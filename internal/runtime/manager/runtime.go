@@ -25,6 +25,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -504,7 +505,7 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	now := time.Now().UTC()
 	operationID := uuid.NewString()
 	eventID := uuid.NewString()
-	directiveEvent, err := runtimeagentcontrol.NewDirectiveEvent(req, target, operationID, eventID, now)
+	directiveEvent, err := runtimeagentcontrol.NewDirectiveEvent(req, target, operationID, eventID, now, am.executionPosture)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
@@ -593,7 +594,7 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	directiveEvent, err := directiveEventFromOperation(admitted)
+	directiveEvent, err := directiveEventFromOperation(admitted, am.executionPosture)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
@@ -693,7 +694,7 @@ func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, s
 	}
 }
 
-func directiveEventFromOperation(op runtimeagentcontrol.DirectiveOperation) (events.Event, error) {
+func directiveEventFromOperation(op runtimeagentcontrol.DirectiveOperation, posture executionposture.Posture) (events.Event, error) {
 	return runtimeagentcontrol.NewDirectiveEvent(runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:      op.AgentID(),
 		FlowInstance: op.FlowInstance(),
@@ -701,7 +702,7 @@ func directiveEventFromOperation(op runtimeagentcontrol.DirectiveOperation) (eve
 		RunID:        op.RequestedRunID,
 		Source:       op.Source,
 		OperatorID:   op.OperatorID,
-	}, runtimeagentcontrol.RunTargetResolution{RunID: op.ResolvedRunID, Mode: op.RunIDResolution}, op.OperationID, op.DirectiveEventID, op.CreatedAt)
+	}, runtimeagentcontrol.RunTargetResolution{RunID: op.ResolvedRunID, Mode: op.RunIDResolution}, op.OperationID, op.DirectiveEventID, op.CreatedAt, posture)
 }
 
 func directiveResultFromOperation(op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
@@ -1311,7 +1312,7 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("marshal platform.reset payload: %w", err)
 		}
-		platformResetEvent, err = newPlatformStandaloneRuntimeControlEvent(events.EventType("platform.reset"), payload, events.EventEnvelope{}, time.Now())
+		platformResetEvent, err = newPlatformStandaloneRuntimeControlEvent(am.executionPosture, events.EventType("platform.reset"), payload, events.EventEnvelope{}, time.Now())
 		if err != nil {
 			return false, err
 		}
@@ -1764,6 +1765,16 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
+							if err := am.executionPosture.Admit(evt.ExecutionMode(), "agent delivery claim"); err != nil {
+								if am.bus != nil {
+									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_posture_rejected",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+										Failure: failureEnvelope(err, "agent-manager", "admit_delivery_execution_posture"),
+									})
+								}
+								return true
+							}
 							releaseLane, laneErr := am.acquireClaimedAttemptLane(evtCtx, route.AgentIdentity)
 							if laneErr != nil {
 								if am.bus != nil {
@@ -2053,7 +2064,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runti
 	}), "agent-manager", "agent_loop")
 
 	eventCtx := am.runtimePlatformControlEventContext(ctx)
-	panicEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, events.EventType("platform.agent_panic"), mustJSON(map[string]any{
+	panicEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, am.executionPosture, events.EventType("platform.agent_panic"), mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,
@@ -2094,7 +2105,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runti
 		})
 	}
 
-	failedEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, events.EventType("platform.agent_failed"), mustJSON(map[string]any{
+	failedEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, am.executionPosture, events.EventType("platform.agent_failed"), mustJSON(map[string]any{
 		"agent_id":        agent.ID(),
 		"flow_instance":   flowInstance,
 		"entity_id":       entityID,

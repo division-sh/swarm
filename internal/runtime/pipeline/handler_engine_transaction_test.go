@@ -2483,7 +2483,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 
 func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: handlerEngineProjectNodeModule(),
 	})
 	entityID := "ent-1"
@@ -2507,7 +2507,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 
 func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
 	})
 	entityID := "ent-1"
@@ -2537,7 +2537,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 
 func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: rulesEmitTemplateContractBundle()},
 	})
 	entityID := "ent-1"

@@ -8,6 +8,7 @@ import (
 
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -17,10 +18,10 @@ func TestCatalogFixtureStartupPolicy_IsStrictForEveryExecutableFixture(t *testin
 
 	strictCatalogFixtureStartupPolicy().apply(t)
 
-	if got := runtime.DefaultWorkflowContractValidationOptions(nil).FatalBootWarnings; !got {
+	if got := runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live).FatalBootWarnings; !got {
 		t.Fatal("FatalBootWarnings = false, want true")
 	}
-	if got := runtime.DefaultWorkflowContractValidationOptions(nil).StrictEmitSchemas; !got {
+	if got := runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live).StrictEmitSchemas; !got {
 		t.Fatal("StrictEmitSchemas = false, want true")
 	}
 
@@ -64,7 +65,7 @@ func TestTier8RuntimeBootMatchesAuthoritativeStartupTruthForWarningFixtures(t *t
 				t.Fatalf("boot warnings present = %v, want %v", got, tc.wantBootWarnings)
 			}
 
-			_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, runtime.DefaultWorkflowContractValidationOptions(nil))
+			_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 			if got := validationErr != nil; got != tc.wantValidationErr {
 				t.Fatalf("ValidateWorkflowContractSurface error = %v, want error=%v", validationErr, tc.wantValidationErr)
 			}

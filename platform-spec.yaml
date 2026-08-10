@@ -849,7 +849,10 @@ contract_formats:
         event shells, context/correlation candidates, and storage. The admission
         owner MUST classify or consume the constructor class and validate the
         complete producer identity, nonnegative chain depth, valid payload JSON,
-        execution mode, and envelope before any event row is written. At the
+        execution mode, and envelope before any event row is written. EventBus additionally
+        consumes the immutable current-process execution posture and rejects an event whose
+        execution mode exceeds that ceiling before persistence, route planning, delivery,
+        or dispatch mutation; it never rewrites the event mode. At the
         selected-store boundary it MUST additionally validate the UUID shape of
         every persisted event/run/parent and envelope entity identity. Missing,
         partial, or invalid producer identity fails admission. It may materialize
@@ -1025,6 +1028,8 @@ contract_formats:
             existing-run root must supply its exact run_id and admits only as
             require-active. The durable event class remains root_ingress for both;
             class, labels, payload, context, and run-id presence never select intent.
+            The immutable current-process posture alone selects the root execution mode;
+            public callers and providers cannot submit or infer it.
         child:
           rule: Child/runtime emits inherit lineage from the supplied parent or
             explicit EventLineage at construction. EventLineage is the canonical
@@ -1035,7 +1040,9 @@ contract_formats:
           rule: Replay/fork events use replay lineage constructors so replay
             source, run ownership, and the persisted source execution_mode are
             explicit before persistence or dispatch. Replay never defaults a
-            missing causal mode to live.
+            missing causal mode to live. Operator event.replay and agent.replay
+            preserve that exact mode and reject a live original under a mock_only
+            process before direct-route, idempotency, delivery, or audit mutation.
             Selected-fork replay is the bounded exception where durable
             parent/source authority is the exact typed selected-fork lineage
             owner rather than events.source_event_id. Selected-contract
@@ -1056,6 +1063,8 @@ contract_formats:
             through firing rather than being coerced to a flow identity. Optional lineage inputs are forbidden. platform.agent_directive is not a
             generic runtime-control event; its durable operation owner uses the
             closed diagnostic-direct constructor and persistence path.
+            Independent runtime-control roots consume the process posture's exact
+            root mode; causal controls preserve lineage mode.
         runtime_diagnostic:
           rule: Runtime diagnostic/dead-letter/status events use diagnostic
             constructors and remain separate from route or delivery authority. A
@@ -3851,6 +3860,8 @@ handler_specification:
         and only through the non_idempotent_write attempt journal. Read-only tools, non-provider tools, and missing or invalid
         responders fail closed without an attempt row. A newly claimed mock attempt materializes the response and persists it with
         execution_mode mock; duplicate and restart delivery reuse that terminal row without rematerializing the response.
+        The process posture is an earlier ceiling: mock_only rejects every live activity intent before attempt claim,
+        credential resolution, journal mutation, or transport and never converts it to mock.
       generated_result_events:
         naming: <flow>.<activity_id>.succeeded and <flow>.<activity_id>.failed. If activity.id is omitted, the platform derives
           a stable id from node id, handler event key, selected rule identity when present, and tool id.
@@ -5911,6 +5922,67 @@ engine:
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
     - "Production multi-writer SQLite concurrency semantics are not promoted by #1087."
     - "Additional raw-SQL runtime feature parity for SQLite requires a separately gated backend-neutral owner before use."
+  process_execution_posture:
+    promoted_by: '#2214'
+    implementation_status: mandatory_binary_process_ceiling
+    owner: internal/runtime/executionposture.Posture
+    config:
+      key: runtime.execution_posture
+      values: [live, mock_only]
+      required: true
+      rule: >
+        Every runtime process declares exactly one execution posture. Omission and unknown values fail config verification.
+        Environment variables, CLI flags, LLM backend/profile, agent census, responder presence, provider/event names,
+        persisted rows, and credentials never default, override, or infer posture. There is no compatibility alias.
+    relationship_to_execution_mode: >
+      Posture is the immutable current-process ceiling; it is not persisted causal execution_mode and does not rewrite it.
+      live admits both live and exact mock chains under the ordinary monotonic actor rules. mock_only admits only mock work.
+      A persisted or replayed live fact under mock_only is rejected before mutation or execution and is never converted,
+      settled, migrated, or retried as mock.
+    root_admission: >
+      Every independent process root consumes Posture.RootMode before construction: event.publish and run.start, Builder run
+      input, signed normalized/raw provider ingress, agent directives, runtime boot/control/diagnostic/session events, budget
+      and stalled-run signals, and true boot-owned schedules. Root mode is live under live and mock under mock_only. Callers
+      cannot submit execution_mode. Child, node/connect, activity-result, and other causal events preserve exact lineage mode.
+    eventbus_admission: >
+      EventBus construction requires the process posture. Before event persistence, route planning, delivery mutation, or
+      dispatch, EventBus rejects any event whose execution_mode exceeds that posture. Direct selected-store event writers
+      remain closed named operations and cannot bypass this process admission owner.
+    durable_reintroduction: >
+      Generic schedules, workflow timers, pipeline obligations, dynamic readiness, decision cards, queued deliveries,
+      activity attempts, replay, forks, run.continue, runtime.resume, standing.resume/reset, and agent restart/recovery retain
+      their immutable persisted execution_mode. Their canonical claim, wakeup, continuation, activation, or lifecycle
+      transaction rejects live under mock_only before claim, release, decision/deferral, generation, run-state, journal,
+      credential, transport, or dispatch mutation. Standing-service lifecycle admission and mutation share one selected-store
+      transaction on SQLite and PostgreSQL.
+    replay_and_fork: >
+      event.replay and agent.replay preserve the original causal mode and reject a live original under mock_only before
+      direct-route publication, idempotency, delivery, or audit mutation. Selected-contract and conversation fork execution
+      consume the current process posture in addition to their exact loaded source and persisted selection authority.
+      Snapshot-only fork/delete operations do not mint execution authority.
+    external_launch: >
+      The central external-effect controller and durable activity dispatcher consume the process posture before authorization,
+      attempt claim, credential lookup, response preparation, or transport. mock_only permits only exact mock-mode execution;
+      a live intent is rejected even when restored durable state or a lower-level adapter would otherwise admit it.
+    source_readiness: >
+      internal/runtime/bootverify.ResolveSourceBootEffectReachability is the sole source-level provider-connector credential
+      readiness projection consumed by verify, doctor, Builder validation/replacement, serve validation, and final runtime
+      boot. live retains conservative declarative activity reachability. mock_only requires every effective agent to resolve
+      exact mock and every provider-connector activity site to have an exact compiled mock response; only those unreachable
+      outbound transport credentials are waived. Signing, listener, MCP, native, exec, workspace, and other independent
+      requirements remain fail-closed.
+    replacement_and_readback: >
+      Project replacement fully validates the candidate against the predecessor's exact process posture before quiescence,
+      startup, standing activation, or context publication. A candidate cannot change posture. health.check and health
+      subscription readback always expose execution_posture from the same immutable runtime fact.
+    no_legacy_rule: >
+      Old configs without runtime.execution_posture and old selected stores containing live work selected under mock_only are
+      unsupported. No default, migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only
+      admission, dummy credential, or dual semantic owner exists.
+    proof: >
+      Source-boundary ratchets forbid posture-owned live literals and profile-derived process mode. Supported proof covers
+      root producers, exact source readiness, replay/fork, decision/defer, schedules/timers, activity/effect launch,
+      standing and queued-work restart on SQLite/PostgreSQL, immutable replacement, and health readback.
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.
@@ -6191,6 +6263,9 @@ engine:
               The mock slot has an independent canonical constructor and does not require an injected live adapter's factory
               or live-session dependencies. Fully mocked sources never construct or consult the unreachable live adapter.
               Mixed sources bind exact mocked agents to MockRuntime and all other agents to the configured live adapter.
+              The process execution posture is a separate ceiling: mock_only requires every effective agent to resolve exact
+              mock before runtime construction, while live permits the existing per-agent selection matrix. Agent source
+              artifacts, backend profiles, and responder presence never select process posture.
             turn_mode_admission:
               owner: internal/runtime/agents.LLMAgent.OnEvent
               rule: >
@@ -6198,6 +6273,8 @@ engine:
                 authority. A live event delivered to an exact mock actor executes as mock and every child/effect remains
                 mock. A mock-causal event delivered to a live-selected actor is rejected before conversation mutation,
                 provider invocation, or tool execution; no receiver may promote mock causality to live execution.
+                The process posture is admitted before actor execution and recovery; a restored live delivery under
+                mock_only is rejected rather than narrowed by choosing a mock actor.
               proof: TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive
             construction_consumers:
               - internal/runtime/runtime.go ordinary managed runtime
@@ -6238,14 +6315,16 @@ engine:
               the activation's exact execution mode. Dynamic-flow readiness persists that mode as immutable activation
               authority even when the original source declares no initial timer or creation event; source reconciliation
               preserves it, and a newly declared first initial timer consumes it instead of the administrative reconciliation
-              context. Only true boot-owned schedules are explicitly live. Live-causal dynamic agent mutations remain subject
+              context. True boot-owned schedules use the process posture's root mode rather than a hardcoded live mode.
+              Schedule/timer/readiness admission, wakeup, and claim reject persisted live authority under mock_only before
+              mutation and never rewrite it. Live-causal dynamic agent mutations remain subject
               to ordinary delegation and lifecycle checks until the family is retired.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
               authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
               bash, and exec-tool reasons remain authoritative in workspace selection and are never erased by the waiver.
           fully_mocked_provider_startup_waiver:
-            promoted_by: '#2172'
+            promoted_by: '#2172, #2214'
             owner: effective source agent registry entry Mock.Configured fact consumed through ResolveAgentExecutionSelection
             rule: >
               A configured exact Python mock selects in-process mock execution for that agent even when runtime config names
@@ -6269,16 +6348,18 @@ engine:
                 - every project-scoped and flow-scoped node declaration lowered through runtime/contracts.ActivitySitesForNode
               rule: >
                 Static and managed outbound tool credentials are required exactly when that tool's transport remains
-                reachable. A source with any live-selected agent retains every outbound tool credential requirement. An
-                all-mock source waives only a provider_connector tool whose exact effective declaration is admitted by the
-                compiled response plan and which is absent from every declarative workflow activity site. Declarative
-                activity sites remain live-reachable from non-agent ingress, including operator publication, regardless of
-                the agent census. Flattened aliases are not census authority: ambiguous local agent or node ids remain
+                reachable under the mandatory process posture. live retains the conservative #2172 rule: any live-selected
+                agent retains every outbound tool credential, and declarative activity sites remain live-reachable from
+                non-agent ingress regardless of agent census. mock_only requires every effective agent to resolve exact mock
+                and every provider_connector activity site to have an exact compiled response; it then waives only the
+                corresponding unreachable outbound transport credentials. Flattened aliases are not census authority: ambiguous local agent or node ids remain
                 represented by every canonical project/flow declaration, while flat declarations are consumed only when no
                 scoped declaration represents that local id. Absent or mismatched responders, scoped conflicts, ordinary
                 HTTP, native, exec, MCP, listener, workspace, inbound signing, and other non-tool requirements remain
-                fail-closed. Agent-free sources retain every requirement. A credential key shared by a waived tool and any
-                surviving requirement remains required. Process-global execution mode is not credential-admission authority.
+                fail-closed. Agent-free live sources retain every requirement; agent-free mock_only sources still require
+                exact responders for every provider activity. A credential key shared by a waived tool and any surviving
+                requirement remains required. Process posture is explicit authority; persisted event mode, profile, agent
+                count, responder presence, and missing credentials never infer it.
               consumers:
                 - internal/runtime/workflow_validation.go for swarm verify and serve validation
                 - internal/cliapp/local_preflight.go for doctor contract-secret admission
@@ -6341,6 +6422,8 @@ engine:
             workspace writes, relays, live LLM adapters, create a runtime-authored agent through agent_hire, or commit
             action-owned artifacts. The sole pipeline activity exception is a statically admitted exact provider_connector
             response that uses the normal non-idempotent attempt journal; it performs no credential lookup or transport.
+            The immutable process posture is admitted before every external-effect authorization and activity-attempt claim.
+            mock_only rejects a live intent before credential, journal, or transport work even if durable recovery restores it.
         accounting:
           invocation_type: mock_python
           usage_accounting: estimated
@@ -6355,7 +6438,8 @@ engine:
             workflow timer activations, external-effect operations and attempts, turns, conversation forks, spend rows,
             decision cards, mailbox/readback summaries, and author activity. Dynamic-flow readiness mode is immutable across
             source revisions and agrees with any planned creation event. Missing mode is invalid and old rows without it are
-            unsupported; no defaults, fallback readers, or mode reconstruction are allowed.
+            unsupported; no defaults, fallback readers, or mode reconstruction are allowed. Process execution posture remains
+            a separate non-persisted ceiling and never becomes another causal fact or migration field.
         supported_surface_proof: >
           A real served bundle, without LLM or unreachable outbound connector credentials, must exercise mock text, visible
           internal tool calls, emitted events, exact provider-connector response materialization, decision-card/mailbox
@@ -6978,8 +7062,10 @@ engine:
         workflow_timer row is owned by WorkflowTimerLifecycle and is never interpreted by this owner.
       admission: >
         Every command carries an explicit schedule_key, mandatory live-or-mock execution_mode, and typed due basis. Agent
-        schedules copy exact causal execution mode, join schedules copy exact lifecycle-effect mode, and boot schedules are
-        explicitly live. Missing mode fails before mutation. The selected store compares the complete
+        schedules copy exact causal execution mode, join schedules copy exact lifecycle-effect mode, and boot schedules use
+        the process posture's exact root mode. Missing mode fails before mutation. The generic-schedule lifecycle admits the
+        process posture before durable admission and again before wakeup/occurrence preparation; restored live work under
+        mock_only is rejected before mutation and is never rewritten. The selected store compares the complete
         immutable command under `{scope, schedule_key}` before reading a clock. A missing key creates one activation and
         stamps admitted_at, initial due, and current due once in the same transaction; identical content returns the same
         current or terminal activation as exact replay; changed content is a conflict. Absolute agent and join coordinates,
@@ -17817,6 +17903,7 @@ configuration_source_authority:
         runtime:
           trust: project_safe_unless_key_is_marked_elevated
           keys:
+            execution_posture: project_safe_required_exact_live_or_mock_only
             max_concurrent_agents: split_unsupported
             event_poll_interval: split_unsupported
             recovery_on_startup: project_safe
@@ -17824,7 +17911,7 @@ configuration_source_authority:
             decision_card_urgency: project_safe_duration_default_24h
             decision_card_reminder_interval: project_safe_duration_default_24h
             decision_card_input_draft_ttl: project_safe_duration_default_15m
-          owner: runtime_storage.runtime_store_backend_selection
+          owner: process_execution_posture for execution_posture; runtime_storage.runtime_store_backend_selection for existing runtime/store keys
         store:
           trust: elevated
           keys:
@@ -26140,6 +26227,7 @@ api_specification:
         - ready
         - db_ok
         - runtime_ok
+        - execution_posture
         - bundle
         properties:
           alive:
@@ -26150,6 +26238,10 @@ api_specification:
             type: boolean
           runtime_ok:
             type: boolean
+          execution_posture:
+            type: string
+            enum: [live, mock_only]
+            description: Immutable current-process execution authority ceiling.
           bundle:
             $ref: '#/components/schemas/BundleIdentity'
       RuntimeIdentityResult:

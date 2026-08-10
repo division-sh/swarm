@@ -223,6 +223,11 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 
 func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent) error {
 	intent = intent.Normalized()
+	if err := d.coordinator.executionPosture.Admit(intent.ExecutionMode, "activity attempt claim, credential lookup, and launch"); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_rejected", "activity-runtime", "execute_activity", map[string]any{
+			"activity_id": intent.ActivityID, "tool": intent.Tool, "execution_mode": intent.ExecutionMode, "execution_posture": d.coordinator.executionPosture,
+		}, err)
+	}
 	var err error
 	ctx, err = activityExecutionContext(ctx, intent)
 	if err != nil {

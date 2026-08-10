@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
 func TestMonitorEmitsOnlyAfterThreshold(t *testing.T) {
@@ -18,7 +19,7 @@ func TestMonitorEmitsOnlyAfterThreshold(t *testing.T) {
 		Diagnosis:      stalledDiagnosis("delivery_lifecycle", "no_active_deliveries"),
 	})
 	publisher := &fakePublisher{}
-	monitor := Monitor{Reader: reader, Publisher: publisher}
+	monitor := Monitor{Reader: reader, Publisher: publisher, ExecutionPosture: executionposture.Live}
 	if result, err := monitor.CheckOnce(context.Background(), now); err != nil {
 		t.Fatalf("CheckOnce before threshold: %v", err)
 	} else if result.Published != 0 || len(publisher.events) != 0 {
@@ -61,7 +62,7 @@ func TestMonitorDoesNotDuplicateSameStalledEvidence(t *testing.T) {
 		LastProgressAt: lastProgress,
 	}] = true
 	publisher := &fakePublisher{}
-	monitor := Monitor{Reader: reader, Publisher: publisher}
+	monitor := Monitor{Reader: reader, Publisher: publisher, ExecutionPosture: executionposture.Live}
 	result, err := monitor.CheckOnce(context.Background(), now)
 	if err != nil {
 		t.Fatalf("CheckOnce: %v", err)
@@ -97,7 +98,7 @@ func TestMonitorSuppressesNonStalledTerminalAndZeroProgressRuns(t *testing.T) {
 		},
 	)
 	publisher := &fakePublisher{}
-	monitor := Monitor{Reader: reader, Publisher: publisher}
+	monitor := Monitor{Reader: reader, Publisher: publisher, ExecutionPosture: executionposture.Live}
 	result, err := monitor.CheckOnce(context.Background(), now)
 	if err != nil {
 		t.Fatalf("CheckOnce: %v", err)
@@ -134,8 +135,9 @@ func TestMonitorHonorsDisabledAndExtendedPolicies(t *testing.T) {
 	)
 	publisher := &fakePublisher{}
 	monitor := Monitor{
-		Reader:    reader,
-		Publisher: publisher,
+		Reader:           reader,
+		Publisher:        publisher,
+		ExecutionPosture: executionposture.Live,
 		PolicyResolver: func(flowInstance string) Policy {
 			switch flowInstance {
 			case "disabled-flow/inst-1":
@@ -176,7 +178,7 @@ func TestMonitorPublishesBothSupportedStalledDiagnosisReasons(t *testing.T) {
 		},
 	)
 	publisher := &fakePublisher{}
-	monitor := Monitor{Reader: reader, Publisher: publisher}
+	monitor := Monitor{Reader: reader, Publisher: publisher, ExecutionPosture: executionposture.Live}
 	result, err := monitor.CheckOnce(context.Background(), now)
 	if err != nil {
 		t.Fatalf("CheckOnce: %v", err)

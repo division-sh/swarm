@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -120,7 +119,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 				Cfg:                  cfg,
 				Sessions:             registry,
 				LiveSessions:         NewTransientLiveSessionAcquirer(registry),
-				CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
+				CompletionController: liveTestCompletionController(harness, harness, harness, harness),
 			}.Build()
 			if err != nil {
 				t.Fatalf("Build: %v", err)
@@ -142,7 +141,7 @@ func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
 		Cfg: &config.Config{
 			LLM: config.LLMConfig{RuntimeMode: "cli_test"},
 		},
-		CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
+		CompletionController: liveTestCompletionController(harness, harness, harness, harness),
 	}.Build()
 	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
 		t.Fatalf("Build error = %v, want retired runtime mode rejection", err)

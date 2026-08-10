@@ -15,6 +15,8 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -107,6 +109,9 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = mustExternalStoreTestBundleSourceFact()
 	}
@@ -163,6 +168,7 @@ func testAuthorActivityContext() context.Context {
 	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	fact := mustExternalStoreTestBundleSourceFact()
 	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), fact)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		"11111111-1111-1111-1111-111111111111",
 		bundleHash,

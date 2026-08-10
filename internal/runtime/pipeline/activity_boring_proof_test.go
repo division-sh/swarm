@@ -347,7 +347,7 @@ func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *tes
 	defer server.Close()
 
 	bus := &recordingPipelineBus{runtimeLogErr: errors.New("runtime log unavailable")}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: activityBoringSource(server.URL)},
 	})
 	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)

@@ -20,6 +20,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -783,8 +784,9 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
-		BaseContext: testAuthorActivityContextForSource(context.Background(), fact),
-		WorkOwner:   workOwner,
+		ExecutionPosture: executionposture.Live,
+		BaseContext:      testAuthorActivityContextForSource(context.Background(), fact),
+		WorkOwner:        workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,

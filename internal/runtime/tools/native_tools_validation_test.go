@@ -10,7 +10,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -226,7 +225,7 @@ func TestValidateNativeToolBootConfig_ExactlyMockedAgentSkipsLiveNativeAdmission
 	harness := effecttest.New()
 	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{
 		Cfg: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
-		CompletionController: runtimeeffects.NewCompletionController(
+		CompletionController: liveTestCompletionController(
 			harness,
 			harness,
 			harness,

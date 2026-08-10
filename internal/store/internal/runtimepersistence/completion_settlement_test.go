@@ -25,7 +25,7 @@ type completionControllerTestStore interface {
 }
 
 func newCompletionControllerForTest(store completionControllerTestStore) *runtimeeffects.Controller {
-	return runtimeeffects.NewCompletionController(store, store, store, nil)
+	return liveTestCompletionController(store, store, store, nil)
 }
 
 type completionSettlementFixture struct {

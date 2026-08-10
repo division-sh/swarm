@@ -30,6 +30,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -37,7 +38,7 @@ import (
 )
 
 func TestInboundGatewayStandingServiceAdmissionClosesDrainsAndReopens(t *testing.T) {
-	gateway := NewInboundGateway(nil, nil, nil)
+	gateway := NewInboundGateway(nil, nil, nil, executionposture.Live)
 	activeCtx, release, admitted := gateway.beginStandingServiceAdmission(context.Background(), "service-1")
 	if !admitted || activeCtx == nil || release == nil {
 		t.Fatal("initial standing service admission was rejected")
@@ -154,7 +155,7 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *Runti
 	if bus != nil {
 		bus.SetProviderOutputAuthorizationVerifier(registry)
 	}
-	gateway := NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
+	gateway := NewInboundGateway(bus, logger, shutdownAdmissionClosed, executionposture.Live, stores...)
 	if len(stores) > 0 && bus != nil {
 		if store, ok := stores[0].(interface{ bindTestInboundEventStore(runtimebus.EventStore) }); ok {
 			store.bindTestInboundEventStore(bus.Store())
@@ -607,7 +608,7 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{})
+	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	bus.SetRuntimeIngressDispatchGate(controller)
 	if _, err := controller.Pause(testAuthorActivityContext(context.Background()), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
@@ -638,7 +639,7 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{})
+	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	bus.SetRuntimeIngressDispatchGate(controller)
 	if _, err := controller.Pause(testAuthorActivityContext(context.Background()), runtimeingress.TransitionRequest{
 		Reason:       "test_pause",
@@ -2678,7 +2679,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := &recordingInboundStore{inserted: true, store: eventStore}
-			gateway := NewInboundGateway(bus, nil, nil, store)
+			gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, store)
 			gateway.SetCredentialStore(identityInboundCredentialStore{})
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", strings.NewReader(string(body)))
 			req.Header.Set("X-Partner-Signature", tc.signature)
@@ -2735,7 +2736,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 		t.Fatal(err)
 	}
 	store := &recordingInboundStore{inserted: true, store: eventStore}
-	gateway := NewInboundGateway(bus, nil, nil, store)
+	gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, store)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", nil)
 	req.Header.Set("X-Partner-Signature", signature)
@@ -2771,7 +2772,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 		t.Fatal(err)
 	}
 	jsonStore := &recordingInboundStore{inserted: true, store: eventStore}
-	jsonGateway := NewInboundGateway(bus, nil, nil, jsonStore)
+	jsonGateway := NewInboundGateway(bus, nil, nil, executionposture.Live, jsonStore)
 	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
 	jsonRec := httptest.NewRecorder()
 	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{

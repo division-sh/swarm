@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -296,6 +297,7 @@ type Controller struct {
 	completionStore          CompletionStore
 	completionHeartbeatStore CompletionHeartbeatStore
 	completionSpendProjector CompletionSpendProjector
+	executionPosture         executionposture.Posture
 }
 
 type controllerContextKey struct{}
@@ -311,6 +313,15 @@ func NewCompletionController(store Store, completionStore CompletionStore, heart
 		completionHeartbeatStore: heartbeatStore,
 		completionSpendProjector: projector,
 	}
+}
+
+// WithExecutionPosture binds the immutable process ceiling before the
+// controller is published to runtime execution contexts.
+func (c *Controller) WithExecutionPosture(posture executionposture.Posture) *Controller {
+	if c != nil {
+		c.executionPosture = posture
+	}
+	return c
 }
 
 func WithController(ctx context.Context, controller *Controller) context.Context {
@@ -335,6 +346,13 @@ func (c *Controller) CompletionEnabled() bool {
 		return false
 	}
 	return c.completionHeartbeatStore != nil && c.completionStore != nil && c.completionSpendProjector != nil
+}
+
+func (c *Controller) ExecutionPosture() executionposture.Posture {
+	if c == nil {
+		return ""
+	}
+	return c.executionPosture
 }
 
 func (c *Controller) IsCurrent(ctx context.Context, token LifecycleToken) (bool, error) {
@@ -560,6 +578,23 @@ func BeginStartupProbe(ctx context.Context, adapter string, request []byte, line
 
 func admitExecutionMode(ctx context.Context, adapter string) error {
 	mode, found := ExecutionModeFromContext(ctx)
+	if controller, ok := ControllerFromContext(ctx); ok {
+		if !controller.executionPosture.Valid() {
+			return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_missing", "external-effects", "authorize_attempt", map[string]any{
+				"action": "execute_external_effect", "adapter": strings.TrimSpace(adapter),
+			})
+		}
+		if !found {
+			return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "execution_mode_missing", "external-effects", "authorize_attempt", map[string]any{
+				"action": "execute_external_effect", "adapter": strings.TrimSpace(adapter), "execution_posture": controller.executionPosture,
+			})
+		}
+		if err := controller.executionPosture.Admit(mode, "external effect authorization"); err != nil {
+			return runtimefailures.Wrap(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_rejected", "external-effects", "authorize_attempt", map[string]any{
+				"adapter": strings.TrimSpace(adapter), "execution_mode": mode, "execution_posture": controller.executionPosture,
+			}, err)
+		}
+	}
 	if !found || mode != ExecutionModeMock || strings.TrimSpace(adapter) == "mock_python" {
 		return nil
 	}

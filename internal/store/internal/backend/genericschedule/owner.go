@@ -682,8 +682,9 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 	if err != nil {
 		return runtimegenericschedule.Activation{}, err
 	}
+	activation.Command.ExecutionMode = executionmode.Mode(executionMode)
 	malformed := func(err error) (runtimegenericschedule.Activation, error) {
-		return runtimegenericschedule.Activation{}, &malformedActivationError{cause: err}
+		return activation, &malformedActivationError{cause: err}
 	}
 	if immutableHash != immutableHashDuplicate {
 		return malformed(errors.New("generic schedule immutable hash projection is inconsistent"))

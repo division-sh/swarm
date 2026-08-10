@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -24,6 +25,7 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultRuntimeConfig: %v", err)
 	}
+	cfg.Runtime.ExecutionPosture = executionposture.Live
 	loaded.bundleSourceFact = mustServeTestEphemeralBundleSourceFact(loaded.bootIdentity.BundleHash)
 	contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 		Ctx: context.Background(), Loaded: loaded, StateStoreSummary: "test stores ready",

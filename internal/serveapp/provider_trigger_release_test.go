@@ -87,6 +87,8 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 func writeReleaseProviderTriggerConfig(t *testing.T, path, sqlitePath string) {
 	t.Helper()
 	lines := []string{
+		"runtime:",
+		"  execution_posture: live",
 		"store:",
 		"  backend: sqlite",
 		"  sqlite:",

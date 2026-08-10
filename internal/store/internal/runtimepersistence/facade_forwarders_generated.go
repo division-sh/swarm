@@ -29,6 +29,7 @@ import (
 	destructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	effects "github.com/division-sh/swarm/internal/runtime/effects"
 	entityquery "github.com/division-sh/swarm/internal/runtime/entityquery"
+	executionposture "github.com/division-sh/swarm/internal/runtime/executionposture"
 	failures "github.com/division-sh/swarm/internal/runtime/failures"
 	inboundpublication "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	ingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -89,6 +90,10 @@ func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID s
 
 func (s *PostgresStore) AdmitDirectiveExecution(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) (agentcontrol.DirectiveOperation, error) {
 	return s.agentPostgresOwner.AdmitDirectiveExecution(ctx, operationID, ownerID, now, lease)
+}
+
+func (s *PostgresStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
+	return s.pipelinePostgresOwner.AdmitStandingServiceRun(ctx, runID, posture)
 }
 
 func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner string, newSessionID string) error {
@@ -1169,6 +1174,10 @@ func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, even
 
 func (s *SQLiteRuntimeStore) AdmitDirectiveExecution(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) (agentcontrol.DirectiveOperation, error) {
 	return s.agentSQLiteOwner.AdmitDirectiveExecution(ctx, operationID, ownerID, now, lease)
+}
+
+func (s *SQLiteRuntimeStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
+	return s.pipelineSQLiteOwner.AdmitStandingServiceRun(ctx, runID, posture)
 }
 
 func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner string, newSessionID string) error {

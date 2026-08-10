@@ -39,9 +39,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	if err := os.Rename(payloadSource, payloadPath); err != nil {
 		t.Fatalf("move release payload: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(releaseRoot, "swarm.yaml")); !os.IsNotExist(err) {
-		t.Fatalf("release project unexpectedly contains swarm.yaml: %v", err)
-	}
+	writeReleaseFile(t, filepath.Join(releaseRoot, "swarm.yaml"), "runtime:\n  execution_posture: live\n")
 
 	fakeRoot := filepath.Join(releaseRoot, "fake-docker-state")
 	fakeBin := filepath.Join(releaseRoot, "fake-bin")

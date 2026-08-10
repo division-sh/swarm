@@ -366,6 +366,7 @@ func TestServeLifecyclePresenterProjectsBootFactsByMode(t *testing.T) {
 }
 
 func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
+	configPath := writeTestVerifyRuntimeConfig(t)
 	tests := []struct {
 		name           string
 		run            func(*serveLifecyclePresenter)
@@ -426,7 +427,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 				return test.code
 			}
 			var stdout, stderr bytes.Buffer
-			code := cliapp.Execute(context.Background(), t.TempDir(), []string{"serve"}, &stdout, &stderr, runServe)
+			code := cliapp.Execute(context.Background(), t.TempDir(), []string{"serve", "--config", configPath}, &stdout, &stderr, runServe)
 			if code != test.code {
 				t.Fatalf("code = %d, want %d\nstdout=%s\nstderr=%s", code, test.code, stdout.String(), stderr.String())
 			}
@@ -1289,6 +1290,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 		"--idempotency-key", "db-loaded-cross-bundle-serve-fork",
 		"--json",
 		"--api-server", "http://" + apiAddr,
+		"--config", writeTestVerifyRuntimeConfig(t),
 	}, &stdout, &stderr, nil)
 	if code != 0 {
 		t.Fatalf("swarm fork code=%d stderr=%s stdout=%s\nserve output:\n%s", code, stderr.String(), stdout.String(), serve.outputString())
@@ -2230,6 +2232,7 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 	t.Helper()
 	lines := []string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),
@@ -5551,7 +5554,10 @@ func runServedEventPublishActiveLoadProof(
 func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, string, int) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	args = append(args, "--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"))
+	args = append(args,
+		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
+		"--config", writeTestVerifyRuntimeConfig(t),
+	)
 	code := cliapp.Execute(context.Background(), t.TempDir(), args, &stdout, &stderr, nil)
 	return stdout.String(), stderr.String(), code
 }
@@ -8754,6 +8760,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	resolvedPaths, err := cliapp.ResolveCLIContractPlatformSpecPaths(cliapp.RepoRoot(), cliapp.CLIContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
 		PlatformSpecPath: opts.PlatformSpecPath,
+		ConfigPath:       opts.ConfigPath,
 	})
 	if err != nil {
 		t.Fatalf("resolve preflight paths: %v", err)
@@ -9268,6 +9275,7 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 	t.Helper()
 	configText := strings.Join([]string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),
@@ -9467,6 +9475,7 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 	t.Helper()
 	lines := []string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),

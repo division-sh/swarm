@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -98,6 +99,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		ContractSelection:   selection,
 		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 			Config:            cfg,
+			ExecutionPosture:  executionposture.Live,
 			EntityStore:       h.pg,
 			HumanTaskStore:    h.pg,
 			SessionRegistry:   h.pg,

@@ -26,7 +26,7 @@ func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testin
 	}
 	fakeStore := &fakeSelectedContractActivationStore{activation: activation}
 
-	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID: forkRunID,
 		Store:     fakeStore,
 	})
@@ -57,7 +57,7 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -148,7 +148,7 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -198,7 +198,7 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -237,7 +237,7 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnUnavailableSource(t
 	}
 	loader := &fakeSelectedContractSourceLoader{err: errors.New("selected source unavailable")}
 
-	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -263,7 +263,7 @@ func TestActivateSelectedContractRunForkFailsBeforePlanningOnPersistedIdentityMi
 	loaded.BundleSourceFact = testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 
-	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -288,7 +288,7 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnStaleBindingAdmissi
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -320,7 +320,7 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
+	_, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,

@@ -28,6 +28,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -410,6 +411,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	bundle := sqliteFlowActivationBundle()
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
 		SemanticSource:    semanticview.Wrap(bundle),
@@ -463,6 +465,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	bundle := sqliteFlowActivationBundle()
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
 		SemanticSource:    semanticview.Wrap(bundle),
@@ -584,6 +587,7 @@ func configureSQLiteFlowActivationLifecycle(
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture:        executionposture.Live,
 		Module:                  module,
 		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,
@@ -1204,7 +1208,7 @@ func TestSQLiteRuntimeStoreRuntimeIngressReadDuringPublishDoesNotReenterWrite(t 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	controller := runtimeingress.NewController(store, bus, runtimeingress.Options{})
+	controller := runtimeingress.NewController(store, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	if err := controller.SyncState(ctx); err != nil {
 		t.Fatalf("SyncState: %v", err)
 	}

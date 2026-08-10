@@ -14,6 +14,7 @@ import (
 	runtimeeventreceiver "github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -58,7 +59,7 @@ func TestExecAgentHireResolvesMockBeforeNativeToolAdmissionWithProductionRuntime
 	harness := effecttest.New()
 	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
 		Cfg:                  &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}},
-		CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
+		CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness).WithExecutionPosture(executionposture.Live),
 	}, runtimeSetHireLiveRuntime{})
 	if err != nil {
 		t.Fatalf("NewAgentRuntimeSet: %v", err)

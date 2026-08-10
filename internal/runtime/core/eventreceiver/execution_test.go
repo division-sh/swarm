@@ -197,5 +197,5 @@ func selectedReceiverState(t testing.TB, mode executionmode.Mode) (runtimeeffect
 	if err != nil {
 		t.Fatalf("construct selected admission: %v", err)
 	}
-	return authority, admission, runtimeeffects.NewController(receiverEffectStore{})
+	return authority, admission, liveTestEffectController(receiverEffectStore{})
 }

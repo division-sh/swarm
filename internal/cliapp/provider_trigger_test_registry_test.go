@@ -67,6 +67,6 @@ func withTestProviderTriggerPlatformInventory(t *testing.T, configText string) s
 func writeTestVerifyRuntimeConfig(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "verify-runtime.yaml")
-	writeRuntimeConfigText(t, path, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: anthropic\n"))
+	writeRuntimeConfigText(t, path, withTestProviderTriggerPlatformInventory(t, "runtime:\n  execution_posture: live\nllm:\n  backend: anthropic\n"))
 	return path
 }

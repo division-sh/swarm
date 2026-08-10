@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
 const wakeupCallbackTimeout = 10 * time.Second
@@ -144,6 +145,7 @@ type Lifecycle struct {
 	planner    PublicationPlanner
 	dispatcher runtimeengine.PostCommitDispatcher
 	logger     Logger
+	posture    executionposture.Posture
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -153,13 +155,16 @@ type Lifecycle struct {
 	stop   bool
 }
 
-func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, dispatcher runtimeengine.PostCommitDispatcher, logger Logger) (*Lifecycle, error) {
+func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, dispatcher runtimeengine.PostCommitDispatcher, logger Logger, posture executionposture.Posture) (*Lifecycle, error) {
 	if store == nil || scheduler == nil || planner == nil || dispatcher == nil {
 		return nil, errors.New("generic schedule lifecycle requires store, scheduler, publication planner, and dispatcher")
 	}
+	if !posture.Valid() {
+		return nil, errors.New("generic schedule lifecycle requires a valid execution posture")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	lifecycle := &Lifecycle{
-		store: store, scheduler: scheduler, planner: planner, dispatcher: dispatcher, logger: logger,
+		store: store, scheduler: scheduler, planner: planner, dispatcher: dispatcher, logger: logger, posture: posture,
 		ctx: ctx, cancel: cancel, retry: make(map[string]struct{}),
 	}
 	if err := scheduler.BindGenericScheduleLifecycle(lifecycle.handleWakeup); err != nil {
@@ -172,6 +177,9 @@ func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, 
 func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (AdmissionResult, error) {
 	if l == nil {
 		return AdmissionResult{}, errors.New("generic schedule lifecycle is required")
+	}
+	if err := l.posture.Admit(command.ExecutionMode, "generic schedule admission"); err != nil {
+		return AdmissionResult{}, err
 	}
 	result, err := l.store.AdmitGenericSchedule(ctx, command)
 	if err != nil {
@@ -279,6 +287,9 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) er
 		}
 		return nil
 	}
+	if err := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule wakeup claim"); err != nil {
+		return err
+	}
 	wakeup, err := activation.Wakeup()
 	if err != nil {
 		return err
@@ -342,6 +353,25 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 }
 
 func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (CommitResult, error) {
+	activation, found, err := l.store.LoadGenericScheduleActivation(ctx, wakeup.ActivationID())
+	if err != nil {
+		if !activation.Command.ExecutionMode.Valid() {
+			return CommitResult{Outcome: CommitRetry}, err
+		}
+		if postureErr := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); postureErr != nil {
+			return CommitResult{Outcome: CommitRetry}, postureErr
+		}
+	}
+	if !found {
+		if err == nil {
+			return CommitResult{Outcome: CommitTerminal}, nil
+		}
+	}
+	if err == nil {
+		if postureErr := l.posture.Admit(activation.Command.ExecutionMode, "generic schedule occurrence preparation"); postureErr != nil {
+			return CommitResult{Outcome: CommitRetry}, postureErr
+		}
+	}
 	prepared, err := l.store.PrepareGenericScheduleOccurrence(ctx, wakeup)
 	if err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
@@ -355,7 +385,7 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (CommitResult, erro
 	case PrepareTerminal:
 		return CommitResult{Outcome: CommitTerminal, Next: prepared.Activation}, nil
 	}
-	activation := prepared.Activation
+	activation = prepared.Activation
 	occurrence := prepared.Occurrence
 	payload, err := canonicaljson.Encode(activation.Command.Payload)
 	if err != nil {

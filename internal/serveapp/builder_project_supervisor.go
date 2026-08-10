@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -69,6 +70,7 @@ type runtimeProjectSupervisor struct {
 	runtimeContexts                 *runtime.RuntimeContextManager
 	pendingReplacement              *pendingRuntimeReplacement
 	sourceReplacementDisabledReason string
+	executionPosture                executionposture.Posture
 }
 
 func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.RuntimeContextManager, fact runtimecorrelation.BundleSourceFact, identity runtimecontracts.BundleIdentity) {
@@ -157,7 +159,11 @@ func newRuntimeProjectSupervisor(
 			if err != nil {
 				return fmt.Errorf("resolve llm backend profile for Builder validation: %w", err)
 			}
-			opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+			posture, err := cfg.ProcessExecutionPosture()
+			if err != nil {
+				return err
+			}
+			opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
 			opts.LLMProfile = profile
 			opts.ProviderTriggerCatalog = catalog
 			_, err = runtime.ValidateWorkflowContractSurface(ctx, source, opts)
@@ -197,6 +203,12 @@ func newRuntimeProjectSupervisor(
 		currentSource: initialSource,
 		currentBundle: initialBundle,
 		currentRT:     initialRT,
+		executionPosture: func() executionposture.Posture {
+			if initialRT == nil {
+				return ""
+			}
+			return initialRT.ExecutionPosture
+		}(),
 	}
 	if initialRT != nil {
 		supervisor.channelPlans = append([]packs.SatisfactionPlan(nil), initialRT.Options.ChannelPlans...)
@@ -588,6 +600,12 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	s.mu.RUnlock()
 	if pending != nil {
 		return s.CurrentProject(), errors.New("runtime replacement transition is already pending")
+	}
+	if newRT == nil {
+		return s.CurrentProject(), errors.New("runtime replacement requires a candidate runtime")
+	}
+	if !s.executionPosture.Valid() || newRT.ExecutionPosture != s.executionPosture {
+		return s.CurrentProject(), fmt.Errorf("runtime replacement cannot change process execution posture: current=%q candidate=%q", s.executionPosture, newRT.ExecutionPosture)
 	}
 	if err := fact.Validate(); err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("runtime replacement bundle source fact: %w", err)

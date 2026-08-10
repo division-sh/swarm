@@ -9,6 +9,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
 func newPlatformCausalRuntimeControlEvent(lineage events.EventLineage, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
@@ -19,19 +20,19 @@ func newPlatformCausalRuntimeDiagnosticEvent(lineage events.EventLineage, eventT
 	return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: platformRuntimeDiagnosticEventFacts(lineage.ExecutionMode, eventType, payload, envelope, createdAt), Lineage: lineage})
 }
 
-func newPlatformStandaloneRuntimeControlEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeControlEventFacts(executionmode.Live, eventType, payload, envelope, createdAt)})
+func newPlatformStandaloneRuntimeControlEvent(posture executionposture.Posture, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
+	return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeControlEventFacts(posture.RootMode(), eventType, payload, envelope, createdAt)})
 }
 
 func newPlatformStandaloneRuntimeDiagnosticEvent(mode executionmode.Mode, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
 	return events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeDiagnosticEventFacts(mode, eventType, payload, envelope, createdAt)})
 }
 
-func newPlatformContextualRuntimeDiagnosticEvent(ctx context.Context, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
+func newPlatformContextualRuntimeDiagnosticEvent(ctx context.Context, posture executionposture.Posture, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 		return newPlatformCausalRuntimeDiagnosticEvent(events.LineageFromEvent(inbound), eventType, payload, envelope, createdAt)
 	}
-	mode := executionmode.Live
+	mode := posture.RootMode()
 	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
 		mode = executionmode.Mode(contextualMode)
 	}

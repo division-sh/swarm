@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -127,7 +128,7 @@ func TestBeginRequiresControllerAndLogicalIdentity(t *testing.T) {
 		t.Fatal("managed effect was admitted without a controller")
 	}
 
-	withController := WithController(withToken, NewController(&effectStoreProbe{}))
+	withController := WithController(withToken, NewController(&effectStoreProbe{}).WithExecutionPosture(executionposture.Live))
 	if _, err := Begin(withController, "authored_http_tool", []byte("request"), nil); err == nil {
 		t.Fatal("managed effect was admitted without logical operation identity")
 	}
@@ -165,9 +166,9 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build managed capability surface: %v", err)
 	}
-	ctx := WithLifecycleToken(context.Background(), token)
+	ctx := WithExecutionMode(WithLifecycleToken(context.Background(), token), ExecutionModeLive)
 	store := &completionStoreProbe{}
-	ctx = WithController(ctx, NewCompletionController(store, store, store, completionProjectionProbe{}))
+	ctx = WithController(ctx, NewCompletionController(store, store, store, completionProjectionProbe{}).WithExecutionPosture(executionposture.Live))
 	ctx = WithLogicalOperationIdentity(ctx, "event-123")
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = WithUsageTarget(ctx, target)
@@ -250,8 +251,8 @@ func TestBeginNormalEffectRejectsCrossContextCapabilitySurfacesBeforeAuthorizati
 			}
 			surface := normalManagedEffectSurface(t, admission, surfaceTarget, surfaceActor)
 
-			ctx := WithLifecycleToken(context.Background(), token)
-			ctx = WithController(ctx, NewController(probe))
+			ctx := WithExecutionMode(WithLifecycleToken(context.Background(), token), ExecutionModeLive)
+			ctx = WithController(ctx, NewController(probe).WithExecutionPosture(executionposture.Live))
 			ctx = WithLogicalOperationIdentity(ctx, "hostile-normal-effect:"+tc.name)
 			ctx = managedexecution.WithAdmission(ctx, admission)
 			if !tc.noTarget {
@@ -305,8 +306,8 @@ func TestManagedEffectRejectsSameSlugSiblingCapabilityPrincipalBeforeAuthorizati
 	siblingTarget.AgentIdentity = siblingIdentity
 	siblingTarget.FlowInstance = siblingIdentity.FlowInstance()
 
-	ctx := WithLifecycleToken(context.Background(), token)
-	ctx = WithController(ctx, NewController(probe))
+	ctx := WithExecutionMode(WithLifecycleToken(context.Background(), token), ExecutionModeLive)
+	ctx = WithController(ctx, NewController(probe).WithExecutionPosture(executionposture.Live))
 	ctx = WithLogicalOperationIdentity(ctx, "same-slug-sibling-capability")
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = WithUsageTarget(ctx, target)
@@ -363,7 +364,7 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 			surface := selectedManagedEffectSurface(t, admission, target, tc.surfaceActor)
 			ctx := WithAuthority(context.Background(), testAuthority)
 			ctx = WithExecutionMode(ctx, ExecutionModeLive)
-			ctx = WithController(ctx, NewController(probe))
+			ctx = WithController(ctx, NewController(probe).WithExecutionPosture(executionposture.Live))
 			ctx = WithLogicalOperationIdentity(ctx, "hostile-selected-effect:"+tc.name)
 			ctx = managedexecution.WithAdmission(ctx, admission)
 			ctx = managedcapabilities.WithContext(ctx, surface)
@@ -422,7 +423,7 @@ func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 	probe := &effectStoreProbe{}
 	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	ctx := WithLogicalOperationIdentity(
-		WithController(WithLifecycleToken(context.Background(), token), NewController(probe)),
+		WithController(WithLifecycleToken(context.Background(), token), NewController(probe).WithExecutionPosture(executionposture.Live)),
 		"event-123",
 	)
 	ctx = managedEffectTestContext(t, ctx, token.AgentID)
@@ -442,8 +443,28 @@ func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 	}
 }
 
+func TestMockOnlyPostureRejectsLiveExternalEffectBeforeAuthorization(t *testing.T) {
+	probe := &effectStoreProbe{}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
+	ctx := WithLogicalOperationIdentity(
+		WithController(
+			WithExecutionMode(WithLifecycleToken(context.Background(), token), ExecutionModeLive),
+			NewController(probe).WithExecutionPosture(executionposture.MockOnly),
+		),
+		"event-live-under-mock-only",
+	)
+	ctx = managedEffectTestContext(t, ctx, token.AgentID)
+	if _, err := Begin(ctx, "authored_http_tool", []byte("request"), nil); err == nil {
+		t.Fatal("mock_only posture admitted a live external effect")
+	}
+	if len(probe.authorizations) != 0 || probe.launches != 0 {
+		t.Fatalf("live external effect reached authorization=%d launch=%d, want zero", len(probe.authorizations), probe.launches)
+	}
+}
+
 func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string) context.Context {
 	t.Helper()
+	ctx = WithExecutionMode(ctx, ExecutionModeLive)
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		t.Fatalf("build managed execution test admission: %v", err)

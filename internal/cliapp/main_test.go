@@ -23,6 +23,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1881,6 +1882,7 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: \"   \"",
@@ -4790,7 +4792,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			source := semanticview.Wrap(tc.bundle)
-			verifyErr := VerifyBundle(context.Background(), source)
+			verifyErr := VerifyBundle(context.Background(), source, executionposture.Live)
 			if tc.wantErr {
 				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.errContains) {
 					t.Fatalf("VerifyBundle error = %v, want substring %q", verifyErr, tc.errContains)
@@ -4799,7 +4801,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				t.Fatalf("VerifyBundle error = %v, want nil", verifyErr)
 			}
 
-			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil))
+			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 			if tc.wantErr {
 				if runtimeErr == nil || !strings.Contains(runtimeErr.Error(), tc.errContains) {
 					t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", runtimeErr, tc.errContains)
@@ -5256,7 +5258,7 @@ func writeRuntimeConfigText(t *testing.T, path, configText string) {
 func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testing.T) {
 	source := semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-local-events")))
 
-	err := VerifyBundle(context.Background(), source)
+	err := VerifyBundle(context.Background(), source, executionposture.Live)
 	if err == nil {
 		t.Fatal("VerifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
 	}
@@ -5271,7 +5273,7 @@ func TestVerifyBundle_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(
 func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 	source := semanticview.Wrap(requiredagentsparentconnect.LoadBundle(t))
 
-	err := VerifyBundle(context.Background(), source)
+	err := VerifyBundle(context.Background(), source, executionposture.Live)
 	if err == nil {
 		t.Fatal("VerifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
 	}
@@ -5314,7 +5316,7 @@ func TestVerifyBundle_CreateEntityAccumulatePreemptsDynamicComputeWarningSurface
 	}
 	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(bundle))
+	err := VerifyBundle(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
 	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
 		t.Fatalf("VerifyBundle error = %v, want create_entity/accumulate boot error", err)
 	}
@@ -5380,7 +5382,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(bundle))
+	err := VerifyBundle(context.Background(), semanticview.Wrap(bundle), executionposture.Live)
 	if err == nil {
 		t.Fatal("VerifyBundle error = nil, want emitted payload completeness invalidity")
 	}
@@ -5395,7 +5397,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))))
+	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))), executionposture.Live)
 	if err == nil {
 		t.Fatal("VerifyBundle error = nil, want hard invalidity from missing producer path")
 	}
@@ -5422,7 +5424,7 @@ func writeVerifyMissingPinWarningFixture(t *testing.T) string {
 func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-state-machine-unreachable"))))
+	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-state-machine-unreachable"))), executionposture.Live)
 	if err == nil {
 		t.Fatal("VerifyBundle error = nil, want warning-only failure from unreachable declared state")
 	}
@@ -5443,7 +5445,7 @@ func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T)
 
 	source := semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeWorkflowValidationDeadEventSchemaFixture(t)))
 
-	verifyErr := VerifyBundle(context.Background(), source)
+	verifyErr := VerifyBundle(context.Background(), source, executionposture.Live)
 	if verifyErr == nil {
 		t.Fatal("VerifyBundle error = nil, want warning-only failure from dead declared event schema")
 	}
@@ -5457,7 +5459,7 @@ func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T)
 		}
 	}
 
-	result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil))
+	result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if runtimeErr == nil {
 		t.Fatal("ValidateWorkflowContractSurface error = nil, want warning-only failure from dead declared event schema")
 	}
@@ -5478,7 +5480,7 @@ func TestVerifyBundle_DeadDeclaredEventSchemaReturnsWarningSurface(t *testing.T)
 func TestVerifyBundle_CreateEntityAccumulateReturnsBootError(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))))
+	err := VerifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))), executionposture.Live)
 	if err == nil {
 		t.Fatal("VerifyBundle error = nil, want create_entity/accumulate boot error")
 	}

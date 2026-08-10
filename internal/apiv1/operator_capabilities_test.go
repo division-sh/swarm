@@ -6,12 +6,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // testOperatorCapabilities is fixture assembly only. Production registration
 // must use the exact family option types in operator_capabilities.go.
 type testOperatorCapabilities struct {
+	ExecutionPosture          executionposture.Posture
 	Now                       func() time.Time
 	Ready                     func() bool
 	RepoRoot                  string
@@ -53,12 +55,20 @@ func (c testOperatorCapabilities) publication() EventPublicationOptions {
 	recipientPlans, _ := c.Events.(EventRecipientPlanChecker)
 	bundleSource, _ := c.Events.(BundleSourceAdmitter)
 	return EventPublicationOptions{
-		Now: c.Now, Idempotency: c.Idempotency, Events: c.Events, Acknowledged: acknowledged,
+		ExecutionPosture: c.posture(),
+		Now:              c.Now, Idempotency: c.Idempotency, Events: c.Events, Acknowledged: acknowledged,
 		RecipientPlans: recipientPlans, BundleSource: bundleSource,
 		Runs: c.Runs, Entities: c.Entities, Observability: c.Observability,
 		RunBundleContext: c.RunBundleContext, RuntimeContexts: c.RuntimeContexts,
 		Source: c.Source, Bundle: c.Bundle,
 	}
+}
+
+func (c testOperatorCapabilities) posture() executionposture.Posture {
+	if c.ExecutionPosture.Valid() {
+		return c.ExecutionPosture
+	}
+	return executionposture.Live
 }
 
 func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
@@ -77,7 +87,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 	agents, _ := c.AgentConversations.(AgentReadStore)
 	conversations, _ := c.AgentConversations.(ConversationReadStore)
 	return MergeOperatorHandlers(
-		OperatorHealthHandlers(HealthHandlerOptions{Now: c.Now, Ready: c.Ready, Database: c.Database, Bundle: c.Bundle}),
+		OperatorHealthHandlers(HealthHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Ready: c.Ready, Database: c.Database, Bundle: c.Bundle}),
 		OperatorRuntimeIdentityHandlers(RuntimeIdentityHandlerOptions{Identity: c.RuntimeIdentity}),
 		OperatorRunReadHandlers(RunReadHandlerOptions{Runs: c.Runs}),
 		OperatorMailboxHandlers(MailboxHandlerOptions{Mailbox: c.Mailbox}),
@@ -105,7 +115,8 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 func testOperatorSubscriptions(c testOperatorCapabilities, overrides ...SubscriptionRuntimeOptions) *SubscriptionRuntime {
 	proposedEffects, _ := c.DecisionCards.(decisioncard.ProposedEffectStore)
 	return OperatorSubscriptions(SubscriptionOptions{
-		Now: c.Now, Ready: c.Ready, Database: c.Database, Observability: c.Observability,
+		ExecutionPosture: c.posture(),
+		Now:              c.Now, Ready: c.Ready, Database: c.Database, Observability: c.Observability,
 		DecisionCards: c.DecisionCards, ProposedEffects: proposedEffects, Bundle: c.Bundle,
 	}, overrides...)
 }
@@ -122,7 +133,7 @@ func testOperatorConversationForkHandlers(c testOperatorCapabilities) map[string
 func testOperatorEventReplayHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 	events, _ := c.Events.(EventReplayOwner)
 	agentIdentities, _ := c.AgentConversations.(AgentIdentityResolver)
-	return OperatorEventReplayHandlers(EventReplayHandlerOptions{Now: c.Now, Idempotency: c.Idempotency, Events: events, Observability: c.Observability, AgentIdentities: agentIdentities, RuntimeContexts: c.RuntimeContexts})
+	return OperatorEventReplayHandlers(EventReplayHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Idempotency: c.Idempotency, Events: events, Observability: c.Observability, AgentIdentities: agentIdentities, RuntimeContexts: c.RuntimeContexts})
 }
 
 func testOperatorRunForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {

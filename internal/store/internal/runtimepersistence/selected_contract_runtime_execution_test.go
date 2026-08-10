@@ -750,7 +750,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 		store: store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{
 			Admission: admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
-			EffectiveConfigFingerprint: "sha256:config", Now: now,
+			EffectiveConfigFingerprint: "sha256:config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: now,
 		},
 	}
 }

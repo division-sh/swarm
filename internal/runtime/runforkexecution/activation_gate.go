@@ -32,6 +32,7 @@ type SelectedContractActivationGateRequest struct {
 	Store               SelectedContractActivationStore
 	ExecutionOwner      SelectedContractExecutionOwner
 	SourceLoader        SelectedContractSourceLoader
+	AgentRuntime        SelectedContractAgentRuntimeOptions
 }
 
 type SelectedContractActivationGateResult struct {
@@ -274,6 +275,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			WorkflowStates:        workflowStates,
 			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
+			AgentRuntime:          selectedContractAgentRuntimePlan{Options: req.AgentRuntime},
 		})
 		if err != nil {
 			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)

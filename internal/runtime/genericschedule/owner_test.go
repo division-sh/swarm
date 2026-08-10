@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -67,6 +68,24 @@ func TestAdmissionCommandRequiresHashBearingExecutionMode(t *testing.T) {
 	}
 	if liveHash == mockHash {
 		t.Fatalf("live and mock commands shared immutable hash %q", liveHash)
+	}
+}
+
+func TestMockOnlyPostureRejectsLiveScheduleBeforePersistence(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	activation := testGlobalActivation(t, AbsoluteDue(now.Add(time.Hour)), now, now.Add(time.Hour))
+	order := []string{}
+	store := &lifecycleProofStore{activation: activation, order: &order}
+	lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.MockOnly)
+	if err != nil {
+		t.Fatalf("NewLifecycle: %v", err)
+	}
+	t.Cleanup(func() { _ = lifecycle.Stop(context.Background()) })
+	if _, err := lifecycle.Admit(context.Background(), activation.Command); err == nil {
+		t.Fatal("mock_only posture admitted a live generic schedule")
+	}
+	if len(order) != 0 {
+		t.Fatalf("live schedule reached store/scheduler operations: %v", order)
 	}
 }
 
@@ -264,7 +283,7 @@ func TestLifecycleRestoreEmitsDeepCatchupWarningBeforeRegisteringWakeup(t *testi
 	store := &restoreStore{activation: activation}
 	scheduler := &restoreScheduler{}
 	logger := &restoreLogger{}
-	lifecycle, err := NewLifecycle(store, scheduler, restorePlanner{}, restoreDispatcher{}, logger)
+	lifecycle, err := NewLifecycle(store, scheduler, restorePlanner{}, restoreDispatcher{}, logger, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +426,7 @@ func TestLifecycleReconcileWithRecoveryQueuesAndConverges(t *testing.T) {
 	store := &lifecycleProofStore{activation: activation}
 	transient := errors.New("register wakeup failed")
 	scheduler := &lifecycleProofScheduler{registerErrs: []error{transient}, registerSeen: make(chan error, 2)}
-	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +533,7 @@ func TestLifecyclePersistsActivationBeforeRegisteringWakeup(t *testing.T) {
 	order := []string{}
 	store := &lifecycleProofStore{activation: activation, order: &order}
 	scheduler := &lifecycleProofScheduler{order: &order}
-	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +578,7 @@ func TestLifecycleTerminalWakeupsRetireBeforeReleasingClaims(t *testing.T) {
 			order := []string{}
 			store := &lifecycleProofStore{activation: activation, order: &order}
 			scheduler := &lifecycleProofScheduler{order: &order}
-			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -584,7 +603,7 @@ func TestLifecycleActiveRecurringWakeupRetainsClaim(t *testing.T) {
 	order := []string{}
 	store := &lifecycleProofStore{activation: activation, order: &order}
 	scheduler := &lifecycleProofScheduler{order: &order}
-	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +630,7 @@ func TestLifecycleRetirementFailureRetainsClaim(t *testing.T) {
 	order := []string{}
 	store := &lifecycleProofStore{activation: activation, order: &order}
 	scheduler := &lifecycleProofScheduler{order: &order, retireErr: retireErr}
-	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +657,7 @@ func TestLifecycleEmptyTerminalPreparationRetiresOriginalExactWakeup(t *testing.
 				missing: true, prepared: PreparedOccurrence{Outcome: PrepareTerminal}, order: &order,
 			}
 			scheduler := &lifecycleProofScheduler{order: &order}
-			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -648,8 +667,8 @@ func TestLifecycleEmptyTerminalPreparationRetiresOriginalExactWakeup(t *testing.
 			if len(scheduler.retired) != 1 || scheduler.retired[0] != wakeup || len(store.released) != 1 || store.released[0] != wakeup {
 				t.Fatalf("empty terminal exact retirement retired=%#v released=%#v", scheduler.retired, store.released)
 			}
-			if got := strings.Join(order, ","); got != "retire,release" {
-				t.Fatalf("empty terminal retirement order = %q", got)
+			if got := strings.Join(order, ","); got != "load,retire,release" {
+				t.Fatalf("empty terminal retirement order = %q, want load,retire,release", got)
 			}
 		})
 	}
@@ -663,7 +682,7 @@ func TestLifecycleEmptyTerminalReleaseFailureRecoversExactWakeup(t *testing.T) {
 		releaseErrs: []error{releaseErr}, releaseSeen: make(chan error, 2),
 	}
 	scheduler := &lifecycleProofScheduler{}
-	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,7 +721,7 @@ func TestLifecyclePlannerFailureCannotReachOccurrenceSettlement(t *testing.T) {
 	}
 	plannerErr := errors.New("publication plan rejected")
 	planner := &lifecycleProofPlanner{prepareErr: plannerErr}
-	lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, planner, &lifecycleProofDispatcher{}, nil)
+	lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, planner, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,7 +754,7 @@ func TestLifecycleCommittedReplayDoesNotFinalizeOrDispatchAgain(t *testing.T) {
 	}
 	planner := &lifecycleProofPlanner{}
 	dispatcher := &lifecycleProofDispatcher{}
-	lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, planner, dispatcher, nil)
+	lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, planner, dispatcher, nil, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}

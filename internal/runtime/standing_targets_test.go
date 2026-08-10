@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
@@ -357,7 +358,7 @@ func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPi
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	publicationStore := &recordingInboundStore{inserted: true, store: eventStore}
-	gateway := NewInboundGateway(bus, nil, nil, publicationStore)
+	gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, publicationStore)
 	gateway.SetCredentialStore(identityInboundCredentialStore{})
 	body := []byte(`{"action":"created","issue":{"number":7}}`)
 	mac := hmac.New(sha256.New, []byte("github-secret"))

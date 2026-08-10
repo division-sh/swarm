@@ -8,6 +8,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 const runForkTestRuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
@@ -56,6 +57,7 @@ func testGatewayWorkOwner(t testing.TB) *worklifetime.RuntimeOccurrence {
 func runForkTestContext(t testing.TB) context.Context {
 	t.Helper()
 	ctx := worklifetime.WithOccurrence(context.Background(), testGatewayWorkOwner(t))
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, runForkTestBundleHash),

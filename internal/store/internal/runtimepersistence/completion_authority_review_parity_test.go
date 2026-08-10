@@ -212,7 +212,7 @@ func proveCommittedCompletionBudgetProjection(t *testing.T, sqlite bool) {
 	fixture := newCompletionReviewFixture(t, sqlite)
 	projection := &completionProjectionCapture{}
 	ctx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), fixture.authority), runtimeeffects.NewCompletionController(fixture.store, fixture.store, fixture.store, projection)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), fixture.authority), liveTestCompletionController(fixture.store, fixture.store, fixture.store, projection)),
 		"review:budget-projection",
 	)
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "budget-projection")

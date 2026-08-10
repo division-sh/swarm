@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runstalled"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -28,15 +29,16 @@ type serveRunStalledReader struct {
 	store runStalledReadStore
 }
 
-func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, stores storeBundle, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus) error {
+func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, stores storeBundle, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus, posture executionposture.Posture) error {
 	reader, ok := newServeRunStalledReader(stores)
 	if !ok || eventBus == nil {
 		return nil
 	}
 	monitor := &runstalled.Monitor{
-		Reader:         reader,
-		Publisher:      eventBus,
-		PolicyResolver: serveRunStalledPolicyResolver(contexts),
+		Reader:           reader,
+		Publisher:        eventBus,
+		ExecutionPosture: posture,
+		PolicyResolver:   serveRunStalledPolicyResolver(contexts),
 		OnError: func(err error) {
 			log.Printf("run stalled escalation monitor: %v", err)
 		},

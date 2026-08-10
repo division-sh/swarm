@@ -28,6 +28,7 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -1506,7 +1507,7 @@ func newNotifyAllChildrenRuntime(
 			"notify-all-children-conformance",
 			conversations,
 			eventBus,
-			runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}),
+			liveTestCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}),
 		)
 		profile, err := llmselection.ResolveActiveBackend(llmselection.BackendMock)
 		if err != nil {
@@ -1560,7 +1561,8 @@ func newNotifyAllChildrenRuntime(
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module,
+		ExecutionPosture: executionposture.Live,
+		Module:           module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
 				return fmt.Errorf("agent manager is not initialized")
@@ -1590,6 +1592,7 @@ func newNotifyAllChildrenRuntime(
 	})
 
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       testAuthorActivityContext(context.Background()),
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		WorkflowInstances: coordinator,

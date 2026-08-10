@@ -13,6 +13,8 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -260,6 +262,14 @@ func (s *PipelineSQLiteOwner) ResetStandingService(ctx context.Context, operatio
 	adapter := newSQLiteStandingServiceAdapter(s)
 	result, err := adapter.ResetStandingService(ctx, operation)
 	return standingServiceResultEvidence(result, adapter, err)
+}
+
+func (s *PipelinePostgresOwner) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
+	return newPostgresStandingServiceAdapter(s).AdmitStandingServiceRun(ctx, runID, posture)
+}
+
+func (s *PipelineSQLiteOwner) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
+	return newSQLiteStandingServiceAdapter(s).AdmitStandingServiceRun(ctx, runID, posture)
 }
 
 func (s *PipelinePostgresOwner) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {
@@ -593,6 +603,9 @@ func (s *standingServiceAdapter) ResumeStandingService(ctx context.Context, oper
 		if !current.DeclarationPresent {
 			return fmt.Errorf("standing service %s is orphaned; restore its declaration before running `swarm standing resume %s`", operation.ServiceID, operation.ServiceID)
 		}
+		if err := s.admitStandingServiceRunTx(txctx, tx, current.RunID, operation.ExecutionPosture); err != nil {
+			return err
+		}
 		if current.OperatorOverride == "none" && current.EffectiveState == "active" {
 			result = current.StandingServiceReconciliation
 			result.Transition = "operator_resumed"
@@ -642,6 +655,9 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		}
 		if !current.DeclarationPresent {
 			return fmt.Errorf("standing service %s is orphaned; restore its declaration before resetting it", operation.ServiceID)
+		}
+		if err := s.admitStandingServiceRunTx(txctx, tx, current.RunID, operation.ExecutionPosture); err != nil {
+			return err
 		}
 		source, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
 		if err != nil {
@@ -708,6 +724,60 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
 	return result, err
+}
+
+func (s *standingServiceAdapter) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("workflow instance store is required")
+	}
+	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return s.admitStandingServiceRunTx(txctx, tx, runID, posture)
+	})
+}
+
+func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, tx *sql.Tx, runID string, posture executionposture.Posture) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("standing service posture admission requires run_id")
+	}
+	if err := posture.Admit(executionmode.Mock, "standing service lifecycle admission"); err != nil {
+		return err
+	}
+	if posture == executionposture.Live {
+		return nil
+	}
+	query := `SELECT EXISTS (
+		SELECT 1 FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
+		WHERE d.run_id = ? AND d.status IN ('pending', 'in_progress', 'failed') AND e.execution_mode = 'live'
+		UNION ALL SELECT 1 FROM timers WHERE run_id = ? AND status = 'active' AND execution_mode = 'live'
+		UNION ALL SELECT 1 FROM decision_cards WHERE run_id = ? AND status = 'pending' AND execution_mode = 'live'
+		UNION ALL SELECT 1 FROM activity_attempts WHERE run_id = ? AND status IN ('started', 'uncertain') AND execution_mode = 'live'
+		UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
+			WHERE run_id = ? AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
+			AND json_extract(plan, '$.execution_mode') = 'live'
+	)`
+	args := []any{runID, runID, runID, runID, runID}
+	if !s.isSQLite() {
+		query = `SELECT EXISTS (
+			SELECT 1 FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
+			WHERE d.run_id = $1::uuid AND d.status IN ('pending', 'in_progress', 'failed') AND e.execution_mode = 'live'
+			UNION ALL SELECT 1 FROM timers WHERE run_id = $1::uuid AND status = 'active' AND execution_mode = 'live'
+			UNION ALL SELECT 1 FROM decision_cards WHERE run_id = $1::uuid AND status = 'pending' AND execution_mode = 'live'
+			UNION ALL SELECT 1 FROM activity_attempts WHERE run_id = $1::uuid AND status IN ('started', 'uncertain') AND execution_mode = 'live'
+			UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
+				WHERE run_id = $1::uuid AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
+				AND plan->>'execution_mode' = 'live'
+		)`
+		args = []any{runID}
+	}
+	var blocked bool
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&blocked); err != nil {
+		return fmt.Errorf("inspect standing service execution posture: %w", err)
+	}
+	if blocked {
+		return posture.Admit(executionmode.Live, "standing service activation or lifecycle mutation")
+	}
+	return nil
 }
 
 func (s *standingServiceAdapter) reconcileStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate runtimepipeline.StandingServiceCandidate) (runtimepipeline.StandingServiceReconciliation, error) {

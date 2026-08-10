@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -28,7 +29,7 @@ func TestManagedProviderPreflightAuthorityCarriesLiveExecutionIdentity(t *testin
 		StateVersion: 11,
 	}
 	store := &managedStartupAuthorityStoreStub{}
-	rt := &Runtime{effectsStore: store, managedCapabilitiesStore: store}
+	rt := &Runtime{ExecutionPosture: executionposture.Live, effectsStore: store, managedCapabilitiesStore: store}
 	preflight, err := rt.managedProviderPreflightAuthority(startupAuthority)
 	if err != nil {
 		t.Fatalf("build managed provider preflight authority: %v", err)

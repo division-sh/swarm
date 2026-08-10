@@ -281,6 +281,7 @@ func waitForReleaseDockerRecordClass(ctx context.Context, root, class string) er
 func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventCount int) {
 	t.Helper()
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module release-observer-overflow\n\ngo 1.23.0\n")
+	writeReleaseFile(t, filepath.Join(root, "swarm.yaml"), "runtime:\n  execution_posture: live\n")
 	copyReleaseTree(t,
 		filepath.Join(repo, "internal", "releasee2e", "testdata", "claude_cli_managed_lifecycle"),
 		filepath.Join(root, "contracts"),

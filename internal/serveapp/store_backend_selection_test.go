@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -432,12 +433,13 @@ func selectedAPICapabilityConfigured(value reflect.Value) bool {
 func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
+	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}}
 	stores, err := buildStores(ctx, storebackend.Selection{
 		Backend:          storebackend.BackendSQLite,
 		BackendSource:    storebackend.SourceFlag,
 		SQLitePath:       path,
 		SQLitePathSource: storebackend.SourceRolloutDefault,
-	}, &config.Config{})
+	}, cfg)
 	if err != nil {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
@@ -461,7 +463,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		t.Fatalf("BundleHash: %v", err)
 	}
 	processWorkOwner := newSupervisorTestProcessOwner(t)
-	runtimeDeps.Config = &config.Config{}
+	runtimeDeps.Config = cfg
 	runtimeDeps.Options = runtime.RuntimeOptions{
 		SelfCheck:              true,
 		ProcessWorkOwner:       processWorkOwner,
@@ -539,6 +541,7 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	t.Helper()
 	lines := []string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),
@@ -578,6 +581,7 @@ func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend s
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	contents := withTestProviderTriggerPlatformInventory(t, strings.Join([]string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),

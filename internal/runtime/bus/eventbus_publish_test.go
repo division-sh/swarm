@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -49,6 +50,34 @@ import (
 )
 
 const eventBusTestRunID = "99999999-9999-9999-9999-999999999999"
+
+type posturePersistenceProbe struct {
+	runtimebus.InMemoryEventStore
+	commits int
+}
+
+func (p *posturePersistenceProbe) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	p.commits++
+	return p.InMemoryEventStore.CommitPublication(ctx, command)
+}
+
+func TestMockOnlyPostureRejectsLiveEventBeforePersistence(t *testing.T) {
+	store := &posturePersistenceProbe{}
+	bus, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ExecutionPosture: executionposture.MockOnly})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	event := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "work.requested", "operator", "", []byte(`{}`), 0,
+		eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+		t.Fatalf("Publish error = %v, want mock-only live rejection", err)
+	}
+	if store.commits != 0 {
+		t.Fatalf("commit calls = %d, want zero", store.commits)
+	}
+}
 
 type retainedConnectionCommitStore struct {
 	runtimebus.InMemoryEventStore
@@ -3010,7 +3039,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	controller := runtimeingress.NewController(pg, eb, runtimeingress.Options{})
+	controller := runtimeingress.NewController(pg, eb, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	eb.SetRuntimeIngressDispatchGate(controller)
 
@@ -3160,6 +3189,7 @@ func newEventBusWorkflowCoordinator(
 	module runtimepipeline.WorkflowModule,
 ) *runtimepipeline.PipelineCoordinator {
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture:        executionposture.Live,
 		Module:                  module,
 		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,

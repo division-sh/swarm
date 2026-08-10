@@ -19,6 +19,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -50,6 +51,7 @@ type AgentManager struct {
 	llmBackend                      string
 	modelAliases                    llmselection.ModelAliases
 	requireModelResolution          bool
+	executionPosture                executionposture.Posture
 	throttleSuppressPrefixes        []string
 	workflowInstances               flowInstancePersistence
 	workOwner                       worklifetime.Occurrence
@@ -141,6 +143,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		opts.PersistenceRoles.LifecycleEffects,
 	)
 	lifecycle.baseContext = opts.BaseContext
+	lifecycle.executionPosture = opts.ExecutionPosture
 	if opts.WorkOwner != nil {
 		_ = lifecycle.prepareRunOwner(opts.BaseContext, opts.WorkOwner)
 	}
@@ -176,6 +179,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		lifecycle:                       lifecycle,
 		roles:                           opts.PersistenceRoles,
 		baseContext:                     opts.BaseContext,
+		executionPosture:                opts.ExecutionPosture,
 		poisonPanicCounts:               make(map[poisonPanicKey]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),

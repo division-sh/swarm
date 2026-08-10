@@ -376,7 +376,7 @@ func newSelectedReceiverProjectionExecution(t testing.TB, executionID, forkRunID
 	variant, err := eventreceiver.SelectedContractForkExecution(
 		authority,
 		admission,
-		runtimeeffects.NewController(receiverProjectionEffectStore{}),
+		liveTestEffectController(receiverProjectionEffectStore{}),
 		runtimecorrelation.RuntimeLineage{
 			Owner:               "selected-receiver-projection-test",
 			RunID:               forkRunID,
@@ -408,7 +408,7 @@ func hostilePublisherContext(t testing.TB) context.Context {
 	}
 	ctx := context.WithValue(context.Background(), publisherOnlyContextKey{}, "publisher-secret")
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
-	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(receiverProjectionEffectStore{}))
+	ctx = runtimeeffects.WithController(ctx, liveTestEffectController(receiverProjectionEffectStore{}))
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner: "publisher-lineage", RunID: uuid.NewString(), Classification: runtimecorrelation.RuntimeLineageClassificationForkLocal,

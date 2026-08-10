@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -19,6 +20,7 @@ func claimNextPipelineWork(
 	if query.RunID != "" {
 		request = runtimepipelineobligation.RunScanRequest(query.RunID)
 	}
+	request = request.WithExecutionPosture(executionposture.Live)
 	scan, err := owner.OpenScan(ctx, request)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, false, err

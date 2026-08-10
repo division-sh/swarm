@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -41,7 +42,7 @@ func TestBootWorkflowTimerScheduleProducesGlobalTypedDueBasis(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			command, ok, err := bootWorkflowTimerSchedule(source, tc.timer)
+			command, ok, err := bootWorkflowTimerSchedule(source, tc.timer, executionposture.Live)
 			if err != nil || !ok {
 				t.Fatalf("bootWorkflowTimerSchedule = ok:%v err:%v", ok, err)
 			}

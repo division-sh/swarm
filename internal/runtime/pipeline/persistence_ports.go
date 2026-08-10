@@ -11,7 +11,6 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -99,9 +98,12 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 		}
 		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
 		if reconciliation.EffectiveState == "active" {
+			if err := pc.workflowStore.AdmitStandingServiceRun(ctx, reconciliation.RunID, pc.executionPosture); err != nil {
+				return nil, err
+			}
 			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
 			operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
-			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
+			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, runtimeeffects.ExecutionMode(pc.executionPosture.RootMode()))
 			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
 				return nil, err
 			}
@@ -284,10 +286,12 @@ func (pc *PipelineCoordinator) SuspendStandingService(ctx context.Context, op St
 }
 
 func (pc *PipelineCoordinator) ResumeStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
+	op.ExecutionPosture = pc.executionPosture
 	return pc.workflowStore.ResumeStandingService(ctx, op)
 }
 
 func (pc *PipelineCoordinator) ResetStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
+	op.ExecutionPosture = pc.executionPosture
 	result, err := pc.workflowStore.ResetStandingService(ctx, op)
 	if err == nil {
 		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)

@@ -10,6 +10,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -52,13 +53,13 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 			directReport := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 			assertToolResolutionWarning(t, directReport.Warnings(), tc.configuredTool, tc.wantToolResolution)
 
-			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil))
+			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 			if runtimeErr != nil {
 				t.Fatalf("ValidateWorkflowContractSurface: %v", runtimeErr)
 			}
 			assertToolResolutionWarning(t, result.BootReport.Warnings(), tc.configuredTool, tc.wantToolResolution)
 
-			if err := cliapp.VerifyBundle(context.Background(), source); err != nil {
+			if err := cliapp.VerifyBundle(context.Background(), source, executionposture.Live); err != nil {
 				t.Fatalf("cliapp.VerifyBundle: %v", err)
 			}
 

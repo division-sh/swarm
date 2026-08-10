@@ -13,6 +13,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -176,6 +177,7 @@ func newTestAgentManager(t *testing.T, bus Bus, factory AgentFactory, stores ...
 func newTestManagerEventBus(t *testing.T) (*runtimebus.EventBus, error) {
 	t.Helper()
 	return runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ExecutionPosture:  executionposture.Live,
 		WorkOwner:         newTestManagerWorkOwner(t),
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -183,6 +185,9 @@ func newTestManagerEventBus(t *testing.T) (*runtimebus.EventBus, error) {
 
 func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +28,7 @@ func TestEventPublicationClassDependsOnRunCreationNotOptionalReference(t *testin
 			event, err := eventPublicationEvent(eventPublicationParams{
 				EventID: uuid.NewString(), EventName: "operator.work", RunID: runID, Emitter: "operator",
 				Payload: []byte(`{}`), NewRunCreated: test.newRun, SourceEventID: test.referenceID,
-			}, time.Now().UTC())
+			}, time.Now().UTC(), executionposture.Live)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -37,6 +38,23 @@ func TestEventPublicationClassDependsOnRunCreationNotOptionalReference(t *testin
 			_, hasReference := event.OperatorReference()
 			if hasReference != test.wantReference {
 				t.Fatalf("operator reference present = %v, want %v", hasReference, test.wantReference)
+			}
+		})
+	}
+}
+
+func TestEventPublicationRootModeComesOnlyFromProcessPosture(t *testing.T) {
+	for _, posture := range []executionposture.Posture{executionposture.Live, executionposture.MockOnly} {
+		t.Run(string(posture), func(t *testing.T) {
+			event, err := eventPublicationEvent(eventPublicationParams{
+				EventID: uuid.NewString(), EventName: "operator.work", RunID: uuid.NewString(), Emitter: "operator",
+				Payload: []byte(`{}`), NewRunCreated: true,
+			}, time.Now().UTC(), posture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := event.ExecutionMode(); got != posture.RootMode() {
+				t.Fatalf("execution mode = %q, want %q", got, posture.RootMode())
 			}
 		})
 	}

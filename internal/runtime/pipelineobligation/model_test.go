@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
 
@@ -101,7 +102,10 @@ func TestPipelineClaimQueryIsClosed(t *testing.T) {
 }
 
 func TestPipelineScanRequestOwnsFixedPhaseOrderAndOpaqueIdentity(t *testing.T) {
-	global := GlobalScanRequest()
+	if err := GlobalScanRequest().Validate(); err == nil {
+		t.Fatal("pipeline scan accepted missing execution posture")
+	}
+	global := GlobalScanRequest().WithExecutionPosture(executionposture.Live)
 	if err := global.Validate(); err != nil {
 		t.Fatalf("global scan request: %v", err)
 	}
@@ -118,7 +122,7 @@ func TestPipelineScanRequestOwnsFixedPhaseOrderAndOpaqueIdentity(t *testing.T) {
 	}
 
 	runID := uuid.NewString()
-	run := RunScanRequest(runID)
+	run := RunScanRequest(runID).WithExecutionPosture(executionposture.Live)
 	if err := run.Validate(); err != nil {
 		t.Fatalf("run scan request: %v", err)
 	}
@@ -133,7 +137,7 @@ func TestPipelineScanRequestOwnsFixedPhaseOrderAndOpaqueIdentity(t *testing.T) {
 	if _, ok := run.QueryAt(2); ok {
 		t.Fatal("run scan exposed an undeclared third phase")
 	}
-	if err := RunScanRequest("not-a-uuid").Validate(); err == nil {
+	if err := RunScanRequest("not-a-uuid").WithExecutionPosture(executionposture.Live).Validate(); err == nil {
 		t.Fatal("run scan accepted invalid run identity")
 	}
 

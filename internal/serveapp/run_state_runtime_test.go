@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
@@ -69,6 +70,7 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		t.Fatalf("activate run status delivery authority: %v", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ExecutionPosture:    executionposture.Live,
 		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
 		BundleSourceFact:    sourceFact,
 		WorkOwner:           workOwner,
@@ -248,6 +250,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		}
 		return testAgent, nil
 	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live,
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
@@ -371,6 +374,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		}
 		return testAgent, nil
 	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live,
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),

@@ -1149,6 +1149,27 @@ func isolateCLIAPIConfigEnv(t *testing.T) {
 	t.Setenv("SWARM_CONTRACTS_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+	writeCLIAPITestExecutionPosture(t)
+}
+
+type cliAPITestFataler interface {
+	Helper()
+	Fatalf(string, ...any)
+}
+
+func writeCLIAPITestExecutionPosture(t cliAPITestFataler) {
+	t.Helper()
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("resolve test user config directory: %v", err)
+	}
+	path := filepath.Join(dir, "swarm", "swarm.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create test user config directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("runtime:\n  execution_posture: live\n"), 0o600); err != nil {
+		t.Fatalf("write test execution posture: %v", err)
+	}
 }
 
 func setCLIAPITestToken(t *testing.T, token string) {

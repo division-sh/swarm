@@ -10,6 +10,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -130,9 +131,10 @@ func TestBuilderValidationConsumesCanonicalMockEffectReachability(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &handler{
-				credentials:    credentialStore,
-				llmProfile:     profile,
-				semanticSource: builderMockConnectorSource(tc.includeLive),
+				credentials:      credentialStore,
+				executionPosture: executionposture.Live,
+				llmProfile:       profile,
+				semanticSource:   builderMockConnectorSource(tc.includeLive),
 			}
 			result := h.runFullValidation(context.Background())
 			gotCredential := false

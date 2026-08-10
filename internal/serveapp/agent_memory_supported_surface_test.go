@@ -532,6 +532,7 @@ func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, provide
 	t.Helper()
 	lines := []string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: true",
 		"workspace:",
 		"  data_source: " + t.TempDir(),

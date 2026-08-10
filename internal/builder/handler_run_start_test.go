@@ -9,6 +9,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -35,9 +36,10 @@ func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
 	store := &runStartAppendStore{}
 	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
-		AuthToken:       testBuilderAuthToken,
-		SemanticSource:  source,
-		RuntimeAcquirer: acquirer,
+		ExecutionPosture: executionposture.Live,
+		AuthToken:        testBuilderAuthToken,
+		SemanticSource:   source,
+		RuntimeAcquirer:  acquirer,
 	})
 
 	resp := callBuilderRPCRaw(t, handler, Request{
@@ -73,9 +75,10 @@ func TestHandlerRunStartRejectsDeclaredUnroutableInputBeforePublish(t *testing.T
 	store := &runStartAppendStore{}
 	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
-		AuthToken:       testBuilderAuthToken,
-		SemanticSource:  source,
-		RuntimeAcquirer: acquirer,
+		ExecutionPosture: executionposture.Live,
+		AuthToken:        testBuilderAuthToken,
+		SemanticSource:   source,
+		RuntimeAcquirer:  acquirer,
 	})
 
 	resp := callBuilderRPCRaw(t, handler, Request{
@@ -137,9 +140,10 @@ func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 	store := &runStartAppendStore{}
 	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
-		AuthToken:       testBuilderAuthToken,
-		SemanticSource:  source,
-		RuntimeAcquirer: acquirer,
+		ExecutionPosture: executionposture.Live,
+		AuthToken:        testBuilderAuthToken,
+		SemanticSource:   source,
+		RuntimeAcquirer:  acquirer,
 	})
 
 	resp := callBuilderRPCRaw(t, handler, Request{

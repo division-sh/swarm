@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -97,7 +98,7 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 
 func newTestRuntimeLogger(db *sql.DB, stub runtimeLogPersistenceStub) *RuntimeLogger {
 	stub.db = db
-	return NewRuntimeLogger(stub)
+	return NewRuntimeLogger(stub, executionposture.Live)
 }
 
 func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCapture, want runtimeLogPayloadArg, wantRunID, wantParentEventID string) {

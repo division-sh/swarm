@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
@@ -42,7 +43,10 @@ func TestSafetyPauseAndResumePreserveInboundLineage(t *testing.T) {
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	publisher := &transitionFailurePublisher{}
-	controller := NewController(nil, publisher, Options{Now: func() time.Time { return now }})
+	controller := NewController(nil, publisher, Options{
+		ExecutionPosture: executionposture.Live,
+		Now:              func() time.Time { return now },
+	})
 
 	if _, err := controller.SafetyPause(ctx, TransitionRequest{Reason: "active work failed", Now: now}); err != nil {
 		t.Fatalf("SafetyPause: %v", err)
@@ -64,7 +68,10 @@ func TestTransitionPostCommitFailuresRemainCallerSuccess(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 5, 11, 10, 0, 0, 0, time.UTC)
 	publisher := &transitionFailurePublisher{publishErr: errors.New("publish unavailable")}
-	controller := NewController(nil, publisher, Options{Now: func() time.Time { return now }})
+	controller := NewController(nil, publisher, Options{
+		ExecutionPosture: executionposture.Live,
+		Now:              func() time.Time { return now },
+	})
 
 	if _, err := controller.Pause(ctx, TransitionRequest{Now: now}); err != nil {
 		t.Fatalf("Pause post-commit publish failure error = %v, want nil", err)

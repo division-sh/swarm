@@ -13,6 +13,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -236,7 +237,7 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			genericStore := &transientGenericScheduleReleaseStore{
 				Store: selected, failures: 1, releaseSeen: make(chan error, 2),
 			}
-			genericLifecycle, err := runtimegenericschedule.NewLifecycle(genericStore, scheduler, planner, dispatcher, nil)
+			genericLifecycle, err := runtimegenericschedule.NewLifecycle(genericStore, scheduler, planner, dispatcher, nil, executionposture.Live)
 			if err != nil {
 				t.Fatal(err)
 			}

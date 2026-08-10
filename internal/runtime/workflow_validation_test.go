@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -17,7 +18,7 @@ import (
 
 func TestDefaultWorkflowContractValidationRejectsHarnessInput(t *testing.T) {
 	source := loadHarnessInjectionValidationSource(t)
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil))
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness at worker.work_requested") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want harness production rejection", err)
 	}
@@ -28,7 +29,7 @@ func TestDefaultWorkflowContractValidationRejectsHarnessInput(t *testing.T) {
 
 func TestValidateWorkflowContractSurfaceAllowsHarnessOnlyForExplicitVerifyPolicy(t *testing.T) {
 	source := loadHarnessInjectionValidationSource(t)
-	opts := DefaultWorkflowContractValidationOptions(nil)
+	opts := DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	opts.AllowHarnessInputs = true
 	opts.AllowHarnessOutputs = true
 	opts.CheckMCPReachable = false
@@ -44,7 +45,7 @@ func TestValidateWorkflowContractSurfaceAllowsHarnessOnlyForExplicitVerifyPolicy
 
 func TestProductionValidationRejectsHarnessOutputIndependently(t *testing.T) {
 	source := loadWorkflowValidationSourceAt(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
-	opts := DefaultWorkflowContractValidationOptions(nil)
+	opts := DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	opts.AllowHarnessInputs = true
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at worker.work_completed") {
@@ -69,7 +70,7 @@ func TestProductionValidationRejectsRootHarnessOutput(t *testing.T) {
 		},
 	}
 	source := semanticview.Wrap(bundle)
-	opts := DefaultWorkflowContractValidationOptions(nil)
+	opts := DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at root_completed") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want root harness output production rejection", err)
@@ -89,7 +90,7 @@ func TestValidateWorkflowContractSurfaceRejectsProgrammaticUnknownOutputSink(t *
 	bundle.Semantics.FlowOutputEventPins = map[string][]runtimecontracts.FlowOutputEventPin{
 		"": bundle.RootSchema.Pins.Outputs.EventPins,
 	}
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), DefaultWorkflowContractValidationOptions(nil))
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err == nil || !strings.Contains(err.Error(), "output pin sink is invalid at root_completed") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want invalid sink rejection", err)
 	}
@@ -101,7 +102,7 @@ func TestValidateWorkflowContractSurfaceRejectsProgrammaticUnknownOutputSink(t *
 func TestEnsureWorkflowBootWiringRejectsHarnessOutputWithoutInputHarness(t *testing.T) {
 	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadWorkflowValidationSourceAt(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))},
-	}, workflowValidationTestProfile(t))
+	}, workflowValidationTestProfile(t), executionposture.Live)
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness") {
 		t.Fatalf("ensureWorkflowBootWiring error = %v, want harness output production rejection", err)
 	}
@@ -110,7 +111,7 @@ func TestEnsureWorkflowBootWiringRejectsHarnessOutputWithoutInputHarness(t *test
 func TestEnsureWorkflowBootWiringRejectsHarnessInput(t *testing.T) {
 	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadHarnessInjectionValidationSource(t)},
-	}, workflowValidationTestProfile(t))
+	}, workflowValidationTestProfile(t), executionposture.Live)
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
 		t.Fatalf("ensureWorkflowBootWiring error = %v, want harness production rejection", err)
 	}
@@ -194,7 +195,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 				WorkflowModule: semanticOnlyWorkflowRuntime{source: tc.source},
-			}, workflowValidationTestProfile(t))
+			}, workflowValidationTestProfile(t), executionposture.Live)
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), tc.errContains) {
 					t.Fatalf("ensureWorkflowBootWiring error = %v, want substring %q", err, tc.errContains)
@@ -228,6 +229,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectCl
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -253,6 +255,7 @@ func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t 
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -289,6 +292,7 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -314,6 +318,7 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -357,6 +362,7 @@ func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) 
 				"support": {ID: "support", EventHandlers: handlers},
 			}
 			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+				ExecutionPosture:  executionposture.Live,
 				CheckMCPReachable: false, StrictEmitSchemas: false, FatalToolImplementationWarning: false, FatalBootWarnings: false,
 			})
 			if tc.wantError == "" {
@@ -407,6 +413,7 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 		},
 	}
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -469,6 +476,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -515,6 +523,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -531,6 +540,7 @@ func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsu
 		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"})),
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -556,6 +566,7 @@ func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClos
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -586,6 +597,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectAuthor
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -624,6 +636,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 		},
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		ExecutionPosture:               executionposture.Live,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -702,6 +715,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 				},
 			}
 			_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+				ExecutionPosture:               executionposture.Live,
 				CheckMCPReachable:              false,
 				StrictEmitSchemas:              false,
 				FatalToolImplementationWarning: false,
@@ -729,7 +743,7 @@ func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *te
 
 	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
-	}, workflowValidationTestProfile(t))
+	}, workflowValidationTestProfile(t), executionposture.Live)
 	if err == nil {
 		t.Fatal("ensureWorkflowBootWiring error = nil, want platform_version compatibility failure")
 	}
@@ -771,7 +785,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "missing workflow module",
 			deps: RuntimeDeps{
-				Config:  &config.Config{},
+				Config:  &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 				Options: RuntimeOptions{BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA)},
 			},
 			errContains: "workflow contract validation failed: workflow module is required",
@@ -780,7 +794,8 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			name: "retired llm runtime mode",
 			deps: RuntimeDeps{
 				Config: &config.Config{
-					LLM: config.LLMConfig{RuntimeMode: "cli_test"},
+					Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live},
+					LLM:     config.LLMConfig{RuntimeMode: "cli_test"},
 				},
 				Options: RuntimeOptions{
 					WorkflowModule:   validModule,
@@ -792,7 +807,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "valid dependency graph",
 			deps: RuntimeDeps{
-				Config: &config.Config{},
+				Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 				Options: RuntimeOptions{
 					WorkflowModule:   validModule,
 					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
@@ -802,7 +817,7 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 		{
 			name: "inbound store without admitted provider registry",
 			deps: RuntimeDeps{
-				Config:       &config.Config{},
+				Config:       &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 				InboundStore: &recordingInboundStore{},
 				Options: RuntimeOptions{
 					WorkflowModule:   validModule,
@@ -835,7 +850,7 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	module := semanticOnlyWorkflowRuntime{source: semanticview.Wrap(testRuntimeWorkflowValidationBundle())}
 
 	boot, err := (RuntimeDeps{
-		Config: &config.Config{},
+		Config: &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}},
 		Options: RuntimeOptions{
 			WorkflowModule:   module,
 			BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
@@ -883,7 +898,7 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 	}
 	source := semanticview.Wrap(bundle)
 
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil))
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err != nil {
 		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
 	}
@@ -914,7 +929,7 @@ func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t 
 	}
 	source := semanticview.Wrap(bundle)
 
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil))
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err == nil || !strings.Contains(err.Error(), "generated_tool_schema_closure") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want boot generated schema closure failure", err)
 	}
@@ -955,7 +970,7 @@ func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToo
 	}
 	source := semanticview.Wrap(bundle)
 
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil))
+	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err != nil {
 		t.Fatalf("ValidateWorkflowContractSurface: %v", err)
 	}
@@ -972,7 +987,7 @@ func TestValidateWorkflowContractSurface_FatalToolImplementationWarningsFollowSh
 	}
 	source := semanticview.Wrap(bundle)
 
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil))
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err == nil || !strings.Contains(err.Error(), "tool implementation warnings") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want tool implementation warning failure", err)
 	}
@@ -983,7 +998,7 @@ func TestValidateWorkflowContractSurface_RejectsCreateEntityWithAccumulate(t *te
 
 	source := semanticview.Wrap(loadRuntimeWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate")))
 
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil))
+	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want create_entity/accumulate boot error", err)
 	}

@@ -235,6 +235,9 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	}
 	plan.event = admitted.Event()
 	plan.admitted = admitted
+	if err := eb.executionPosture.Admit(plan.event.ExecutionMode(), "event persistence and delivery"); err != nil {
+		return PreparedPublish{}, err
+	}
 	if err := eb.requireExistingRunActive(preparedCtx, plan.event); err != nil {
 		return PreparedPublish{}, err
 	}

@@ -12098,6 +12098,14 @@
           "db_ok": {
             "type": "boolean"
           },
+          "execution_posture": {
+            "description": "Immutable current-process execution authority ceiling.",
+            "enum": [
+              "live",
+              "mock_only"
+            ],
+            "type": "string"
+          },
           "ready": {
             "type": "boolean"
           },
@@ -12110,6 +12118,7 @@
           "ready",
           "db_ok",
           "runtime_ok",
+          "execution_posture",
           "bundle"
         ],
         "type": "object"

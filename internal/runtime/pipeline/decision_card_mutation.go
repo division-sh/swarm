@@ -313,6 +313,11 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 	if err != nil {
 		return DecisionCardMutationCommand{}, nil, err
 	}
+	if mutation.kind == DecisionCardMutationDecide || mutation.kind == DecisionCardMutationDefer {
+		if err := pc.executionPosture.Admit(card.ExecutionMode, "decision-card decision or deferral mutation"); err != nil {
+			return DecisionCardMutationCommand{}, nil, err
+		}
+	}
 	ctx = runtimecorrelation.WithRunID(ctx, card.RunID)
 	command := DecisionCardMutationCommand{Mutation: mutation}
 	intents := make([]runtimeengine.EmitIntent, 0, 2)

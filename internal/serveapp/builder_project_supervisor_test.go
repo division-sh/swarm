@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -48,6 +49,9 @@ import (
 )
 
 func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
+	if cfg != nil && !cfg.Runtime.ExecutionPosture.Valid() {
+		cfg.Runtime.ExecutionPosture = executionposture.Live
+	}
 	deps := stores.runtimeDeps()
 	deps.Config = cfg
 	deps.Options = options
@@ -151,7 +155,7 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 		t.Fatalf("load harness artifact: %v", err)
 	}
 	catalog := testProviderTriggerCatalog(t)
-	oldRuntime := &runtimepkg.Runtime{}
+	oldRuntime := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live}
 	var ready atomic.Bool
 	ready.Store(true)
 	supervisor := newRuntimeProjectSupervisor(
@@ -168,7 +172,7 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 		return module, bundle, nil
 	}
 	supervisor.validateSource = func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
-		opts := runtimepkg.DefaultWorkflowContractValidationOptions(nil)
+		opts := runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 		opts.ProviderTriggerCatalog = catalog
 		_, err := runtimepkg.ValidateWorkflowContractSurface(ctx, source, opts)
 		return err
@@ -191,12 +195,51 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 	}
 }
 
+func TestRuntimeProjectSupervisorRejectsExecutionPostureChangeBeforeQuiesceOrPublication(t *testing.T) {
+	oldRuntime := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live}
+	candidateRuntime := &runtimepkg.Runtime{ExecutionPosture: executionposture.MockOnly}
+	var ready atomic.Bool
+	ready.Store(true)
+	var quiesced, started atomic.Int32
+	supervisor := &runtimeProjectSupervisor{
+		ready:            &ready,
+		currentRoot:      "/tmp/old-project",
+		currentBundle:    &runtimecontracts.WorkflowContractBundle{},
+		currentSource:    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:        oldRuntime,
+		executionPosture: executionposture.Live,
+	}
+	supervisor.quiesceRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
+		quiesced.Add(1)
+		return nil
+	}
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error {
+		started.Add(1)
+		return nil
+	}
+
+	_, err := supervisor.replaceCurrentRuntimeWithSource(
+		context.Background(), "/tmp/candidate", semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		&runtimecontracts.WorkflowContractBundle{}, runtimecorrelation.BundleSourceFact{}, runtimecontracts.BundleIdentity{},
+		candidateRuntime, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "runtime replacement cannot change process execution posture") {
+		t.Fatalf("replacement error = %v, want process posture rejection", err)
+	}
+	if quiesced.Load() != 0 || started.Load() != 0 {
+		t.Fatalf("rejected replacement lifecycle calls = quiesce:%d start:%d, want zero", quiesced.Load(), started.Load())
+	}
+	if supervisor.CurrentRuntime() != oldRuntime || !ready.Load() {
+		t.Fatal("rejected replacement changed predecessor publication or readiness")
+	}
+}
+
 func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
 	var captured runtimepkg.RuntimeDeps
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		captured = deps
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
@@ -226,19 +269,20 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 }
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShutdown(t *testing.T) {
-	oldRT := &runtimepkg.Runtime{}
-	newRT := &runtimepkg.Runtime{Options: runtimepkg.RuntimeOptions{
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live}
+	newRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{
 		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("1")),
 	}}
 	var ready atomic.Bool
 	ready.Store(true)
 
 	supervisor := &runtimeProjectSupervisor{
-		ready:         &ready,
-		currentRoot:   "/tmp/old-project",
-		currentBundle: &runtimecontracts.WorkflowContractBundle{},
-		currentSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		currentRT:     oldRT,
+		ready:            &ready,
+		currentRoot:      "/tmp/old-project",
+		currentBundle:    &runtimecontracts.WorkflowContractBundle{},
+		currentSource:    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:        oldRT,
+		executionPosture: executionposture.Live,
 	}
 
 	shutdownCalled := false
@@ -307,8 +351,8 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_ClearsReadinessBeforeShut
 }
 
 func TestRuntimeProjectSupervisorReplaceCurrentRuntime_WaitsForRuntimeStartBeforeReady(t *testing.T) {
-	oldRT := &runtimepkg.Runtime{}
-	newRT := &runtimepkg.Runtime{Options: runtimepkg.RuntimeOptions{
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live}
+	newRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{
 		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("2")),
 	}}
 	var ready atomic.Bool
@@ -317,11 +361,12 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_WaitsForRuntimeStartBefor
 	releaseStart := make(chan struct{})
 
 	supervisor := &runtimeProjectSupervisor{
-		ready:         &ready,
-		currentRoot:   "/tmp/old-project",
-		currentBundle: &runtimecontracts.WorkflowContractBundle{},
-		currentSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		currentRT:     oldRT,
+		ready:            &ready,
+		currentRoot:      "/tmp/old-project",
+		currentBundle:    &runtimecontracts.WorkflowContractBundle{},
+		currentSource:    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:        oldRT,
+		executionPosture: executionposture.Live,
 	}
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
 		return nil
@@ -441,14 +486,14 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 				t.Errorf("retire process ingress test bus %s: %v", alias, err)
 			}
 		})
-		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, persistence)
+		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
 		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})
 		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 		if err != nil {
 			t.Fatalf("CompileAdmission(%s): %v", alias, err)
 		}
 		return runtimepkg.BundleContext{
-			BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash), Source: source, Runtime: &runtimepkg.Runtime{Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
+			BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash), Source: source, Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
 			StandingTargets: []runtimepkg.StandingTarget{{
 				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", PackageKey: "telegram-package", FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
@@ -502,9 +547,9 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementRestoresOldContext(t *
 	if err != nil {
 		t.Fatalf("NewEventBus(new): %v", err)
 	}
-	oldRT := &runtimepkg.Runtime{Bus: oldBus}
-	newRT := &runtimepkg.Runtime{Bus: newBus}
-	restoredRT := &runtimepkg.Runtime{Bus: oldBus}
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: oldBus}
+	newRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: newBus}
+	restoredRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: oldBus}
 	hash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
 	oldWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	newWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
@@ -522,7 +567,7 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementRestoresOldContext(t *
 	restoredRT.Options = runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}
 	supervisor := &runtimeProjectSupervisor{
 		ready: &ready, currentRoot: "/tmp/current", currentSource: source,
-		currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: oldRT,
+		currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: oldRT, executionPosture: executionposture.Live,
 		currentBundleSourceFact: fact, runtimeContexts: manager,
 	}
 	supervisor.quiesceRuntime = func(_ context.Context, rt *runtimepkg.Runtime, opts runtimepkg.ShutdownOptions) error {
@@ -561,8 +606,8 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	if err != nil {
 		t.Fatalf("NewEventBus(new): %v", err)
 	}
-	oldRT := &runtimepkg.Runtime{Bus: oldBus}
-	newRT := &runtimepkg.Runtime{Bus: newBus}
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: oldBus}
+	newRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: newBus}
 	oldHash := "bundle-v1:sha256:" + strings.Repeat("1", 64)
 	newHash := "bundle-v1:sha256:" + strings.Repeat("2", 64)
 	oldWorkOwner := newSupervisorTestRuntimeOccurrence(t, oldHash)
@@ -582,7 +627,7 @@ func TestRuntimeProjectSupervisorChangedNonStandingBundleReplacesManagerContext(
 	ready.Store(true)
 	supervisor := &runtimeProjectSupervisor{
 		ready: &ready, currentRoot: "/tmp/current", currentSource: oldSource,
-		currentBundle: oldBundle, currentRT: oldRT, currentBundleSourceFact: oldFact,
+		currentBundle: oldBundle, currentRT: oldRT, currentBundleSourceFact: oldFact, executionPosture: executionposture.Live,
 		runtimeContexts: manager,
 	}
 	var started, quiesced []*runtimepkg.Runtime
@@ -633,8 +678,8 @@ func TestRuntimeProjectSupervisorReplacementPublishesDowntimeAcrossPublicSurface
 	}
 	hash := runtimeContextTestHash("d")
 	fact := mustServeTestEphemeralBundleSourceFact(hash)
-	oldRT := &runtimepkg.Runtime{Bus: oldBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
-	newRT := &runtimepkg.Runtime{Bus: newBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: oldBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
+	newRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: newBus, Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact}}
 	oldWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	newWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleSourceFact: fact, Source: source, Runtime: oldRT, WorkOwner: oldWorkOwner})
@@ -645,7 +690,7 @@ func TestRuntimeProjectSupervisorReplacementPublishesDowntimeAcrossPublicSurface
 	ready.Store(true)
 	supervisor := &runtimeProjectSupervisor{
 		ready: &ready, currentRoot: "/old", currentSource: source, currentBundle: bundle,
-		currentRT: oldRT, currentBundleSourceFact: fact, runtimeContexts: manager,
+		currentRT: oldRT, currentBundleSourceFact: fact, runtimeContexts: manager, executionPosture: executionposture.Live,
 	}
 	candidateStart := make(chan struct{})
 	releaseCandidate := make(chan struct{})
@@ -830,6 +875,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						currentRT:               predecessor,
 						currentBundleSourceFact: oldFact,
 						runtimeContexts:         manager,
+						executionPosture:        executionposture.Live,
 					}
 					supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
 						if rt == candidate {
@@ -930,6 +976,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						currentRT:               rollbackPredecessor,
 						currentBundleSourceFact: rollbackFact,
 						runtimeContexts:         rollbackManager,
+						executionPosture:        executionposture.Live,
 					}
 					rollbackSupervisor.ready.Store(true)
 					rollbackSupervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
@@ -1290,7 +1337,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					newFact := mustServeTestEphemeralBundleSourceFact(newHash)
 					supervisor := &runtimeProjectSupervisor{
 						ready: new(atomic.Bool), currentRoot: contractsRoot, currentSource: oldSource, currentBundle: bundle,
-						currentRT: predecessor, currentBundleSourceFact: oldFact, runtimeContexts: manager,
+						currentRT: predecessor, currentBundleSourceFact: oldFact, runtimeContexts: manager, executionPosture: executionposture.Live,
 						providerTriggers: catalog, replacementShutdown: runtimepkg.ShutdownOptions{Grace: 5 * time.Second},
 					}
 					supervisor.ready.Store(true)
@@ -1416,7 +1463,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			ready.Store(true)
 			supervisor := &runtimeProjectSupervisor{
 				ready: &ready, currentRoot: "/old", currentSource: source, currentBundle: bundle,
-				currentRT: predecessor, currentBundleSourceFact: fact, runtimeContexts: manager,
+				currentRT: predecessor, currentBundleSourceFact: fact, runtimeContexts: manager, executionPosture: executionposture.Live,
 				replacementShutdown: runtimepkg.ShutdownOptions{Grace: 20 * time.Millisecond},
 			}
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
@@ -1638,7 +1685,7 @@ func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	rt := &runtimepkg.Runtime{Bus: bus}
+	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus}
 	hash := "bundle-v1:sha256:" + strings.Repeat("9", 64)
 	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	fact := mustServeTestPersistedBundleSourceFact(hash)
@@ -1648,7 +1695,7 @@ func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	supervisor := &runtimeProjectSupervisor{
-		currentRoot: "/tmp/current", currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: rt,
+		currentRoot: "/tmp/current", currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: rt, executionPosture: executionposture.Live,
 		currentBundleSourceFact: fact, runtimeContexts: manager,
 	}
 	_, err = supervisor.CloseProjectWithShutdownOptions(context.Background(), runtimepkg.ShutdownOptions{Grace: -1})
@@ -1751,17 +1798,18 @@ func (*processIngressEventStore) ListEventDeliveryRecipients(context.Context, st
 }
 
 func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGrace(t *testing.T) {
-	oldRT := &runtimepkg.Runtime{}
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live}
 	var ready atomic.Bool
 	ready.Store(true)
 	wantGrace := 75 * time.Millisecond
 
 	supervisor := &runtimeProjectSupervisor{
-		ready:         &ready,
-		currentRoot:   "/tmp/old-project",
-		currentBundle: &runtimecontracts.WorkflowContractBundle{},
-		currentSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		currentRT:     oldRT,
+		ready:            &ready,
+		currentRoot:      "/tmp/old-project",
+		currentBundle:    &runtimecontracts.WorkflowContractBundle{},
+		currentSource:    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:        oldRT,
+		executionPosture: executionposture.Live,
 	}
 
 	var capturedGrace time.Duration
@@ -1976,6 +2024,7 @@ func newSupervisorForLoadProjectFailureTest(
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
 	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, nil, "", nil, nil, nil)
+	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = worklifetime.NewProcess()
 	catalog := testProviderTriggerCatalog(t)
 	supervisor.providerTriggers = catalog
@@ -2006,7 +2055,7 @@ func TestRuntimeProjectSupervisorCarriesProcessOwnerIntoDynamicRuntime(t *testin
 	var captured runtimepkg.RuntimeDeps
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		captured = deps
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.processWorkOwner = processOwner
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
@@ -2022,7 +2071,7 @@ func TestRuntimeProjectSupervisorCarriesProcessOwnerIntoDynamicRuntime(t *testin
 
 func TestRuntimeProjectSupervisorDerivesProcessOwnerFromInitialRuntime(t *testing.T) {
 	processOwner := worklifetime.NewProcess()
-	initial := &runtimepkg.Runtime{Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: processOwner}}
+	initial := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: processOwner}}
 	supervisor := newRuntimeProjectSupervisor(
 		"", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{}, nil, nil, nil, "", nil, nil, initial,
@@ -2042,7 +2091,7 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 
 	var gotMountSources cliapp.WorkspaceMountSources
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.mountSources = wantMountSources
 	supervisor.newWorkspaces = func(_ storeBundle, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
@@ -2076,7 +2125,7 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSo
 			return nil, err
 		}
 		deps.Options.WorkflowModule = stubWorkflowModule{source: effectiveSource}
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != projectRoot {
@@ -2203,7 +2252,7 @@ func TestRuntimeProjectSupervisorOpenProjectNoAgentSkipsWorkspaceLifecycle(t *te
 
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, nil, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		gotWorkspace = deps.Options.WorkspaceLifecycle
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.ready = &ready
 	supervisor.cfg = &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}}
@@ -2260,9 +2309,9 @@ func TestRuntimeProjectSupervisorOpenProjectRejectsNilLifecycleWithoutNoWorkspac
 func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
 	var ready atomic.Bool
-	oldRT := &runtimepkg.Runtime{}
+	oldRT := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live}
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.ready = &ready
 	supervisor.currentRoot = "/tmp/old"
@@ -2301,7 +2350,7 @@ func TestRuntimeProjectSupervisorLoadProjectPassesBundleSourceFactToRuntime(t *t
 	var gotSourceFact runtimecorrelation.BundleSourceFact
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		gotSourceFact = deps.Options.BundleSourceFact
-		return &runtimepkg.Runtime{Options: deps.Options}, nil
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
@@ -2376,7 +2425,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	fact := mustServeTestEphemeralBundleSourceFact(hash)
-	rt := &runtimepkg.Runtime{Bus: bus, Manager: manager}
+	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, Manager: manager}
 	contexts, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 		BundleSourceFact: fact, Source: source, Runtime: rt, WorkOwner: workOwner,
 	})
@@ -2385,7 +2434,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	}
 	supervisor := &runtimeProjectSupervisor{
 		currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentBundleSourceFact: fact,
-		currentRT: rt, runtimeContexts: contexts,
+		currentRT: rt, runtimeContexts: contexts, executionPosture: executionposture.Live,
 	}
 	control := dashboardDynamicAgentControl{supervisor: supervisor}
 

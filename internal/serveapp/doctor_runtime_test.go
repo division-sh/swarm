@@ -74,6 +74,7 @@ func TestRunServeRuntimeRejectsDeclaredProviderTriggerPackBeforeStoreSelection(t
 	configPath := filepath.Join(configDir, "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),
@@ -139,6 +140,7 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		"  sqlite:",
 		"    path: " + storePath,
 		"runtime:",
+		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		strings.Join(workspace, "\n"),
 		"llm:",

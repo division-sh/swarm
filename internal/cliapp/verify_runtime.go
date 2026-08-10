@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -229,12 +230,12 @@ func trimmedStringSlice(items []string) []string {
 	return out
 }
 
-func VerifyBundle(ctx context.Context, source semanticview.Source) error {
-	_, err := verifyBundleResult(ctx, source)
+func VerifyBundle(ctx context.Context, source semanticview.Source, posture executionposture.Posture) error {
+	_, err := verifyBundleResult(ctx, source, posture)
 	return err
 }
 
-func verifyBundleResult(ctx context.Context, source semanticview.Source) (runtime.WorkflowContractValidationResult, error) {
+func verifyBundleResult(ctx context.Context, source semanticview.Source, posture executionposture.Posture) (runtime.WorkflowContractValidationResult, error) {
 	credentialStore, err := BuildCredentialStore()
 	if err != nil {
 		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure credentials: %w", err)
@@ -243,7 +244,7 @@ func verifyBundleResult(ctx context.Context, source semanticview.Source) (runtim
 	if err != nil {
 		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure managed credentials: %w", err)
 	}
-	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
 	opts.ManagedCredentials = managedCredentialStore
 	return verifyBundleResultWithOptions(ctx, source, opts)
 }
@@ -260,14 +261,10 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure credentials: %w", err)
 	}
-	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
 	managedCredentialStore, err := BuildManagedCredentialStore()
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure managed credentials: %w", err)
 	}
-	opts.ManagedCredentials = managedCredentialStore
-	opts.AllowHarnessInputs = true
-	opts.AllowHarnessOutputs = true
 	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
@@ -276,6 +273,14 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("resolve llm backend profile: %w", err)
 	}
+	posture, err := configResult.Config.ProcessExecutionPosture()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, err
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
+	opts.ManagedCredentials = managedCredentialStore
+	opts.AllowHarnessInputs = true
+	opts.AllowHarnessOutputs = true
 	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile = profile
 	opts.ModelAliases = configResult.Config.LLM.Models

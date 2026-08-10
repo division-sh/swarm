@@ -105,7 +105,7 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 	} else {
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
-	controller := runtimeeffects.NewController(store)
+	controller := liveTestEffectController(store)
 	handles := make([]*runtimeeffects.Handle, 0, len(tokens))
 	contexts := make([]context.Context, 0, len(tokens))
 	for _, token := range tokens {
@@ -197,7 +197,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	}
 
-	controller := runtimeeffects.NewController(store)
+	controller := liveTestEffectController(store)
 	activeCtx := runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{
 		RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: started.AgentID, Generation: started.Generation,
 	}), controller)

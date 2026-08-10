@@ -31,8 +31,9 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	contractsPath := writeScenarioRunnerFixture(t)
+	configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+		ConfigPath:              configPath,
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
@@ -47,6 +48,7 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 		"test",
+		"--config", configPath,
 		"--contracts", contractsPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "10s",
@@ -253,8 +255,9 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 				}
 				return stores, err
 			}
+			configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 			options := cliapp.ServeOptions{
-				ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+				ConfigPath:              configPath,
 				ContractsPath:           contractsPath,
 				PlatformSpecPath:        defaultPlatformSpecPath,
 				APIListenAddr:           "127.0.0.1:0",
@@ -282,6 +285,7 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 			var stdout, stderr bytes.Buffer
 			code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 				"test",
+				"--config", configPath,
 				"--contracts", contractsPath,
 				"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 				"--timeout", "20s",

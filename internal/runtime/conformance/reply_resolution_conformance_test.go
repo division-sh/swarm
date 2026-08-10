@@ -23,6 +23,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -753,7 +754,8 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module, Persistence: workflowPersistence, RunLifecycle: backend,
+		ExecutionPosture: executionposture.Live,
+		Module:           module, Persistence: workflowPersistence, RunLifecycle: backend,
 		DeliveryStore: backend, DeadLetters: backend, DeliveryRuntime: eb, DecisionCards: cards, HumanTasks: cards,
 		ProposedEffects: backend, DecisionCardDraftExpiry: backend, HumanTaskExpiry: backend,
 		PipelineObligations: backend.PipelineObligations(), ReceiverExecution: eventreceiver.NormalExecution(),

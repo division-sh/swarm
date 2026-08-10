@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -21,7 +22,7 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	}, RunTargetResolution{
 		RunID: "00000000-0000-0000-0000-000000000701",
 		Mode:  RunResolutionSpecified,
-	}, "00000000-0000-0000-0000-000000000702", "00000000-0000-0000-0000-000000000703", time.Date(2026, 5, 14, 3, 10, 0, 0, time.UTC))
+	}, "00000000-0000-0000-0000-000000000702", "00000000-0000-0000-0000-000000000703", time.Date(2026, 5, 14, 3, 10, 0, 0, time.UTC), executionposture.Live)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}
@@ -64,6 +65,7 @@ func TestNewDirectiveEventEncodesExactRunResolutionAuthority(t *testing.T) {
 				"00000000-0000-0000-0000-000000000712",
 				"00000000-0000-0000-0000-000000000713",
 				time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
+				executionposture.Live,
 			)
 			if err != nil {
 				t.Fatalf("NewDirectiveEvent: %v", err)
@@ -84,6 +86,7 @@ func TestNewDirectiveEventEncodesExactRunResolutionAuthority(t *testing.T) {
 		"00000000-0000-0000-0000-000000000722",
 		"00000000-0000-0000-0000-000000000723",
 		time.Date(2026, 7, 19, 19, 45, 0, 0, time.UTC),
+		executionposture.Live,
 	); err == nil {
 		t.Fatal("NewDirectiveEvent unknown resolution error = nil")
 	}
