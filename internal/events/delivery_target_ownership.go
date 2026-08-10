@@ -16,7 +16,7 @@ const (
 )
 
 // DeliveryTargetOwnership is the complete receiver-owned target fact for one
-// node delivery. Its zero value is reserved for untargeted agent delivery.
+// targeted delivery. Its zero value is reserved for untargeted agent delivery.
 type DeliveryTargetOwnership struct {
 	kind  deliveryTargetOwnershipKind
 	route RouteIdentity

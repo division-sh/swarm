@@ -121,14 +121,21 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target ownership classification requires a node recipient")
 	}
 	blueprint := req.Blueprint.Normalized()
-	if blueprint.FlowInstance == "" {
-		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
-	}
 	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
 	if !admitted {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
 	}
 	flowID := req.Handler.FlowID()
+	blueprint.FlowID = flowID
+	blueprint = selectedRunRootTargetBlueprint(req.Source, req.Event, flowID, blueprint)
+	if blueprint.FlowInstance == "" {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
+	}
+	acquisitionUsesEntity, acquisitionMaterializes, err := deliveryTargetHandlerAcquisition(req.Source, req.Handler, req.Event.Type())
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	usesEntity := acquisitionUsesEntity || handlerUsesEntity(req.Source, flowID, handler)
 	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(blueprint, req.Candidates)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
@@ -149,14 +156,16 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		return events.DeliveryTargetOwnership{}, ambiguousDeliveryTargetOwnerError(blueprint.FlowInstance, existing, materializing)
 	}
 	if len(materializing) == 1 && len(existing) == 0 {
-		planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
-		if err != nil {
-			return events.DeliveryTargetOwnership{}, err
+		if handlerCanMaterializeEntity(req.Source, flowID, handler) {
+			planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
+			if err != nil {
+				return events.DeliveryTargetOwnership{}, err
+			}
+			if planned != materializing[0] {
+				return events.DeliveryTargetOwnership{}, fmt.Errorf("materializing target evidence disagrees with canonical handler identity: evidence=%#v planned=%#v", materializing[0], planned)
+			}
 		}
-		if planned != materializing[0] {
-			return events.DeliveryTargetOwnership{}, fmt.Errorf("materializing target evidence disagrees with canonical handler identity: evidence=%#v planned=%#v", materializing[0], planned)
-		}
-		return events.NewMaterializingEntityTarget(planned)
+		return events.NewMaterializingEntityTarget(materializing[0])
 	}
 	if len(existing) == 1 && len(materializing) == 0 {
 		return events.NewExistingEntityTarget(existing[0])
@@ -164,7 +173,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if blueprint.EntityID != "" && len(req.Candidates) == 0 {
 		return events.NewExistingEntityTarget(blueprint)
 	}
-	if !handlerUsesEntity(req.Source, flowID, handler) {
+	if !usesEntity {
 		blueprint.EntityID = ""
 		return events.NewEntitylessReceiverTarget(blueprint)
 	}
@@ -175,7 +184,22 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		}
 		return events.NewMaterializingEntityTarget(planned)
 	}
+	if acquisitionMaterializes {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing canonical materialization evidence for flow instance %q", blueprint.FlowInstance)
+	}
 	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", blueprint.FlowInstance)
+}
+
+func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, flowID string, blueprint events.RouteIdentity) events.RouteIdentity {
+	if source == nil || strings.TrimSpace(flowID) != strings.TrimSpace(source.WorkflowName()) {
+		return blueprint
+	}
+	runID := strings.TrimSpace(evt.RunID())
+	if runID == "" {
+		return blueprint
+	}
+	blueprint.FlowInstance = runID
+	return blueprint.Normalized()
 }
 
 func ValidateDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest, owner events.DeliveryTargetOwnership) error {
@@ -206,19 +230,25 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	if routeFlowID := owner.Route().FlowID; routeFlowID != "" && routeFlowID != flowID {
 		return fmt.Errorf("stamped delivery target flow %q disagrees with handler flow %q", routeFlowID, flowID)
 	}
-	usesEntity := handlerUsesEntity(source, flowID, handler)
+	acquisitionUsesEntity, _, err := deliveryTargetHandlerAcquisition(source, handlerFact, evt.Type())
+	if err != nil {
+		return err
+	}
+	usesEntity := acquisitionUsesEntity || handlerUsesEntity(source, flowID, handler)
 	switch {
 	case owner.EntitylessReceiver():
 		if usesEntity {
 			return fmt.Errorf("entityless_receiver ownership disagrees with entity-scoped handler %s", recipient.ID())
 		}
 	case owner.MaterializingEntity():
-		planned, err := canonicalHandlerMaterializationTarget(source, flowID, handler, evt, owner.Route())
-		if err != nil {
-			return err
-		}
-		if planned != owner.Route() {
-			return fmt.Errorf("materializing_entity ownership disagrees with canonical future identity: stamped=%#v planned=%#v", owner.Route(), planned)
+		if handlerCanMaterializeEntity(source, flowID, handler) {
+			planned, err := canonicalHandlerMaterializationTarget(source, flowID, handler, evt, owner.Route())
+			if err != nil {
+				return err
+			}
+			if planned != owner.Route() {
+				return fmt.Errorf("materializing_entity ownership disagrees with canonical future identity: stamped=%#v planned=%#v", owner.Route(), planned)
+			}
 		}
 	case owner.ExistingEntity():
 	default:
@@ -227,12 +257,52 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	return nil
 }
 
+func deliveryTargetHandlerAcquisition(source semanticview.Source, handler DeliveryTargetHandler, eventType events.EventType) (usesEntity, materializes bool, err error) {
+	if source == nil || handler.Empty() {
+		return false, false, nil
+	}
+	if handler.eventType != "" {
+		eventType = handler.eventType
+	}
+	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(handler.FlowID(), string(eventType))
+	if association.Status == semanticview.EndpointAssociationAmbiguous {
+		return false, false, association.Err()
+	}
+	endpoint, ok := association.Endpoint()
+	if !ok || endpoint.ResolutionMode == runtimecontracts.FlowInputResolutionModeNone {
+		return false, false, nil
+	}
+	switch endpoint.ResolutionMode {
+	case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
+		return true, true, nil
+	default:
+		return true, false, nil
+	}
+}
+
 func matchingDeliveryTargetOwnerCandidates(blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate) ([]events.RouteIdentity, []events.RouteIdentity, error) {
+	exact := make([]DeliveryTargetOwnerCandidate, 0, len(candidates))
+	sameFlow := make([]DeliveryTargetOwnerCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		route := candidate.Route.Normalized()
+		if route.FlowInstance == blueprint.FlowInstance {
+			exact = append(exact, candidate)
+			continue
+		}
+		if route.FlowID != "" && route.FlowID == blueprint.FlowID {
+			sameFlow = append(sameFlow, candidate)
+		}
+	}
+	if len(exact) > 0 {
+		candidates = exact
+	} else {
+		candidates = sameFlow
+	}
 	existingSet := map[events.RouteIdentity]struct{}{}
 	materializingSet := map[events.RouteIdentity]struct{}{}
 	for _, candidate := range candidates {
 		route := candidate.Route.Normalized()
-		if route.FlowInstance != blueprint.FlowInstance || route.EntityID == "" {
+		if route.EntityID == "" {
 			continue
 		}
 		if blueprint.EntityID != "" && route.EntityID != blueprint.EntityID {
@@ -279,14 +349,7 @@ func ambiguousDeliveryTargetOwnerError(flowInstance string, groups ...[]events.R
 }
 
 func handlerCanMaterializeEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
-	if handler.CreateEntity || (handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()) {
-		return true
-	}
-	return flowIsStateless(source, flowID) && handlerMaterializesEntity(source, flowID, handler)
-}
-
-func flowIsStateless(source semanticview.Source, flowID string) bool {
-	return source != nil && strings.TrimSpace(source.FlowInitialStage(flowID)) == "" && len(source.FlowStates(flowID)) == 0
+	return handlerMaterializesEntity(source, flowID, handler)
 }
 
 func handlerUsesEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {

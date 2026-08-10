@@ -95,6 +95,7 @@ type storeTestDurableEventBusStore interface {
 	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.SelectedRunTargetOwnerLister
 	runtimebus.EventDeliveryTargetReader
 	runtimebus.EventDeliveryRouteSetReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -137,7 +138,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
-		ActiveAgents: store, ActiveFlows: store, DeliveryTargets: store, DeliveryRouteSets: store,
+		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, DeliveryTargets: store, DeliveryRouteSets: store,
 		TargetFailureRecorder: store, RunOrigins: store,
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(store, opts)

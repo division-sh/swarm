@@ -633,7 +633,7 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 		},
 	)
 
-	parentRoute := events.RouteIdentity{EntityID: "parent-entity", FlowInstance: "parent/inst-1"}
+	parentRoute := events.RouteIdentity{FlowID: "parent", EntityID: "parent-entity", FlowInstance: "parent/inst-1"}
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/output.done", "", "", nil, 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, parentRoute), time.Time{}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
@@ -718,8 +718,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 		"",
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
-			{FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
-			{FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+			{FlowID: "child-a", FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
+			{FlowID: "child-b", FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
 		}),
 		time.Time{},
 	))
@@ -736,8 +736,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 		t.Fatalf("delivery routes = %#v, want 2 semantic target routes", got)
 	}
 	wantRoutes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("child-a-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "child-a/inst-1", EntityID: "ent-a"})},
-		{Recipient: events.MustNodeDeliveryRecipient("child-b-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "child-b/inst-1", EntityID: "ent-b"})},
+		{Recipient: events.MustNodeDeliveryRecipient("child-a-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "child-a", FlowInstance: "child-a/inst-1", EntityID: "ent-a"})},
+		{Recipient: events.MustNodeDeliveryRecipient("child-b-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "child-b", FlowInstance: "child-b/inst-1", EntityID: "ent-b"})},
 	}
 	for _, wantRoute := range wantRoutes {
 		if !deliveryPlannerRoutesContain(plan.DeliveryRoutes(), wantRoute) {
@@ -791,8 +791,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 		"",
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
-			{FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
-			{FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
+			{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
+			{FlowID: "worker", FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
 		}),
 		time.Time{},
 	))
@@ -800,8 +800,8 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 		t.Fatalf("Plan: %v", err)
 	}
 	wantRoutes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: "worker/w-001"})},
-		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: "worker/w-002"})},
+		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: "worker/w-001"})},
+		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-002", EntityID: "worker/w-002"})},
 	}
 	if got := len(plan.DeliveryRoutes()); got != len(wantRoutes) {
 		t.Fatalf("delivery routes = %#v, want %d same-node target routes", plan.DeliveryRoutes(), len(wantRoutes))
@@ -1451,7 +1451,7 @@ func TestNoTargetNodeRouteFamiliesUseExactPersistedTargetOwner(t *testing.T) {
 
 func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
 	owner := events.RouteIdentity{
-		FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("selected-operating-owner"),
+		FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("selected-operating-owner"),
 	}
 	for _, test := range []struct {
 		name     string

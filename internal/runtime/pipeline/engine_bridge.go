@@ -246,10 +246,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	statePath := firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance())
+	if exactDelivery {
+		statePath = stampedOwner.Route().FlowInstance
+	}
 	stateRoute, err := canonicalHandlerRoute(
 		source,
 		flowID,
-		firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()),
+		statePath,
 		triggerCtx.Event,
 	)
 	if err != nil {

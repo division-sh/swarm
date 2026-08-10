@@ -519,7 +519,11 @@ func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runt
 func terminalEventAdmissionPersistVariants(store semanticEventFixtureStore) map[string]func(context.Context, events.Event, string) error {
 	return map[string]func(context.Context, events.Event, string) error{
 		"commit_event": func(ctx context.Context, evt events.Event, recipient string) error {
-			return commitSemanticEventFixtureWithAgents(ctx, store, evt, []string{recipient})
+			var recipients []string
+			if recipient = strings.TrimSpace(recipient); recipient != "" {
+				recipients = []string{recipient}
+			}
+			return commitSemanticEventFixtureWithAgents(ctx, store, evt, recipients)
 		},
 	}
 }
@@ -603,7 +607,7 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 				if err := harness.markTerminal(ctx, runID, seed.ID(), status); err != nil {
 					t.Fatalf("mark %s: %v", status, err)
 				}
-				if err := persist(ctx, seed, "agent-terminal-duplicate"); err != nil {
+				if err := persist(ctx, seed, ""); err != nil {
 					t.Fatalf("exact duplicate atomic persistence: %v", err)
 				}
 				seedState, err := harness.loadState(ctx, runID, seed.ID())

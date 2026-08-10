@@ -329,7 +329,7 @@ rows:
       - {kind: go_test, name: TestCompileConnectPlansAllowsFanInStreamEventIDDedup}
       - {kind: go_test, name: TestCompileConnectPlansFailsClosedForInvalidFanInStream}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanWithLocationDoesNotDependOnRawPinNamesOrProducerTargets}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
+      - {kind: go_test, name: TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
@@ -388,7 +388,7 @@ rows:
     proof_refs:
       - {kind: issue, issue: 2114}
       - {kind: go_test, name: TestConnectRecipientEvaluationUsesCompiledReceiverPin}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberPersistsMatchedNoRecipient}
       - {kind: go_test, name: TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority}
       - {kind: go_test, name: TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority}
     notes: >

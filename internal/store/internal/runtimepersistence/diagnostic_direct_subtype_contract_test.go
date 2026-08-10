@@ -92,7 +92,10 @@ func commitNamedDiagnosticContractEvent(ctx context.Context, fixture authorActiv
 			}
 			_, err = (sqlPublishCommitter{tx: tx, store: store, story: story}).commitNamedEvent(
 				txctx, "diagnostic subtype contract proof", events.EventAdmissionDiagnosticDirect, expectedType,
-				runtimebus.CommitPublishRequest{Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect},
+				runtimebus.CommitPublishRequest{
+					Event: admitted, RouteSettlement: testRouteSettlement(admitted.Event(), nil),
+					ReplayScope: runtimepipelineobligation.ScopeDirect,
+				},
 			)
 			return err
 		})

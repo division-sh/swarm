@@ -925,9 +925,6 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		if r.AgentIdentity.AgentID() != r.Recipient.ID() {
 			return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber id does not match agent identity")
 		}
-		if r.Target.EntitylessReceiver() {
-			return DeliveryRouteIdentity{}, fmt.Errorf("targeted agent delivery cannot carry entityless_receiver ownership")
-		}
 	case r.Recipient.IsNode():
 		if !r.AgentIdentity.IsZero() {
 			return DeliveryRouteIdentity{}, fmt.Errorf("node delivery route cannot carry agent identity")

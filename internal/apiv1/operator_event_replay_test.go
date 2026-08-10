@@ -998,7 +998,12 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			"",
 			events.EventEnvelope{EntityID: runID},
 			time.Now().UTC())
-		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, nodeOnlyEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime")}}, runtimepipelineobligation.ScopeSubscribed)
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, nodeOnlyEvent, []events.DeliveryRoute{{
+			Recipient: events.MustNodeDeliveryRecipient("workflow-runtime"),
+			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+				FlowID: "workflow-runtime", FlowInstance: runID,
+			}),
+		}}, runtimepipelineobligation.ScopeSubscribed)
 		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(eventID, nil, "idem-node-only-pending"))
 		if resp.Error == nil {

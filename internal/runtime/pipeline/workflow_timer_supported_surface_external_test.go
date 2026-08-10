@@ -505,6 +505,10 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if got := plan.DeliveryRoutes; len(got) != 1 || !got[0].Recipient.IsNode() || got[0].Recipient.ID() != "controller" {
 				t.Fatalf("timer cancellation delivery routes = %#v, want exact controller node route", got)
 			}
+			wantTarget := events.RouteIdentity{FlowID: "timer-proof", FlowInstance: runID, EntityID: entityID}
+			if got := plan.DeliveryRoutes[0].Target.Route(); got != wantTarget {
+				t.Fatalf("timer cancellation target owner = %#v, want selected run owner %#v", got, wantTarget)
+			}
 			if err := bus.Publish(ctx, cancelEvent); err != nil {
 				t.Fatalf("publish timer cancellation transition: %v", err)
 			}

@@ -190,9 +190,10 @@ func commitSelectedForkEventFixture(
 	}()
 	outcome, err := commitSelectedForkEventOutcome(ctx, store, runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
-			Event:         admitted,
-			ReplayScope:   runtimepipelineobligation.ScopeDirect,
-			PipelineClaim: claim,
+			Event:           admitted,
+			RouteSettlement: testRouteSettlement(admitted.Event(), nil),
+			ReplayScope:     runtimepipelineobligation.ScopeDirect,
+			PipelineClaim:   claim,
 		},
 		Lineage: lineage,
 	})

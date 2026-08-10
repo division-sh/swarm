@@ -314,7 +314,7 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 					t.Fatalf("count delivered node/%s: %v", nodeID, err)
 				}
 				if count < minimum {
-					t.Fatalf("delivered node/%s rows = %d, want at least %d", nodeID, count, minimum)
+					t.Fatalf("delivered node/%s rows = %d, want at least %d\n%s", nodeID, count, minimum, canonicalRoutingSQLiteDebug(t, servedDB))
 				}
 			}
 		})

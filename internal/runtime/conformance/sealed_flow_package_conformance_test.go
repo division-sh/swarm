@@ -145,8 +145,8 @@ func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanti
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
 	target := plan.Readback().Targets[0]
-	if target.FlowInstance != "consumer" || target.EntityID != runtimeflowidentity.EntityID("consumer") {
-		t.Fatalf("connect plan target = %#v, want static consumer route", target)
+	if target != (events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer"}) {
+		t.Fatalf("connect plan target = %#v, want owner-free static consumer blueprint", target)
 	}
 	if plan.RequiresRuntimeResolution() {
 		t.Fatal("static sealed package connect route unexpectedly requires runtime descriptor resolution")
@@ -160,10 +160,9 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
 	}),
 	}
 	evt := eventtest.ChildWithLineage(

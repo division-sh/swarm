@@ -181,7 +181,7 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"fanout-node": {ID: "fanout-node", ExecutionType: "system_node"},
 			"spawn-node":  {ID: "spawn-node", ExecutionType: "system_node"},
@@ -252,6 +252,12 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 	}
+	for _, nodeID := range []string{"fanout-node", "spawn-node"} {
+		node := bundle.Nodes[nodeID]
+		node.EventHandlers = bundle.Semantics.NodeHandlers[nodeID]
+		bundle.Nodes[nodeID] = node
+	}
+	return bundle
 }
 
 func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {

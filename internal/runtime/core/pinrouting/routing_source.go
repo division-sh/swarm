@@ -20,6 +20,13 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, nodeID string, 
 	if !ok {
 		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared node %q", strings.TrimSpace(nodeID))
 	}
+	route = route.Normalized()
+	if strings.TrimSpace(owner.Layer) == "project" && route.EntityID == "" {
+		if route.FlowID != strings.TrimSpace(source.WorkflowName()) || route.FlowInstance == "" {
+			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", strings.TrimSpace(nodeID))
+		}
+		return events.NewStaticFlowRoutingSource(route)
+	}
 	return admitDeclaredExecutionRoutingSource(source, "node", strings.TrimSpace(nodeID), owner, route)
 }
 

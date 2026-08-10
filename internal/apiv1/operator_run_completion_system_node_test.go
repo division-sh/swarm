@@ -72,7 +72,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	assertPipelineReceiptSucceeded(t, db, eventID)
 	assertSystemNodeOutcomePersisted(t, db, eventID, "pipeline")
 	assertSystemNodeDeliverySettled(t, db, eventID, "pipeline")
-	assertRunEntityTerminal(t, db, runID, "done")
+	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
 	if diagnose.Error != nil {
@@ -294,19 +294,20 @@ func assertPipelineReceiptSucceeded(t *testing.T, db *sql.DB, eventID string) {
 	}
 }
 
-func assertRunEntityTerminal(t *testing.T, db *sql.DB, runID, wantState string) {
+func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowInstance, wantState string) {
 	t.Helper()
 	var state string
 	if err := db.QueryRow(`
 		SELECT COALESCE(current_state, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid
-		  AND entity_id = $1::uuid
-	`, runID).Scan(&state); err != nil {
-		t.Fatalf("load run entity terminal state: %v", err)
+		  AND entity_id = $2::uuid
+		  AND flow_instance = $3
+	`, runID, entityID, flowInstance).Scan(&state); err != nil {
+		t.Fatalf("load flow entity terminal state: %v", err)
 	}
 	if state != wantState {
-		t.Fatalf("run entity current_state = %q, want %q", state, wantState)
+		t.Fatalf("flow entity current_state = %q, want %q", state, wantState)
 	}
 }
 

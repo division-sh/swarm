@@ -71,6 +71,7 @@ type apiTestDurableEventStore interface {
 	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.SelectedRunTargetOwnerLister
 	runtimebus.EventDeliveryTargetReader
 	runtimebus.EventDeliveryRouteSetReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -147,6 +148,7 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			FlowRouteRollback:     durable,
 			ActiveAgents:          durable,
 			ActiveFlows:           durable,
+			TargetOwners:          durable,
 			DeliveryTargets:       durable,
 			DeliveryRouteSets:     durable,
 			TargetFailureRecorder: durable,

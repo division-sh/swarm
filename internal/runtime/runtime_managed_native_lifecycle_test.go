@@ -120,6 +120,9 @@ func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context) ([]
 func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
 }
+func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+	return nil, nil
+}
 func (managedNativeDurableRoles) ListEventDeliveryTargets(context.Context, string) (map[string]events.RouteIdentity, error) {
 	return map[string]events.RouteIdentity{}, nil
 }
@@ -138,7 +141,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 	return runtimebus.DurableDependencies{
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
 		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
-		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles,
+		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		DeliveryTargets: roles, DeliveryRouteSets: roles,
 		TargetFailureRecorder: roles, RunOrigins: roles,
 	}

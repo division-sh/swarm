@@ -88,7 +88,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			if err != nil {
 				t.Fatal(err)
 			}
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("standing-startup-node")}
+			route := testEntitylessNodeDeliveryRoute("standing-startup-node")
 			evt := eventtest.RuntimeControl(uuid.NewString(), "standing.signal.startup", "test", candidate.EntityID, []byte(`{}`), 0, created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC())
 			if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
 				t.Fatalf("insert startup-order event: %v", err)

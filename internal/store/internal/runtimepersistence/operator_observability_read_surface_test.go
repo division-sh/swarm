@@ -29,13 +29,15 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	newerEventID := uuid.NewString()
 	base := time.Unix(1700000000, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
-	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base)
+	olderAgentRoute := testAgentDeliveryRoute(t, "agent-a", "fixture/agent-a")
+	olderNodeRoute := testEntitylessNodeDeliveryRoute("node-a")
+	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base, olderAgentRoute, olderNodeRoute)
 	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
 	olderEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, olderEventID)
 	agentFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)
 	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)
-	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}, runtimedelivery.StateExhausted, &agentFailure)
-	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}, runtimedelivery.StateRetrying, &nodeFailure)
+	seedDeliveryStateFixture(t, ctx, pg, olderEvent, olderAgentRoute, runtimedelivery.StateExhausted, &agentFailure)
+	seedDeliveryStateFixture(t, ctx, pg, olderEvent, olderNodeRoute, runtimedelivery.StateRetrying, &nodeFailure)
 	hasDead := true
 	filtered, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
 		Filter: operatorread.OperatorEventListFilter{
@@ -640,7 +642,7 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
-	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-1")}, runtimedelivery.StateQueued, nil)
+	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), testEntitylessNodeDeliveryRoute("node-1"), runtimedelivery.StateQueued, nil)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, firstSnapshot, base, base)
 	filterFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_error", nil)
 	secondSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, secondEvent), events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2")}, runtimedelivery.StateExhausted, &filterFailure)
@@ -704,6 +706,7 @@ func seedOperatorObservabilityEvent(
 	payload json.RawMessage,
 	entityID string,
 	createdAt time.Time,
+	routes ...events.DeliveryRoute,
 ) {
 	t.Helper()
 	envelope := events.EventEnvelope{}
@@ -717,7 +720,7 @@ func seedOperatorObservabilityEvent(
 	} else {
 		event = eventtest.PersistedProjectionForProducer(eventID, events.EventType(eventName), producer, "", payload, 0, runID, "", envelope, createdAt)
 	}
-	if err := commitSemanticEventFixture(ctx, pg, event); err != nil {
+	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, event, routes); err != nil {
 		t.Fatalf("seed operator observability event %s: %v", eventName, err)
 	}
 }

@@ -3137,7 +3137,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 		t.Fatalf("%s test.setup_entities result = %#v, want run %s and one entity", rt.Backend, result, runID)
 	}
 	entity := result.Entities[0]
-	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != "" || entity.EntityType != "widget" || entity.CurrentState != "waiting" {
+	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "widget" || entity.CurrentState != "waiting" {
 		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
 	}
 	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
@@ -3264,7 +3264,7 @@ func requireServedTestSetupPersistence(t *testing.T, db *sql.DB, backend, runID,
 	if err := db.QueryRowContext(context.Background(), entityQuery, entityArgs...).Scan(&flow, &typ, &state, &score); err != nil {
 		t.Fatalf("%s load setup entity %s: %v", backend, entityID, err)
 	}
-	if flow != "" || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
+	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}
 
@@ -5952,7 +5952,14 @@ func requireServedEventPublishRouteJSON(t *testing.T, backend, field, raw, flowI
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		t.Fatalf("%s decode %s route JSON %q: %v", backend, field, raw, err)
 	}
-	if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
+	if field == "event.target_route" {
+		if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
+			t.Fatalf("%s %s route = %#v, want flow/entity %s/%s", backend, field, decoded, flowInstance, entityID)
+		}
+		return
+	}
+	route, ok := decoded["route"].(map[string]any)
+	if !ok || decoded["kind"] != "existing_entity" || route["flow_instance"] != flowInstance || route["entity_id"] != entityID {
 		t.Fatalf("%s %s route = %#v, want flow/entity %s/%s", backend, field, decoded, flowInstance, entityID)
 	}
 }
@@ -7985,7 +7992,12 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
-		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(subscriberID)}})
+		[]events.DeliveryRoute{{
+			Recipient: events.MustNodeDeliveryRecipient(subscriberID),
+			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+				FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(subscriberID),
+			}),
+		}})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at

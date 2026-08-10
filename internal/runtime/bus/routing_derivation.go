@@ -236,7 +236,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents); err != nil {
 			return nil, err
 		}
-		if err := rt.addNodePatternsLocked(source, scope.Key, owningFlowID, handlerFlowID, inputEvents, basePath, localEvents, scope.Nodes); err != nil {
+		if err := rt.addNodePatternsLocked(source, scope.Key, owningFlowID, agentFlowID, handlerFlowID, inputEvents, basePath, localEvents, scope.Nodes); err != nil {
 			return nil, err
 		}
 	}
@@ -265,7 +265,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents); err != nil {
 			return nil, err
 		}
-		if err := rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes); err != nil {
+		if err := rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes); err != nil {
 			return nil, err
 		}
 	}
@@ -1038,7 +1038,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			return fmt.Errorf("route subscriber agent %s concrete identity: %w", key, err)
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			if err := rt.addConnectRecipientLocked(routingFlowID, inputEvents, rawPattern, subscriber, ""); err != nil {
+			if err := rt.addConnectRecipientLocked(agentFlowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
 			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberAgent, packageKey, agentFlowID, inputEvents, agentPath, agentPath, localEvents, rawPattern)
@@ -1056,7 +1056,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	return nil
 }
 
-func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, routingFlowID, handlerFlowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) error {
+func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, routingFlowID, connectFlowID, handlerFlowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) error {
 	for _, key := range sortedStringKeys(nodes) {
 		entry := nodes[key]
 		semanticNodeID := strings.TrimSpace(key)
@@ -1082,7 +1082,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 				return fmt.Errorf("admit route subscriber target handler %s for %s: %w", semanticNodeID, rawPattern, err)
 			}
 			admittedSubscriber.targetHandler = targetHandler
-			if err := rt.addConnectRecipientLocked(routingFlowID, inputEvents, rawPattern, admittedSubscriber, ""); err != nil {
+			if err := rt.addConnectRecipientLocked(connectFlowID, inputEvents, rawPattern, admittedSubscriber, ""); err != nil {
 				return err
 			}
 			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, packageKey, routingFlowID, inputEvents, basePath, basePath, localEvents, rawPattern)

@@ -1,6 +1,7 @@
 package pinrouting
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,28 @@ func TestResolveFailsClosedOnIncompleteParentRoute(t *testing.T) {
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != FailureParentRouteIncomplete {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureParentRouteIncomplete)
+	}
+}
+
+func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"root-node": {ID: "root-node"},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root-workflow"},
+	})
+	route := events.RouteIdentity{FlowID: "root-workflow", FlowInstance: "run-one"}
+
+	got, err := AdmitNodeExecutionRoutingSource(source, "root-node", route)
+	if err != nil {
+		t.Fatalf("AdmitNodeExecutionRoutingSource: %v", err)
+	}
+	if got.Kind() != events.RoutingSourceStaticFlow || got.Route() != route {
+		t.Fatalf("routing source = %s %#v, want entityless static flow %#v", got.Kind().StorageCode(), got.Route(), route)
+	}
+
+	if _, err := AdmitNodeExecutionRoutingSource(source, "root-node", events.RouteIdentity{FlowID: "root-workflow"}); err == nil || !strings.Contains(err.Error(), "exact selected-run flow route") {
+		t.Fatalf("incomplete entityless source error = %v", err)
 	}
 }
 

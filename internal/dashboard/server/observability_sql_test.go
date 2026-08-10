@@ -30,6 +30,15 @@ func dashboardObservabilityAgentRoute(t testing.TB, agentID string) events.Deliv
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentidentitytest.RootRuntime(t, agentID, "dashboard-observability-test")}
 }
 
+func dashboardObservabilityNodeRoute(nodeID string) events.DeliveryRoute {
+	return events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
+		}),
+	}
+}
+
 func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, message, agentID string) string {
 	t.Helper()
 	class := runtimefailures.ClassInternalFailure
@@ -168,7 +177,7 @@ func TestObservabilityProjection_ListEvents_FiltersTypedSubscriberIdentity(t *te
 			events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
 		routes := make([]events.DeliveryRoute, 0, len(deliveries))
 		for _, delivery := range deliveries {
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(delivery.subscriberID)}
+			route := dashboardObservabilityNodeRoute(delivery.subscriberID)
 			if delivery.subscriberType == "agent" {
 				route = dashboardObservabilityAgentRoute(t, delivery.subscriberID)
 			}

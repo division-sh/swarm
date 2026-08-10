@@ -189,7 +189,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 		uuid.NewString(), events.EventType("completion.node.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("terminal-node")}
+	route := testEntitylessNodeDeliveryRoute("terminal-node")
 	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, deliveryEvent, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("seed active node delivery: %v", err)
 	}

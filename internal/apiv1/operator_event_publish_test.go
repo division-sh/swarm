@@ -2119,6 +2119,9 @@ func flowScopedEventPublishBundle(eventsByFlow map[string]string) *runtimecontra
 				nodeID: {
 					ID:           nodeID,
 					SubscribesTo: []string{eventName},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+						eventName: {},
+					},
 				},
 			},
 		})
@@ -2149,6 +2152,10 @@ func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 	node := runtimecontracts.SystemNodeContract{
 		ID:           "scan-orchestrator",
 		SubscribesTo: []string{"scan.requested", "scan.followup"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"scan.requested": {},
+			"scan.followup":  {},
+		},
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
@@ -2190,6 +2197,9 @@ func eventPublishTargetRouteTestBundle() *runtimecontracts.WorkflowContractBundl
 	bootstrapNode := runtimecontracts.SystemNodeContract{
 		ID:           "bootstrap-node",
 		SubscribesTo: []string{bootstrapEvent},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			bootstrapEvent: {},
+		},
 	}
 	operatingNode := runtimecontracts.SystemNodeContract{
 		ID:            "lifecycle-orchestrator",
@@ -2254,6 +2264,9 @@ func eventPublishRootTemplateCollisionTestBundle() *runtimecontracts.WorkflowCon
 	rootNode := runtimecontracts.SystemNodeContract{
 		ID:           "root-orchestrator",
 		SubscribesTo: []string{eventName},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			eventName: {},
+		},
 	}
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
@@ -2433,7 +2446,8 @@ func assertEventPublishDeliveryTargetRoute(t *testing.T, db *sql.DB, eventID, su
 	if err := json.Unmarshal([]byte(targetRoute), &decoded); err != nil {
 		t.Fatalf("decode delivery target_route: %v", err)
 	}
-	if decoded["flow_instance"] != flowInstance || decoded["entity_id"] != entityID {
+	route := asMap(t, decoded["route"])
+	if decoded["kind"] != "existing_entity" || route["flow_instance"] != flowInstance || route["entity_id"] != entityID {
 		t.Fatalf("delivery target_route = %#v, want flow/entity %s/%s", decoded, flowInstance, entityID)
 	}
 }

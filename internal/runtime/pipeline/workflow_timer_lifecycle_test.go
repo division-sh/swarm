@@ -369,7 +369,10 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		0,
 		testPipelineRunID,
 		"",
-		handlerTestWorkflowEnvelope(bundle.WorkflowName(), testPipelineRunID, entityID),
+		events.EnvelopeForTargetRoute(
+			handlerTestWorkflowEnvelope(bundle.WorkflowName(), testPipelineRunID, entityID),
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID},
+		),
 		time.Now().UTC(),
 	)
 
@@ -413,6 +416,16 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	childEntityID := FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID:      rootEntityID,
+		StorageRef:      bundle.WorkflowName(),
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "idle",
+		Metadata:        map[string]any{"entity_id": rootEntityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
+	})); err != nil {
+		t.Fatalf("seed root instance: %v", err)
+	}
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      childEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
@@ -450,7 +463,10 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
+		events.EnvelopeForTargetRoute(
+			events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+		),
 		time.Now().UTC(),
 	)
 
@@ -534,7 +550,10 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+		events.EnvelopeForTargetRoute(
+			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+		),
 		time.Time{},
 	)); err != nil || handled || consume {
 		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want no unstamped match", handled, consume, err)
@@ -549,7 +568,10 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+		events.EnvelopeForTargetRoute(
+			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+		),
 		time.Now().UTC(),
 	)
 
@@ -629,7 +651,10 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+		events.EnvelopeForTargetRoute(
+			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: rootEntityID},
+		),
 		time.Now().UTC(),
 	)
 

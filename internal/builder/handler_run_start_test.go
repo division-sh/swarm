@@ -185,6 +185,9 @@ func runStartInputBundle(eventName string) *runtimecontracts.WorkflowContractBun
 			"scan-orchestrator": {
 				ID:           "scan-orchestrator",
 				SubscribesTo: []string{eventName},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					eventName: {},
+				},
 			},
 		},
 	}

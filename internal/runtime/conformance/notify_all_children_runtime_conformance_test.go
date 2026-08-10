@@ -1245,6 +1245,8 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			})
 			itemEvents := loadNotifyAllChildrenItemEvents(t, ctx, backend, db, runID, notifyID)
 			if len(itemEvents) != 3 {
+				dumpNotifyAllChildrenRuntimeState(t, ctx, backend, db)
+				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("fan-out item events = %#v, want exactly A/B/stale", itemEvents)
 			}
 			items := notifyAllChildrenItemIDsByAccount(t, itemEvents)

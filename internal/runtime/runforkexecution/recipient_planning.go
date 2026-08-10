@@ -10,7 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type SelectedContractRecipientPlanningRequest struct {
@@ -302,9 +304,10 @@ type selectedContractRecipientPlanPublishGuard struct {
 	plansBySourceEvent map[string]runfork.RunForkSelectedContractRecipientPlanEvent
 	sourceByForkEvent  map[string]string
 	sourceAgents       map[string]struct{}
+	semanticSource     semanticview.Source
 }
 
-func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelectedContractRecipientPlanning, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
+func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelectedContractRecipientPlanning, source semanticview.Source, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
 	if err := validateSelectedContractRecipientPlanningForPublish(planning); err != nil {
 		return nil, err
 	}
@@ -333,6 +336,7 @@ func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelect
 		plansBySourceEvent: plans,
 		sourceByForkEvent:  map[string]string{},
 		sourceAgents:       allowedAgents,
+		semanticSource:     source,
 	}, nil
 }
 
@@ -456,7 +460,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err != nil {
 		return nil, err
 	}
-	return selectedContractNodeDeliveryRoutes(expected.Recipients), nil
+	return selectedContractNodeDeliveryRoutes(g.semanticSource, expected.EventName, expected.Recipients)
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events.Event) bool {
@@ -486,9 +490,9 @@ func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(e
 	return sourceEventID, expected, nil
 }
 
-func selectedContractNodeDeliveryRoutes(in []runfork.RunForkContractFrontierRecipient) []runtimebus.DeliveryRouteBlueprint {
+func selectedContractNodeDeliveryRoutes(source semanticview.Source, eventName string, in []runfork.RunForkContractFrontierRecipient) ([]runtimebus.DeliveryRouteBlueprint, error) {
 	if len(in) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]runtimebus.DeliveryRouteBlueprint, 0, len(in))
 	for _, recipient := range in {
@@ -499,15 +503,31 @@ func selectedContractNodeDeliveryRoutes(in []runfork.RunForkContractFrontierReci
 		if id == "" {
 			continue
 		}
+		if source == nil {
+			return nil, fmt.Errorf("selected-contract node recipient %s requires its admitted semantic source", id)
+		}
+		declaration, ok := source.NodeContractSource(id)
+		if !ok {
+			return nil, fmt.Errorf("selected-contract node recipient %s has no canonical declaration owner", id)
+		}
+		flowID := strings.TrimSpace(declaration.FlowID)
+		if flowID == "" {
+			flowID = strings.TrimSpace(source.WorkflowName())
+		}
+		handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, flowID, id)
+		if err != nil {
+			return nil, fmt.Errorf("admit selected-contract handler for %s: %w", id, err)
+		}
 		route := runtimebus.DeliveryRouteBlueprint{
 			Recipient: events.MustNodeDeliveryRecipient(id),
+			Handler:   handler.ForEvent(events.EventType(strings.TrimSpace(eventName))),
 		}
 		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
 			route.Target.FlowInstance = path
 		}
 		out = append(out, route)
 	}
-	return out
+	return out, nil
 }
 
 func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []frontierRecipientKey {

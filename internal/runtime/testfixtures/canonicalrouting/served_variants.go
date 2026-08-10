@@ -14,14 +14,14 @@ func CopyRootIngressServedFollowUp(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
 initial_state: pending
 terminal_states: [done]
-states: [pending, done]
+states: [pending, processed, done]
 `, `name: served-event-publish-followup
 initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    item.received:
-      advances_to: done
+      advances_to: processed
       emit:
         event: item.processed
         fields:
@@ -43,7 +43,8 @@ states: [new, waiting, done]
   execution_type: system_node
   subscribes_to: [item.processed]
   event_handlers:
-    item.processed: {}
+    item.processed:
+      advances_to: done
 `, `item-observer:
   id: item-observer
   execution_type: system_node
@@ -277,7 +278,7 @@ func addLegacyTemplateRoot(t testing.TB, root string) {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
 initial_state: pending
 terminal_states: [done]
-states: [pending, done]
+states: [pending, processed, done]
 pins:
   inputs:
     events:
@@ -305,6 +306,7 @@ pins:
   outputs:
     events: []
 `)
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
 	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "{}\n", `portfolio:
   owner: text
 `)
@@ -318,7 +320,8 @@ opco.spinup_requested:
   instance_id: text
   product_id: text
 `)
-	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    item.processed: {}\n", `    item.processed: {}
+	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "    item.processed:\n      advances_to: done\n", `    item.processed:
+      advances_to: done
 portfolio-bootstrap:
   id: portfolio-bootstrap
   execution_type: system_node

@@ -388,7 +388,16 @@ func flowNodeEventHandlers(source Source, flowID, nodeID string) (map[string]run
 	if !ok {
 		return nil, "", false
 	}
-	return node.EventHandlers, packageKey, true
+	handlers := make(map[string]runtimecontracts.SystemNodeEventHandler, len(node.EventHandlers))
+	for eventType, handler := range node.EventHandlers {
+		if eventType = eventidentity.Normalize(eventType); eventType != "" {
+			if bundle, ok := Bundle(source); ok && bundle != nil {
+				handler = bundle.ExternalizeNodeHandlerForFlow(flowID, handler)
+			}
+			handlers[eventType] = handler
+		}
+	}
+	return handlers, packageKey, true
 }
 
 // ResolveFlowNodeDeclaration returns the node from one exact flow scope. It

@@ -525,8 +525,18 @@ func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanti
 			continue
 		}
 		receiver := plan.ReceiverEndpoint().Readback()
+		flowID := workflowNodeFlowID(source, nodeID)
 		target := plan.ReceiverRoute(receiver.FlowPath, "receiver-entity")
-		blueprint := runtimepinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}
+		if target.FlowID == "" {
+			target.FlowID = flowID
+		}
+		if target.FlowInstance == "" {
+			target.FlowInstance = flowID
+		}
+		blueprint := runtimepinrouting.ConnectDeliveryRoute{
+			Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target,
+			Handler: runtimepinrouting.MustConnectReceiverHandler(flowID, nodeID),
+		}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, blueprint)
 		if err != nil {
 			t.Fatalf("build stamped connect claim: %v", err)
@@ -545,7 +555,10 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 			continue
 		}
 		target := plan.ReceiverRoute(receiver.FlowPath, "receiver-entity")
-		blueprint := runtimepinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}
+		blueprint := runtimepinrouting.ConnectDeliveryRoute{
+			Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target,
+			Handler: runtimepinrouting.MustConnectReceiverHandler(receiver.FlowID, nodeID),
+		}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, blueprint)
 		if err != nil {
 			t.Fatalf("build stamped connect claim: %v", err)
@@ -677,7 +690,7 @@ func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScoped
 	}
 }
 
-func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryRequiresExactSourceTargetAgreement(t *testing.T) {
+func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryConsumesExactTargetOwner(t *testing.T) {
 	source := workflowNodeDirectTemplateDeliverySource()
 	producerRoute := events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-1", EntityID: "entity-1"}
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
@@ -692,7 +705,8 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryRequiresExactSource
 		want   bool
 	}{
 		{name: "exact instance", target: producerRoute, want: true},
-		{name: "other instance", target: events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-2", EntityID: "entity-2"}},
+		{name: "stamped owner entity", target: events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-1", EntityID: "entity-2"}, want: true},
+		{name: "unrelated flow", target: events.RouteIdentity{FlowID: "intake", FlowInstance: "account_case/ti-1", EntityID: "entity-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: events.MustExistingEntityTarget(tc.target)}

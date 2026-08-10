@@ -53,7 +53,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []runfork.RunForkUnsupportedBlocker{{
 		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -169,7 +169,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
@@ -181,7 +181,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, events []sele
 			})
 			continue
 		}
-		evaluation := contractFrontierRouteEvaluation(routeTable, event.eventName, event.routingSource)
+		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, event.eventName, event.routingSource)
 		eventIncomplete := evaluation.requiresRuntimeResolution
 		incomplete = incomplete || eventIncomplete
 		disposition := runfork.RunForkSelectedContractDispositionEvidenceOnly

@@ -543,7 +543,7 @@ const canonicalEventDeliveriesProjectionSQL = `
 	                   'instance_id', d.agent_flow_instance_id,
 	                   'instance_path', d.agent_flow_instance_path)
 	           ) ELSE '{}'::jsonb END,
-	           'delivery_target_route', d.delivery_target_route,
+		           'delivery_target_ownership', d.delivery_target_route,
 	           'delivery_context', d.delivery_context,
 	           'delivery_payload_projection', d.delivery_payload_projection, 'status', d.status,
 	           'retry_count', d.retry_count, 'max_retries', d.max_retries,

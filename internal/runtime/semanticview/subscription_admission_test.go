@@ -160,6 +160,29 @@ func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing
 	}
 }
 
+func TestResolveFlowNodeSubscriptionHandlerRejectsBareSubscriptionAsExecutableHandler(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{
+		Path:   "child",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.requested": {}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", SubscribesTo: []string{"task.requested"}},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	source := Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+		},
+	})
+
+	resolved := ResolveFlowNodeSubscriptionHandler(source, "child", "listener", "child/task.requested")
+	if resolved.Matched {
+		t.Fatalf("resolved handler = %#v, want routing-only subscription to remain non-executable", resolved)
+	}
+}
+
 func TestResolveNodeSubscriptionHandlerScopesLocalWildcardToOwnerFlow(t *testing.T) {
 	for _, authored := range []string{"task.*", "*"} {
 		t.Run(authored, func(t *testing.T) {

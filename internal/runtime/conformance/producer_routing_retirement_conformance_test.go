@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -160,8 +161,17 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 					FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
 				})
 			}
+			previewCtx := context.Background()
+			if tc.flowID != "" {
+				previewCtx = runtimedelivery.WithRoute(previewCtx, events.DeliveryRoute{
+					Recipient: events.MustNodeDeliveryRecipient(tc.nodeID),
+					Target: events.MustExistingEntityTarget(events.RouteIdentity{
+						FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
+					}),
+				})
+			}
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
-				context.Background(), bundle, tc.nodeID,
+				previewCtx, bundle, tc.nodeID,
 				eventtest.RunCreatingRootIngress(
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-proof", "", payload, 0,
 					"00000000-0000-0000-0000-000000000001", "", envelope, time.Now().UTC(),
@@ -241,18 +251,25 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 		t.Run(tc.id, func(t *testing.T) {
 			bundle := loadProducerRoutingFixture(t, tc.fixture)
 			if tc.id == "B100" {
-				handlers := bundle.Semantics.NodeHandlers[tc.nodeID]
-				handler := handlers[tc.trigger]
+				node := bundle.Nodes[tc.nodeID]
+				handler := node.EventHandlers[tc.trigger]
 				handler.Action = runtimecontracts.ActionSpec{}
-				handlers[tc.trigger] = handler
+				node.EventHandlers[tc.trigger] = handler
+				bundle.Nodes[tc.nodeID] = node
 			}
 			payload, err := json.Marshal(tc.payload)
 			if err != nil {
 				t.Fatal(err)
 			}
 			source := semanticview.Wrap(bundle)
+			previewCtx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(tc.nodeID),
+				Target: events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: source.WorkflowName(), FlowInstance: "00000000-0000-0000-0000-000000000001", EntityID: "fixture-entity",
+				}),
+			})
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
-				context.Background(),
+				previewCtx,
 				bundle,
 				tc.nodeID,
 				eventtest.RunCreatingRootIngress(

@@ -762,7 +762,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}),
 		time.Time{},
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
@@ -828,7 +828,7 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 		0,
 		runID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}),
 		time.Now().UTC(),
 		executionmode.Mock,
 	)
@@ -883,7 +883,7 @@ func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 		0,
 		"",
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}),
 		time.Time{},
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
@@ -983,6 +983,7 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 				FlowInstance: "parent-flow/source-1",
 				EntityID:     "ent-parent",
 			},
+			Target: events.RouteIdentity{EntityID: "ent-1"},
 		},
 		time.Time{},
 	)

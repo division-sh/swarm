@@ -208,6 +208,7 @@ type externalRuntimeTestDurableEventStore interface {
 	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.SelectedRunTargetOwnerLister
 	runtimebus.EventDeliveryTargetReader
 	runtimebus.EventDeliveryRouteSetReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -219,7 +220,7 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		ReplyContext: durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
-		ActiveFlows: durable, DeliveryTargets: durable, DeliveryRouteSets: durable,
+		ActiveFlows: durable, TargetOwners: durable, DeliveryTargets: durable, DeliveryRouteSets: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable,
 	}
 }

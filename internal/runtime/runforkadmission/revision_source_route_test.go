@@ -39,11 +39,11 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
 	pendingEvent := eventtest.ExistingRunRootIngress(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at)
-	pendingRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("pending-source-node")}
+	pendingRoute := revisionSourceEntitylessNodeRoute("pending-source-node")
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 	completedEvent := eventtest.ExistingRunRootIngress(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at.Add(time.Second))
-	completedRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("completed-source-node")}
+	completedRoute := revisionSourceEntitylessNodeRoute("completed-source-node")
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	completedClaim, err := storetest.ClaimDelivery(ctx, pg, completedEvent, completedRoute)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				event = eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
 			}
 			if tc.deliveryStatus != "" {
-				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("source-node")}
+				route := revisionSourceEntitylessNodeRoute("source-node")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				if tc.deliveryStatus == "completed" {
 					claimed, err := storetest.ClaimDelivery(ctx, pg, event, route)
@@ -290,6 +290,15 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				t.Fatalf("source route facts present = %v, want %v", history.SourceRouteFactsPresent, tc.wantRouteFacts)
 			}
 		})
+	}
+}
+
+func revisionSourceEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
+	return events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
+		}),
 	}
 }
 
