@@ -19,7 +19,7 @@ import (
 )
 
 type eventCommitTxStore interface {
-	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	CommitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
@@ -34,14 +34,22 @@ type eventCommitTxStore interface {
 }
 
 func (s *EventPostgresOwner) CommitDirectiveEventTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	return (sqlPublishCommitter{tx: tx, store: s, story: story}).commitNamedEvent(ctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
-		Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect,
+		Event: admitted, RouteSettlement: settlement, ReplayScope: runtimepipelineobligation.ScopeDirect,
 	})
 }
 
 func (s *EventSQLiteOwner) CommitDirectiveEventTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	return (sqlPublishCommitter{tx: tx, store: s, story: story}).commitNamedEvent(ctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
-		Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect,
+		Event: admitted, RouteSettlement: settlement, ReplayScope: runtimepipelineobligation.ScopeDirect,
 	})
 }
 
@@ -65,7 +73,10 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event)
+	if err := req.ValidateRouteSettlement(); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
+	}
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event, req.RouteSettlement)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -134,6 +145,12 @@ func validateSelectedForkCommitRequest(req runtimebus.CommitSelectedForkEventReq
 	if req.Commit.Event.Class() != events.EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork operation requires selected_fork_replay event class")
 	}
+	if req.Commit.RouteSettlement.WriteClass() != events.EventWriteSelectedForkPublication {
+		return fmt.Errorf("selected-fork operation requires selected-fork publication settlement")
+	}
+	if err := req.Commit.ValidateRouteSettlement(); err != nil {
+		return err
+	}
 	event := req.Commit.Event.Event()
 	lineage, ok := event.SelectedForkLineage()
 	if !ok {
@@ -165,7 +182,7 @@ func commitSelectedForkEvent(
 	result := runtimebus.CommittedSelectedForkEvent{}
 	committer := sqlPublishCommitter{tx: tx, store: store, story: story}
 	var err error
-	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, tx, story, req.Commit.Event)
+	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, tx, story, req.Commit.Event, req.Commit.RouteSettlement)
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
@@ -282,7 +299,7 @@ func commitPublicationTx(
 			return runtimebus.CommittedPublication{}, err
 		}
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, committer.story, request.Event)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, committer.story, request.Event, request.RouteSettlement)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
@@ -378,10 +395,14 @@ func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run fu
 	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformRuntimeLog); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log operation: %w", err)
 	}
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteRuntimeLogDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	outcome := runtimebus.EventAppendOutcomeUnknown
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted)
+		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted, settlement)
 		return err
 	})
 	if err != nil {

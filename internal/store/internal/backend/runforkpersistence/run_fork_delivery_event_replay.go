@@ -40,14 +40,13 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 	}
 	replayable := execution.DeliveryEventReplayWork
 	if len(replayable) == 0 {
-		return result, nil
+		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires at least one owner-authorized delivery")
 	}
 
 	if err := store.requireCurrentSchema(); err != nil {
 		return result, err
 	}
 	sourceEvents := map[string]events.Event{}
-	insertedEvents := map[string]string{}
 	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact(lineage.ForkBundleHash)
 	if err != nil {
 		return result, fmt.Errorf("construct fork replay bundle source: %w", err)
@@ -58,6 +57,16 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 	if err != nil {
 		return result, fmt.Errorf("construct fork replay activation delivery authority: %w", err)
 	}
+	type preparedReplayDelivery struct {
+		item          runfork.RunForkHistoricalReplayExecutableWork
+		sourceEventID string
+		forkEventID   string
+		obligation    runtimedelivery.Obligation
+	}
+	preparedEvents := make(map[string]events.AdmittedEvent, len(replayable))
+	preparedRoutes := make(map[string][]events.DeliveryRoute, len(replayable))
+	eventOrder := make([]string, 0, len(replayable))
+	preparedDeliveries := make([]preparedReplayDelivery, 0, len(replayable))
 	for _, item := range replayable {
 		sourceEventID := strings.TrimSpace(item.SourceEventID)
 		sourceDeliveryID := strings.TrimSpace(item.SourceDeliveryID)
@@ -73,24 +82,14 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 			sourceEvent = loaded
 			sourceEvents[sourceEventID] = sourceEvent
 		}
-		forkEventID, ok := insertedEvents[sourceEventID]
-		if !ok {
-			forkEventID = deterministicRunForkReplayEventID(lineage.ForkRunID, sourceEventID)
+		forkEventID := deterministicRunForkReplayEventID(lineage.ForkRunID, sourceEventID)
+		if _, ok := preparedEvents[forkEventID]; !ok {
 			replayed, err := projectRunForkReplayEvent(sourceEvent, lineage, forkEventID, now)
 			if err != nil {
 				return result, err
 			}
-			outcome, err := store.events.AppendAdmittedEventTxOutcome(ctx, tx, story, replayed)
-			if err != nil {
-				return result, err
-			}
-			if err := store.PipelinePostgresOwner.CommitScopeAtTx(ctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
-				return result, err
-			}
-			if outcome == runtimebus.EventAppendInserted {
-				result.ReplayedEventCount++
-			}
-			insertedEvents[sourceEventID] = forkEventID
+			preparedEvents[forkEventID] = replayed
+			eventOrder = append(eventOrder, forkEventID)
 		}
 		sourceDelivery, err := postgresDeliveryAdapter.Snapshot(ctx, tx, sourceDeliveryID)
 		if err != nil {
@@ -103,7 +102,31 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		if err != nil {
 			return result, err
 		}
-		inserted, err := insertRunForkReplayDelivery(ctx, tx, lineage, item, sourceEventID, forkEventID, obligation, now)
+		preparedRoutes[forkEventID] = append(preparedRoutes[forkEventID], obligation.Route())
+		preparedDeliveries = append(preparedDeliveries, preparedReplayDelivery{item: item, sourceEventID: sourceEventID, forkEventID: forkEventID, obligation: obligation})
+	}
+	for _, forkEventID := range eventOrder {
+		routes := events.NormalizeDeliveryRoutes(preparedRoutes[forkEventID])
+		settlement, err := events.NewDeliverySettlement(events.EventWriteHistoricalRunForkReplay, events.ConnectEvaluationLedger{})
+		if err != nil {
+			return result, err
+		}
+		if err := settlement.Validate(routes); err != nil {
+			return result, err
+		}
+		outcome, err := store.events.AppendAdmittedEventTxOutcome(ctx, tx, story, preparedEvents[forkEventID], settlement)
+		if err != nil {
+			return result, err
+		}
+		if err := store.PipelinePostgresOwner.CommitScopeAtTx(ctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
+			return result, err
+		}
+		if outcome == runtimebus.EventAppendInserted {
+			result.ReplayedEventCount++
+		}
+	}
+	for _, prepared := range preparedDeliveries {
+		inserted, err := insertRunForkReplayDelivery(ctx, tx, lineage, prepared.item, prepared.sourceEventID, prepared.forkEventID, prepared.obligation, now)
 		if err != nil {
 			return result, err
 		}

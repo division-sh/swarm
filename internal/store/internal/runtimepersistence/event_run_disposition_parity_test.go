@@ -372,7 +372,7 @@ func appendAdmittedBoundaryFixture(ctx context.Context, selected any, event even
 				return storyErr
 			}
 			var appendErr error
-			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, tx, story, admitted)
+			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, tx, story, admitted, testRouteSettlement(admitted.Event(), nil))
 			return appendErr
 		})
 	case *SQLiteRuntimeStore:
@@ -382,7 +382,7 @@ func appendAdmittedBoundaryFixture(ctx context.Context, selected any, event even
 				return storyErr
 			}
 			var appendErr error
-			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, tx, story, admitted)
+			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, tx, story, admitted, testRouteSettlement(admitted.Event(), nil))
 			return appendErr
 		})
 	default:

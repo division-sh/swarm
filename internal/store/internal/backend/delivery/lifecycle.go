@@ -500,6 +500,13 @@ func (s *DeliveryPostgresOwner) DeliverySnapshotsForEvent(ctx context.Context, e
 	return postgresDeliveryAdapter.SnapshotsForEvent(ctx, s.backend, eventID)
 }
 
+func (s *DeliveryPostgresOwner) DeliverySnapshotsForEventTx(ctx context.Context, tx *sql.Tx, eventID string) ([]runtimedelivery.Snapshot, error) {
+	if s == nil || tx == nil {
+		return nil, errors.New("delivery PostgreSQL transaction owner is required")
+	}
+	return postgresDeliveryAdapter.SnapshotsForEvent(ctx, tx, eventID)
+}
+
 func (s *DeliverySQLiteOwner) DeliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, s.backend, eventID)
 }

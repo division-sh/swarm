@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
@@ -72,46 +74,107 @@ func LoadSQLiteEventIdentity(ctx context.Context, q interface {
 	return loadSQLiteEventIdentity(ctx, q, eventID)
 }
 
-func (s *EventPostgresOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *EventPostgresOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	row, found, err := loadPostgresEventIdentity(ctx, tx, eventID)
 	if err != nil || !found {
-		return events.AdmittedEvent{}, found, err
+		return runtimebus.PreparedPublishEvent{}, found, err
 	}
 	admitted, err := decodeEventRecord(row)
-	return admitted, err == nil, err
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, eventID)
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
 }
 
-func (s *EventPostgresOwner) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *EventPostgresOwner) LoadPreparedPublishEvent(ctx context.Context, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	if s == nil || s.backend == nil {
-		return events.AdmittedEvent{}, false, fmt.Errorf("postgres store is required")
+		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("postgres store is required")
 	}
 	row, found, err := loadPostgresEventIdentity(ctx, s.backend, eventID)
 	if err != nil || !found {
-		return events.AdmittedEvent{}, found, err
+		return runtimebus.PreparedPublishEvent{}, found, err
 	}
 	admitted, err := decodeEventRecord(row)
-	return admitted, err == nil, err
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	snapshots, err := s.DeliverySnapshotsForEvent(ctx, eventID)
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
 }
 
-func (s *EventSQLiteOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *EventSQLiteOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	row, found, err := loadSQLiteEventIdentity(ctx, tx, eventID)
 	if err != nil || !found {
-		return events.AdmittedEvent{}, found, err
+		return runtimebus.PreparedPublishEvent{}, found, err
 	}
 	admitted, err := decodeEventRecord(row)
-	return admitted, err == nil, err
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, eventID)
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
 }
 
-func (s *EventSQLiteOwner) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *EventSQLiteOwner) LoadPreparedPublishEvent(ctx context.Context, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	if s == nil || s.backend == nil {
-		return events.AdmittedEvent{}, false, fmt.Errorf("sqlite runtime store is required")
+		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("sqlite runtime store is required")
 	}
 	row, found, err := loadSQLiteEventIdentity(ctx, s.backend, eventID)
 	if err != nil || !found {
-		return events.AdmittedEvent{}, found, err
+		return runtimebus.PreparedPublishEvent{}, found, err
 	}
 	admitted, err := decodeEventRecord(row)
-	return admitted, err == nil, err
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	snapshots, err := s.DeliverySnapshotsForEvent(ctx, eventID)
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
+}
+
+func deliveryRoutesFromSnapshots(snapshots []runtimedelivery.Snapshot) []events.DeliveryRoute {
+	routes := make([]events.DeliveryRoute, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		routes = append(routes, snapshot.Route)
+	}
+	return events.NormalizeDeliveryRoutes(routes)
+}
+
+func preparedPublishEvent(admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute) (runtimebus.PreparedPublishEvent, bool, error) {
+	if err := settlement.Validate(routes); err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("validate persisted route settlement: %w", err)
+	}
+	return runtimebus.PreparedPublishEvent{
+		Event: admitted, Settlement: settlement, DeliveryRoutes: routes,
+	}, true, nil
 }
 
 func loadPostgresEventIdentities(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]persistedEventIdentity, error) {

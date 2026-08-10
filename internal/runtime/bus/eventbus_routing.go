@@ -384,6 +384,13 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 	if err != nil {
 		return nil, err
 	}
+	agents, _, err := eb.activeAgentDescriptors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, descriptor := range activeTargetDescriptorsFromAgents(agents) {
+		descriptors = appendActiveTargetDescriptor(descriptors, descriptor)
+	}
 	out := make([]runtimepinrouting.Descriptor, 0, len(descriptors))
 	for _, descriptor := range descriptors {
 		descriptor = descriptor.Normalized()
@@ -401,21 +408,30 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 }
 
 func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
-	agentDescriptors, agentsOK, err := eb.activeAgentDescriptors(ctx)
-	if err != nil {
-		return nil, true, err
+	out := []ActiveTargetDescriptor{}
+	available := false
+	targetOwners := eb.durable.TargetOwners
+	if targetOwners != nil {
+		available = true
+		owners, err := targetOwners.ListSelectedRunTargetOwners(ctx)
+		if err != nil {
+			return nil, true, err
+		}
+		for _, owner := range owners {
+			out = appendActiveTargetDescriptor(out, owner)
+		}
 	}
-	out := activeTargetDescriptorsFromAgents(agentDescriptors)
 	lister := eb.durable.ActiveFlows
 	if lister == nil {
-		return out, agentsOK || len(out) > 0, nil
+		return out, available, nil
 	}
+	available = true
 	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister)
 	if err != nil {
 		return nil, true, err
 	}
 	out = appendActiveFlowInstanceTargetDescriptors(out, flowDescriptors)
-	return out, true, nil
+	return out, available, nil
 }
 
 func activeTargetDescriptorsFromAgents(descriptors map[agentidentity.Identity]ActiveAgentDescriptor) []ActiveTargetDescriptor {
@@ -424,7 +440,11 @@ func activeTargetDescriptorsFromAgents(descriptors map[agentidentity.Identity]Ac
 	}
 	out := make([]ActiveTargetDescriptor, 0, len(descriptors))
 	for _, descriptor := range descriptors {
-		out = appendActiveTargetDescriptor(out, descriptor.TargetDescriptor())
+		target := descriptor.TargetDescriptor()
+		if target.EntityID == "" {
+			continue
+		}
+		out = appendActiveTargetDescriptor(out, target)
 	}
 	return out
 }

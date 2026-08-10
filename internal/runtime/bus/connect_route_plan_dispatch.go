@@ -88,6 +88,7 @@ type connectRoutePlanResolver struct {
 type connectRoutePlanDispatch struct {
 	Matched              bool
 	Failure              runtimepinrouting.TargetFailure
+	Evaluation           events.ConnectEvaluationLedger
 	LiveRecipients       []RoutePlanLiveRecipient
 	DeliveryIntents      []RoutePlanDeliveryIntent
 	RoutedRecipients     []Subscriber
@@ -116,14 +117,19 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 }
 
 func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (connectRoutePlanDispatch, error) {
+	emptyEvaluation, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		return connectRoutePlanDispatch{}, err
+	}
 	if len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
-		return connectRoutePlanDispatch{}, nil
+		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
 	for _, issue := range r.issues {
 		if r.graph.IssueMatchesEvent(issue, evt) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
 			return connectRoutePlanDispatch{
-				Matched: true,
-				Failure: connectRoutePlanTargetFailure(issue.Failure),
+				Matched:    true,
+				Failure:    connectRoutePlanTargetFailure(issue.Failure),
+				Evaluation: emptyEvaluation,
 				ExtraDetail: map[string]any{
 					"connect_route_plan_failure": issue.Failure.Code(),
 					"connect_route_plan_detail":  strings.TrimSpace(issue.Detail),
@@ -142,7 +148,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 
 	matched := r.matchedPlans(ctx, evt)
 	if len(matched) == 0 {
-		return connectRoutePlanDispatch{}, nil
+		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		snapshot := connectRoutePlanSnapshot{base: r.routeTable.snapshotGeneration()}
@@ -171,8 +177,13 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 }
 
 func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string) (connectRoutePlanDispatch, error) {
+	emptyEvaluation, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		return connectRoutePlanDispatch{}, err
+	}
 	out := connectRoutePlanDispatch{
-		Matched: true,
+		Matched:    true,
+		Evaluation: emptyEvaluation,
 		ExtraDetail: map[string]any{
 			"connect_route_plans_count": len(matched),
 		},
@@ -187,11 +198,21 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 				return connectRoutePlanDispatch{}, err
 			}
 			if !failure.Empty() {
+				if err := r.appendBlockedPlanEvaluation(&out, plan, nil); err != nil {
+					return connectRoutePlanDispatch{}, err
+				}
 				out.Failure = failure
 				for key, value := range detail {
 					out.ExtraDetail[key] = value
 				}
 				return out, nil
+			}
+			targets := make([]events.RouteIdentity, 0, len(routes))
+			for _, route := range routes {
+				targets = append(targets, route.Target)
+			}
+			if err := r.appendMaterializedPlanEvaluation(ctx, &out, plan, targets); err != nil {
+				return connectRoutePlanDispatch{}, err
 			}
 			routes, err = stampConnectExecutionClaims(plan, routes)
 			if err != nil {
@@ -220,6 +241,9 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			return connectRoutePlanDispatch{}, err
 		}
 		if !materialized.Failure.Empty() {
+			if err := r.appendBlockedPlanEvaluation(&out, plan, connectMaterializedTargets(materialized)); err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
 			out.Failure = connectRoutePlanTargetFailure(materialized.Failure)
 			out.ExtraDetail["connect_route_plan_failure"] = materialized.Failure.Code()
 			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
@@ -253,8 +277,11 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			})
 		}
 		_, routeCreatedInPlan := createdRoutes[decision.Route()]
-		routes, liveRoutes, subscribers, err := r.deliveryRoutesForMaterialization(ctx, plan, materialized, decision, routeCreatedInPlan)
+		routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, plan, materialized, decision, routeCreatedInPlan)
 		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+		if err := mergeConnectEvaluation(&out.Evaluation, evaluation); err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
 		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleRequest {
@@ -283,11 +310,9 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			descriptors = refreshed
 		}
 		if len(routes) == 0 {
-			out.Failure = runtimepinrouting.FailureTargetNotSubscribed
-			out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.FailureTargetNotSubscribed.Code()
 			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
-			return out, nil
+			continue
 		}
 		if err := receiverPinAdmission.Admit(plan, routes); err != nil {
 			return connectRoutePlanDispatch{}, err
@@ -298,7 +323,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
 			return out, nil
 		}
-		out.DeliveryIntents = append(out.DeliveryIntents, connectRoutePlanDeliveryIntents(routes, liveRoutes, routeCreatedInPlan)...)
+		out.DeliveryIntents = append(out.DeliveryIntents, connectRoutePlanDeliveryIntents(plan, routes, liveRoutes, routeCreatedInPlan)...)
 		out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(liveRoutes)...)
 		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
 	}
@@ -437,9 +462,6 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
 	if plan.ReceiverEndpoint().IsRoot() {
 		target := evt.TargetRoute().Normalized()
-		if target.EntityID == "" {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
-		}
 		rootFlowID := strings.TrimSpace(r.source.WorkflowName())
 		rootInstance := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 		if rootFlowID == "" || rootInstance == "" {
@@ -517,23 +539,44 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 			break
 		}
 	}
-	if !needsDescriptors || r.loadDescriptors == nil {
+	if !needsDescriptors {
+		return nil, nil
+	}
+	if projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx); ok {
+		return projection.pinRoutingDescriptors(plans), nil
+	}
+	if r.loadDescriptors == nil {
 		return nil, nil
 	}
 	return r.loadDescriptors(ctx)
 }
 
-func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision, routeCreatedInPlan bool) ([]events.DeliveryRoute, []events.DeliveryRoute, []Subscriber, error) {
+func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision, routeCreatedInPlan bool) ([]events.DeliveryRoute, []events.DeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {
 	targets := connectMaterializedTargets(materialized)
 	if plan.ReceiverEndpoint().IsRoot() && len(targets) == 0 {
 		targets = []events.RouteIdentity{{}}
 	}
 	if len(targets) == 0 {
-		return nil, nil, nil, nil
+		evaluation := r.evaluateSelectedReceiverCarriers(ctx, plan, nil)
+		ledger, err := evaluation.Ledger()
+		return nil, nil, nil, ledger, err
+	}
+	selectionTargets := make([]events.RouteIdentity, 0, len(targets))
+	for _, target := range targets {
+		selectionTarget := target.Normalized()
+		if plan.ReceiverEndpoint().IsRoot() {
+			selectionTarget = events.RouteIdentity{EntityID: selectionTarget.EntityID}
+		}
+		selectionTargets = append(selectionTargets, selectionTarget)
+	}
+	evaluation := r.evaluateSelectedReceiverCarriers(ctx, plan, selectionTargets)
+	ledger, err := evaluation.Ledger()
+	if err != nil {
+		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 	}
 	projection, err := syntheticDeliveryPayloadProjection(plan, decision)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 	}
 	routes := make([]events.DeliveryRoute, 0, len(targets))
 	liveRoutes := make([]events.DeliveryRoute, 0, len(targets))
@@ -549,13 +592,13 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 		}
 		matchedSubscribers := r.resolveSelectedReceiverCarriers(ctx, plan, selectionTarget)
 		if len(matchedSubscribers) == 0 {
-			return nil, nil, nil, nil
+			return nil, nil, nil, ledger, nil
 		}
 		subscribers = append(subscribers, matchedSubscribers...)
 		for _, subscriber := range matchedSubscribers {
 			identity, live, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, decision, routeCreatedInPlan)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, events.ConnectEvaluationLedger{}, err
 			}
 			route := events.DeliveryRoute{
 				Recipient:         subscriber.Recipient,
@@ -569,7 +612,7 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 			}
 		}
 	}
-	return events.NormalizeDeliveryRoutes(routes), events.NormalizeDeliveryRoutes(liveRoutes), dedupeSubscribers(subscribers), nil
+	return events.NormalizeDeliveryRoutes(routes), events.NormalizeDeliveryRoutes(liveRoutes), dedupeSubscribers(subscribers), ledger, nil
 }
 
 func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
@@ -696,6 +739,10 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 }
 
 func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {
+	return connectRecipientSubscribers(r.evaluateSelectedReceiverCarriers(ctx, plan, []events.RouteIdentity{target}))
+}
+
+func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
 	tables := []*RouteTable{r.routeTable}
 	if ctx != nil {
 		if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
@@ -703,17 +750,53 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 		}
 	}
 	if len(tables) == 0 {
-		return nil
+		return runtimepinrouting.ConnectRecipientEvaluation{}
 	}
-	out := make([]Subscriber, 0)
+	registrations := make([]runtimepinrouting.ConnectRecipientRegistration, 0)
 	for _, routeTable := range tables {
 		if routeTable == nil {
 			continue
 		}
-		evaluation := routeTable.evaluateConnectPlan(plan, []events.RouteIdentity{target})
-		out = append(out, connectRecipientSubscribers(evaluation)...)
+		registrations = append(registrations, routeTable.connectRecipientAdmissions()...)
 	}
-	return dedupeSubscribers(out)
+	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations)
+}
+
+func (r connectRoutePlanResolver) appendMaterializedPlanEvaluation(ctx context.Context, out *connectRoutePlanDispatch, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) error {
+	ledger, err := r.evaluateSelectedReceiverCarriers(ctx, plan, targets).Ledger()
+	if err != nil {
+		return err
+	}
+	return mergeConnectEvaluation(&out.Evaluation, ledger)
+}
+
+func (r connectRoutePlanResolver) appendBlockedPlanEvaluation(out *connectRoutePlanDispatch, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) error {
+	planID, err := runtimepinrouting.ConnectPlanIdentity(plan)
+	if err != nil {
+		return err
+	}
+	entry, err := events.NewConnectPlanEvaluation(planID, events.ConnectPlanResolutionBlocked, targets, nil)
+	if err != nil {
+		return err
+	}
+	ledger, err := events.NewConnectEvaluationLedger([]events.ConnectPlanEvaluation{entry})
+	if err != nil {
+		return err
+	}
+	return mergeConnectEvaluation(&out.Evaluation, ledger)
+}
+
+func mergeConnectEvaluation(target *events.ConnectEvaluationLedger, addition events.ConnectEvaluationLedger) error {
+	if target == nil || !addition.Present() {
+		return nil
+	}
+	plans := append(target.Plans(), addition.Plans()...)
+	merged, err := events.NewConnectEvaluationLedger(plans)
+	if err != nil {
+		return err
+	}
+	*target = merged
+	return nil
 }
 
 func connectRoutePlanMatchesEvent(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, evt events.Event) bool {
@@ -747,7 +830,7 @@ func connectRoutePlanLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLi
 	return normalizeRoutePlanLiveRecipients(out)
 }
 
-func connectRoutePlanDeliveryIntents(routes, liveRoutes []events.DeliveryRoute, routeCreatedInPlan bool) []RoutePlanDeliveryIntent {
+func connectRoutePlanDeliveryIntents(plan runtimepinrouting.ConnectRoutePlan, routes, liveRoutes []events.DeliveryRoute, routeCreatedInPlan bool) []RoutePlanDeliveryIntent {
 	intents := routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)
 	liveAgents := make(map[agentidentity.Identity]struct{}, len(liveRoutes))
 	for _, route := range events.NormalizeDeliveryRoutes(liveRoutes) {
@@ -757,6 +840,7 @@ func connectRoutePlanDeliveryIntents(routes, liveRoutes []events.DeliveryRoute, 
 	}
 	for index := range intents {
 		intent := &intents[index]
+		intent.AllowStructuralOwner = routeCreatedInPlan || plan.StructuralTargetOwnerEligible()
 		if !intent.Recipient.IsAgent() {
 			continue
 		}

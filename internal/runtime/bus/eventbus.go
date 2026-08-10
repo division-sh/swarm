@@ -110,6 +110,7 @@ type DurableDependencies struct {
 	FlowRouteRollback     FlowInstanceRouteRollbackPersistence
 	ActiveAgents          ActiveAgentDescriptorLister
 	ActiveFlows           ActiveFlowInstanceDescriptorLister
+	TargetOwners          SelectedRunTargetOwnerLister
 	DeliveryTargets       EventDeliveryTargetReader
 	DeliveryRouteSets     EventDeliveryRouteSetReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
@@ -130,6 +131,7 @@ func (d DurableDependencies) validate() error {
 		{"flow route rollback owner", d.FlowRouteRollback},
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
+		{"selected-run target owner reader", d.TargetOwners},
 		{"delivery target reader", d.DeliveryTargets},
 		{"delivery route reader", d.DeliveryRouteSets},
 		{"target failure recorder", d.TargetFailureRecorder},
@@ -464,6 +466,7 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 		return nil, err
 	}
 	eb.ephemeral = true
+	eb.rebuildRoutePlanners()
 	return eb, nil
 }
 

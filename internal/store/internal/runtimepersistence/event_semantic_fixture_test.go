@@ -155,7 +155,7 @@ func commitDiagnosticRuntimeLogFixtureTx(ctx context.Context, store eventCommitT
 	if admitted.Class() != events.EventAdmissionDiagnosticDirect || admitted.Event().Type() != events.EventTypePlatformRuntimeLog {
 		return fmt.Errorf("runtime-log fixture requires a diagnostic_direct platform.runtime_log event")
 	}
-	outcome, err := store.AppendAdmittedEventTxOutcome(ctx, tx, runtimeAuthorActivityMutation(story), admitted)
+	outcome, err := store.AppendAdmittedEventTxOutcome(ctx, tx, runtimeAuthorActivityMutation(story), admitted, testRouteSettlement(admitted.Event(), nil))
 	if err != nil {
 		return err
 	}
@@ -224,6 +224,19 @@ func commitDeliveryReplayEventFixture(
 	if err != nil {
 		return err
 	}
+	var recipient events.DeliveryRecipient
+	switch subscriberType {
+	case "node":
+		recipient, err = events.NewNodeDeliveryRecipient(subscriberID)
+	case "agent":
+		recipient, err = events.NewAgentDeliveryRecipient(subscriberID)
+	default:
+		return fmt.Errorf("delivery-replay fixture subscriber type %q is unsupported", subscriberType)
+	}
+	if err != nil {
+		return err
+	}
+	route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{Recipient: recipient})
 	ctx, release, err := semanticEventFixtureContext(ctx, store, replayed.Event())
 	if err != nil {
 		return err
@@ -234,7 +247,7 @@ func commitDeliveryReplayEventFixture(
 		if err != nil {
 			return err
 		}
-		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, tx, story, replayed)
+		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, tx, story, replayed, testHistoricalReplaySettlement([]events.DeliveryRoute{route}))
 		if err != nil {
 			return err
 		}
@@ -244,19 +257,6 @@ func commitDeliveryReplayEventFixture(
 		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
-		var recipient events.DeliveryRecipient
-		switch subscriberType {
-		case "node":
-			recipient, err = events.NewNodeDeliveryRecipient(subscriberID)
-		case "agent":
-			recipient, err = events.NewAgentDeliveryRecipient(subscriberID)
-		default:
-			return fmt.Errorf("delivery-replay fixture subscriber type %q is unsupported", subscriberType)
-		}
-		if err != nil {
-			return err
-		}
-		route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{Recipient: recipient})
 		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, forkRunID)
 		if err != nil {
 			return err
@@ -355,7 +355,7 @@ func commitAdmittedSemanticEventFixtureOutcomeWithDisposition(
 	commit := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, selected eventCommitTxStore) error {
 		runtimeStory := runtimeAuthorActivityMutation(story)
 		var appendErr error
-		outcome, appendErr = selected.AppendAdmittedEventTxOutcome(txctx, tx, runtimeStory, admitted)
+		outcome, appendErr = selected.AppendAdmittedEventTxOutcome(txctx, tx, runtimeStory, admitted, testRouteSettlement(admitted.Event(), req.DeliveryRoutes))
 		if appendErr != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return appendErr
 		}
@@ -425,7 +425,7 @@ func commitSemanticEventFixtureWithRoutesStoryTx(ctx context.Context, store even
 	defer func() {
 		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
 	}()
-	outcome, err := store.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted)
+	outcome, err := store.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted, testRouteSettlement(admitted.Event(), routes))
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return err
 	}
@@ -488,7 +488,7 @@ func insertCanonicalEventRecordFixture(ctx context.Context, selectedStore any, e
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
 	}
-	record, err := eventrecord.FromAdmitted(admitted)
+	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
 	if err != nil {
 		return err
 	}
@@ -528,7 +528,7 @@ func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
 	}
-	record, err := eventrecord.FromAdmitted(admitted)
+	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
 	if err != nil {
 		return err
 	}

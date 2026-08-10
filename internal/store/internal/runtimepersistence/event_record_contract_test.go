@@ -250,7 +250,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := eventrecord.FromAdmitted(admitted)
+	base, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +606,7 @@ func assertExactEventRecord(t *testing.T, ctx context.Context, fixture authorAct
 	if err != nil {
 		t.Fatalf("admit expected event: %v", err)
 	}
-	want, err := eventrecord.FromAdmitted(wantAdmitted)
+	want, err := eventrecord.FromAdmitted(wantAdmitted, testRouteSettlement(wantAdmitted.Event(), nil))
 	if err != nil {
 		t.Fatalf("build expected record: %v", err)
 	}

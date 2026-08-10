@@ -45,6 +45,48 @@ func TestInMemoryCommitterRejectsClosedGenericClasses(t *testing.T) {
 	}
 }
 
+func TestCommitPublishRejectsMissingOrDualRouteSettlement(t *testing.T) {
+	event := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "work.started", "gateway", "", []byte(`{}`), 0,
+		uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalEmpty, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectedEmpty, err := events.NewNoDeliverySettlement(events.EventWriteSelectedForkPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		commit CommitPublishRequest
+	}{
+		{name: "missing", commit: CommitPublishRequest{Event: admitted}},
+		{name: "selected class", commit: CommitPublishRequest{Event: admitted, RouteSettlement: selectedEmpty}},
+		{name: "delivery arm without route", commit: CommitPublishRequest{Event: admitted, RouteSettlement: delivery}},
+		{name: "no delivery arm with route", commit: CommitPublishRequest{Event: admitted, RouteSettlement: normalEmpty, DeliveryRoutes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer")}}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := (InMemoryEventStore{}).CommitPublication(context.Background(), PublicationCommand{Commit: test.commit}); err == nil {
+				t.Fatal("hostile publication command was accepted")
+			}
+		})
+	}
+}
+
 func TestEveryGenericPublicationSurfaceRejectsClosedEventClasses(t *testing.T) {
 	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {

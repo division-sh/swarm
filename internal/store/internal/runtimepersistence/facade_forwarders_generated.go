@@ -407,6 +407,10 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx)
 }
 
+func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx)
+}
+
 func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	return s.operatorAgentPostgres.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
@@ -647,7 +651,7 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 	return s.operatorObservabilityPostgres.LoadOperatorEvent(ctx, eventID)
 }
 
-func (s *PostgresStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *PostgresStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
 	return s.eventPostgresOwner.LoadPreparedPublishEvent(ctx, eventID)
 }
 
@@ -1443,6 +1447,10 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx)
 }
 
+func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx)
+}
+
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	return s.operatorAgentSQLite.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
@@ -1643,7 +1651,7 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	return s.operatorObservabilitySQLite.LoadOperatorEvent(ctx, eventID)
 }
 
-func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
 	return s.eventSQLiteOwner.LoadPreparedPublishEvent(ctx, eventID)
 }
 

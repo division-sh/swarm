@@ -92,7 +92,11 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
 	}
-	record, err := eventrecord.FromAdmitted(admitted)
+	settlement, err := fixtureSettlement(admitted.Event())
+	if err != nil {
+		return err
+	}
+	record, err := eventrecord.FromAdmitted(admitted, settlement)
 	if err != nil {
 		return err
 	}
@@ -128,6 +132,23 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 		return fmt.Errorf("canonical event fixture %s conflicts with its persisted record", record.EventID)
 	}
 	return nil
+}
+
+func fixtureSettlement(event events.Event) (events.RouteSettlement, error) {
+	switch event.Type() {
+	case events.EventTypePlatformRuntimeLog:
+		return events.NewNoDeliverySettlement(events.EventWriteRuntimeLogDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	case events.EventTypePlatformInboundRecord:
+		return events.NewNoDeliverySettlement(events.EventWriteInboundEvidenceDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	case events.EventTypePlatformAgentDirective:
+		return events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	default:
+		ledger, err := events.NewConnectEvaluationLedger(nil)
+		if err != nil {
+			return events.RouteSettlement{}, err
+		}
+		return events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+	}
 }
 
 func ExistingRunRoot(

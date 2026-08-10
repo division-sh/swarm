@@ -139,6 +139,14 @@ func ChildWithLineageAndRoutingSource(id string, eventType events.EventType, sou
 	return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage}))
 }
 
+// ChildForProducerWithRoutingSource builds a child fixture with exact producer
+// and admitted routing-source facts.
+func ChildForProducerWithRoutingSource(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode)
+	facts.RoutingSource = source
+	return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage}))
+}
+
 // Replay builds a test fixture for replaying an already-recorded event.
 func Replay(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	return mustEvent(events.NewReplayEvent(events.ReplayEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerAgent, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode), Lineage: lineage}))

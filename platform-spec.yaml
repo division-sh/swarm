@@ -1287,9 +1287,41 @@ contract_formats:
             in the evaluation until all admitted lifecycle and reply mutations finish. Route installation and retirement
             consume that same owner. A stale base or staged generation produces no lifecycle or reply effect, and no
             concurrent evaluation or post-check route mutation may interleave before those effects complete.
+          target_owner_projection: |
+            Compile-time plans own receiver route blueprints only and never mint run-specific entity ownership from source
+            entities, route text, path hashes, leaf/suffix matching, or descriptor normalization. Before publication admission,
+            one generation-consistent selected-run projection resolves every node target and every explicitly targeted agent
+            route to exactly one persisted receiver owner. Missing, ambiguous, malformed, stale, foreign, or disagreeing owner
+            evidence fails before event, delivery, settlement, lifecycle, warning, or reply mutation. A nested static receiver
+            without a distinct selected row may consume only the already-admitted current DeliveryRoute target when compiled
+            topology proves shared structural ownership. An untargeted agent delivery instead records an explicitly empty
+            DeliveryRoute target because its required typed AgentIdentity is the complete receiver owner; root route absence is
+            represented by AgentIdentity route presence, never by a nullable or inferred identity. Duplicate, restart,
+            selected-fork, historical replay, claim/scan, settlement, and public observation preserve the originally stamped
+            target and AgentIdentity without current-owner re-resolution.
           no_delivery_postcondition: |
-            Every matched admitted connect evaluation produces at least one durable delivery intent or one typed fail-closed
-            no-delivery disposition. A matched event cannot settle with both zero delivery intents and no disposition.
+            Every admitted persisted event settles atomically to exactly one typed arm: one or more durable DeliveryRoute
+            obligations, or one closed no-delivery disposition. The six exhaustive write classes are normal EventBus
+            publication, selected-fork EventBus publication, directive direct, runtime-log direct, inbound-evidence direct,
+            and PostgreSQL historical run-fork replay. Unknown classes, a missing or dual arm, direct events with routes,
+            compiled publication without its evaluation ledger, historical replay with no-delivery, and historical replay
+            with zero authorized work fail before event mutation. Direct platform facts use no_subscriber_by_design and
+            cannot carry current-plan evidence; historical replay copies exact durable routes and cannot carry current-plan
+            evidence. Duplicate and recovery paths compare and preserve the original settlement and never replan it.
+          per_plan_evidence: |
+            The compiled evaluator persists one normalized typed ledger for every publication, including an explicit zero-plan
+            result. Every matching plan has one opaque identity derived from the canonical plan-only codec, its normalized
+            targets, one closed resolution outcome, and every considered typed receiver/recipient registration with exactly
+            one accepted, pin_mismatch, or path_mismatch outcome. no_registration and resolution_blocker are plan-level
+            variants and cannot be encoded as candidates with absent identity. Entries sort and deduplicate by typed identity;
+            conflicting duplicates and malformed or unknown variants fail closed. ConnectExecutionClaim remains the
+            route-bound accepted-delivery projection and cannot identify a zero-route plan.
+          settlement_observation: |
+            Event list, get, and subscribe hydrate the persisted settlement. Successful deliveries expose a one-way structured
+            target projection derived from DeliveryRoute; no-delivery events expose the closed reason and persisted per-plan
+            evidence. Missing delivery rows, SQL joins, diagnostic strings, and current topology cannot reconstruct this fact.
+            Unexpected no-delivery reasons project as warning-class author activity/NDJSON; typed deliberate empty outputs and
+            direct platform facts do not warn. Unknown or malformed durable/public variants fail decoding.
           string_boundary: |
             Routing semantic values do not implement fmt.Stringer. Explicit persistence codecs and diagnostic projections are
             one-way boundaries and cannot re-enter graph compilation or evaluation. DeliveryRoute, Subscriber, and selected-
@@ -12375,6 +12407,7 @@ platform_tables:
             source_route                JSONB NOT NULL,
             target_route                JSONB NOT NULL,
             target_set                  JSONB NOT NULL,
+            route_settlement            JSONB NOT NULL,
             operator_reference_event_id UUID,
             handler_node                TEXT,
             idempotency_key             TEXT,
@@ -26580,6 +26613,7 @@ api_specification:
         - delivery_id
         - subscriber_type
         - subscriber_id
+        - target
         - status
         - retry_count
         - retry_scheduled
@@ -26591,6 +26625,9 @@ api_specification:
             $ref: '#/components/schemas/SubscriberType'
           subscriber_id:
             type: string
+          target:
+            $ref: '#/components/schemas/EventDeliveryTarget'
+            description: Exact persisted receiver route owner for node and explicitly targeted agent delivery, or an empty object for an untargeted agent whose typed agent identity is the receiver owner.
           session_id:
             type: string
           status:
@@ -26617,6 +26654,68 @@ api_specification:
             description: Terminal dead-letter records linked to this exact delivery_id and claim_version; sibling route evidence for the same event MUST NOT appear.
             items:
               $ref: '#/components/schemas/DeadLetterRecord'
+      EventDeliveryTarget:
+        type: object
+        additionalProperties: false
+        properties:
+          flow_id:
+            type: string
+          flow_instance:
+            type: string
+          entity_id:
+            type: string
+        description: One-way structured projection of the persisted DeliveryRoute target. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.
+      EventConnectCandidateEvidence:
+        type: object
+        additionalProperties: false
+        required: [receiver_sha256, recipient_kind, recipient_id, outcome]
+        properties:
+          receiver_sha256:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+          recipient_kind:
+            $ref: '#/components/schemas/SubscriberType'
+          recipient_id:
+            type: string
+          path:
+            type: string
+          agent_identity:
+            type: string
+            description: One-way concrete agent identity description; never parsed as authority.
+          outcome:
+            type: string
+            enum: [accepted, pin_mismatch, path_mismatch]
+      EventConnectPlanEvaluation:
+        type: object
+        additionalProperties: false
+        required: [plan_sha256, resolution, targets, candidates]
+        properties:
+          plan_sha256:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+          resolution:
+            type: string
+            enum: [resolved, runtime_resolution_required, resolution_blocker, no_registration]
+          targets:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventDeliveryTarget'
+          candidates:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventConnectCandidateEvidence'
+      EventNoDelivery:
+        type: object
+        additionalProperties: false
+        required: [reason, plans]
+        properties:
+          reason:
+            type: string
+            enum: [matched_no_recipient, resolution_blocked, declared_consumer_no_plan, no_subscriber_by_design]
+          plans:
+            type: array
+            items:
+              $ref: '#/components/schemas/EventConnectPlanEvaluation'
       EventPublishTargetRoute:
         type: object
         additionalProperties: false
@@ -26962,8 +27061,12 @@ api_specification:
             additionalProperties: true
           deliveries:
             type: array
+            description: The successful settlement arm. Non-empty exactly when no_delivery is absent.
             items:
               $ref: '#/components/schemas/EventDelivery'
+          no_delivery:
+            $ref: '#/components/schemas/EventNoDelivery'
+            description: The no-delivery settlement arm. Present exactly when deliveries is empty.
           dead_letters:
             type: array
             items:

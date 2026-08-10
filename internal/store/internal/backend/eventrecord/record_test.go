@@ -17,7 +17,9 @@ func validRecord(t *testing.T) Record {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := FromAdmitted(admitted)
+	ledger, _ := events.NewConnectEvaluationLedger(nil)
+	settlement, _ := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+	record, err := FromAdmitted(admitted, settlement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +161,14 @@ func validDiagnosticDirectRecord(t *testing.T, eventType events.EventType, runID
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := FromAdmitted(admitted)
+	class := events.EventWriteRuntimeLogDirect
+	if eventType == events.EventTypePlatformAgentDirective {
+		class = events.EventWriteDirectiveDirect
+	} else if eventType == events.EventTypePlatformInboundRecord {
+		class = events.EventWriteInboundEvidenceDirect
+	}
+	settlement, _ := events.NewNoDeliverySettlement(class, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	record, err := FromAdmitted(admitted, settlement)
 	if err != nil {
 		t.Fatal(err)
 	}

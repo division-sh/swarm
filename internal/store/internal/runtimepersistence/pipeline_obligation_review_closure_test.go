@@ -650,7 +650,7 @@ func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, ev
 	if err != nil {
 		return err
 	}
-	record, err := eventrecord.FromAdmitted(admitted)
+	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
 	if err != nil {
 		return err
 	}
@@ -1121,7 +1121,7 @@ func commitReviewClosureEvent(
 	defer release()
 	commit := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, store eventCommitTxStore) error {
 		mutation := runtimeAuthorActivityMutation(story)
-		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, tx, mutation, admitted)
+		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, tx, mutation, admitted, testRouteSettlement(admitted.Event(), nil))
 		if err != nil {
 			return err
 		}

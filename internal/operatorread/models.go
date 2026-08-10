@@ -178,6 +178,7 @@ type OperatorEventFull struct {
 	ProducerType             events.EventProducerType   `json:"producer_type"`
 	Payload                  map[string]any             `json:"payload"`
 	Deliveries               []OperatorEventDelivery    `json:"deliveries"`
+	NoDelivery               *OperatorNoDelivery        `json:"no_delivery,omitempty"`
 	DeadLetters              []OperatorDeadLetterRecord `json:"dead_letters"`
 	event                    events.Event
 }
@@ -187,6 +188,7 @@ type OperatorEventDelivery struct {
 	SubscriberType string                     `json:"subscriber_type"`
 	SubscriberID   string                     `json:"subscriber_id"`
 	Route          events.DeliveryRoute       `json:"-"`
+	Target         OperatorDeliveryTarget     `json:"target"`
 	SessionID      string                     `json:"session_id,omitempty"`
 	Status         string                     `json:"status"`
 	ReasonCode     string                     `json:"reason_code,omitempty"`
@@ -199,6 +201,33 @@ type OperatorEventDelivery struct {
 	FinishedAt     *time.Time                 `json:"finished_at,omitempty"`
 	DeadLetters    []OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
 	ClaimVersion   int64                      `json:"-"`
+}
+
+type OperatorDeliveryTarget struct {
+	FlowID       string `json:"flow_id,omitempty"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityID     string `json:"entity_id,omitempty"`
+}
+
+type OperatorNoDelivery struct {
+	Reason string                          `json:"reason"`
+	Plans  []OperatorConnectPlanEvaluation `json:"plans"`
+}
+
+type OperatorConnectPlanEvaluation struct {
+	PlanSHA256 string                             `json:"plan_sha256"`
+	Resolution string                             `json:"resolution"`
+	Targets    []OperatorDeliveryTarget           `json:"targets"`
+	Candidates []OperatorConnectCandidateEvidence `json:"candidates"`
+}
+
+type OperatorConnectCandidateEvidence struct {
+	ReceiverSHA256 string `json:"receiver_sha256"`
+	RecipientKind  string `json:"recipient_kind"`
+	RecipientID    string `json:"recipient_id"`
+	Path           string `json:"path,omitempty"`
+	AgentIdentity  string `json:"agent_identity,omitempty"`
+	Outcome        string `json:"outcome"`
 }
 
 type OperatorDeadLetterRecord struct {

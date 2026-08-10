@@ -371,6 +371,15 @@ func (rt *RouteTable) connectRecipientAdmissionsLocked() []runtimepinrouting.Con
 	return out
 }
 
+func (rt *RouteTable) connectRecipientAdmissions() []runtimepinrouting.ConnectRecipientRegistration {
+	if rt == nil {
+		return nil
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.connectRecipientAdmissionsLocked()
+}
+
 func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEvaluation) []Subscriber {
 	recipients := evaluation.Recipients()
 	out := make([]Subscriber, 0, len(recipients))

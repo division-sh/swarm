@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -155,8 +154,8 @@ func assertSealedFlowPackageConnectPlan(t *testing.T, source semanticview.Source
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
 	target := plan.Readback().Targets[0]
-	if target.FlowInstance != "consumer" || target.EntityID != runtimeflowidentity.EntityID("consumer") {
-		t.Fatalf("connect plan target = %#v, want static consumer route", target)
+	if target.FlowInstance != "consumer" || target.EntityID != "" {
+		t.Fatalf("connect plan target = %#v, want static consumer blueprint", target)
 	}
 	if plan.RequiresRuntimeResolution() {
 		t.Fatal("static sealed package connect route unexpectedly requires runtime descriptor resolution")
@@ -166,7 +165,10 @@ func assertSealedFlowPackageConnectPlan(t *testing.T, source semanticview.Source
 func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.Source) {
 	t.Helper()
 
-	store := &sealedFlowPackageRouteStore{}
+	consumerOwner := eventtest.UUID("sealed-consumer-owner")
+	store := &sealedFlowPackageRouteStore{targetOwners: []runtimebus.ActiveTargetDescriptor{{
+		ID: "sealed-consumer", FlowInstance: "consumer", EntityID: consumerOwner,
+	}}}
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -174,7 +176,7 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
+		EntityID:     consumerOwner,
 	},
 	}
 	producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
@@ -241,8 +243,13 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 }
 
 type sealedFlowPackageRouteStore struct {
-	events map[string]events.Event
-	routes map[string][]events.DeliveryRoute
+	events       map[string]events.Event
+	routes       map[string][]events.DeliveryRoute
+	targetOwners []runtimebus.ActiveTargetDescriptor
+}
+
+func (s *sealedFlowPackageRouteStore) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
 func (s *sealedFlowPackageRouteStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {

@@ -356,15 +356,15 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("projectRunForkReplayEvent: %v", err)
 	}
+	route := testAgentDeliveryRoute(t, "replay-agent", "fixture/replay-agent")
 	pg := fixture.store.(*PostgresStore)
-	outcome, err := pg.AppendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), replayedProjection)
+	outcome, err := pg.AppendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), replayedProjection, testHistoricalReplaySettlement([]events.DeliveryRoute{route}))
 	if err != nil {
 		t.Fatalf("append replay event: %v", err)
 	}
 	if outcome != runtimebus.EventAppendInserted {
 		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
 	}
-	route := testAgentDeliveryRoute(t, "replay-agent", "fixture/replay-agent")
 	sourceAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, sourceRunID)
 	if err != nil {
 		t.Fatalf("construct source replay delivery authority: %v", err)

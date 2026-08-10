@@ -336,13 +336,18 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		}
 		if found {
 			if !publication.direct && len(eb.connectRoutePlanner.matchedPlans(ctx, evt)) > 0 {
-				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable)
+				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
 				if err != nil {
 					return releaseFailure(err)
 				}
 			}
+			routePlan := routePlanFromManifest(evt, deliveryRecipientManifest{
+				DeliveryRoutes: durable.DeliveryRoutes,
+			}, routeIntentProducerRecipientMaterializer)
+			routePlan.ConnectEvaluation = durable.Settlement.Ledger()
 			prepared := PreparedPublish{
-				Event: evt, admitted: admitted, publicationClaim: claim,
+				Event: evt, admitted: admitted, plan: routePlan,
+				settlement: durable.Settlement, publicationClaim: claim,
 			}
 			request := prepared.CommitRequest()
 			return prepared, PublicationCommand{
@@ -410,6 +415,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		Event: evt, admitted: admitted, plan: routePlan,
 		direct:           replayScope == runtimepipelineobligation.ScopeDirect,
 		publicationClaim: claim,
+	}
+	prepared.settlement, err = eb.routeSettlementForPlan(evt, routePlan, events.EventWriteNormalPublication)
+	if err != nil {
+		return releaseFailure(err)
 	}
 	if !routePlan.TargetFailure.Empty() {
 		prepared.targetFailure = true
@@ -537,6 +546,7 @@ type PreparedPublish struct {
 	Event             events.Event
 	admitted          events.AdmittedEvent
 	plan              RoutePlan
+	settlement        events.RouteSettlement
 	exactDuplicate    bool
 	targetFailure     bool
 	dispatchQueued    bool
@@ -569,6 +579,7 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	authority, _ := p.publicationClaim.bus.DeliveryAuthority()
 	request := CommitPublishRequest{
 		Event:             p.admitted,
+		RouteSettlement:   p.settlement,
 		DeliveryRoutes:    p.plan.DeliveryRoutes(),
 		DeliveryAuthority: authority,
 		ReplayScope:       runtimepipelineobligation.ScopeSubscribed,
@@ -583,6 +594,23 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		request.DeadLetter = &record
 	}
 	return request
+}
+
+func (eb *EventBus) routeSettlementForPlan(evt events.Event, plan RoutePlan, class events.EventWriteClass) (events.RouteSettlement, error) {
+	routes := plan.DeliveryRoutes()
+	if len(routes) > 0 {
+		return events.NewDeliverySettlement(class, plan.ConnectEvaluation)
+	}
+	reason := events.NoDeliveryDeclaredConsumerNoPlan
+	switch {
+	case !plan.TargetFailure.Empty():
+		reason = events.NoDeliveryResolutionBlocked
+	case plan.CanonicalRouteOwnerMatched():
+		reason = events.NoDeliveryMatchedNoRecipient
+	case runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), evt.RoutingSource()).DeliberateNoSubscriber():
+		reason = events.NoDeliveryNoSubscriberByDesign
+	}
+	return events.NewNoDeliverySettlement(class, reason, plan.ConnectEvaluation)
 }
 
 func (p PreparedPublish) CommittedDeliveryHandoffs() ([]runtimedelivery.DurableHandoffProof, error) {
@@ -685,6 +713,10 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: plan,
 		publicationClaim: publicationClaim,
+	}
+	prepared.settlement, err = eb.routeSettlementForPlan(evt, plan, events.EventWriteSelectedForkPublication)
+	if err != nil {
+		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
 	}
 	if !plan.TargetFailure.Empty() {
 		prepared.targetFailure = true
@@ -1494,13 +1526,16 @@ func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt event
 
 func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) PublishRecipientPlan {
 	routePlan = routePlan.Normalized()
+	deliveryRoutes := routePlan.DeliveryRoutes()
+	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(eb.semanticSource, string(evt.Type()), evt.RoutingSource())
 	out := PublishRecipientPlan{
 		Recipients:             routePlan.RecipientIDs(),
 		PersistedRecipients:    routePlan.PersistedRecipientIDs(),
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
-		DeliveryRoutes:         routePlan.DeliveryRoutes(),
+		DeliveryRoutes:         deliveryRoutes,
 		TargetFailure:          routePlan.TargetFailure.Code(),
-		canonicalAuthority:     routePlan.CanonicalRouteOwnerMatched() && routePlan.AuthorityOwner == routePlanSourceConnectRoutePlan,
+		canonicalAuthority: routePlan.CanonicalRouteOwnerMatched() || len(deliveryRoutes) > 0 ||
+			!routePlan.TargetFailure.Empty() || classification.DeliberateNoSubscriber(),
 	}
 	if eb != nil {
 		out.RoutedRecipients = eb.describeSubscribersForEvent(string(evt.Type()), routePlan.RoutedRecipients)

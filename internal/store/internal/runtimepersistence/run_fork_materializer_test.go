@@ -880,6 +880,171 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	}
 }
 
+type runForkReplaySettlementFixture struct {
+	ctx          context.Context
+	db           *sql.DB
+	store        *PostgresStore
+	sourceRunID  string
+	forkRunID    string
+	sourceEvent  events.Event
+	sourceRoute  events.DeliveryRoute
+	sourceID     string
+	deliveryID   string
+	entityID     string
+	materialized runfork.RunForkMaterialization
+}
+
+func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixture {
+	t.Helper()
+	_, db, _ := testutil.StartPostgres(t)
+	store := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	rootEventID := uuid.NewString()
+	at := time.Unix(1700000840, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, rootEventID, at)
+
+	sourceID := uuid.NewString()
+	sourceEvent := eventtest.ChildWithLineage(
+		sourceID,
+		events.EventType("fork.ready"),
+		"declarative-node",
+		"event-owned-task",
+		json.RawMessage(`{"task_id":"payload-owned-task","topic":"fork-ready"}`),
+		1,
+		events.EventLineage{
+			RunID: sourceRunID, ParentEventID: rootEventID, TaskID: "event-owned-task", ExecutionMode: executionmode.Mock,
+		},
+		events.EventEnvelope{
+			EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity,
+			Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID},
+		},
+		at.Add(time.Second),
+	)
+	agentIdentity := runtimebustest.Identity(t, "safe-agent", "flow-a/1")
+	sourceRoute := events.DeliveryRoute{
+		Recipient: events.MustAgentDeliveryRecipient(agentIdentity.AgentID()), AgentIdentity: agentIdentity,
+		Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID},
+	}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, store, sourceEvent, []events.DeliveryRoute{sourceRoute}); err != nil {
+		t.Fatalf("commit historical replay source event and delivery: %v", err)
+	}
+	var deliveryID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT delivery_id::text
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'agent' AND subscriber_id = 'safe-agent'
+	`, sourceID).Scan(&deliveryID); err != nil {
+		t.Fatalf("load historical replay source delivery: %v", err)
+	}
+	captureRunForkTestRevision(t, db, sourceRunID)
+	plan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceID})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady || len(plan.PendingWork) != 1 {
+		t.Fatalf("historical replay plan = %#v, want one executable pending delivery", plan)
+	}
+	materialized, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: sourceID})
+	if err != nil {
+		t.Fatalf("MaterializeRunFork: %v", err)
+	}
+	return runForkReplaySettlementFixture{
+		ctx: ctx, db: db, store: store, sourceRunID: sourceRunID, forkRunID: materialized.ForkRunID,
+		sourceEvent: sourceEvent, sourceRoute: sourceRoute, sourceID: sourceID, deliveryID: deliveryID,
+		entityID: entityID, materialized: materialized,
+	}
+}
+
+func (f runForkReplaySettlementFixture) activate(t *testing.T, confirm bool) (runfork.RunForkActivation, error) {
+	t.Helper()
+	return f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{
+		ForkRunID: f.forkRunID, ConfirmSourceFreeze: confirm,
+		HistoricalReplayExecutionAdmitter: &fakeRunForkHistoricalReplayExecutionAdmitter{},
+	})
+}
+
+func (f runForkReplaySettlementFixture) replaySnapshot(t *testing.T) (string, string, string, string) {
+	t.Helper()
+	var eventID, settlement, deliveryID, target string
+	if err := f.db.QueryRowContext(f.ctx, `
+		SELECT e.event_id::text, e.route_settlement::text, d.delivery_id::text, d.target_route::text
+		FROM events e
+		JOIN event_deliveries d ON d.event_id = e.event_id
+		WHERE e.run_id = $1::uuid
+	`, f.forkRunID).Scan(&eventID, &settlement, &deliveryID, &target); err != nil {
+		t.Fatalf("load historical replay settlement snapshot: %v", err)
+	}
+	return eventID, settlement, deliveryID, target
+}
+
+func TestPostgresRunForkDeliveryEventReplayCommitsSettlementAtomically(t *testing.T) {
+	fixture := newRunForkReplaySettlementFixture(t)
+	result, err := fixture.activate(t, false)
+	if err == nil || !strings.Contains(err.Error(), "confirmation") {
+		t.Fatalf("ActivateRunFork without freeze confirmation = result:%#v err:%v", result, err)
+	}
+	if result.Activated || result.SourceFrozen {
+		t.Fatalf("failed activation mutated lifecycle: %#v", result)
+	}
+	assertRunForkActivationReplayMutationAbsent(t, fixture.db, fixture.sourceRunID, fixture.forkRunID)
+}
+
+func TestPostgresRunForkDeliveryEventReplayExactDuplicatePreservesSettlement(t *testing.T) {
+	fixture := newRunForkReplaySettlementFixture(t)
+	result, err := fixture.activate(t, true)
+	if err != nil || !result.Activated || result.DeliveryEventReplay == nil {
+		t.Fatalf("ActivateRunFork = result:%#v err:%v", result, err)
+	}
+	beforeEvent, beforeSettlement, beforeDelivery, beforeTarget := fixture.replaySnapshot(t)
+	repeated, err := fixture.activate(t, true)
+	if err == nil || !strings.Contains(err.Error(), "requires materialized fork status") || !repeated.RepeatedActivationFailed {
+		t.Fatalf("repeat ActivateRunFork = result:%#v err:%v", repeated, err)
+	}
+	afterEvent, afterSettlement, afterDelivery, afterTarget := fixture.replaySnapshot(t)
+	if beforeEvent != afterEvent || beforeSettlement != afterSettlement || beforeDelivery != afterDelivery || beforeTarget != afterTarget {
+		t.Fatalf("repeat activation changed replay settlement\nbefore: %s %s %s %s\nafter:  %s %s %s %s", beforeEvent, beforeSettlement, beforeDelivery, beforeTarget, afterEvent, afterSettlement, afterDelivery, afterTarget)
+	}
+	for name, query := range map[string]string{
+		"events":     `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
+		"deliveries": `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
+		"lineage":    `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`,
+	} {
+		var count int
+		if err := fixture.db.QueryRowContext(fixture.ctx, query, fixture.forkRunID).Scan(&count); err != nil {
+			t.Fatalf("count replay %s: %v", name, err)
+		}
+		if count != 1 {
+			t.Fatalf("replay %s after exact retry = %d, want 1", name, count)
+		}
+	}
+}
+
+func TestPostgresOperatorEventReadbackProjectsRunForkReplaySettlement(t *testing.T) {
+	fixture := newRunForkReplaySettlementFixture(t)
+	result, err := fixture.activate(t, true)
+	if err != nil || !result.Activated {
+		t.Fatalf("ActivateRunFork = result:%#v err:%v", result, err)
+	}
+	eventID, _, _, _ := fixture.replaySnapshot(t)
+	full, err := fixture.store.LoadOperatorEvent(fixture.ctx, eventID)
+	if err != nil {
+		t.Fatalf("LoadOperatorEvent: %v", err)
+	}
+	if full.RunID != fixture.forkRunID || full.NoDelivery != nil || len(full.Deliveries) != 1 {
+		t.Fatalf("operator replay settlement = %#v", full)
+	}
+	delivery := full.Deliveries[0]
+	if delivery.SubscriberType != "agent" || delivery.SubscriberID != "safe-agent" || delivery.Status != "pending" || delivery.Terminal {
+		t.Fatalf("operator replay delivery = %#v", delivery)
+	}
+	want := fixture.sourceRoute.Target.Normalized()
+	if delivery.Target.FlowID != want.FlowID || delivery.Target.FlowInstance != want.FlowInstance || delivery.Target.EntityID != want.EntityID {
+		t.Fatalf("operator replay target = %#v, want %#v", delivery.Target, want)
+	}
+}
+
 func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)

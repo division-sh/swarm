@@ -42,6 +42,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	store := &fanInStreamMemoryStore{}
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
+		Durable:        bus.DurableDependencies{TargetOwners: store},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
 			return nil
@@ -72,7 +73,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
-		EntityID:     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
+		EntityID:     fanInStreamSelectedOwner(),
 	}.Normalized()
 	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-a", "operating/a", "report-1", "2026-Q1", 100)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
@@ -194,6 +195,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	store := &fanInStreamMemoryStore{}
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
+		Durable:        bus.DurableDependencies{TargetOwners: store},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
 			return nil
@@ -224,7 +226,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
-		EntityID:     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
+		EntityID:     fanInStreamSelectedOwner(),
 	}.Normalized()
 
 	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/a", "report-1", "2026-Q1", 100)
@@ -251,6 +253,16 @@ type fanInStreamMemoryStore struct {
 	events         map[string]events.Event
 	deliveryRoutes map[string][]events.DeliveryRoute
 	scopes         map[string]runtimepipelineobligation.CommittedScope
+}
+
+func fanInStreamSelectedOwner() string {
+	return eventtest.UUID("fan-in-stream-selected-owner")
+}
+
+func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context) ([]bus.ActiveTargetDescriptor, error) {
+	return []bus.ActiveTargetDescriptor{{
+		ID: "portfolio", FlowInstance: templatefanin.ReceiverFlowInstance, EntityID: fanInStreamSelectedOwner(),
+	}}, nil
 }
 
 func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {

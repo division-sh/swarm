@@ -6,7 +6,6 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -32,6 +31,7 @@ func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testi
 			testActiveAgentDescriptor(t, "service-owner", "service-ent", "service-owner/root"),
 		},
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{{
+			EntityID:     "component-owner",
 			FlowInstance: flowInstance,
 			FlowTemplate: "component-scaffold",
 			BundleHash:   authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource,
@@ -54,7 +54,7 @@ func TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances(t *testi
 	for _, descriptor := range descriptors {
 		switch descriptor.FlowInstance {
 		case flowInstance:
-			foundFlow = descriptor.EntityID == runtimeflowidentity.EntityID(flowInstance)
+			foundFlow = descriptor.EntityID == "component-owner"
 		case "service-owner/root":
 			foundAgent = descriptor.EntityID == "service-ent"
 		}

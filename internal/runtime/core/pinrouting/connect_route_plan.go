@@ -40,6 +40,16 @@ func ConnectExecutionClaim(plan ConnectRoutePlan, route events.DeliveryRoute) (e
 	return events.AdmitConnectExecutionClaim(digest, pinDigest, route, plan.receiver.event.value)
 }
 
+// ConnectPlanIdentity derives the plan-only identity used by evaluation
+// evidence. Recipient-specific execution claims are derived separately.
+func ConnectPlanIdentity(plan ConnectRoutePlan) (events.ConnectPlanIdentity, error) {
+	canonical, err := json.Marshal(connectPlanIdentityCodec(plan))
+	if err != nil {
+		return events.ConnectPlanIdentity{}, fmt.Errorf("encode connect plan identity: %w", err)
+	}
+	return events.AdmitConnectPlanIdentity(sha256.Sum256(canonical)), nil
+}
+
 type connectExecutionClaimEndpointCodec struct {
 	Kind          uint8                   `json:"kind"`
 	FlowID        string                  `json:"flow_id,omitempty"`
@@ -77,7 +87,7 @@ type connectExecutionClaimReplyCodec struct {
 	CorrelationKey    string `json:"correlation_key"`
 }
 
-type connectExecutionClaimPlanCodec struct {
+type connectPlanIdentityWire struct {
 	Source                      connectExecutionClaimEndpointCodec   `json:"source"`
 	Receiver                    connectExecutionClaimEndpointCodec   `json:"receiver"`
 	TargetKind                  uint8                                `json:"target_kind"`
@@ -88,15 +98,23 @@ type connectExecutionClaimPlanCodec struct {
 	Target                      events.RouteIdentity                 `json:"target"`
 	TargetSet                   []events.RouteIdentity               `json:"target_set,omitempty"`
 	ProviderOutputAuthorization *runtimeprovideroutput.Authorization `json:"provider_output_authorization,omitempty"`
-	Recipient                   events.DeliveryRoute                 `json:"recipient"`
+}
+
+type connectExecutionClaimPlanCodec struct {
+	Plan      connectPlanIdentityWire `json:"plan"`
+	Recipient events.DeliveryRoute    `json:"recipient"`
 }
 
 func connectExecutionClaimCodec(plan ConnectRoutePlan, route events.DeliveryRoute) connectExecutionClaimPlanCodec {
-	codec := connectExecutionClaimPlanCodec{
+	return connectExecutionClaimPlanCodec{Plan: connectPlanIdentityCodec(plan), Recipient: route}
+}
+
+func connectPlanIdentityCodec(plan ConnectRoutePlan) connectPlanIdentityWire {
+	codec := connectPlanIdentityWire{
 		Source: connectEndpointCodec(plan.source), Receiver: connectEndpointCodec(plan.receiver),
 		TargetKind: uint8(plan.targetKind), ResolutionKind: uint8(plan.resolutionKind),
 		Target: plan.target.Normalized(), TargetSet: connectClaimTargets(plan.targetSet),
-		ProviderOutputAuthorization: plan.ProviderOutputAuthorization(), Recipient: route,
+		ProviderOutputAuthorization: plan.ProviderOutputAuthorization(),
 	}
 	if plan.instanceKey != nil {
 		codec.InstanceKey = &connectExecutionClaimInstanceCodec{
@@ -402,6 +420,9 @@ func (i ConnectReceiverPinIdentity) Equal(other ConnectReceiverPinIdentity) bool
 	return i.digest == other.digest
 }
 func (i ConnectReceiverPinIdentity) Diagnostic() string { return i.diagnostic }
+func (i ConnectReceiverPinIdentity) EvidenceIdentity() events.ConnectReceiverIdentity {
+	return events.AdmitConnectReceiverIdentity(i.digest)
+}
 
 type ConnectRecipientKind uint8
 
@@ -456,6 +477,8 @@ type ConnectRecipientEvaluation struct {
 	matched                   bool
 	requiresRuntimeResolution bool
 	recipients                []ConnectRecipient
+	plans                     []events.ConnectPlanEvaluation
+	err                       error
 }
 
 func (e ConnectRecipientEvaluation) Matched() bool { return e.matched }
@@ -464,6 +487,12 @@ func (e ConnectRecipientEvaluation) RequiresRuntimeResolution() bool {
 }
 func (e ConnectRecipientEvaluation) Recipients() []ConnectRecipient {
 	return append([]ConnectRecipient(nil), e.recipients...)
+}
+func (e ConnectRecipientEvaluation) Ledger() (events.ConnectEvaluationLedger, error) {
+	if e.err != nil {
+		return events.ConnectEvaluationLedger{}, e.err
+	}
+	return events.NewConnectEvaluationLedger(e.plans)
 }
 
 func (e ConnectRoutePlanEndpoint) receiverPinIdentity() ConnectReceiverPinIdentity {
@@ -898,7 +927,26 @@ func (p ConnectRoutePlan) ProviderOutputAuthorization() *runtimeprovideroutput.A
 }
 
 func (p ConnectRoutePlan) RequiresRuntimeResolution() bool {
-	return p.resolutionKind != ConnectResolutionStatic
+	return p.receiver.IsRoot() || p.resolutionKind != ConnectResolutionStatic
+}
+
+// StructuralTargetOwnerEligible reports whether compiled topology proves that
+// a static receiver is nested under the currently executing delivery owner.
+// The delivery target supplies entity authority; endpoint paths only prove the
+// structural relationship.
+func (p ConnectRoutePlan) StructuralTargetOwnerEligible() bool {
+	if p.fanIn != nil || p.receiver.kind != connectEndpointStaticFlow {
+		return false
+	}
+	receiverPath := strings.Trim(p.receiver.flowPath.value, "/")
+	if receiverPath == "" {
+		return false
+	}
+	if p.source.IsRoot() {
+		return true
+	}
+	sourcePath := strings.Trim(p.source.flowPath.value, "/")
+	return sourcePath != "" && receiverPath != sourcePath && strings.HasPrefix(receiverPath, sourcePath+"/")
 }
 
 type ConnectRoutePlanIssue struct {
@@ -1253,16 +1301,40 @@ func (g CompiledConnectGraph) AdmitReceiverRecipient(flowID string, eventType ev
 
 func (g CompiledConnectGraph) EvaluateMaterializedRecipients(plan ConnectRoutePlan, targets []events.RouteIdentity, registrations []ConnectRecipientRegistration) ConnectRecipientEvaluation {
 	evaluation := ConnectRecipientEvaluation{matched: true}
+	planID, err := ConnectPlanIdentity(plan)
+	if err != nil {
+		evaluation.err = err
+		return evaluation
+	}
 	if plan.RequiresRuntimeResolution() && len(targets) == 0 {
 		evaluation.requiresRuntimeResolution = true
+		entry, entryErr := events.NewConnectPlanEvaluation(planID, events.ConnectPlanRuntimeResolutionRequired, nil, nil)
+		if entryErr != nil {
+			evaluation.err = entryErr
+			return evaluation
+		}
+		evaluation.plans = append(evaluation.plans, entry)
 		return evaluation
 	}
 	if len(targets) == 0 {
 		targets = []events.RouteIdentity{{}}
 	}
-	for _, target := range targets {
-		evaluation.recipients = append(evaluation.recipients, evaluateConnectPlanRecipients(plan, target, registrations)...)
+	recipients, candidates, err := evaluateConnectPlanRecipients(plan, targets, registrations)
+	if err != nil {
+		evaluation.err = err
+		return evaluation
 	}
+	evaluation.recipients = append(evaluation.recipients, recipients...)
+	resolution := events.ConnectPlanResolved
+	if len(registrations) == 0 {
+		resolution = events.ConnectPlanNoRegistration
+	}
+	entry, entryErr := events.NewConnectPlanEvaluation(planID, resolution, targets, candidates)
+	if entryErr != nil {
+		evaluation.err = entryErr
+		return evaluation
+	}
+	evaluation.plans = append(evaluation.plans, entry)
 	evaluation.recipients = normalizeConnectRecipients(evaluation.recipients)
 	return evaluation
 }
@@ -1272,7 +1344,13 @@ func (g CompiledConnectGraph) EvaluateSourceRecipients(sourceEvent SourceEvent, 
 	for _, plan := range g.MatchingSourceEvent(sourceEvent) {
 		evaluation.matched = true
 		if plan.RequiresRuntimeResolution() {
+			part := g.EvaluateMaterializedRecipients(plan, nil, registrations)
 			evaluation.requiresRuntimeResolution = true
+			evaluation.plans = append(evaluation.plans, part.plans...)
+			if part.err != nil {
+				evaluation.err = part.err
+				return evaluation
+			}
 			continue
 		}
 		targets := append([]events.RouteIdentity(nil), plan.targetSet...)
@@ -1281,27 +1359,59 @@ func (g CompiledConnectGraph) EvaluateSourceRecipients(sourceEvent SourceEvent, 
 		}
 		part := g.EvaluateMaterializedRecipients(plan, targets, registrations)
 		evaluation.recipients = append(evaluation.recipients, part.recipients...)
+		evaluation.plans = append(evaluation.plans, part.plans...)
+		if part.err != nil {
+			evaluation.err = part.err
+			return evaluation
+		}
 	}
 	evaluation.recipients = normalizeConnectRecipients(evaluation.recipients)
 	return evaluation
 }
 
-func evaluateConnectPlanRecipients(plan ConnectRoutePlan, target events.RouteIdentity, registrations []ConnectRecipientRegistration) []ConnectRecipient {
-	target = target.Normalized()
+func evaluateConnectPlanRecipients(plan ConnectRoutePlan, targets []events.RouteIdentity, registrations []ConnectRecipientRegistration) ([]ConnectRecipient, []events.ConnectCandidateEvidence, error) {
 	pin := plan.ReceiverPinIdentity()
 	if pin.Empty() {
-		return nil
+		return nil, nil, fmt.Errorf("connect plan receiver pin identity is required")
 	}
 	out := make([]ConnectRecipient, 0, len(registrations))
+	evidence := make([]events.ConnectCandidateEvidence, 0, len(registrations))
 	for _, registration := range registrations {
-		if !registration.receiverPin.Equal(pin) || !connectRecipientMatchesTarget(plan, registration.recipient, target) {
-			continue
+		outcome := events.ConnectCandidatePinMismatch
+		matchedTarget := false
+		if registration.receiverPin.Equal(pin) {
+			outcome = events.ConnectCandidatePathMismatch
+			for _, target := range targets {
+				if connectRecipientMatchesTarget(plan, registration.recipient, target.Normalized()) {
+					matchedTarget = true
+					outcome = events.ConnectCandidateAccepted
+					break
+				}
+			}
 		}
 		recipient := registration.recipient
-		recipient.handlerEvent = plan.ReceiverLocalEvent()
-		out = append(out, recipient)
+		if matchedTarget {
+			recipient.handlerEvent = plan.ReceiverLocalEvent()
+			out = append(out, recipient)
+		}
+		deliveryRecipient, err := connectEvidenceRecipient(recipient)
+		if err != nil {
+			return nil, nil, err
+		}
+		candidate, err := events.NewConnectCandidateEvidence(registration.receiverPin.EvidenceIdentity(), deliveryRecipient, recipient.path, recipient.agentIdentity, outcome)
+		if err != nil {
+			return nil, nil, err
+		}
+		evidence = append(evidence, candidate)
 	}
-	return normalizeConnectRecipients(out)
+	return normalizeConnectRecipients(out), evidence, nil
+}
+
+func connectEvidenceRecipient(recipient ConnectRecipient) (events.DeliveryRecipient, error) {
+	if recipient.kind == ConnectRecipientAgent {
+		return events.NewAgentDeliveryRecipient(recipient.id)
+	}
+	return events.NewNodeDeliveryRecipient(recipient.id)
 }
 
 func connectRecipientMatchesTarget(plan ConnectRoutePlan, recipient ConnectRecipient, target events.RouteIdentity) bool {
@@ -2492,7 +2602,6 @@ func staticConnectRoute(source semanticview.Source, flowID string) events.RouteI
 	return events.RouteIdentity{
 		FlowID:       strings.TrimSpace(flowID),
 		FlowInstance: flowInstance,
-		EntityID:     runtimeflowidentity.EntityID(flowInstance),
 	}.Normalized()
 }
 
@@ -2504,7 +2613,6 @@ func fanInSingletonRoute(flowID, singleton string) events.RouteIdentity {
 	return events.RouteIdentity{
 		FlowID:       strings.TrimSpace(flowID),
 		FlowInstance: singleton,
-		EntityID:     runtimeflowidentity.EntityID(singleton),
 	}.Normalized()
 }
 

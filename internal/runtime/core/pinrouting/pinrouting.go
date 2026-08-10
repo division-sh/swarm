@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -137,8 +136,17 @@ func (c OutputConsumerClassification) HasRuntimeConsumer() bool {
 	return c.Has(OutputConsumerSameFlow) || c.Has(OutputConsumerConnect) || c.Has(OutputConsumerStructuralParent) || c.Has(OutputConsumerExternal)
 }
 
+func (c OutputConsumerClassification) DeliberateNoSubscriber() bool {
+	return (c.Has(OutputConsumerHarness) || c.Has(OutputConsumerExternal)) &&
+		!c.Has(OutputConsumerSameFlow) && !c.Has(OutputConsumerConnect) && !c.Has(OutputConsumerStructuralParent)
+}
+
 func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string) OutputConsumerClassification {
 	return classifyOutputConsumer(source, flowID, eventType, events.NoRoutingSource())
+}
+
+func ClassifyRoutingSourceOutputConsumer(source semanticview.Source, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
+	return classifyOutputConsumer(source, routingSource.Route().FlowID, eventType, routingSource)
 }
 
 func classifyOutputConsumer(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
@@ -318,11 +326,8 @@ func OutputHasExternalConsumer(source semanticview.Source, flowID, eventType str
 func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity {
 	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
 	entityID := strings.TrimSpace(descriptor.EntityID)
-	if flowInstance == "" && entityID == "" {
+	if flowInstance == "" || entityID == "" {
 		return events.RouteIdentity{}
-	}
-	if entityID == "" && flowInstance != "" {
-		entityID = runtimeflowidentity.EntityID(flowInstance)
 	}
 	return events.RouteIdentity{
 		FlowID:       strings.TrimSpace(flowID),

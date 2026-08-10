@@ -183,6 +183,13 @@ func (s *ObservabilitySQLite) LoadOperatorEvent(ctx context.Context, eventID str
 	}
 	event.Deliveries = operatorread.EnrichOperatorDeliveryFailureEvidence(deliveries, deadLetters)
 	event.DeadLetters = deadLetters
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event settlement: %w", err)
+	}
+	if err := applyRouteSettlement(&event, settlement); err != nil {
+		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event settlement: %w", err)
+	}
 	if event.DeadLetters == nil {
 		event.DeadLetters = []operatorread.OperatorDeadLetterRecord{}
 	}
