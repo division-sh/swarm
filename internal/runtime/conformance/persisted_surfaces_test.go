@@ -980,7 +980,8 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	if _, err := pg.AdmitGenericSchedule(ctx, runtimegenericschedule.AdmissionCommand{
 		ScheduleKey: "recover-me", OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
 		EventType: "timer.check", Payload: semanticvalue.EmptyObject(),
-		RoutingSource: events.NewPlatformControlRoutingSource(), Due: runtimegenericschedule.DelayDue(time.Minute),
+		RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
+		Due:    runtimegenericschedule.DelayDue(time.Minute),
 		TaskID: "recover-me",
 	}); err != nil {
 		t.Fatalf("AdmitGenericSchedule: %v", err)

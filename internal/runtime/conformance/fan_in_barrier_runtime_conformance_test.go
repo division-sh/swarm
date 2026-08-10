@@ -39,7 +39,9 @@ type fanInBarrierConformanceStore interface {
 
 type fanInBarrierGenericScheduleWakeups struct{}
 
-func (fanInBarrierGenericScheduleWakeups) ReconcileWakeup(context.Context, string) error { return nil }
+func (fanInBarrierGenericScheduleWakeups) ReconcileWakeupWithRecovery(context.Context, string) (bool, error) {
+	return false, nil
+}
 
 type fanInBarrierRuntime struct {
 	bus         *runtimebus.EventBus

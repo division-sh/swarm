@@ -47,6 +47,25 @@ func TestControllerStopReportsPostCommitReconciliationFailureWithoutReplayingSto
 	}
 }
 
+func TestControllerStopReportsQueuedPostCommitRecoveryWithoutReplayingStop(t *testing.T) {
+	ref := runtimetimercancellation.Ref{
+		Family: runtimetimercancellation.FamilyGenericSchedule, ActivationID: "activation-1", DueAt: time.Now(),
+	}
+	reconcileErr := &runtimetimercancellation.ReconciliationError{Pending: []runtimetimercancellation.Failure{{
+		Ref: ref, Err: errors.New("retire wakeup failed"),
+	}}}
+	store := &fakeRunControlStore{stopState: State{RunID: "run-1", TimerCancellations: []runtimetimercancellation.Ref{ref}}}
+	controller := NewController(store, nil, Options{TimerCancellations: &fakeTimerCancellationReconciler{err: reconcileErr}})
+
+	result, err := controller.Stop(context.Background(), TransitionRequest{RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want committed transition with queued recovery", err)
+	}
+	if store.stopCalls != 1 || result.Recovery.Disposition != RecoveryPending || !errors.Is(result.Recovery.Err, reconcileErr) {
+		t.Fatalf("Stop() result=%#v stop_calls=%d", result, store.stopCalls)
+	}
+}
+
 func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t *testing.T) {
 	releaseErr := errors.New("release failed after commit")
 	store := &fakeRunControlStore{}

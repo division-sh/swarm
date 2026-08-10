@@ -657,6 +657,7 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 		"schedule_key": command.ScheduleKey, "immutable_hash": admitted.Activation.ImmutableHash,
 		"due_basis_kind": string(command.Due.Kind), "owner_kind": string(command.OwnerKind),
 		"owner_agent": command.OwnerID, "task_id": command.TaskID, "status": string(runtimegenericschedule.StatusActive),
+		"execution_mode": string(command.ExecutionMode),
 	} {
 		if got, _ := admission[field].(string); got != want {
 			t.Fatalf("projected admission %s = %q, want %q; fact=%s", field, got, want, admittedFact)

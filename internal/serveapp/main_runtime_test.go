@@ -7674,7 +7674,8 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		ScheduleKey: "timer-" + source, RunID: runID, EntityID: entityID,
 		OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "serve-startup-recovery",
 		EventType: "timer.fired", Payload: semanticvalue.EmptyObject(), RoutingSource: routingSource,
-		Due: runtimegenericschedule.DelayDue(time.Hour), TaskID: "timer-" + source,
+		ExecutionMode: executionmode.Live,
+		Due:           runtimegenericschedule.DelayDue(time.Hour), TaskID: "timer-" + source,
 	}); err != nil {
 		t.Fatalf("seed timer %s: %v", source, err)
 	}

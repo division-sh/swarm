@@ -23,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -1310,7 +1311,8 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 				ScheduleKey: lookalikeTaskID, RunID: runID, EntityID: entityID, FlowInstance: "generic",
 				OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "generic",
 				EventType: "generic.tick", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
-				Due: runtimegenericschedule.AbsoluteDue(activation.FireAt), TaskID: lookalikeTaskID,
+				ExecutionMode: executionmode.Live,
+				Due:           runtimegenericschedule.AbsoluteDue(activation.FireAt), TaskID: lookalikeTaskID,
 			}
 			insertGenericSchedulePersistenceFixture(t, ctx, store.testDB(), !store.isSQLite(), command)
 
@@ -1650,6 +1652,40 @@ func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *
 				t.Fatalf("cancel workflow timer: %v", err)
 			}
 			waitForWorkflowTimerSchedulerEmpty(t, pc.timerScheduler)
+		})
+	}
+}
+
+func TestWorkflowTimerReconcileWithRecoveryQueuesAndConvergesOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
+			scheduler := pc.workflowTimers.scheduler
+			if err := scheduler.cancelWorkflowTimerWakeup(activation.Ref); err != nil {
+				t.Fatal(err)
+			}
+			waitForWorkflowTimerSchedulerEmpty(t, scheduler)
+			var once sync.Once
+			pc.workflowTimers.testAfterWakeupLoad = func() {
+				once.Do(func() { pc.workflowTimers.scheduler = nil })
+			}
+
+			queued, err := pc.workflowTimers.ReconcileWakeupWithRecovery(ctx, activation.Ref)
+			pc.workflowTimers.scheduler = scheduler
+			if !queued || !errors.Is(err, errWorkflowTimerSchedulerRequired) {
+				t.Fatalf("initial reconciliation queued=%v err=%v, want queued scheduler failure", queued, err)
+			}
+			deadline := time.Now().Add(time.Second)
+			for time.Now().Before(deadline) {
+				active, draining := workflowTimerScheduledCounts(scheduler)
+				if active == 1 && draining == 0 {
+					return
+				}
+				runtime.Gosched()
+			}
+			active, draining := workflowTimerScheduledCounts(scheduler)
+			t.Fatalf("recovered workflow timer scheduler active=%d draining=%d, want 1/0", active, draining)
 		})
 	}
 }

@@ -3,6 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -31,9 +34,31 @@ type recordingGenericScheduleReconciler struct {
 	activationIDs []string
 }
 
-func (r *recordingGenericScheduleReconciler) ReconcileWakeup(_ context.Context, activationID string) error {
+type transientGenericScheduleReleaseStore struct {
+	runtimegenericschedule.Store
+	mu          sync.Mutex
+	failures    int
+	releaseSeen chan error
+}
+
+func (s *transientGenericScheduleReleaseStore) ReleaseGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) error {
+	s.mu.Lock()
+	if s.failures > 0 {
+		s.failures--
+		s.mu.Unlock()
+		err := errors.New("transient generic schedule claim release failure")
+		s.releaseSeen <- err
+		return err
+	}
+	s.mu.Unlock()
+	err := s.Store.ReleaseGenericScheduleWakeup(ctx, wakeup)
+	s.releaseSeen <- err
+	return err
+}
+
+func (r *recordingGenericScheduleReconciler) ReconcileWakeupWithRecovery(_ context.Context, activationID string) (bool, error) {
 	r.activationIDs = append(r.activationIDs, activationID)
-	return nil
+	return false, nil
 }
 
 func newGenericScheduleAwareWorkflowTestCoordinator(
@@ -82,7 +107,10 @@ func seedGenericScheduleTimerFamilies(
 }
 
 func authorGenericScheduleConsumerContext(runID string) context.Context {
-	return runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(genericScheduleConsumerTestBundleHash), runID)
+	return runtimeeffects.WithExecutionMode(
+		runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(genericScheduleConsumerTestBundleHash), runID),
+		runtimeeffects.ExecutionModeLive,
+	)
 }
 
 func assertGenericScheduleTimerFamilyCancellation(
@@ -205,7 +233,10 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(workOwner)
 			planner := &terminalSchedulePlannerProbe{}
 			dispatcher := &terminalScheduleDispatcherProbe{}
-			genericLifecycle, err := runtimegenericschedule.NewLifecycle(selected, scheduler, planner, dispatcher, nil)
+			genericStore := &transientGenericScheduleReleaseStore{
+				Store: selected, failures: 1, releaseSeen: make(chan error, 2),
+			}
+			genericLifecycle, err := runtimegenericschedule.NewLifecycle(genericStore, scheduler, planner, dispatcher, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -255,8 +286,21 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			result, err := controller.Stop(ctx, runtimeruncontrol.TransitionRequest{
 				RunID: runID, Reason: "supported_run_stop", ControlledBy: "test", Now: time.Now().UTC(),
 			})
-			if err != nil || result.Recovery.Disposition != runtimeruncontrol.RecoveryComplete {
+			if err != nil || result.Recovery.Disposition != runtimeruncontrol.RecoveryPending {
 				t.Fatalf("run stop result=%#v err=%v", result, err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				select {
+				case releaseErr := <-genericStore.releaseSeen:
+					if attempt == 0 && releaseErr == nil {
+						t.Fatal("initial generic schedule release unexpectedly succeeded")
+					}
+					if attempt == 1 && releaseErr != nil {
+						t.Fatalf("queued generic schedule release did not converge: %v", releaseErr)
+					}
+				case <-time.After(time.Second):
+					t.Fatalf("generic schedule release attempt %d was not observed", attempt+1)
+				}
 			}
 
 			quiesceCtx, cancel := context.WithTimeout(context.Background(), time.Second)

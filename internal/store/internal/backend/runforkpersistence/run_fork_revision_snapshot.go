@@ -117,6 +117,7 @@ type runForkRevisionTimer struct {
 	FireEvent            string          `json:"fire_event"`
 	FirePayload          json.RawMessage `json:"fire_payload"`
 	RoutingSource        json.RawMessage `json:"routing_source"`
+	ExecutionMode        string          `json:"execution_mode"`
 	FireAt               time.Time       `json:"fire_at"`
 	InitialFireAt        *time.Time      `json:"initial_fire_at"`
 	Recurring            bool            `json:"recurring"`

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
@@ -164,6 +165,7 @@ type AdmissionCommand struct {
 	EventType     string
 	Payload       semanticvalue.Value
 	RoutingSource events.RoutingSource
+	ExecutionMode executionmode.Mode
 	ReplyContext  string
 	Due           DueBasis
 	TaskID        string
@@ -178,6 +180,7 @@ func (c AdmissionCommand) Canonical() AdmissionCommand {
 	c.OwnerID = strings.TrimSpace(c.OwnerID)
 	c.AgentIdentity = c.AgentIdentity.Normalize()
 	c.EventType = strings.TrimSpace(c.EventType)
+	c.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(c.ExecutionMode)))
 	c.ReplyContext = strings.TrimSpace(c.ReplyContext)
 	c.Due = c.Due.Canonical()
 	c.TaskID = strings.TrimSpace(c.TaskID)
@@ -194,6 +197,9 @@ func (c AdmissionCommand) Validate() error {
 	}
 	if c.Payload.Kind() != semanticvalue.KindObject {
 		return errors.New("generic schedule payload must be a semantic object")
+	}
+	if !c.ExecutionMode.Valid() {
+		return fmt.Errorf("generic schedule execution_mode %q is invalid", c.ExecutionMode)
 	}
 	if err := c.Due.Validate(); err != nil {
 		return err
@@ -287,27 +293,28 @@ func (c AdmissionCommand) ImmutableHash() (string, error) {
 	}
 	due := c.Due.Canonical()
 	projection := struct {
-		ScheduleKey  string          `json:"schedule_key"`
-		RunID        string          `json:"run_id"`
-		EntityID     string          `json:"entity_id"`
-		FlowInstance string          `json:"flow_instance"`
-		OwnerKind    OwnerKind       `json:"owner_kind"`
-		OwnerID      string          `json:"owner_id"`
-		Agent        json.RawMessage `json:"agent_identity"`
-		EventType    string          `json:"event_type"`
-		Payload      json.RawMessage `json:"payload"`
-		Routing      json.RawMessage `json:"routing_source"`
-		ReplyContext string          `json:"reply_context_id"`
-		DueKind      DueBasisKind    `json:"due_kind"`
-		DueAbsolute  string          `json:"due_absolute,omitempty"`
-		DueDelay     string          `json:"due_delay,omitempty"`
-		DueCron      string          `json:"due_cron,omitempty"`
-		DueEvery     string          `json:"due_every,omitempty"`
-		TaskID       string          `json:"task_id"`
+		ScheduleKey   string             `json:"schedule_key"`
+		RunID         string             `json:"run_id"`
+		EntityID      string             `json:"entity_id"`
+		FlowInstance  string             `json:"flow_instance"`
+		OwnerKind     OwnerKind          `json:"owner_kind"`
+		OwnerID       string             `json:"owner_id"`
+		Agent         json.RawMessage    `json:"agent_identity"`
+		EventType     string             `json:"event_type"`
+		Payload       json.RawMessage    `json:"payload"`
+		Routing       json.RawMessage    `json:"routing_source"`
+		ExecutionMode executionmode.Mode `json:"execution_mode"`
+		ReplyContext  string             `json:"reply_context_id"`
+		DueKind       DueBasisKind       `json:"due_kind"`
+		DueAbsolute   string             `json:"due_absolute,omitempty"`
+		DueDelay      string             `json:"due_delay,omitempty"`
+		DueCron       string             `json:"due_cron,omitempty"`
+		DueEvery      string             `json:"due_every,omitempty"`
+		TaskID        string             `json:"task_id"`
 	}{
 		ScheduleKey: c.ScheduleKey, RunID: c.RunID, EntityID: c.EntityID,
 		FlowInstance: c.FlowInstance, OwnerKind: c.OwnerKind, OwnerID: c.OwnerID,
-		Agent: agent, EventType: c.EventType, Payload: payload, Routing: routing,
+		Agent: agent, EventType: c.EventType, Payload: payload, Routing: routing, ExecutionMode: c.ExecutionMode,
 		ReplyContext: c.ReplyContext, DueKind: due.Kind, DueAbsolute: formatTime(due.Absolute),
 		DueDelay: due.Delay.String(), DueCron: due.Cron, DueEvery: due.Every.String(), TaskID: c.TaskID,
 	}

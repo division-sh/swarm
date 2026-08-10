@@ -11,13 +11,14 @@ import (
 )
 
 type genericWakeupProbe struct {
-	ids []string
-	err error
+	ids    []string
+	err    error
+	queued bool
 }
 
-func (p *genericWakeupProbe) ReconcileWakeup(_ context.Context, id string) error {
+func (p *genericWakeupProbe) ReconcileWakeupWithRecovery(_ context.Context, id string) (bool, error) {
 	p.ids = append(p.ids, id)
-	return p.err
+	return p.queued, p.err
 }
 
 func TestReconcilerAttemptsEveryCommittedCancellationAfterOneOwnerFails(t *testing.T) {
@@ -41,9 +42,20 @@ type workflowWakeupProbe struct {
 	refs []timeridentity.WorkflowTimerActivationRef
 }
 
-func (p *workflowWakeupProbe) ReconcileWakeup(_ context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
+func (p *workflowWakeupProbe) ReconcileWakeupWithRecovery(_ context.Context, ref timeridentity.WorkflowTimerActivationRef) (bool, error) {
 	p.refs = append(p.refs, ref)
-	return nil
+	return false, nil
+}
+
+func TestReconcilerClassifiesQueuedRecoverySeparatelyFromPermanentFailure(t *testing.T) {
+	sentinel := errors.New("retirement failed")
+	err := NewReconciler(&genericWakeupProbe{err: sentinel, queued: true}, nil).Reconcile(context.Background(), []Ref{{
+		Family: FamilyGenericSchedule, ActivationID: "generic-1", DueAt: time.Now(),
+	}})
+	var reconciliation *ReconciliationError
+	if !errors.As(err, &reconciliation) || !reconciliation.RecoveryPendingOnly() || !errors.Is(err, sentinel) {
+		t.Fatalf("queued reconciliation error = %#v, want pending-only sentinel", err)
+	}
 }
 
 func TestReconcilerDispatchesExactFamilyTypedEvidence(t *testing.T) {

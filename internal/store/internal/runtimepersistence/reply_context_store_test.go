@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -121,7 +122,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				FlowInstance: identity.FlowInstance(), OwnerKind: runtimegenericschedule.OwnerAgent,
 				OwnerID: identity.AgentID(), AgentIdentity: identity, EventType: "provider.resume",
 				Payload:       semanticvalue.MustObject(map[string]semanticvalue.Value{"resume": semanticvalue.Bool(true)}),
-				RoutingSource: routing, ReplyContext: record.ID,
+				RoutingSource: routing, ExecutionMode: executionmode.Live, ReplyContext: record.ID,
 				Due: runtimegenericschedule.AbsoluteDue(now.Add(10 * time.Minute)), TaskID: "reply-resume",
 			}
 			admitted, err := store.AdmitGenericSchedule(events.WithDeliveryContext(ctx, deliveryContext), command)

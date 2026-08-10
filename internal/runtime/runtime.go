@@ -2238,6 +2238,7 @@ func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontract
 		TaskID:        handle.TaskID(),
 		Payload:       payload,
 		RoutingSource: events.NewPlatformControlRoutingSource(),
+		ExecutionMode: executionmode.Live,
 		Due:           runtimegenericschedule.DelayDue(interval),
 	}
 	if timer.Recurring {

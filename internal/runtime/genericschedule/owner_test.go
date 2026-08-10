@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -19,7 +20,8 @@ func testGlobalActivation(t *testing.T, due DueBasis, admittedAt, currentDue tim
 	command := AdmissionCommand{
 		ScheduleKey: "global-proof", OwnerKind: OwnerSystem, OwnerID: "runtime",
 		EventType: "platform.generic_schedule_proof", Payload: semanticvalue.EmptyObject(),
-		RoutingSource: events.NewPlatformControlRoutingSource(), Due: due, TaskID: "global-proof",
+		RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
+		Due: due, TaskID: "global-proof",
 	}
 	hash, err := command.ImmutableHash()
 	if err != nil {
@@ -37,6 +39,35 @@ func testGlobalActivation(t *testing.T, due DueBasis, admittedAt, currentDue tim
 		t.Fatal(err)
 	}
 	return activation
+}
+
+func TestAdmissionCommandRequiresHashBearingExecutionMode(t *testing.T) {
+	command := testGlobalActivation(
+		t,
+		AbsoluteDue(time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)),
+		time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC),
+	).Command
+
+	missing := command
+	missing.ExecutionMode = ""
+	if err := missing.Validate(); err == nil || !strings.Contains(err.Error(), "execution_mode") {
+		t.Fatalf("missing execution mode error = %v, want typed admission rejection", err)
+	}
+
+	liveHash, err := command.ImmutableHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := command
+	mock.ExecutionMode = executionmode.Mock
+	mockHash, err := mock.ImmutableHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liveHash == mockHash {
+		t.Fatalf("live and mock commands shared immutable hash %q", liveHash)
+	}
 }
 
 func TestActivationValidateClosesGenericScheduleStateEvidenceMatrix(t *testing.T) {
@@ -118,6 +149,30 @@ func TestOccurrenceEventUsesPersistedDueCoordinateAsSemanticTime(t *testing.T) {
 	}
 	if occurrence.AdmittedAt.Equal(event.CreatedAt()) {
 		t.Fatal("occurrence admission bookkeeping was conflated with semantic occurrence time")
+	}
+}
+
+func TestOccurrenceEventPreservesImmutableExecutionMode(t *testing.T) {
+	dueAt := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	activation := testGlobalActivation(t, AbsoluteDue(dueAt), dueAt.Add(-time.Hour), dueAt)
+	activation.Command.ExecutionMode = executionmode.Mock
+	var err error
+	activation.ImmutableHash, err = activation.Command.ImmutableHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := activation.Validate(); err != nil {
+		t.Fatalf("validate mock activation: %v", err)
+	}
+	event, err := occurrenceEvent(activation, Occurrence{
+		ActivationID: activation.ID, DueAt: dueAt,
+		EventID: OccurrenceEventID(activation.ID, dueAt), AdmittedAt: dueAt,
+	}, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("occurrence execution mode = %q, want mock", event.ExecutionMode())
 	}
 }
 
@@ -321,16 +376,66 @@ func (*lifecycleProofStore) ReleaseGenericScheduleClaims(context.Context) error 
 
 type lifecycleProofScheduler struct {
 	restoreScheduler
-	order     *[]string
-	retired   []Wakeup
-	retireErr error
+	order        *[]string
+	retired      []Wakeup
+	retireErr    error
+	registerErrs []error
+	registerSeen chan error
 }
 
 func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup) error {
 	if s.order != nil {
 		*s.order = append(*s.order, "register")
 	}
+	var result error
+	if len(s.registerErrs) > 0 {
+		result = s.registerErrs[0]
+		s.registerErrs = s.registerErrs[1:]
+	}
+	if s.registerSeen != nil {
+		s.registerSeen <- result
+	}
+	if result != nil {
+		return result
+	}
 	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+}
+
+func TestLifecycleReconcileWithRecoveryQueuesAndConverges(t *testing.T) {
+	dueAt := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	activation := testGlobalActivation(t, AbsoluteDue(dueAt), dueAt.Add(-time.Minute), dueAt)
+	store := &lifecycleProofStore{activation: activation}
+	transient := errors.New("register wakeup failed")
+	scheduler := &lifecycleProofScheduler{registerErrs: []error{transient}, registerSeen: make(chan error, 2)}
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopLifecycleProof(t, lifecycle)
+
+	queued, err := lifecycle.ReconcileWakeupWithRecovery(context.Background(), activation.ID)
+	if !queued || !errors.Is(err, transient) {
+		t.Fatalf("initial reconciliation queued=%v err=%v, want queued transient", queued, err)
+	}
+	select {
+	case err := <-scheduler.registerSeen:
+		if !errors.Is(err, transient) {
+			t.Fatalf("first registration error = %v", err)
+		}
+	default:
+		t.Fatal("initial reconciliation did not attempt registration")
+	}
+	select {
+	case err := <-scheduler.registerSeen:
+		if err != nil {
+			t.Fatalf("recovery registration error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued generic schedule recovery did not converge")
+	}
+	if len(scheduler.registered) != 1 || scheduler.registered[0].ActivationID() != activation.ID {
+		t.Fatalf("recovered registrations = %#v", scheduler.registered)
+	}
 }
 func (s *lifecycleProofScheduler) RetireGenericScheduleWakeup(wakeup Wakeup) error {
 	s.retired = append(s.retired, wakeup)

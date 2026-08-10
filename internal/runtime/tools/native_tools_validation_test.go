@@ -72,7 +72,7 @@ func nativeCapabilityRuntimeSet(t testing.TB, runtime llm.Runtime) *llm.AgentRun
 func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing.T) {
 	mockActor := models.AgentConfig{ID: "mock-agent", NativeTools: models.NativeToolConfig{FileIO: true}}
 	liveActor := models.AgentConfig{ID: "live-agent", NativeTools: models.NativeToolConfig{FileIO: true}}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		ModelRuntimes: mappedAgentRuntimeResolver{
 			mockActor.ID: mockCapabilityRuntimeStub{},
 			liveActor.ID: nativeCapabilityRuntimeStub{},

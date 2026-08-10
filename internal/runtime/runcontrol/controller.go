@@ -83,6 +83,7 @@ const (
 	RecoveryExhausted     RecoveryDisposition = "exhausted"
 	RecoveryBlocked       RecoveryDisposition = "blocked"
 	RecoveryFailed        RecoveryDisposition = "failed"
+	RecoveryPending       RecoveryDisposition = "pending"
 	RecoveryCancelled     RecoveryDisposition = "cancelled"
 )
 
@@ -171,7 +172,12 @@ func (c *Controller) Stop(ctx context.Context, req TransitionRequest) (Transitio
 		return result, nil
 	}
 	if err := c.timerCancellations.Reconcile(context.WithoutCancel(ctx), state.TimerCancellations); err != nil {
-		result.Recovery = PostCommitRecovery{Disposition: RecoveryFailed, Err: err}
+		disposition := RecoveryFailed
+		var reconciliation *runtimetimercancellation.ReconciliationError
+		if errors.As(err, &reconciliation) && reconciliation.RecoveryPendingOnly() {
+			disposition = RecoveryPending
+		}
+		result.Recovery = PostCommitRecovery{Disposition: disposition, Err: err}
 	}
 	return result, nil
 }

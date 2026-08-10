@@ -441,7 +441,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"run.stop": {
 			Params:         map[string]any{"run_id": runID},
 			ConflictParams: map[string]any{"run_id": otherRunID},
-			ResultKeys:     []string{"ok"},
+			ResultKeys:     []string{"ok", "recovery"},
 			SuccessEffects: 1,
 		},
 		"runtime.nuke": {
@@ -1462,7 +1462,11 @@ func (c *mutatingProbeRunControl) transition(action string, req runtimeruncontro
 		return runtimeruncontrol.TransitionResult{}, err
 	}
 	c.state.recordEffect()
-	return runtimeruncontrol.TransitionResult{RunID: req.RunID, Status: action}, nil
+	result := runtimeruncontrol.TransitionResult{RunID: req.RunID, Status: action}
+	if action == "stop" {
+		result.Recovery.Disposition = runtimeruncontrol.RecoveryComplete
+	}
+	return result, nil
 }
 
 type mutatingProbeAgentControl struct {

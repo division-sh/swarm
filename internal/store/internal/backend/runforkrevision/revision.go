@@ -606,7 +606,7 @@ const canonicalTimersProjectionSQL = `
 	           'entity_id', t.entity_id, 'flow_scope_key', t.flow_scope_key,
 	           'flow_instance_id', t.flow_instance_id, 'flow_instance', t.flow_instance,
 	           'fire_event', t.fire_event, 'fire_payload', t.fire_payload,
-	           'routing_source', t.routing_source, 'fire_at', t.fire_at,
+	           'routing_source', t.routing_source, 'execution_mode', t.execution_mode, 'fire_at', t.fire_at,
 	           'initial_fire_at', t.initial_fire_at, 'recurring', t.recurring,
 	           'recurrence_interval', t.recurrence_interval,
 	           'owner_node', t.owner_node, 'owner_agent', t.owner_agent, 'owner_kind', t.owner_kind,

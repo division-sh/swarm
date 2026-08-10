@@ -2,18 +2,61 @@ package timercancellation
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
 type GenericScheduleWakeupOwner interface {
-	ReconcileWakeup(context.Context, string) error
+	ReconcileWakeupWithRecovery(context.Context, string) (bool, error)
 }
 
 type WorkflowTimerWakeupOwner interface {
-	ReconcileWakeup(context.Context, timeridentity.WorkflowTimerActivationRef) error
+	ReconcileWakeupWithRecovery(context.Context, timeridentity.WorkflowTimerActivationRef) (bool, error)
+}
+
+type Failure struct {
+	Ref Ref
+	Err error
+}
+
+// ReconciliationError distinguishes committed cancellations whose process
+// projection is queued for recovery from failures that could not be queued.
+type ReconciliationError struct {
+	Pending []Failure
+	Failed  []Failure
+}
+
+func (e *ReconciliationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(e.Pending)+len(e.Failed))
+	for _, failure := range e.Pending {
+		parts = append(parts, fmt.Sprintf("pending %s/%s: %v", failure.Ref.Family, failure.Ref.ActivationID, failure.Err))
+	}
+	for _, failure := range e.Failed {
+		parts = append(parts, fmt.Sprintf("failed %s/%s: %v", failure.Ref.Family, failure.Ref.ActivationID, failure.Err))
+	}
+	return fmt.Sprintf("timer cancellation reconciliation pending=%d failed=%d: %s", len(e.Pending), len(e.Failed), strings.Join(parts, "; "))
+}
+
+func (e *ReconciliationError) Unwrap() []error {
+	if e == nil {
+		return nil
+	}
+	errs := make([]error, 0, len(e.Pending)+len(e.Failed))
+	for _, failure := range append(append([]Failure(nil), e.Pending...), e.Failed...) {
+		if failure.Err != nil {
+			errs = append(errs, failure.Err)
+		}
+	}
+	return errs
+}
+
+func (e *ReconciliationError) RecoveryPendingOnly() bool {
+	return e != nil && len(e.Pending) > 0 && len(e.Failed) == 0
 }
 
 // Reconciler is the sole post-commit interpreter of family-typed timer
@@ -28,38 +71,59 @@ func NewReconciler(generic GenericScheduleWakeupOwner, workflow WorkflowTimerWak
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, refs []Ref) error {
-	var failures []error
+	outcome := &ReconciliationError{}
+	failed := func(ref Ref, err error) {
+		outcome.Failed = append(outcome.Failed, Failure{Ref: ref.Canonical(), Err: err})
+	}
+	pending := func(ref Ref, err error) {
+		outcome.Pending = append(outcome.Pending, Failure{Ref: ref.Canonical(), Err: err})
+	}
 	for _, cancellation := range refs {
 		cancellation = cancellation.Canonical()
 		if err := cancellation.Validate(); err != nil {
-			failures = append(failures, err)
+			failed(cancellation, err)
 			continue
 		}
 		switch cancellation.Family {
 		case FamilyGenericSchedule:
 			if r == nil || r.generic == nil {
-				failures = append(failures, fmt.Errorf("generic schedule cancellation reconciliation owner is required"))
+				failed(cancellation, fmt.Errorf("generic schedule cancellation reconciliation owner is required"))
 				continue
 			}
-			if err := r.generic.ReconcileWakeup(ctx, cancellation.ActivationID); err != nil {
-				failures = append(failures, fmt.Errorf("reconcile generic schedule %s: %w", cancellation.ActivationID, err))
+			queued, err := r.generic.ReconcileWakeupWithRecovery(ctx, cancellation.ActivationID)
+			if err != nil {
+				err = fmt.Errorf("reconcile generic schedule %s: %w", cancellation.ActivationID, err)
+				if queued {
+					pending(cancellation, err)
+				} else {
+					failed(cancellation, err)
+				}
 			}
 		case FamilyWorkflowTimer:
 			if r == nil || r.workflow == nil {
-				failures = append(failures, fmt.Errorf("workflow timer cancellation reconciliation owner is required"))
+				failed(cancellation, fmt.Errorf("workflow timer cancellation reconciliation owner is required"))
 				continue
 			}
 			ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(cancellation.TaskID)
 			if !ok || ref.ActivationID != cancellation.ActivationID {
-				failures = append(failures, fmt.Errorf("workflow timer cancellation evidence is inconsistent"))
+				failed(cancellation, fmt.Errorf("workflow timer cancellation evidence is inconsistent"))
 				continue
 			}
-			if err := r.workflow.ReconcileWakeup(ctx, ref); err != nil {
-				failures = append(failures, fmt.Errorf("reconcile workflow timer %s: %w", cancellation.ActivationID, err))
+			queued, err := r.workflow.ReconcileWakeupWithRecovery(ctx, ref)
+			if err != nil {
+				err = fmt.Errorf("reconcile workflow timer %s: %w", cancellation.ActivationID, err)
+				if queued {
+					pending(cancellation, err)
+				} else {
+					failed(cancellation, err)
+				}
 			}
 		default:
-			failures = append(failures, fmt.Errorf("unsupported timer cancellation family %q", cancellation.Family))
+			failed(cancellation, fmt.Errorf("unsupported timer cancellation family %q", cancellation.Family))
 		}
 	}
-	return errors.Join(failures...)
+	if len(outcome.Pending) == 0 && len(outcome.Failed) == 0 {
+		return nil
+	}
+	return outcome
 }
