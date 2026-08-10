@@ -274,8 +274,8 @@ func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner a
 	if err := owner.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "observer", FlowID: "global", FlowPath: identity.FlowInstance(),
-		Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
-	}),
+			Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
