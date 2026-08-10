@@ -601,6 +601,9 @@ func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPl
 	if !ok || !current.Eligible() {
 		return false, fmt.Errorf("readiness not found")
 	}
+	if current.Plan.ExecutionMode != normalized.ExecutionMode {
+		return false, fmt.Errorf("cannot revise readiness execution mode")
+	}
 	actualJSON, err := json.Marshal(current.Plan)
 	if err != nil {
 		return false, err
@@ -2093,6 +2096,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	source := semanticview.Wrap(bundle)
 	setFlowActivationManagerSemanticSource(am, source)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.TriggerEvent = testFlowActivationTriggerEventWithMode(req.TriggerEvent.ID(), executionmode.Mock, req.TriggerEvent.RunID())
 	initialCtx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, initialCtx, req); err != nil {
 		t.Fatalf("activate initial source: %v", err)
@@ -2102,7 +2106,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
-	if err != nil || !found || initial.TopologyReadyAt.IsZero() {
+	if err != nil || !found || initial.TopologyReadyAt.IsZero() || initial.Plan.ExecutionMode != executionmode.Mock {
 		t.Fatalf("initial readiness: found=%v err=%v readiness=%#v", found, err, initial)
 	}
 
@@ -2136,6 +2140,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	if completed.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
 		completed.Plan.BundleHash != revisedHash ||
 		completed.Plan.BundleSource != revisedSource ||
+		completed.Plan.ExecutionMode != executionmode.Mock ||
 		completed.TopologyReadyAt.IsZero() ||
 		completed.Pending() {
 		t.Fatalf("same-version revised source did not recomplete exact plan: %#v", completed)
@@ -2486,7 +2491,7 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 				InstancePath: path,
 				RunStatus:    "running", InstanceStatus: "active",
 				Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0",
+					RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 					Identity: runtimeflowidentity.Instance{
 						TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 						InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -2563,7 +2568,7 @@ func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T
 	plan, err := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance,
 		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash, BundleSource: bundleSource,
-		WorkflowVersion: bundle.WorkflowVersion(),
+		WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 		Agents: []runtimepipeline.DynamicFlowRuntimeAgentExpectation{{
 			Identity: runtimeagentidentity.Identity{
 				Name: runtimeagentidentity.Name{
@@ -2890,6 +2895,10 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if len(instances.lifecycleModes) != 1 || instances.lifecycleModes[0] != executionmode.Mock {
 		t.Fatalf("initial lifecycle modes = %#v, want [mock]", instances.lifecycleModes)
+	}
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, runID, req.Instance.Route())
+	if err != nil || !found || readiness.Plan.ExecutionMode != executionmode.Mock {
+		t.Fatalf("durable activation execution mode: found=%v err=%v readiness=%#v", found, err, readiness)
 	}
 	if got, _ := autoEmit.ContextMap("")["source_event_id"].(string); got != triggerEventID {
 		t.Fatalf("event context source_event_id = %q, want trigger event %q", got, triggerEventID)

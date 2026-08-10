@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const dynamicFlowRuntimeReadinessVersion = 3
+const dynamicFlowRuntimeReadinessVersion = 4
 
 type DynamicFlowRuntimeAgentExpectation struct {
 	Identity       runtimeagentidentity.Identity `json:"identity"`
@@ -84,6 +84,7 @@ type DynamicFlowRuntimeReadinessPlan struct {
 	BundleHash      string                               `json:"bundle_hash"`
 	BundleSource    string                               `json:"bundle_source"`
 	WorkflowVersion string                               `json:"workflow_version"`
+	ExecutionMode   executionmode.Mode                   `json:"execution_mode"`
 	Agents          []DynamicFlowRuntimeAgentExpectation `json:"agents"`
 	CreationEvent   *DynamicFlowRuntimeCreationEventPlan `json:"creation_event,omitempty"`
 }
@@ -250,6 +251,9 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	if p.WorkflowVersion == "" {
 		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness requires workflow_version")
 	}
+	if !p.ExecutionMode.Valid() {
+		return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow runtime readiness requires typed execution mode authority")
+	}
 	agents := append([]DynamicFlowRuntimeAgentExpectation(nil), p.Agents...)
 	for idx := range agents {
 		agents[idx].Identity = agents[idx].Identity.Normalize()
@@ -296,6 +300,9 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 		}
 		if event.EventType == "" || event.RunID != p.RunID || event.ParentEventID == "" || !event.ExecutionMode.Valid() || event.CreatedAt.IsZero() {
 			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow creation event requires exact type, lineage, execution mode, and occurrence time")
+		}
+		if event.ExecutionMode != p.ExecutionMode {
+			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow creation event execution mode disagrees with readiness authority")
 		}
 		if len(event.Payload) == 0 || !json.Valid(event.Payload) {
 			return DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow creation event requires valid payload")

@@ -817,14 +817,15 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string)
 		if !bundleHash.Valid || !bundleSource.Valid {
 			return nil, fmt.Errorf("%s %s is missing exact run bundle source", label, instancePath)
 		}
-		var plan runtimepipeline.DynamicFlowRuntimeReadinessPlan
-		if err := json.Unmarshal([]byte(planRaw.String), &plan); err != nil {
-			return nil, fmt.Errorf("decode %s %s readiness plan: %w", label, instancePath, err)
-		}
-		plan, err := plan.Normalized()
+		readiness, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(
+			runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{
+				RunID: runID, InstancePath: instancePath, Plan: []byte(planRaw.String),
+			},
+		)
 		if err != nil {
 			return nil, fmt.Errorf("validate %s %s readiness plan: %w", label, instancePath, err)
 		}
+		plan := readiness.Plan
 		if plan.RunID != runID || plan.Identity.InstancePath != instancePath || plan.Identity.TemplateID != templateID {
 			return nil, fmt.Errorf("%s %s readiness identity does not match persisted owner", label, instancePath)
 		}
