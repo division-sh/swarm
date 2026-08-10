@@ -5674,8 +5674,9 @@ engine:
         path plus short database operations for purge/load/completion rows; Postgres remains authoritative for production
         concurrency through its advisory-lock owner. PostgreSQL advisory-lock ownership is bound to one exact reserved session;
         terminal unlock, unlock-result verification, session close, and capacity restoration are part of the operation result.
-        Any terminal release failure clears fabricated completion/replay success and fails closed. Callback, publish, or release
-        failure must leave no idempotency completion for the failed request.
+        A terminal release failure clears success from the current response and fails closed. If completion persistence committed
+        before that release failure, the durable completion remains canonical and the next same-key request replays it without
+        re-executing the callback. Callback or publish failure before completion persistence must leave no idempotency completion.
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
     - name: runtime_session_registry_rows
