@@ -84,7 +84,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	if err := selected.UpsertAgent(ctx, manager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
-			ExecutionMode: "live", FlowPath: "flow/a", Config: json.RawMessage(`{"system_prompt":"usage"}`),
+			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Config: json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status: "active", StartedAt: base.Add(-time.Minute),
 	}); err != nil {
