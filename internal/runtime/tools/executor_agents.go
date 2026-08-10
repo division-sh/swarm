@@ -286,6 +286,21 @@ func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentC
 }
 
 func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	causalMode, hasCausalMode := runtimeeffects.ExecutionModeFromContext(ctx)
+	if actor.ExecutionMode == runtimeeffects.ExecutionModeMock || (hasCausalMode && causalMode == runtimeeffects.ExecutionModeMock) {
+		return nil, failures.New(
+			failures.ClassAuthorizationDenied,
+			"mock_agent_hire_forbidden",
+			"tool-executor",
+			"agent_hire.authorize_execution_mode",
+			map[string]any{
+				"action":                "agent_hire",
+				"actor_id":              actor.ID,
+				"actor_execution_mode":  actor.ExecutionMode,
+				"causal_execution_mode": causalMode,
+			},
+		)
+	}
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")

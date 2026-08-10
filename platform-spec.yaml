@@ -6114,6 +6114,11 @@ engine:
               before admission or construction. The persistence projection accepts only an already-resolved backend and never
               invents a configured default from authored intent or an empty descriptor. Native-tool admission runs only after
               this resolution and construction uses that same resolved actor/runtime pair.
+            dynamic_authority_rule: >
+              Mock-causal execution cannot invoke agent_hire to create a runtime-authored actor. The mutation is rejected
+              before input decoding, manager lookup, or spawn because a dynamic child could otherwise select a live provider
+              and mint authority outside the source-owned mock census. Live-causal agent_hire remains subject to its ordinary
+              delegation and lifecycle checks until the dynamic mutation family is retired.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
               authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
@@ -6212,9 +6217,9 @@ engine:
           rule: >
             The central external-effect authorization owner rejects mock-mode attempts before launch. A mock performance may
             request visible internal tools and emit events, but it cannot call providers, HTTP tools, MCP, native commands,
-            workspace writes, relays, live LLM adapters, or action-owned artifact repository commits. The sole pipeline activity
-            exception is a statically admitted exact provider_connector response that uses the normal non-idempotent attempt journal;
-            it performs no credential lookup or transport.
+            workspace writes, relays, live LLM adapters, create a runtime-authored agent through agent_hire, or commit
+            action-owned artifacts. The sole pipeline activity exception is a statically admitted exact provider_connector
+            response that uses the normal non-idempotent attempt journal; it performs no credential lookup or transport.
         accounting:
           invocation_type: mock_python
           usage_accounting: estimated
