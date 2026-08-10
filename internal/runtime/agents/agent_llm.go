@@ -51,10 +51,10 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		subs = append(subs, events.EventType(s))
 	}
 
-	if err := cfg.ValidateIntentCarrier(); err != nil {
+	systemPrompt, err := cfg.DerivedSystemPrompt()
+	if err != nil {
 		return nil, err
 	}
-	systemPrompt := cfg.SystemPrompt
 	systemPrompt = appendPromptPostamble(systemPrompt)
 
 	maxTurns := 100

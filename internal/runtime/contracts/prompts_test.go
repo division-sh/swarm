@@ -372,7 +372,7 @@ func TestResolvedAgentIntent_DoesNotGuessSources(t *testing.T) {
 	}
 }
 
-func TestAssembleAgentSystemPrompt_DeliversCriteriaWithoutChangingIntentIdentity(t *testing.T) {
+func TestAssembleAgentPrompt_DeliversCriteriaWithoutChangingIntentIdentity(t *testing.T) {
 	flow := FlowContractView{
 		Paths: FlowContractPaths{ID: "validation", Flow: "validation"},
 		Policy: PolicyDocument{Criteria: map[string]PolicyCriteriaSet{
@@ -386,7 +386,11 @@ func TestAssembleAgentSystemPrompt_DeliversCriteriaWithoutChangingIntentIdentity
 		t.Fatal(err)
 	}
 	entry := AgentRegistryEntry{ResolvedIntent: resolved, Criteria: []string{"feasibility_exclusions"}}
-	got, err := AssembleAgentSystemPrompt(bundle, "validation", entry, []string{"feasibility_exclusions"})
+	prompt, err := AssembleAgentPrompt(bundle, "validation", entry, []string{"feasibility_exclusions"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := prompt.Text(resolved, entry.Criteria)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -634,33 +634,35 @@ func TestExecAgentFire_PersistenceFailureRestoresPriorAuthority(t *testing.T) {
 
 func TestRetiredDynamicAgentMutationFailsBeforeAnyInterpreterOrManagerSideEffect(t *testing.T) {
 	for _, toolName := range []string{"agent_hire", "agent_reconfigure"} {
-		for _, tc := range []struct {
-			name  string
-			input any
-		}{
-			{name: "ordinary", input: map[string]any{"agent_id": "worker"}},
-			{name: "top_level_raw_prompt", input: map[string]any{"system_prompt": "obsolete"}},
-			{name: "nested_raw_prompt", input: map[string]any{"config": map[string]any{"nested": map[string]any{"system_prompt": "obsolete"}}}},
-			{name: "malformed", input: make(chan struct{})},
+		for aliasName, alias := range map[string]string{
+			"canonical":    toolName,
+			"whitespace":   " \t" + toolName + "\n",
+			"mcp_prefixed": "mcp__runtime-tools__" + toolName,
 		} {
-			t.Run(toolName+"/"+tc.name, func(t *testing.T) {
-				manager := &captureManagerStub{}
-				exec := NewExecutor(nil, nil, manager)
-				var err error
-				if tc.name == "ordinary" {
-					_, err = exec.Execute(context.Background(), toolName, tc.input)
-				} else if toolName == "agent_hire" {
-					_, err = exec.ExecAgentHireDirect(models.AgentConfig{}, tc.input)
-				} else {
-					_, err = exec.ExecAgentReconfigureDirect(models.AgentConfig{}, tc.input)
-				}
-				if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), toolName) {
-					t.Fatalf("error = %v, want unconditional %s retirement", err, toolName)
-				}
-				if manager.resolveCalled || manager.spawnCalled || manager.reconfigureCalled || manager.teardownCalled {
-					t.Fatalf("retired %s reached manager: %#v", toolName, manager)
-				}
-			})
+			for _, tc := range []struct {
+				name  string
+				input any
+			}{
+				{name: "ordinary", input: map[string]any{"agent_id": "worker"}},
+				{name: "top_level_raw_prompt", input: map[string]any{"system_prompt": "obsolete"}},
+				{name: "nested_raw_prompt", input: map[string]any{"config": map[string]any{"nested": map[string]any{"system_prompt": "obsolete"}}}},
+				{name: "malformed", input: make(chan struct{})},
+			} {
+				t.Run(toolName+"/"+aliasName+"/"+tc.name, func(t *testing.T) {
+					manager := &captureManagerStub{}
+					exec := NewExecutor(nil, nil, manager)
+					_, err := exec.Execute(context.Background(), alias, tc.input)
+					if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), toolName) {
+						t.Fatalf("error = %v, want unconditional %s retirement", err, toolName)
+					}
+					if strings.Contains(err.Error(), "tool_actor_context_missing") {
+						t.Fatalf("retired alias reached actor context lookup: %v", err)
+					}
+					if manager.resolveCalled || manager.spawnCalled || manager.reconfigureCalled || manager.teardownCalled {
+						t.Fatalf("retired %s reached manager: %#v", toolName, manager)
+					}
+				})
+			}
 		}
 	}
 }

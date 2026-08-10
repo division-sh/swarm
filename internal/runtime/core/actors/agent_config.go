@@ -55,52 +55,66 @@ func (cfg NativeToolConfig) Names() []string {
 // LLM, and semantic/runtime contract resolution. It is intentionally distinct
 // from persistence-row ownership even when stored verbatim.
 type AgentConfig struct {
-	ID                   string                        `json:"id"`
-	Identity             runtimeagentidentity.Identity `json:"identity"`
-	Type                 string                        `json:"type"`
-	Role                 string                        `json:"role"`
-	FlowID               string                        `json:"flow_id,omitempty"`
-	Model                string                        `json:"model,omitempty"`
-	LLMBackend           string                        `json:"llm_backend,omitempty"`
-	ResolvedLLMBackend   string                        `json:"resolved_llm_backend,omitempty"`
-	ResolvedModel        string                        `json:"resolved_model,omitempty"`
-	ResolvedLLMProvider  string                        `json:"resolved_llm_provider,omitempty"`
-	ResolvedLLMTransport string                        `json:"resolved_llm_transport,omitempty"`
-	ExecutionMode        runtimeeffects.ExecutionMode  `json:"execution_mode,omitempty"`
-	Memory               agentmemory.Plan              `json:"memory"`
-	Mock                 mockperformance.Performance   `json:"mock,omitempty"`
-	Intent               runtimeagentintent.Resolved   `json:"intent"`
-	SystemPrompt         string                        `json:"derived_system_prompt"`
-	MaxTurnsPerTask      int                           `json:"max_turns_per_task,omitempty"`
-	Subscriptions        []string                      `json:"subscriptions,omitempty"`
-	EmitEvents           []string                      `json:"emit_events,omitempty"`
-	Criteria             []string                      `json:"criteria,omitempty"`
-	Tools                []string                      `json:"tools,omitempty"`
-	Permissions          []string                      `json:"permissions,omitempty"`
-	NativeTools          NativeToolConfig              `json:"native_tools,omitempty"`
-	FlowDataAccess       []string                      `json:"flow_data_access,omitempty"`
-	WorkspaceClass       string                        `json:"workspace_class,omitempty"`
-	ManagerFallback      string                        `json:"manager_fallback,omitempty"`
-	FlowPath             string                        `json:"flow_path,omitempty"`
-	EntityID             string                        `json:"entity_id,omitempty"`
-	ParentAgent          string                        `json:"parent_agent_id,omitempty"`
-	Config               json.RawMessage               `json:"config,omitempty"`
-	BudgetEnvelope       float64                       `json:"budget_envelope,omitempty"`
+	ID                   string                           `json:"id"`
+	Identity             runtimeagentidentity.Identity    `json:"identity"`
+	Type                 string                           `json:"type"`
+	Role                 string                           `json:"role"`
+	FlowID               string                           `json:"flow_id,omitempty"`
+	Model                string                           `json:"model,omitempty"`
+	LLMBackend           string                           `json:"llm_backend,omitempty"`
+	ResolvedLLMBackend   string                           `json:"resolved_llm_backend,omitempty"`
+	ResolvedModel        string                           `json:"resolved_model,omitempty"`
+	ResolvedLLMProvider  string                           `json:"resolved_llm_provider,omitempty"`
+	ResolvedLLMTransport string                           `json:"resolved_llm_transport,omitempty"`
+	ExecutionMode        runtimeeffects.ExecutionMode     `json:"execution_mode,omitempty"`
+	Memory               agentmemory.Plan                 `json:"memory"`
+	Mock                 mockperformance.Performance      `json:"mock,omitempty"`
+	Intent               runtimeagentintent.Resolved      `json:"intent"`
+	Prompt               runtimeagentintent.DerivedPrompt `json:"-"`
+	MaxTurnsPerTask      int                              `json:"max_turns_per_task,omitempty"`
+	Subscriptions        []string                         `json:"subscriptions,omitempty"`
+	EmitEvents           []string                         `json:"emit_events,omitempty"`
+	Criteria             []string                         `json:"criteria,omitempty"`
+	Tools                []string                         `json:"tools,omitempty"`
+	Permissions          []string                         `json:"permissions,omitempty"`
+	NativeTools          NativeToolConfig                 `json:"native_tools,omitempty"`
+	FlowDataAccess       []string                         `json:"flow_data_access,omitempty"`
+	WorkspaceClass       string                           `json:"workspace_class,omitempty"`
+	ManagerFallback      string                           `json:"manager_fallback,omitempty"`
+	FlowPath             string                           `json:"flow_path,omitempty"`
+	EntityID             string                           `json:"entity_id,omitempty"`
+	ParentAgent          string                           `json:"parent_agent_id,omitempty"`
+	Config               json.RawMessage                  `json:"config,omitempty"`
+	BudgetEnvelope       float64                          `json:"budget_envelope,omitempty"`
 }
 
 func (cfg AgentConfig) EffectiveEntityID() string { return strings.TrimSpace(cfg.EntityID) }
 
 func (cfg AgentConfig) ValidateIntentCarrier() error {
+	if err := cfg.ValidateIntentInputs(); err != nil {
+		return err
+	}
+	if err := cfg.Prompt.Validate(cfg.Intent, cfg.Criteria); err != nil {
+		return fmt.Errorf("derived prompt: %w", err)
+	}
+	return nil
+}
+
+func (cfg AgentConfig) ValidateIntentInputs() error {
 	if err := cfg.Intent.Validate(); err != nil {
 		return fmt.Errorf("resolved intent: %w", err)
 	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		return fmt.Errorf("derived system prompt is required")
-	}
-	if !strings.HasPrefix(cfg.SystemPrompt, cfg.Intent.Content) {
-		return fmt.Errorf("derived system prompt must begin with the exact resolved intent content")
+	if !slices.Equal(cfg.Criteria, normalizeStringList(cfg.Criteria)) {
+		return fmt.Errorf("criteria references are not canonical")
 	}
 	return nil
+}
+
+func (cfg AgentConfig) DerivedSystemPrompt() (string, error) {
+	if err := cfg.ValidateIntentCarrier(); err != nil {
+		return "", err
+	}
+	return cfg.Prompt.Text(cfg.Intent, cfg.Criteria)
 }
 
 func ValidateNoAuthoredSystemPrompt(raw json.RawMessage) error {

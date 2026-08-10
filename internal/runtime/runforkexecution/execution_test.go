@@ -2816,7 +2816,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 			},
 		},
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
-	if err == nil || !strings.Contains(err.Error(), "derived system prompt is required") {
+	if err == nil || !strings.Contains(err.Error(), "cannot reconstruct its derived prompt without a semantic source") {
 		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
 	}
 	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {

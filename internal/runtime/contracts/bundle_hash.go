@@ -234,12 +234,13 @@ func (b *bundleHashEntryBuilder) addExactIntentFile(path string, expected []byte
 			if b.entries[i].Path != abs {
 				continue
 			}
-			if b.entries[i].Policy != bundleHashIntent {
+			if b.entries[i].Policy != bundleHashIntent && b.entries[i].Policy != bundleHashRaw {
 				return fmt.Errorf("declared intent %s overlaps canonical input %s with non-intent policy", label, b.entries[i].Label)
 			}
 			if len(b.entries[i].ExpectedExact) > 0 && !bytes.Equal(b.entries[i].ExpectedExact, expected) {
 				return fmt.Errorf("declared intent %s has conflicting exact content owners", label)
 			}
+			b.entries[i].Policy = bundleHashIntent
 			b.entries[i].ExpectedExact = append([]byte(nil), expected...)
 			return nil
 		}

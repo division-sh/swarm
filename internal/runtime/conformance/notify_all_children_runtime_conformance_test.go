@@ -490,7 +490,9 @@ func proveDynamicFlowSourceRevisionConvergence(
 	rogue.ID = rogueID
 	rogue.Identity = runtimeagentidentity.Identity{}
 	rogue.Role = "rogue"
-	assertNotifyAllChildrenReadinessOwnershipFailure(t, "generic hire", runtimeV2.manager.SpawnAgent(rogue))
+	if err := runtimeV2.manager.SpawnAgent(rogue); err == nil || !strings.Contains(err.Error(), "resolved intent does not match a canonical declaration") {
+		t.Fatalf("generic hire error = %v, want canonical intent rejection", err)
+	}
 	genericReconfigure := reader.Config
 	genericReconfigure.Role = "generic-reconfigure"
 	_, genericReconfigureErr := runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, genericReconfigure, nil)

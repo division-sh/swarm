@@ -1855,9 +1855,13 @@ func requireTableColumns(t *testing.T, ctx context.Context, db *sql.DB, tableNam
 func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
 	t.Helper()
 	identity := conformanceAgentIdentity(t, agentID)
-	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "conformance#agents."+agentID+".intent", "Exercise the conformance surface.")
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents."+agentID+".intent", "Exercise the conformance surface.")
 	if err != nil {
 		t.Fatalf("resolve conformance agent intent: %v", err)
+	}
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive conformance agent prompt: %v", err)
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1871,7 +1875,7 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 			ResolvedLLMBackend: "anthropic",
 			ExecutionMode:      "live",
 			Intent:             intent,
-			SystemPrompt:       intent.Content,
+			Prompt:             prompt,
 			Config:             []byte(`{}`),
 		},
 		Status:    "active",

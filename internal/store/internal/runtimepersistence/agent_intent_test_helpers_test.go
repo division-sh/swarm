@@ -31,6 +31,10 @@ func runtimePersistenceTestAgentConfig(cfg runtimeactors.AgentConfig) runtimeact
 		panic(err)
 	}
 	cfg.Intent = intent
-	cfg.SystemPrompt = content
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Prompt = prompt
 	return cfg
 }

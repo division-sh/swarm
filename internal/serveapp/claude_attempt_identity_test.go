@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -39,6 +40,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -560,6 +562,7 @@ func newClaudeAttemptProofManagerForGeneration(
 		BaseContext:      claudeAttemptProofContext(),
 		LifecycleStore:   backend.store,
 		DeliveryStore:    backend.store,
+		SemanticSource:   claudeAttemptProofSemanticSource(),
 		Sessions:         backend.sessions,
 		SessionResetter:  backend.store,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
@@ -567,6 +570,18 @@ func newClaudeAttemptProofManagerForGeneration(
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend.store)
 	return manager, eventBus, coordinator
+}
+
+func claudeAttemptProofSemanticSource() semanticview.Source {
+	cfg := claudeAttemptProofAgentConfig()
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			cfg.ID: {
+				ID: cfg.ID, Type: cfg.Type, Role: cfg.Role, Model: cfg.Model,
+				ResolvedIntent: cfg.Intent,
+			},
+		},
+	})
 }
 
 func claudeAttemptProofAdmissionContext(t testing.TB) context.Context {

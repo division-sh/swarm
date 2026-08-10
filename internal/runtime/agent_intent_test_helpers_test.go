@@ -20,7 +20,7 @@ func runtimeTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtime
 		resolved, err := runtimeagentintent.Resolve(
 			runtimeagentintent.SourceInline,
 			"inline",
-			"test#agents."+strings.TrimSpace(cfg.ID)+".intent",
+			"agents.yaml#agents."+strings.TrimSpace(cfg.ID)+".intent",
 			"Perform the runtime test agent's assigned work.",
 		)
 		if err != nil {
@@ -28,8 +28,12 @@ func runtimeTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtime
 		}
 		cfg.Intent = resolved
 	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = cfg.Intent.Content
+	if cfg.Prompt.Empty() {
+		prompt, err := runtimeagentintent.IntentOnlyPrompt(cfg.Intent)
+		if err != nil {
+			t.Fatalf("derive runtime test prompt: %v", err)
+		}
+		cfg.Prompt = prompt
 	}
 	return cfg
 }

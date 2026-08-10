@@ -200,6 +200,10 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
 				ExecutionMode: "live", Subscriptions: []string{"task.completed"},
 			})
+			bundle.Agents[agentID] = runtimecontracts.AgentRegistryEntry{
+				ID: agentID, Type: "test", Role: "observer", Model: "regular",
+				ResolvedIntent: agentConfig.Intent, Subscriptions: []string{"task.completed"},
+			}
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			entityID := eventtest.UUID("startup-order-node-entity-" + backend.name)

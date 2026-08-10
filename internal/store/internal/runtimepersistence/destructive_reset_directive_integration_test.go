@@ -75,12 +75,16 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
-	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "test#agents.directive-reset-agent.intent", "Exercise destructive reset coordination.")
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.directive-reset-agent.intent", "Exercise destructive reset coordination.")
 	if err != nil {
 		t.Fatalf("resolve test agent intent: %v", err)
 	}
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive test agent prompt: %v", err)
+	}
 	rec := runtimemanager.PersistedAgent{
-		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agent.id, Identity: identity, Role: "test", Model: "regular", Intent: intent, SystemPrompt: intent.Content},
+		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agent.id, Identity: identity, Role: "test", Model: "regular", Intent: intent, Prompt: prompt},
 		Status:    "active",
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),

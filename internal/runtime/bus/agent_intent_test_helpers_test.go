@@ -16,13 +16,17 @@ func busTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtimeacto
 	intent, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
 		"inline",
-		"test#agents."+strings.TrimSpace(cfg.ID)+".intent",
+		"agents.yaml#agents."+strings.TrimSpace(cfg.ID)+".intent",
 		"Process the event-bus test agent's assigned events.",
 	)
 	if err != nil {
 		t.Fatalf("resolve event-bus test intent: %v", err)
 	}
 	cfg.Intent = intent
-	cfg.SystemPrompt = intent.Content
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive event-bus test prompt: %v", err)
+	}
+	cfg.Prompt = prompt
 	return cfg
 }

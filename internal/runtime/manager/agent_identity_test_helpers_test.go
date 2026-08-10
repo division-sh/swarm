@@ -24,7 +24,7 @@ func managerTestResolvedIntent(agentID string) runtimeagentintent.Resolved {
 	resolved, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
 		"inline",
-		"test#agents."+strings.TrimSpace(agentID)+".intent",
+		"agents.yaml#agents."+strings.TrimSpace(agentID)+".intent",
 		"Perform the manager test agent's assigned work.",
 	)
 	if err != nil {
@@ -37,8 +37,12 @@ func managerTestAgentConfig(cfg runtimeactors.AgentConfig) runtimeactors.AgentCo
 	if cfg.Intent.Empty() {
 		cfg.Intent = managerTestResolvedIntent(cfg.ID)
 	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = cfg.Intent.Content
+	if cfg.Prompt.Empty() {
+		prompt, err := runtimeagentintent.IntentOnlyPrompt(cfg.Intent)
+		if err != nil {
+			panic(err)
+		}
+		cfg.Prompt = prompt
 	}
 	return cfg
 }

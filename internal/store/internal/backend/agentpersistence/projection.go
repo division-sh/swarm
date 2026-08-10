@@ -31,7 +31,6 @@ type PersistedAgentRuntimeDescriptor struct {
 	ExecutionMode        runtimeeffects.ExecutionMode   `json:"execution_mode"`
 	Mock                 mockperformance.Performance    `json:"mock,omitempty"`
 	Intent               runtimeagentintent.Resolved    `json:"intent"`
-	DerivedSystemPrompt  string                         `json:"derived_system_prompt"`
 	Criteria             []string                       `json:"criteria,omitempty"`
 }
 
@@ -103,7 +102,6 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"execution_mode":         {},
 	"mock":                   {},
 	"intent":                 {},
-	"derived_system_prompt":  {},
 	"criteria":               {},
 }
 
@@ -183,8 +181,8 @@ func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err := runtimeactors.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
 		return PersistedAgentProjection{}, err
 	}
-	if err := cfg.ValidateIntentCarrier(); err != nil {
-		return PersistedAgentProjection{}, fmt.Errorf("agent %s intent carrier: %w", strings.TrimSpace(cfg.ID), err)
+	if err := cfg.ValidateIntentInputs(); err != nil {
+		return PersistedAgentProjection{}, fmt.Errorf("agent %s intent inputs: %w", strings.TrimSpace(cfg.ID), err)
 	}
 	configJSON, err := mergeAgentConfigJSON(cfg)
 	if err != nil {
@@ -275,7 +273,6 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		ExecutionMode:        desc.ExecutionMode,
 		Mock:                 desc.Mock,
 		Intent:               desc.Intent,
-		SystemPrompt:         desc.DerivedSystemPrompt,
 		Memory:               memory,
 		MaxTurnsPerTask:      desc.MaxTurnsPerTask,
 		Subscriptions:        decodeJSONStringList(row.SubscriptionsJSON),
@@ -294,7 +291,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
-	if err := cfg.ValidateIntentCarrier(); err != nil {
+	if err := cfg.ValidateIntentInputs(); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s intent carrier: %w", strings.TrimSpace(row.AgentID), err)
 	}
 	if err := agentmemory.ValidateFlowOwnership(cfg.Memory, cfg.FlowPath); err != nil {
@@ -319,7 +316,6 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		ExecutionMode:        cfg.ExecutionMode,
 		Mock:                 cfg.Mock,
 		Intent:               cfg.Intent,
-		DerivedSystemPrompt:  cfg.SystemPrompt,
 		Criteria:             append([]string(nil), cfg.Criteria...),
 	}
 	if !descExecutionModeMatchesBackend(llmBackend, desc.ExecutionMode) {

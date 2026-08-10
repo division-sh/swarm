@@ -445,7 +445,7 @@ func bootverifyTestResolvedIntent(agentID string) runtimeagentintent.Resolved {
 	resolved, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
 		"inline",
-		"test#agents."+strings.TrimSpace(agentID)+".intent",
+		"agents.yaml#agents."+strings.TrimSpace(agentID)+".intent",
 		"Inspect provider reachability for this test fixture.",
 	)
 	if err != nil {

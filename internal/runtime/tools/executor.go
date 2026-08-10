@@ -380,6 +380,7 @@ func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
+	name = normalizeNativeToolName(strings.TrimSpace(name))
 	if err := retiredDynamicAgentMutationError(name); err != nil {
 		return nil, err
 	}
@@ -389,7 +390,6 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 		e.emitToolExecutionEvent(ctx, models.AgentConfig{}, name, input, nil, err, 0, "context")
 		return nil, err
 	}
-	name = normalizeNativeToolName(strings.TrimSpace(name))
 	if err := e.authorizeToolUsage(ctx, actor, name); err != nil {
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "authorize")
 		return nil, err

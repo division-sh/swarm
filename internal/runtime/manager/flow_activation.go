@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -1002,7 +1003,7 @@ func buildFlowAgentConfig(
 	if err := models.ValidateNoAuthoredSystemPrompt(rawConfig); err != nil {
 		return models.AgentConfig{}, fmt.Errorf("flow agent %s config: %w", key, err)
 	}
-	systemPrompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
+	prompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
 	if err != nil {
 		return models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
 	}
@@ -1022,7 +1023,7 @@ func buildFlowAgentConfig(
 		Memory:          entry.MemoryPlan,
 		Mock:            entry.Mock,
 		Intent:          entry.ResolvedIntent,
-		SystemPrompt:    systemPrompt,
+		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
 		EmitEvents:      normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID),
@@ -1199,7 +1200,7 @@ func buildStaticFlowAgentConfig(
 	if err != nil {
 		return models.AgentConfig{}, err
 	}
-	systemPrompt, err := assembleResolvedAgentPrompt(source, flowID, entry)
+	prompt, err := assembleResolvedAgentPrompt(source, flowID, entry)
 	if err != nil {
 		return models.AgentConfig{}, fmt.Errorf("static flow agent %s intent: %w", logicalID, err)
 	}
@@ -1222,7 +1223,7 @@ func buildStaticFlowAgentConfig(
 		Memory:          entry.MemoryPlan,
 		Mock:            entry.Mock,
 		Intent:          entry.ResolvedIntent,
-		SystemPrompt:    systemPrompt,
+		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
 		EmitEvents:      normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath),
@@ -1245,9 +1246,9 @@ func buildStaticFlowAgentConfig(
 	return cfg, nil
 }
 
-func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entry runtimecontracts.AgentRegistryEntry) (string, error) {
+func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entry runtimecontracts.AgentRegistryEntry) (runtimeagentintent.DerivedPrompt, error) {
 	bundle, _ := semanticview.Bundle(source)
-	return runtimecontracts.AssembleAgentSystemPrompt(bundle, flowID, entry, nil)
+	return runtimecontracts.AssembleAgentPrompt(bundle, flowID, entry, nil)
 }
 
 func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath, templateID, instanceID string) []string {

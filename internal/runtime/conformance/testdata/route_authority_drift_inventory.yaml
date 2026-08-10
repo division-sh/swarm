@@ -650,6 +650,7 @@ seam_families:
       - internal/events/construction_test.go
       - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
       - internal/runtime/conformance/persisted_surfaces_test.go
+      - internal/runtime/manager/agent_intent_recovery_test.go
       - internal/runtime/manager/agent_manager.go
       - internal/runtime/manager/execution_projection_test.go
       - internal/runtime/manager/flow_activation.go
