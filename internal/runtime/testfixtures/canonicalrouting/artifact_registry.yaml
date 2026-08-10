@@ -16,6 +16,7 @@ artifacts:
   - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership, issue: 1738}
   - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership, issue: 1738}
   - {root: tests/tier9-composition-patterns/test-compose-create-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCanonicalRoutingOwnership, issue: 1738}
+  - {root: tests/tier6-event-loop/test-cross-entity-concurrent, disposition: tracked-split, owner: delivery-target-lifecycle-identity, proof: internal/runtime/cataloge2e/tier6_event_loop_e2e_test.go:TestTier6EventLoopCanonicalRoutingOwnership, issue: 2132}
   - {root: tests/tier5-flow-lifecycle/test-timer-cancel, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
   - {root: tests/tier5-flow-lifecycle/test-timer-fire, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
   - {root: tests/tier5-flow-lifecycle/test-timer-recurring, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
@@ -150,7 +151,6 @@ groups:
       - tests/tier6-event-loop/test-atomicity-guard-rollback
       - tests/tier6-event-loop/test-atomicity-rollback
       - tests/tier6-event-loop/test-chain-depth-limit
-      - tests/tier6-event-loop/test-cross-entity-concurrent
       - tests/tier6-event-loop/test-dead-letter
       - tests/tier6-event-loop/test-entity-serialization
       - tests/tier6-event-loop/test-event-persisted-before-delivery
