@@ -303,20 +303,8 @@ func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentC
 }
 
 func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	causalMode, hasCausalMode := runtimeeffects.ExecutionModeFromContext(ctx)
-	if actor.ExecutionMode == runtimeeffects.ExecutionModeMock || (hasCausalMode && causalMode == runtimeeffects.ExecutionModeMock) {
-		return nil, failures.New(
-			failures.ClassAuthorizationDenied,
-			"mock_agent_hire_forbidden",
-			"tool-executor",
-			"agent_hire.authorize_execution_mode",
-			map[string]any{
-				"action":                "agent_hire",
-				"actor_id":              actor.ID,
-				"actor_execution_mode":  actor.ExecutionMode,
-				"causal_execution_mode": causalMode,
-			},
-		)
+	if err := authorizeAgentMutationExecutionMode(ctx, actor, "agent_hire"); err != nil {
+		return nil, err
 	}
 	manager := e.getManager()
 	if manager == nil {
@@ -372,7 +360,10 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
 }
 
-func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentFire(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	if err := authorizeAgentMutationExecutionMode(ctx, actor, "agent_fire"); err != nil {
+		return nil, err
+	}
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -411,6 +402,9 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 }
 
 func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	if err := authorizeAgentMutationExecutionMode(ctx, actor, "agent_reconfigure"); err != nil {
+		return nil, err
+	}
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -463,6 +457,26 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 		return nil, fmt.Errorf("project committed agent authority: %w", err)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
+}
+
+func authorizeAgentMutationExecutionMode(ctx context.Context, actor models.AgentConfig, action string) error {
+	action = strings.TrimSpace(action)
+	causalMode, hasCausalMode := runtimeeffects.ExecutionModeFromContext(ctx)
+	if actor.ExecutionMode != runtimeeffects.ExecutionModeMock && (!hasCausalMode || causalMode != runtimeeffects.ExecutionModeMock) {
+		return nil
+	}
+	return failures.New(
+		failures.ClassAuthorizationDenied,
+		"mock_"+action+"_forbidden",
+		"tool-executor",
+		action+".authorize_execution_mode",
+		map[string]any{
+			"action":                action,
+			"actor_id":              actor.ID,
+			"actor_execution_mode":  actor.ExecutionMode,
+			"causal_execution_mode": causalMode,
+		},
+	)
 }
 
 type managedAgentAuthorityPlan struct {

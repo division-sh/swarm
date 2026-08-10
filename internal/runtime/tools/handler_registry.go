@@ -24,7 +24,7 @@ func (e *Executor) registerAgentHandlers(handlers map[string]ToolHandler) {
 		return e.execAgentHire(ctx, actor, input)
 	}
 	handlers["agent_fire"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execAgentFire(actor, input)
+		return e.execAgentFire(ctx, actor, input)
 	}
 	handlers["agent_reconfigure"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 		return e.execAgentReconfigure(ctx, actor, input)

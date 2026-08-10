@@ -740,7 +740,7 @@ func (e *Executor) ExecAgentHireDirect(actor models.AgentConfig, input any) (any
 }
 
 func (e *Executor) ExecAgentFireDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentFire(actor, input)
+	return e.execAgentFire(context.Background(), actor, input)
 }
 
 func (e *Executor) ExecAgentReconfigureDirect(actor models.AgentConfig, input any) (any, error) {
