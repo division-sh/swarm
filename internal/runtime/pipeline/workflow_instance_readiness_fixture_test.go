@@ -144,6 +144,9 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 		if current.Plan.Identity != normalized.Identity || current.Plan.RunID != normalized.RunID {
 			return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
 		}
+		if current.Plan.ExecutionMode != normalized.ExecutionMode {
+			return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
+		}
 		actualJSON, err := canonicaljson.Bytes(current.Plan)
 		if err != nil {
 			return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)

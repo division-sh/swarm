@@ -868,15 +868,18 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: "44444444-4444-4444-8444-444444444444",
 	})
-	readinessPlan, err := json.Marshal(runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-		Version: 0,
+	readinessOwner, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "component-scaffold", ScopeKey: "component-scaffold", InstanceID: "active",
 			InstancePath: "component-scaffold/active", EntityID: entityID, HasStoredPath: true,
 		},
 		RunID: runID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral", WorkflowVersion: "1.0.0",
-	})
+		BundleSource: "ephemeral", WorkflowVersion: "1.0.0", ExecutionMode: "live",
+	}).Normalized()
+	if err != nil {
+		t.Fatalf("normalize readiness plan: %v", err)
+	}
+	readinessPlan, err := json.Marshal(readinessOwner)
 	if err != nil {
 		t.Fatalf("marshal readiness plan: %v", err)
 	}

@@ -6121,8 +6121,11 @@ engine:
               still a destructive live-state effect. Delayed work does not mint fresh authority: generic
               schedules, join schedules, and authored workflow timer activations persist the exact causal execution_mode and
               copy it unchanged into every fired event, including after selected-store restore. Initial-entry timers consume
-              the activation's exact execution mode; only true boot-owned schedules are explicitly live. Live-causal dynamic
-              agent mutations remain subject to ordinary delegation and lifecycle checks until the family is retired.
+              the activation's exact execution mode. Dynamic-flow readiness persists that mode as immutable activation
+              authority even when the original source declares no initial timer or creation event; source reconciliation
+              preserves it, and a newly declared first initial timer consumes it instead of the administrative reconciliation
+              context. Only true boot-owned schedules are explicitly live. Live-causal dynamic agent mutations remain subject
+              to ordinary delegation and lifecycle checks until the family is retired.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
               authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
@@ -6234,10 +6237,11 @@ engine:
             budget-cap admission.
         provenance:
           rule: >
-            execution_mode is copied from execution authority into events, durable schedules and workflow timer activations,
-            external-effect operations and attempts, turns, conversation forks, spend rows, decision cards, mailbox/readback
-            summaries, and author activity. Missing mode is invalid and old rows without it are unsupported; no defaults,
-            fallback readers, or mode reconstruction are allowed.
+            execution_mode is copied from execution authority into events, dynamic-flow readiness, durable schedules and
+            workflow timer activations, external-effect operations and attempts, turns, conversation forks, spend rows,
+            decision cards, mailbox/readback summaries, and author activity. Dynamic-flow readiness mode is immutable across
+            source revisions and agrees with any planned creation event. Missing mode is invalid and old rows without it are
+            unsupported; no defaults, fallback readers, or mode reconstruction are allowed.
         supported_surface_proof: >
           A real served bundle, without LLM or unreachable outbound connector credentials, must exercise mock text, visible
           internal tool calls, emitted events, exact provider-connector response materialization, decision-card/mailbox
@@ -6896,7 +6900,9 @@ engine:
       one ordered `AcceptedEvent` effect carrying exact event identity, occurrence time, and either no transition or a
       complete typed from/to/transition identity. Timer, join, and gate reactions consume those effects in order and do
       not reconstruct empty-string transitions or choose local clocks. A workflow timer activation is derived only from
-      one of those exact persisted initial-entry or accepted-event causes. Its deterministic activation ID includes run,
+      one of those exact persisted initial-entry or accepted-event causes. When a dynamic source revision introduces the
+      first initial-entry timer, the lifecycle consumes the instance's immutable readiness execution_mode; an administrative
+      reconciliation context cannot create causal authority. Its deterministic activation ID includes run,
       entity, flow instance, declaration, loop generation, and exact causal identity. Declarations are selected through
       the persisted instance owner before any activation or cancellation decision, where an empty declaration `flow_id` belongs
       only to the root instance whose `workflow_name` equals the semantic source workflow name, and a nonempty `flow_id`

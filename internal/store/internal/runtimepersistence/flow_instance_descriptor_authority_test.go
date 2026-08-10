@@ -187,6 +187,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 		{name: "no readiness row", wantListError: "missing exact readiness plan"},
 		{name: "wrong-run readiness row", readiness: "exact", readinessOnWrongRun: true, wantListError: "missing exact readiness plan"},
 		{name: "incomplete readiness plan", readiness: `{}`, wantListError: "validate"},
+		{name: "stale readiness version", readiness: `{"version":3}`, wantListError: "unsupported version 3"},
 		{name: "malformed readiness plan", readiness: `{"workflow_version":{"unexpected":true}}`, wantListError: "decode"},
 		{name: "exact readiness owner", readiness: "exact"},
 		{name: "foreign run source", readiness: "exact", foreignBundle: true, wantListError: "readiness source does not match persisted run"},
@@ -467,7 +468,7 @@ func exactFlowInstanceDescriptorReadinessJSON(
 			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
 			EntityID: entityID, HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0",
+		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0", ExecutionMode: "live",
 	}).Normalized()
 	if err != nil {
 		t.Fatalf("normalize exact descriptor readiness: %v", err)

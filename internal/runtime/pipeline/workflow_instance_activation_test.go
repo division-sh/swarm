@@ -396,6 +396,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				BundleHash:      bundleHash,
 				BundleSource:    bundleSource,
 				WorkflowVersion: "1.0.0",
+				ExecutionMode:   executionmode.Live,
 				Agents: []DynamicFlowRuntimeAgentExpectation{
 					{
 						Identity: runtimeagentidentity.Identity{
@@ -435,6 +436,18 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 					RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
 					Payload: []byte(`{"name":"alpha"}`), CreatedAt: occurredAt,
 				},
+			}
+			missingMode := plan
+			missingMode.ExecutionMode = ""
+			if _, err := missingMode.Normalized(); err == nil {
+				t.Fatal("readiness plan without execution mode was accepted")
+			}
+			mismatchedCreationMode := plan
+			mismatchedCreation := *plan.CreationEvent
+			mismatchedCreation.ExecutionMode = executionmode.Mock
+			mismatchedCreationMode.CreationEvent = &mismatchedCreation
+			if _, err := mismatchedCreationMode.Normalized(); err == nil {
+				t.Fatal("readiness plan accepted a creation event with conflicting execution mode")
 			}
 			instance := WorkflowInstance{
 				InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
@@ -562,6 +575,11 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, noAutoPlan, readyAt); err != nil {
 				t.Fatalf("mark no-auto topology ready: %v", err)
+			}
+			changedMode := noAutoPlan
+			changedMode.ExecutionMode = executionmode.Mock
+			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, changedMode, readyAt.Add(5*time.Second)); err == nil {
+				t.Fatal("readiness reconciliation changed immutable execution mode")
 			}
 			revisedNoAutoPlan := noAutoPlan
 			revisedNoAutoPlan.BundleHash, revisedNoAutoPlan.BundleSource = revisedSourceFact.StorageValues()

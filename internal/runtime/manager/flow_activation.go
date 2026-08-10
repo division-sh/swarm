@@ -215,10 +215,14 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		}
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
+	mode, err := flowInstanceActivationExecutionMode(ctx, req)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
 	autoEmitLineage := events.EventLineage{
 		RunID:         autoEmitRunID,
 		ParentEventID: triggerEventID,
-		ExecutionMode: req.TriggerEvent.ExecutionMode(),
+		ExecutionMode: mode,
 	}
 	if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
 		(strings.TrimSpace(autoEmitLineage.RunID) == "" || strings.TrimSpace(autoEmitLineage.ParentEventID) == "") {
@@ -264,10 +268,6 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		ActivationVariables:           flowActivationVars(req),
 		OccurredAt:                    occurredAt,
 		StandingGenerationReplacement: req.StandingGenerationReplacement,
-	}
-	mode, err := flowInstanceActivationExecutionMode(ctx, req)
-	if err != nil {
-		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 	plan.Instance, plan.Lifecycle, err = am.workflowInstances.PrepareInitialEntryLifecycle(ctx, plan.Instance, occurredAt)
@@ -457,6 +457,7 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 		BundleHash:      bundleHash,
 		BundleSource:    bundleSource,
 		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+		ExecutionMode:   lineage.ExecutionMode,
 		Agents:          make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(agentRecords)),
 	}
 	for _, rec := range agentRecords {

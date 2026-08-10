@@ -103,6 +103,7 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 		BundleHash:      authorActivityTestBundleHash,
 		BundleSource:    authorActivityTestBundleSource,
 		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
+		ExecutionMode:   "live",
 	}
 	instance := runtimepipeline.WorkflowInstance{
 		InstanceID:       req.Instance.InstanceID,

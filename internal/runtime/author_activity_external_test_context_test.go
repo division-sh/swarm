@@ -82,7 +82,7 @@ func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(
 	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance, RunID: req.TriggerEvent.RunID(),
 		BundleHash: bundleHash, BundleSource: bundleSource,
-		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
+		WorkflowVersion: req.ContractBundle.WorkflowVersion(), ExecutionMode: "live",
 	}
 	instance := runtimepipeline.WorkflowInstance{
 		InstanceID: req.Instance.InstanceID, StorageRef: req.Instance.InstancePath,

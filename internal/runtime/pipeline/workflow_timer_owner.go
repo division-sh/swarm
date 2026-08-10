@@ -335,6 +335,16 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	if err != nil {
 		return err
 	}
+	var readinessMode executionmode.Mode
+	if store.readiness != nil {
+		readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
+		if err != nil {
+			return err
+		}
+		if found {
+			readinessMode = readiness.Plan.ExecutionMode
+		}
+	}
 	currentState := strings.TrimSpace(instance.CurrentState)
 	initialState := strings.TrimSpace(workflowInitialStateForFlow(source, instance.WorkflowName))
 	if initialState == "" {
@@ -353,7 +363,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 				continue
 			}
 			if !initialMode.Valid() {
-				initialMode, err = initialWorkflowTimerExecutionMode(ctx, active)
+				initialMode, err = initialWorkflowTimerExecutionMode(ctx, readinessMode, active)
 				if err != nil {
 					return err
 				}
@@ -488,7 +498,10 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	return nil
 }
 
-func initialWorkflowTimerExecutionMode(ctx context.Context, active []WorkflowTimerActivation) (executionmode.Mode, error) {
+func initialWorkflowTimerExecutionMode(ctx context.Context, readinessMode executionmode.Mode, active []WorkflowTimerActivation) (executionmode.Mode, error) {
+	if readinessMode != "" && !readinessMode.Valid() {
+		return "", fmt.Errorf("workflow initial timer readiness has invalid execution mode")
+	}
 	var persisted executionmode.Mode
 	for _, activation := range active {
 		if activation.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial {
@@ -502,6 +515,12 @@ func initialWorkflowTimerExecutionMode(ctx context.Context, active []WorkflowTim
 			return "", fmt.Errorf("workflow initial timers disagree on execution mode")
 		}
 		persisted = mode
+	}
+	if readinessMode.Valid() {
+		if persisted.Valid() && persisted != readinessMode {
+			return "", fmt.Errorf("workflow initial timers disagree with durable readiness execution mode")
+		}
+		return readinessMode, nil
 	}
 	if persisted.Valid() {
 		return persisted, nil

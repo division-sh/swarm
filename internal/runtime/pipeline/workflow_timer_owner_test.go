@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -96,9 +97,18 @@ func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing
 			if activation.ExecutionMode != executionmode.Mock {
 				t.Fatalf("persisted activation execution mode = %q, want mock", activation.ExecutionMode)
 			}
-			mode, err := initialWorkflowTimerExecutionMode(ctx, []WorkflowTimerActivation{activation})
+			mode, err := initialWorkflowTimerExecutionMode(ctx, executionmode.Mock, []WorkflowTimerActivation{activation})
 			if err != nil || mode != executionmode.Mock {
 				t.Fatalf("reconciliation execution mode = %q err=%v, want persisted mock", mode, err)
+			}
+			mode, err = initialWorkflowTimerExecutionMode(ctx, "", []WorkflowTimerActivation{activation})
+			if err != nil || mode != executionmode.Mock {
+				t.Fatalf("static persisted execution mode = %q err=%v, want mock", mode, err)
+			}
+			conflicting := activation
+			conflicting.ExecutionMode = executionmode.Live
+			if _, err := initialWorkflowTimerExecutionMode(ctx, executionmode.Mock, []WorkflowTimerActivation{conflicting}); err == nil {
+				t.Fatal("readiness mode accepted a conflicting persisted initial timer")
 			}
 
 			outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
@@ -107,6 +117,73 @@ func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing
 			}
 			if got := bus.publishedEvent(0).ExecutionMode(); got != executionmode.Mock {
 				t.Fatalf("fired event execution mode = %q, want mock", got)
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, liveCtx := tc.open(t)
+			createdAt := canonicalWorkflowTimerTime(time.Now().UTC().Add(-2 * time.Second))
+			runID := runtimecorrelation.RunIDFromContext(liveCtx)
+			route := workflowTimerRootRoute(liveCtx)
+			entityID := uuid.NewString()
+			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(liveCtx)
+			if !ok {
+				t.Fatal("dynamic timer test context is missing bundle source fact")
+			}
+			bundleHash, bundleSource := sourceFact.StorageValues()
+			readiness := DynamicFlowRuntimeReadinessPlan{
+				Identity: runtimeflowidentity.Instance{
+					TemplateID: "workflow-timer-first-revision", ScopeKey: route.ScopeKey,
+					InstanceID: route.InstanceID, InstancePath: route.InstancePath,
+					EntityID: entityID, HasStoredPath: true,
+				},
+				RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource,
+				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Mock,
+			}
+
+			sourceA := semanticview.Wrap(workflowTimerFirstDeclarationRevisionBundle(false))
+			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+				Module:      &pipelineFixtureWorkflowModule{source: sourceA},
+				Persistence: workflowPersistenceForTest(store),
+			})
+			mockCtx := runtimeeffects.WithExecutionMode(liveCtx, executionmode.Mock)
+			result, err := pcA.MaterializeInitialEntry(mockCtx, workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
+				WorkflowName: "workflow-timer-first-revision", WorkflowVersion: "1.0.0",
+				RuntimeReadiness: &readiness, CurrentState: "waiting", CreatedAt: createdAt,
+			}), createdAt)
+			if err != nil || result != WorkflowInitialMaterializationCreated {
+				t.Fatalf("materialize timer-free dynamic instance: result=%v err=%v", result, err)
+			}
+			if err := pcA.ArmInitialEntryTimers(mockCtx, route); err != nil {
+				t.Fatalf("arm timer-free source: %v", err)
+			}
+			if active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true); len(active) != 0 {
+				t.Fatalf("timer-free source active timers = %#v", active)
+			}
+
+			bus := &recordingPipelineBus{}
+			sourceB := semanticview.Wrap(workflowTimerFirstDeclarationRevisionBundle(true))
+			pcB := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module:      &pipelineFixtureWorkflowModule{source: sourceB},
+				Persistence: workflowPersistenceForTest(store),
+			})
+			if err := pcB.ReconcileInitialEntryTimers(liveCtx, route); err != nil {
+				t.Fatalf("reconcile first initial timer with live administrative context: %v", err)
+			}
+			active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true)
+			if len(active) != 1 || active[0].ExecutionMode != executionmode.Mock {
+				t.Fatalf("first revised timer = %#v, want one mock activation", active)
+			}
+			outcome, err := fireWorkflowTimerTestWakeup(liveCtx, pcB, active[0])
+			if err != nil || outcome != WorkflowTimerFireCommitted {
+				t.Fatalf("fire first revised timer: outcome=%q err=%v", outcome, err)
+			}
+			if got := bus.publishedEvent(0).ExecutionMode(); got != executionmode.Mock {
+				t.Fatalf("first revised timer event execution mode = %q, want mock", got)
 			}
 		})
 	}
@@ -2387,6 +2464,19 @@ func workflowTimerSourceRevisionBundle(revised bool) *runtimecontracts.WorkflowC
 	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-source-revision", Version: "1.0.0", InitialStage: "waiting",
 		Timers: timers,
+	}}
+}
+
+func workflowTimerFirstDeclarationRevisionBundle(revised bool) *runtimecontracts.WorkflowContractBundle {
+	var timers []runtimecontracts.WorkflowTimerContract
+	if revised {
+		timers = []runtimecontracts.WorkflowTimerContract{{
+			ID: "waiting.first", Stage: "waiting", StageOwned: true, Owner: "runtime",
+			Event: "timer.first", StartOn: "state:waiting", Delay: "1s",
+		}}
+	}
+	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "workflow-timer-first-revision", Version: "1.0.0", InitialStage: "waiting", Timers: timers,
 	}}
 }
 

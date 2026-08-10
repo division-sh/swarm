@@ -549,14 +549,18 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
 		t.Fatalf("seed account entity state: %v", err)
 	}
-	readinessPlan, err := json.Marshal(runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+	readinessOwner, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: runtimeflowidentity.Instance{
 			TemplateID: "account", ScopeKey: "account", InstanceID: "one", InstancePath: instanceRoute.InstancePath,
 			EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath), HasStoredPath: true,
 		},
 		RunID: eventBusTestRunID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "ephemeral", WorkflowVersion: source.WorkflowVersion(),
-	})
+		BundleSource: "ephemeral", WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+	}).Normalized()
+	if err != nil {
+		t.Fatalf("normalize account readiness owner: %v", err)
+	}
+	readinessPlan, err := json.Marshal(readinessOwner)
 	if err != nil {
 		t.Fatalf("marshal account readiness owner: %v", err)
 	}

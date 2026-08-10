@@ -1382,6 +1382,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 			BundleHash:      bundleHash,
 			BundleSource:    bundleSource,
 			WorkflowVersion: activeWorkflowVersion + "-changed",
+			ExecutionMode:   executionmode.Live,
 		},
 	}}}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
