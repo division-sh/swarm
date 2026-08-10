@@ -14,7 +14,7 @@ import (
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
@@ -216,7 +216,7 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		publication, err := eventPublicationEvent(params, now)
+		publication, err := eventPublicationEvent(params, now, selectedOpts.ExecutionPosture)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
@@ -429,7 +429,10 @@ func eventPublicationPayload(params map[string]any) (json.RawMessage, bool, erro
 	return encoded, payloadEntityIDPresent, nil
 }
 
-func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (events.Event, error) {
+func eventPublicationEvent(params eventPublicationParams, createdAt time.Time, posture executionposture.Posture) (events.Event, error) {
+	if !posture.Valid() {
+		return events.Event{}, fmt.Errorf("runtime execution posture is required")
+	}
 	envelope := events.EventEnvelope{EntityID: params.EntityID}
 	if flowInstance := strings.Trim(strings.TrimSpace(params.FlowInstance), "/"); flowInstance != "" {
 		envelope.FlowInstance = flowInstance
@@ -440,7 +443,7 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (
 	facts := events.EventFacts{
 		ID: params.EventID, Type: events.EventType(params.EventName),
 		Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: params.Emitter},
-		Payload:  params.Payload, Envelope: envelope, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
+		Payload:  params.Payload, Envelope: envelope, CreatedAt: createdAt, ExecutionMode: posture.RootMode(),
 	}
 	if params.NewRunCreated {
 		return events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: params.RunID})
@@ -689,7 +692,7 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 			"reason":     "recipient planning unavailable: event publisher does not expose subscribed recipient planning",
 		})
 	}
-	publication, err := eventPublicationEvent(params, time.Time{})
+	publication, err := eventPublicationEvent(params, time.Time{}, opts.ExecutionPosture)
 	if err != nil {
 		return err
 	}

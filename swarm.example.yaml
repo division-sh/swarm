@@ -41,6 +41,7 @@
 #   decision_card_input_draft_ttl: 15m # Lifetime of an incomplete actor-scoped decision input draft.
 #   decision_card_reminder_interval: 24h # Cadence for later pending decision-card reminders.
 #   decision_card_urgency: 24h # Delay before a pending decision card becomes urgent.
+#   execution_posture: live # Maximum execution mode for this process; exactly live or mock_only.
 #   recovery_on_startup: false # Recover persisted runtime state on startup.
 # serve:
 #   api_listen_addr: "127.0.0.1:8081" # Loopback API listener. Public or wildcard binds require local/operator config or a flag.

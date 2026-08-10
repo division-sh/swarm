@@ -29,6 +29,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -1019,6 +1020,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 	}
 	source := semanticview.Wrap(bundle)
 	return OperatorReadOptions{
+		ExecutionPosture:          executionposture.Live,
 		RepoRoot:                  t.TempDir(),
 		PlatformSpecPath:          testBundleRegistrationPlatformSpec(t),
 		Now:                       func() time.Time { return s.now },

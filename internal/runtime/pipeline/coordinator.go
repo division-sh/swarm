@@ -24,6 +24,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -76,6 +77,7 @@ type PipelineCoordinator struct {
 	bundleSourceFact       runtimecorrelation.BundleSourceFact
 	runBundleAvailability  RunBundleAvailabilityReader
 	decisionCardCadence    decisioncard.CadencePolicy
+	executionPosture       executionposture.Posture
 
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -90,6 +92,7 @@ type PipelineCoordinator struct {
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
 
 type PipelineCoordinatorOptions struct {
+	ExecutionPosture                 executionposture.Posture
 	ShardPlanner                     any
 	Module                           WorkflowModule
 	Persistence                      WorkflowPersistence
@@ -194,6 +197,9 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		if err := opts.ReceiverExecution.Validate(); err != nil {
 			return nil
 		}
+		if !opts.ExecutionPosture.Valid() {
+			return nil
+		}
 	}
 	module := opts.Module
 	if module == nil {
@@ -241,6 +247,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		bundleSourceFact:                 opts.BundleSourceFact,
 		runBundleAvailability:            opts.RunBundleAvailability,
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),
+		executionPosture:                 opts.ExecutionPosture,
 		testEntityStateHook:              opts.TestEntityStateHook,
 		testWorkflowNodeHandlerStartHook: opts.TestWorkflowNodeHandlerStartHook,
 		testLifecycleProbe:               opts.TestLifecycleProbe,
@@ -278,7 +285,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 	}
 	coordinator.workflowStore = workflowStore
 	if workflowStore != nil {
-		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler)
+		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler, opts.ExecutionPosture)
 	}
 	coordinator.timerCancellations = runtimetimercancellation.NewReconciler(coordinator.genericSchedules, coordinator.workflowTimers)
 	return coordinator

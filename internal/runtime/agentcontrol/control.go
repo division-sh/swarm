@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
 
@@ -146,7 +146,7 @@ type BoardDirective struct {
 	Source          string
 }
 
-func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, operationID, eventID string, now time.Time) (events.Event, error) {
+func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, operationID, eventID string, now time.Time, posture executionposture.Posture) (events.Event, error) {
 	var none events.Event
 	agentID := strings.TrimSpace(req.AgentID)
 	directive := strings.TrimSpace(req.Directive)
@@ -159,6 +159,9 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	}
 	if target.RunID == "" {
 		return none, errors.New("run_id is required")
+	}
+	if !posture.Valid() {
+		return none, errors.New("runtime execution posture is required")
 	}
 	operationID = strings.TrimSpace(operationID)
 	if _, err := uuid.Parse(operationID); err != nil {
@@ -204,7 +207,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, ope
 	facts := events.EventFacts{
 		ID: eventID, Type: events.EventType(DirectiveEventType),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload:  raw, ExecutionMode: executionmode.Live, CreatedAt: now,
+		Payload:  raw, ExecutionMode: posture.RootMode(), CreatedAt: now,
 	}
 	switch target.Mode {
 	case RunResolutionNewRunAllocated:

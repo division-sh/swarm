@@ -13,6 +13,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -20,6 +21,7 @@ import (
 )
 
 type WorkflowContractValidationOptions struct {
+	ExecutionPosture               executionposture.Posture
 	Credentials                    runtimecredentials.Store
 	ManagedCredentials             runtimemanagedcredentials.Store
 	CheckMCPReachable              bool
@@ -53,12 +55,13 @@ type WorkflowContractValidationResult struct {
 	bootEffectReachability           runtimebootverify.SourceBootEffectReachability
 }
 
-func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
+func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store, posture executionposture.Posture) WorkflowContractValidationOptions {
 	profile, err := llmselection.ResolveActiveBackend(llmselection.DefaultBackendID())
 	if err != nil {
 		panic(fmt.Sprintf("resolve built-in default LLM profile: %v", err))
 	}
 	return WorkflowContractValidationOptions{
+		ExecutionPosture:               posture,
 		Credentials:                    credentials,
 		LLMProfile:                     profile,
 		CheckMCPReachable:              true,
@@ -75,6 +78,9 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result := WorkflowContractValidationResult{ProductionValid: true}
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
+	}
+	if !opts.ExecutionPosture.Valid() {
+		return result, fmt.Errorf("runtime execution posture is required")
 	}
 	if invalidSinks := workflowInvalidOutputSinkDeclarations(source); len(invalidSinks) > 0 {
 		result.ProductionValid = false
@@ -95,7 +101,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if len(harnessOutputs) > 0 && !opts.AllowHarnessOutputs {
 		return result, fmt.Errorf("production validation rejects test-only output sink: harness at %s; replace it with a real consumer before booting", strings.Join(harnessOutputs, ", "))
 	}
-	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile)
+	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile, opts.ExecutionPosture)
 	if err != nil {
 		return result, err
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -30,7 +31,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 		t.Fatalf("seed sqlite subject event: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(store)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "sqlite diagnostic persisted",
@@ -89,7 +90,7 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	envelope := computeModuleReplayEvidenceTestEnvelope()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["node_id"] = "node-a"
-	logger := runtimepkg.NewRuntimeLogger(store)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Message:   "Compute module replay evidence recorded",
@@ -196,7 +197,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("seed direct sqlite runtime log fallback row: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(store)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "runtime-owned source",
@@ -308,7 +309,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 		t.Fatalf("seed postgres subject event: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "postgres diagnostic persisted",
@@ -353,7 +354,7 @@ func TestPostgresRuntimeLogPersistenceUsesClosedNamedCommits(t *testing.T) {
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 
 	subject := eventtest.RunCreatingRootIngress(
 		subjectEventID, events.EventType("validation/validation.package_ready"),

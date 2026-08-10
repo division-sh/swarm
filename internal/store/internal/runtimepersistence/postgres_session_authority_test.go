@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -321,7 +322,7 @@ func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) 
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
 
 			owner := selected.PipelineObligations()
-			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("open scan: %v", err)
 			}
@@ -348,7 +349,7 @@ func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) 
 				t.Fatalf("claim after failed close = %v, want ErrStaleClaim", err)
 			}
 
-			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("open fresh scan: %v", err)
 			}
@@ -447,7 +448,7 @@ func TestPostgresPipelineClaimPoisonBetweenLeaseAttachAndRegistryPublicationIsTe
 	ctx := testAuthorActivityContext()
 	eventID := uuid.NewString()
 	registry := selected.pipelinePostgresOwner.PostgresPipelineClaimsForTest()
-	scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+	scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 	if err != nil {
 		t.Fatalf("open scan: %v", err)
 	}

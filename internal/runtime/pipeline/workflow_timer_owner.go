@@ -22,6 +22,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -101,6 +102,7 @@ type WorkflowTimerLifecycle struct {
 	scheduler    *Scheduler
 	publication  EnginePublicationPlanner
 	dispatcher   runtimeengine.PostCommitDispatcher
+	posture      executionposture.Posture
 	recoveryCtx  context.Context
 	cancel       context.CancelFunc
 	projectionMu sync.Mutex
@@ -112,9 +114,12 @@ type WorkflowTimerLifecycle struct {
 	testAfterWakeupLoad   func()
 }
 
-func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview.Source, bus Bus, workOwner worklifetime.Occurrence, scheduler *Scheduler) *WorkflowTimerLifecycle {
+func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview.Source, bus Bus, workOwner worklifetime.Occurrence, scheduler *Scheduler, posture executionposture.Posture) *WorkflowTimerLifecycle {
 	if store == nil {
 		return nil
+	}
+	if !posture.Valid() {
+		panic("pipeline: workflow timer lifecycle requires a valid execution posture")
 	}
 	recoveryCtx, cancel := context.WithCancel(context.Background())
 	lifecycle := &WorkflowTimerLifecycle{
@@ -122,6 +127,7 @@ func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview
 		source:                source,
 		logger:                bus,
 		workOwner:             workOwner,
+		posture:               posture,
 		recoveryCtx:           recoveryCtx,
 		cancel:                cancel,
 		recovering:            make(map[string]chan struct{}),
@@ -241,6 +247,9 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflo
 			return err
 		}
 		if err := cause.validateForActivation(); err != nil {
+			return err
+		}
+		if err := l.posture.Admit(cause.ExecutionMode, "workflow timer activation reconciliation"); err != nil {
 			return err
 		}
 		interval := workflowTimerDuration(declaration, workflowTimerPolicy(source, declaration.FlowID))
@@ -376,6 +385,9 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 				ToState:       currentState,
 			}
 			if err := cause.validateForActivation(); err != nil {
+				return err
+			}
+			if err := l.posture.Admit(cause.ExecutionMode, "initial workflow timer activation reconciliation"); err != nil {
 				return err
 			}
 			if err := validateWorkflowTimerTopology(source, declaration); err != nil {
@@ -835,6 +847,9 @@ func (l *WorkflowTimerLifecycle) ReconcileWakeup(ctx context.Context, ref timeri
 	if !found || activation.Ref != ref || activation.Status != workflowTimerStatusActive {
 		return l.retireWakeup(ref)
 	}
+	if err := l.posture.Admit(activation.ExecutionMode, "workflow timer wakeup projection"); err != nil {
+		return err
+	}
 	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, activation)
 	if err != nil {
 		return err
@@ -930,6 +945,9 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 	}
 	if !hint.FireAt.Equal(occurrence.DueAt) {
 		return WorkflowTimerFireTerminal, false, nil
+	}
+	if err := l.posture.Admit(hint.ExecutionMode, "workflow timer occurrence preparation"); err != nil {
+		return WorkflowTimerFireRetry, false, err
 	}
 	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, hint)
 	if err != nil {

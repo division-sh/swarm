@@ -50,13 +50,13 @@ func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupown
 		ExecutionAuthorityID: authority.AuthorityID,
 		StartupOwnerID:       authority.OwnerID,
 		StartupGeneration:    authority.Generation,
-		EffectController:     runtimeeffects.NewController(effectStore),
+		EffectController:     runtimeeffects.NewController(effectStore).WithExecutionPosture(rt.ExecutionPosture),
 		CapabilityStore:      capabilityStore,
 		EffectAuthority: func(probeID, actorID string) (runtimeeffects.Authority, error) {
 			effectAuthority := runtimeeffects.Authority{
 				Kind: runtimeeffects.AuthorityStartupProbe, ID: strings.TrimSpace(probeID),
 				ExecutionOwner: authority.OwnerID, LeaseExpiresAt: time.Now().UTC().Add(15 * time.Minute), FenceGeneration: authority.Generation,
-				ExecutionMode: runtimeeffects.ExecutionModeLive,
+				ExecutionMode: runtimeeffects.ExecutionMode(rt.ExecutionPosture.RootMode()),
 				StartupProbe: runtimeeffects.StartupProbeAuthority{
 					ProbeID: probeID, StartupAuthorityID: authority.AuthorityID, StartupStateVersion: authority.StateVersion,
 					ActorID: actorID, ExecutionKind: string(managedcapabilities.ExecutionNormalAgent), ExecutionAuthorityID: authority.AuthorityID,

@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -61,6 +62,7 @@ type ProjectController interface {
 }
 
 type Options struct {
+	ExecutionPosture executionposture.Posture
 	Health           HealthChecker
 	Entities         EntityReader
 	Runtime          RuntimeController
@@ -171,6 +173,7 @@ func NewHandler(opts Options) http.Handler {
 		runtime:          opts.Runtime,
 		credentials:      opts.Credentials,
 		llmProfile:       opts.LLMProfile,
+		executionPosture: opts.ExecutionPosture,
 		authToken:        strings.TrimSpace(opts.AuthToken),
 		version:          strings.TrimSpace(opts.Version),
 		semanticSource:   opts.SemanticSource,

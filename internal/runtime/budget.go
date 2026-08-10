@@ -13,7 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -34,6 +34,7 @@ type BudgetTracker struct {
 	mailboxFrom    string
 	thresholds     budgetThresholds
 	terminalStates []string
+	posture        executionposture.Posture
 
 	mu        sync.Mutex
 	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
@@ -48,7 +49,7 @@ type budgetThresholds struct {
 	Emergency float64
 }
 
-func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source) *BudgetTracker {
+func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture) *BudgetTracker {
 	var terminalStates []string
 	if source != nil {
 		terminalStates = source.FlowTerminalStages("")
@@ -62,6 +63,7 @@ func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *co
 		mailboxFrom:    "runtime",
 		thresholds:     budgetThresholdsFromSource(source),
 		terminalStates: normalizeBudgetStateList(terminalStates),
+		posture:        posture,
 		lastState:      make(map[string]string),
 	}
 }
@@ -368,7 +370,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	facts := events.EventFacts{
 		ID: evtID, Type: events.EventType("platform.budget_threshold_crossed"),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"}, Payload: mustJSON(payload),
-		CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		CreatedAt: time.Now(), ExecutionMode: t.posture.RootMode(),
 	}
 	var evt events.Event
 	var constructErr error

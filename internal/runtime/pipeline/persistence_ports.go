@@ -11,7 +11,6 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
@@ -101,7 +100,7 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 		if reconciliation.EffectiveState == "active" {
 			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
 			operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
-			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
+			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, runtimeeffects.ExecutionMode(pc.executionPosture.RootMode()))
 			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
 				return nil, err
 			}

@@ -61,7 +61,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	eventID := uuid.NewString()
 	facts := events.EventFacts{
 		ID: eventID, Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: raw, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		Payload: raw, CreatedAt: time.Now(),
 		Envelope: events.EventEnvelope{
 			EntityID:     entityID,
 			FlowInstance: flowInstance,
@@ -83,9 +83,14 @@ func newAgentStartedRuntimeDiagnostic(ctx context.Context, eventID string, facts
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	parentEventID := runtimecorrelation.RuntimeLineageParentForEvent(ctx, eventID)
 	taskID := strings.TrimSpace(facts.TaskID)
-	mode := executionmode.Live
+	mode := facts.ExecutionMode
 	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
 		mode = executionmode.Mode(contextualMode)
+	}
+	if !mode.Valid() {
+		if controller, ok := runtimeeffects.ControllerFromContext(ctx); ok {
+			mode = controller.ExecutionPosture().RootMode()
+		}
 	}
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 		if runID == "" {

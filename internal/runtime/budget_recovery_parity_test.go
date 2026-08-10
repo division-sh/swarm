@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -106,7 +107,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					"global_monthly_cap":     10,
 					"per_entity_monthly_cap": 10,
 				},
-			}}, selected, nil, source)
+			}}, selected, nil, source, executionposture.Live)
 			manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 				BaseContext:    ctx,
 				LifecycleStore: selected,

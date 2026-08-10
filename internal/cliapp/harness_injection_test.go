@@ -11,6 +11,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -84,7 +85,7 @@ func TestVerifyValidationPolicyIsTheOnlyHarnessOptIn(t *testing.T) {
 	if !opts.AllowHarnessInputs || !opts.AllowHarnessOutputs {
 		t.Fatal("verify policy did not opt into validation-only harness acceptance")
 	}
-	production := runtimepkg.DefaultWorkflowContractValidationOptions(nil)
+	production := runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	if production.AllowHarnessInputs || production.AllowHarnessOutputs {
 		t.Fatal("default production policy inherited verify-only harness acceptance")
 	}

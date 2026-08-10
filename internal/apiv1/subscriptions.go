@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
@@ -37,6 +38,7 @@ type SubscriptionRuntime struct {
 	observability  ObservabilityReadStore
 	decisionCards  decisioncard.Store
 	bundle         runtimecontracts.BundleIdentity
+	posture        executionposture.Posture
 	pollInterval   time.Duration
 	healthInterval time.Duration
 	queueSize      int
@@ -142,6 +144,7 @@ func OperatorSubscriptions(opts OperatorReadOptions, overrides ...SubscriptionRu
 		observability: opts.Observability,
 		decisionCards: opts.DecisionCards,
 		bundle:        opts.Bundle,
+		posture:       opts.ExecutionPosture,
 	}
 	if len(overrides) > 0 {
 		out.pollInterval = overrides[0].PollInterval
@@ -397,7 +400,7 @@ func (r *SubscriptionRuntime) newOwnedSubscriptionWork(session *webSocketSession
 }
 
 func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session *webSocketSession, subscriptionID string) {
-	if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.bundle)) {
+	if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.bundle, r.posture)) {
 		return
 	}
 	ticker := time.NewTicker(r.healthInterval)
@@ -407,7 +410,7 @@ func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.bundle)) {
+			if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.bundle, r.posture)) {
 				return
 			}
 		}
@@ -672,7 +675,7 @@ func advanceRuntimeLogSubscriptionSince(state *runtimeLogSubscriptionState, late
 	state.since = &value
 }
 
-func operatorHealthSnapshot(ctx context.Context, ready func() bool, database Pinger, bundle runtimecontracts.BundleIdentity) healthCheckResult {
+func operatorHealthSnapshot(ctx context.Context, ready func() bool, database Pinger, bundle runtimecontracts.BundleIdentity, posture executionposture.Posture) healthCheckResult {
 	runtimeOK := false
 	if ready != nil {
 		runtimeOK = ready()
@@ -682,11 +685,12 @@ func operatorHealthSnapshot(ctx context.Context, ready func() bool, database Pin
 		dbOK = database.Ping(ctx) == nil
 	}
 	return healthCheckResult{
-		Alive:     true,
-		Ready:     runtimeOK && dbOK,
-		DBOK:      dbOK,
-		RuntimeOK: runtimeOK,
-		Bundle:    bundle,
+		Alive:            true,
+		Ready:            runtimeOK && dbOK,
+		DBOK:             dbOK,
+		RuntimeOK:        runtimeOK,
+		ExecutionPosture: posture,
+		Bundle:           bundle,
 	}
 }
 

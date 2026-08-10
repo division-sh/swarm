@@ -17,6 +17,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -111,6 +112,9 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	opts := runtimebus.EventBusOptions{}
 	if len(options) > 0 {
 		opts = options[0]
+	}
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID

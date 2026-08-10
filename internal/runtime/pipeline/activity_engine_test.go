@@ -30,6 +30,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -43,7 +44,7 @@ import (
 func TestPipelineActivityIntentWriterValidatesWithoutPersisting(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -187,7 +188,7 @@ func activityRequestEventWithPayload(t *testing.T, original events.Event, payloa
 
 func TestPipelineActivityContractPinUnavailableRequestsClaimRelease(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	pc := newPreviewPipelineCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(&recordingPipelineBus{}, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -269,7 +270,7 @@ func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
 func TestPipelineActivityIntentWriterDoesNotUseAmbientPostCommitAuthority(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	writer := pipelineActivityIntentWriter{coordinator: pc}
@@ -656,7 +657,7 @@ func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntr
 func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 
@@ -700,7 +701,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent(inputURL)
@@ -772,7 +773,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -819,7 +820,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -1164,6 +1165,48 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 				})
 			}
 		})
+	}
+}
+
+func TestMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTP(t *testing.T) {
+	ctx := context.Background()
+	db, store := newSQLiteActivityJournalStore(t, ctx)
+	runID := uuid.NewString()
+	seedActivityRun(t, db, true, runID)
+	var httpCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		httpCalls.Add(1)
+	}))
+	defer server.Close()
+	tool, err := testTelegramConnectorTool(server.URL).WithStaticCredentials("must_not_read")
+	if err != nil {
+		t.Fatalf("derive credential-bearing tool: %v", err)
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": tool,
+	}})
+	credentials := &countingActivityCredentialStore{}
+	pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+		ExecutionPosture:  executionposture.MockOnly,
+		Module:            staticSemanticWorkflowModule{source: source},
+		Persistence:       workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
+		Credentials:       credentials,
+	})
+	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+	intent.Tool = "telegram.send_message"
+	intent.ActivityID = "telegram_send_message"
+	intent.ExecutionMode = executionmode.Live
+	intent.EffectClass = tool.Effect()
+	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err == nil {
+		t.Fatal("mock_only posture admitted a live activity intent")
+	}
+	var attempts int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id = ?`, runID).Scan(&attempts); err != nil {
+		t.Fatalf("count activity attempts: %v", err)
+	}
+	if attempts != 0 || credentials.reads.Load() != 0 || httpCalls.Load() != 0 {
+		t.Fatalf("live activity reached attempts=%d credentials=%d HTTP=%d, want zero", attempts, credentials.reads.Load(), httpCalls.Load())
 	}
 }
 

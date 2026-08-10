@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
@@ -55,7 +56,7 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 	if bus != nil {
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
-	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, stores...)
+	gateway := runtimepkg.NewInboundGateway(bus, logger, shutdownAdmissionClosed, executionposture.Live, stores...)
 	gateway.SetCredentialStore(boundedProviderCredentialStore{})
 	return gateway
 }

@@ -235,6 +235,7 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
 				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 					Config:              req.Config,
+					ExecutionPosture:    req.ExecutionPosture,
 					EntityStore:         stores.ToolEntityStore,
 					HumanTaskStore:      stores.HumanTaskStore,
 					SessionRegistry:     stores.SessionRegistry,
@@ -745,7 +746,11 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
 		}
 	}
-	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
+	posture, err := req.Config.ProcessExecutionPosture()
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
@@ -822,6 +827,10 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 	if err != nil {
 		return nil, err
 	}
+	posture, err := cfg.ProcessExecutionPosture()
+	if err != nil {
+		return nil, err
+	}
 	registry := sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
 	return runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
 		Cfg:                  cfg,
@@ -831,7 +840,7 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 		Workspaces:           workspaces,
 		ToolGateway:          binding,
 		Credentials:          providerCredentials,
-		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector),
+		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector).WithExecutionPosture(posture),
 	}, nil)
 }
 
@@ -1267,6 +1276,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Credentials:             credentialStore,
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     providerCredentialStore,
+		ExecutionPosture:        rt.ExecutionPosture,
 		RuntimeContextManager:   runtimeContextManager,
 	})
 	if err != nil {
@@ -1274,6 +1284,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 	apiReadOptions := apiv1.OperatorReadOptions{
+		ExecutionPosture: rt.ExecutionPosture,
 		RepoRoot:         repo,
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		Ready: func() bool {
@@ -1380,7 +1391,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if opts.TestRuntimeContextsReadyHook != nil {
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
-	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores, runtimeContexts, rt.Bus); err != nil {
+	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores, runtimeContexts, rt.Bus, rt.ExecutionPosture); err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
 	}

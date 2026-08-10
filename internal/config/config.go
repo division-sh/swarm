@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"gopkg.in/yaml.v3"
 )
@@ -29,13 +30,14 @@ type Config struct {
 }
 
 type RuntimeConfig struct {
-	MaxConcurrentAgents          int           `yaml:"max_concurrent_agents"`
-	EventPollInterval            time.Duration `yaml:"event_poll_interval"`
-	RecoveryOnStartup            bool          `yaml:"recovery_on_startup"`
-	DecisionCardFirstReminder    time.Duration `yaml:"decision_card_first_reminder"`
-	DecisionCardUrgency          time.Duration `yaml:"decision_card_urgency"`
-	DecisionCardReminderInterval time.Duration `yaml:"decision_card_reminder_interval"`
-	DecisionCardInputDraftTTL    time.Duration `yaml:"decision_card_input_draft_ttl"`
+	ExecutionPosture             executionposture.Posture `yaml:"execution_posture"`
+	MaxConcurrentAgents          int                      `yaml:"max_concurrent_agents"`
+	EventPollInterval            time.Duration            `yaml:"event_poll_interval"`
+	RecoveryOnStartup            bool                     `yaml:"recovery_on_startup"`
+	DecisionCardFirstReminder    time.Duration            `yaml:"decision_card_first_reminder"`
+	DecisionCardUrgency          time.Duration            `yaml:"decision_card_urgency"`
+	DecisionCardReminderInterval time.Duration            `yaml:"decision_card_reminder_interval"`
+	DecisionCardInputDraftTTL    time.Duration            `yaml:"decision_card_input_draft_ttl"`
 }
 
 type ProviderTriggersConfig struct {
@@ -260,6 +262,9 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) validate(backendOverride string) error {
+	if _, err := c.ProcessExecutionPosture(); err != nil {
+		return err
+	}
 	if err := c.validateDecisionCardCadence(); err != nil {
 		return err
 	}
@@ -327,6 +332,18 @@ func (c *Config) validate(backendOverride string) error {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
 	}
 	return nil
+}
+
+// ProcessExecutionPosture returns the mandatory process execution ceiling.
+func (c *Config) ProcessExecutionPosture() (executionposture.Posture, error) {
+	if c == nil {
+		return "", errors.New("config is required")
+	}
+	posture, ok := executionposture.Parse(string(c.Runtime.ExecutionPosture))
+	if !ok {
+		return "", fmt.Errorf("runtime.execution_posture must be exactly live or mock_only, got %q", strings.TrimSpace(string(c.Runtime.ExecutionPosture)))
+	}
+	return posture, nil
 }
 
 func (c *Config) validateDecisionCardCadence() error {

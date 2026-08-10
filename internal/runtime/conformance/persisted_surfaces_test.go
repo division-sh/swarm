@@ -37,6 +37,7 @@ import (
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -666,7 +667,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	entityID := uuid.NewString()
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassAuthorizationDenied,
 		"cross_flow_write_forbidden",
@@ -1189,7 +1190,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
@@ -1429,7 +1430,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},

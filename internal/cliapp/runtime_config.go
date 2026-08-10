@@ -141,9 +141,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			OpenAICompatible: config.OpenAICompatibleConfig{},
 		},
 	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
 	return cfg, nil
 }
 

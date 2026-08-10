@@ -60,7 +60,7 @@ func (h *handler) runFullValidation(ctx context.Context) ValidationResult {
 		result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
 		return result
 	}
-	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, h.llmProfile)
+	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, h.llmProfile, h.executionPosture)
 	if err != nil {
 		return builderValidationSetupFailure(result, startedAt, err)
 	}

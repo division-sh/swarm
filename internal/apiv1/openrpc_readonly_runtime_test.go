@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -293,7 +294,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"entity.list":                {Params: map[string]any{}, ResultKeys: []string{"entities"}},
 		"event.get":                  {Params: map[string]any{"event_id": "evt-1"}, ResultKeys: []string{"event_id", "event_name", "payload", "deliveries", "dead_letters"}},
 		"event.list":                 {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
-		"health.check":               {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "bundle"}},
+		"health.check":               {Params: map[string]any{}, ResultKeys: []string{"alive", "ready", "db_ok", "runtime_ok", "execution_posture", "bundle"}},
 		"health.ping":                {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
 		"mailbox.get":                {Params: map[string]any{"mailbox_id": "card-1"}, ResultKeys: []string{"kind", "decision_card"}},
 		"mailbox.list":               {Params: map[string]any{}, ResultKeys: []string{"items"}},
@@ -510,9 +511,10 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 	}
 	decisionProbeState := &mutatingRuntimeProbeState{now: now}
 	return OperatorReadOptions{
-		Now:      func() time.Time { return now },
-		Ready:    func() bool { return true },
-		Database: fakePinger{},
+		ExecutionPosture: executionposture.Live,
+		Now:              func() time.Time { return now },
+		Ready:            func() bool { return true },
+		Database:         fakePinger{},
 		RuntimeIdentity: RuntimeIdentityResult{
 			RuntimeInstanceID:   "runtime-1",
 			StartedAt:           now.Format(time.RFC3339Nano),

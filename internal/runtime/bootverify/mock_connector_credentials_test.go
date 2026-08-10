@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -130,6 +131,42 @@ func TestCredentialChecksRetainAllMockToolUsedByLiveWorkflowActivity(t *testing.
 	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") ||
 		!credentialFindingContains(findings, "provider_credential", "node provider-sender handler provider.requested") {
 		t.Fatalf("credential findings = %#v, want live workflow activity requirement retained", findings)
+	}
+}
+
+func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveSource, livePlan := mockConnectorCredentialFixture(t, "static", false, true)
+	if _, err := ResolveSourceBootEffectReachability(liveSource, profile, livePlan, executionposture.MockOnly); err == nil || !strings.Contains(err.Error(), "live agents") {
+		t.Fatalf("live-agent reachability error = %v, want mock-only actor rejection", err)
+	}
+
+	mockSource, exactPlan := mockConnectorCredentialFixture(t, "static", false, false)
+	bundle, ok := semanticview.Bundle(mockSource)
+	if !ok {
+		t.Fatal("mock connector source has no canonical bundle")
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"provider-sender": {
+			ID: "provider-sender",
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"provider.requested": {Activity: runtimecontracts.ActivitySpec{ID: "provider_send", Tool: "provider.send"}},
+			},
+		},
+	}
+	mockSource = semanticview.Wrap(bundle)
+	reachability, err := ResolveSourceBootEffectReachability(mockSource, profile, exactPlan, executionposture.MockOnly)
+	if err != nil {
+		t.Fatalf("mock-only exact response reachability: %v", err)
+	}
+	if reachability.ToolCredentialRequired("provider.send") {
+		t.Fatal("mock-only exact provider activity retained a live credential requirement")
+	}
+	if _, err := ResolveSourceBootEffectReachability(mockSource, profile, nil, executionposture.MockOnly); err == nil || !strings.Contains(err.Error(), "exact mock response") {
+		t.Fatalf("missing-response reachability error = %v, want exact responder rejection", err)
 	}
 }
 
@@ -455,7 +492,7 @@ func mockConnectorEffectReachability(t *testing.T, source semanticview.Source, p
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
-	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan)
+	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan, executionposture.Live)
 	if err != nil {
 		t.Fatalf("ResolveSourceBootEffectReachability: %v", err)
 	}

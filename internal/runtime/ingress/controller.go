@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
@@ -65,8 +65,9 @@ type EventPublisher interface {
 }
 
 type Options struct {
-	Now          func() time.Time
-	ReleaseLimit int
+	Now              func() time.Time
+	ReleaseLimit     int
+	ExecutionPosture executionposture.Posture
 }
 
 type Controller struct {
@@ -75,6 +76,7 @@ type Controller struct {
 	publisher    EventPublisher
 	now          func() time.Time
 	releaseLimit int
+	posture      executionposture.Posture
 	memory       State
 	memoryInit   bool
 }
@@ -93,6 +95,7 @@ func NewController(store Store, publisher EventPublisher, opts Options) *Control
 		publisher:    publisher,
 		now:          now,
 		releaseLimit: limit,
+		posture:      opts.ExecutionPosture,
 	}
 }
 
@@ -253,6 +256,9 @@ func (c *Controller) setTransitionEvent(ctx context.Context, target Status, even
 }
 
 func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, reason, controlledBy string, lastFailure *runtimefailures.Envelope, now time.Time) (string, error) {
+	if c == nil || !c.posture.Valid() {
+		return "", fmt.Errorf("runtime ingress execution posture is invalid")
+	}
 	if c.publisher == nil {
 		return "", nil
 	}
@@ -283,7 +289,7 @@ func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, 
 	eventID := uuid.NewString()
 	facts := events.EventFacts{
 		ID: eventID, Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: raw, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: now, ExecutionMode: executionmode.Live,
+		Payload: raw, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: now, ExecutionMode: c.posture.RootMode(),
 	}
 	var evt events.Event
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {

@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -42,6 +43,7 @@ const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
 
 type SelectedContractAgentRuntimeOptions struct {
 	Config              *config.Config
+	ExecutionPosture    executionposture.Posture
 	EntityStore         runtimetools.EntityPersistence
 	HumanTaskStore      runtimetools.HumanTaskCardStore
 	SessionRegistry     runtimesessions.Registry
@@ -232,6 +234,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	}
 	if len(req.AgentRuntime.Records) == 0 {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
+			ExecutionPosture:  req.AgentRuntime.Options.ExecutionPosture,
 			BaseContext:       context.WithoutCancel(ctx),
 			BundleSourceFact:  req.LoadedSource.BundleSourceFact,
 			SemanticSource:    req.LoadedSource.Source,
@@ -365,6 +368,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		return selectedContractAgentRuntimeFactory{}, err
 	}
 	managerOptions := options.AgentManagerOptions
+	managerOptions.ExecutionPosture = options.ExecutionPosture
 	if managerOptions.SemanticSource == nil {
 		managerOptions.SemanticSource = source
 	}
@@ -391,7 +395,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		}
 		managerOptions.LLMBackend = backendProfile.ID
 	}
-	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source)
+	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture)
 	managerOptions.Budget = budget
 	if options.AgentFactory != nil {
 		return selectedContractAgentRuntimeFactory{factory: options.AgentFactory, options: managerOptions}, nil
@@ -445,7 +449,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		MCPTurns:             mcpTurns,
 		ToolGateway:          binding,
 		Credentials:          options.ProviderCredentials,
-		CompletionController: runtimeeffects.NewCompletionController(ports.effects, ports.completion, ports.completionHeartbeat, budget),
+		CompletionController: runtimeeffects.NewCompletionController(ports.effects, ports.completion, ports.completionHeartbeat, budget).WithExecutionPosture(managerOptions.ExecutionPosture),
 	}, options.LLMRuntime)
 	if err != nil {
 		if cleanup != nil {

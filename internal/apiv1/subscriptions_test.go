@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
@@ -20,9 +21,10 @@ import (
 func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 	now := time.Unix(1700001000, 0).UTC()
 	readOpts := OperatorReadOptions{
-		Now:      func() time.Time { return now },
-		Ready:    func() bool { return true },
-		Database: fakePinger{err: nil},
+		ExecutionPosture: executionposture.MockOnly,
+		Now:              func() time.Time { return now },
+		Ready:            func() bool { return true },
+		Database:         fakePinger{err: nil},
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",

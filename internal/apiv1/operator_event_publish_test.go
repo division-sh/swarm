@@ -21,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -1868,6 +1869,7 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			ExecutionPosture: executionposture.Live,
 			Now:              func() time.Time { return time.Now().UTC() },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},

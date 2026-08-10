@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
@@ -551,10 +552,11 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:      func() time.Time { return now },
-			Ready:    func() bool { return true },
-			Database: fakePinger{err: nil},
-			Runs:     fakeRuns,
+			ExecutionPosture: executionposture.MockOnly,
+			Now:              func() time.Time { return now },
+			Ready:            func() bool { return true },
+			Database:         fakePinger{err: nil},
+			Runs:             fakeRuns,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.2.3",
@@ -584,6 +586,9 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	healthResult := asMap(t, health.Result)
 	if healthResult["ready"] != true || healthResult["db_ok"] != true || healthResult["runtime_ok"] != true {
 		t.Fatalf("health.check result = %#v", healthResult)
+	}
+	if healthResult["execution_posture"] != "mock_only" {
+		t.Fatalf("health.check execution_posture = %#v, want mock_only", healthResult["execution_posture"])
 	}
 	bundle := asMap(t, healthResult["bundle"])
 	if bundle["bundle_hash"] != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {

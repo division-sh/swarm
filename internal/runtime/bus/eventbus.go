@@ -19,6 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -95,6 +96,7 @@ type EventBus struct {
 	deliveryAuthority           runtimedelivery.ExecutionAuthority
 	deliveryContinuations       DeliveryContinuationOwner
 	durable                     DurableDependencies
+	executionPosture            executionposture.Posture
 }
 
 // DurableDependencies is the exact selected-store contract consumed by a
@@ -266,6 +268,7 @@ type StandingRunWorkOwner interface {
 }
 
 type EventBusOptions struct {
+	ExecutionPosture            executionposture.Posture
 	Logger                      LoggerHook
 	Interceptors                []EventInterceptor
 	InterceptorProvider         func() []EventInterceptor
@@ -338,6 +341,9 @@ func closedSignal() chan struct{} {
 }
 
 func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if !opts.ExecutionPosture.Valid() {
+		return nil, errors.New("durable event bus requires a valid execution posture")
+	}
 	if opts.PipelineObligations == nil {
 		return nil, errors.New("durable event bus requires the pipeline obligation owner")
 	}
@@ -534,6 +540,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		receiverExecution:           opts.ReceiverExecution,
 		deliveryAuthority:           opts.DeliveryAuthority,
 		durable:                     opts.Durable,
+		executionPosture:            opts.ExecutionPosture,
 	}
 	if opts.DeliveryAuthority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
 		transfers, err := newSelectedDeliveryTransfers(opts.DeliveryAuthority)

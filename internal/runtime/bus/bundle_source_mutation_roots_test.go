@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -376,6 +377,7 @@ func newSourceMutationProbeBusWithStore(
 		WorkOwner:           runtimeOwner,
 		ReceiverExecution:   eventreceiver.NormalExecution(),
 		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact),
+		ExecutionPosture:    executionposture.Live,
 	}
 	if len(sources) > 0 {
 		options.ContractBundle = sources[0]
@@ -449,6 +451,7 @@ func TestDurableEventBusConstructionRequiresImmutableBundleSourceFact(t *testing
 	owner := newSourceMutationProbeOwner()
 	if _, err := NewEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
 		PipelineObligations: owner,
+		ExecutionPosture:    executionposture.Live,
 	}); err == nil || !strings.Contains(err.Error(), "immutable bundle source fact") {
 		t.Fatalf("durable constructor error = %v, want immutable source rejection", err)
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -48,6 +49,9 @@ import (
 )
 
 func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
+	if cfg != nil && !cfg.Runtime.ExecutionPosture.Valid() {
+		cfg.Runtime.ExecutionPosture = executionposture.Live
+	}
 	deps := stores.runtimeDeps()
 	deps.Config = cfg
 	deps.Options = options
@@ -168,7 +172,7 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 		return module, bundle, nil
 	}
 	supervisor.validateSource = func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
-		opts := runtimepkg.DefaultWorkflowContractValidationOptions(nil)
+		opts := runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 		opts.ProviderTriggerCatalog = catalog
 		_, err := runtimepkg.ValidateWorkflowContractSurface(ctx, source, opts)
 		return err
@@ -441,7 +445,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 				t.Errorf("retire process ingress test bus %s: %v", alias, err)
 			}
 		})
-		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, persistence)
+		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
 		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})
 		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 		if err != nil {

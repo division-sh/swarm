@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -81,6 +82,9 @@ func (*runtimeTestUnavailableHumanTaskExpiry) CommitHumanTaskExpirations(context
 }
 
 func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
@@ -225,6 +229,9 @@ func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtime
 
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
@@ -322,6 +329,9 @@ func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) 
 
 func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	t.Helper()
+	if deps.Config != nil && !deps.Config.Runtime.ExecutionPosture.Valid() {
+		deps.Config.Runtime.ExecutionPosture = executionposture.Live
+	}
 	if strings.TrimSpace(deps.Options.RuntimeInstanceID) == "" {
 		deps.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}

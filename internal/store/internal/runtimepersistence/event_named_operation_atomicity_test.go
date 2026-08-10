@@ -302,6 +302,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 			ContainerPlanFingerprint:   "sha256:container",
 			ActorCensusFingerprint:     "sha256:actors",
 			EffectiveConfigFingerprint: "sha256:config",
+			ExecutionMode:              executionmode.Live,
 			Now:                        createdAt,
 		})
 		if err != nil {

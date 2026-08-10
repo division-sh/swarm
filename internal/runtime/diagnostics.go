@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -48,6 +49,7 @@ func (e *RuntimeLogEntry) NormalizeEntityID() {
 
 type RuntimeLogger struct {
 	persistence RuntimeLogPersistence
+	posture     executionposture.Posture
 }
 
 // RuntimeLogPersistence owns backend-specific platform.runtime_log persistence
@@ -76,8 +78,8 @@ type DigestPersistence interface {
 	ListInstanceDigestRows(ctx context.Context, limit int) ([]InstanceDigestRow, error)
 }
 
-func NewRuntimeLogger(persistence RuntimeLogPersistence) *RuntimeLogger {
-	return &RuntimeLogger{persistence: persistence}
+func NewRuntimeLogger(persistence RuntimeLogPersistence, posture executionposture.Posture) *RuntimeLogger {
+	return &RuntimeLogger{persistence: persistence, posture: posture}
 }
 
 func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
@@ -103,7 +105,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 		return nil
 	}
 	detail := marshalJSONOrEmpty(e.Detail)
-	payload, err := logRuntimeEventSpec(ctx, l.persistence, true, level.String(), component, action, e, detail)
+	payload, err := logRuntimeEventSpec(ctx, l.persistence, l.posture, true, level.String(), component, action, e, detail)
 	if err != nil {
 		return err
 	}
@@ -209,7 +211,7 @@ func sanitizeStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
+func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence, posture executionposture.Posture, hasRunID bool, level, component, action string, e RuntimeLogEntry, detail []byte) (CanonicalRuntimeLogPayload, error) {
 	if persistence == nil {
 		return CanonicalRuntimeLogPayload{}, nil
 	}
@@ -253,7 +255,7 @@ func logRuntimeEventSpec(ctx context.Context, persistence RuntimeLogPersistence,
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	mode := runtimeeffects.ExecutionMode(executionmode.Live)
+	mode := runtimeeffects.ExecutionMode(posture.RootMode())
 	if contextualMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
 		mode = contextualMode
 	}

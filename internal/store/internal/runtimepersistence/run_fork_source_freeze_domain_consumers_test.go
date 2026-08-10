@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -233,7 +234,7 @@ func forkedDirectiveReservation(t *testing.T, runID string, now time.Time) agent
 	request := agentcontrol.SendDirectiveRequest{
 		AgentID: "freeze-agent", FlowInstance: "freeze/directive", Directive: "continue", RunID: runID, Source: agentcontrol.DirectiveSourceV1RPC, OperatorID: "operator",
 	}
-	event, err := agentcontrol.NewDirectiveEvent(request, agentcontrol.RunTargetResolution{RunID: runID, Mode: agentcontrol.RunResolutionSpecified}, operationID, eventID, now)
+	event, err := agentcontrol.NewDirectiveEvent(request, agentcontrol.RunTargetResolution{RunID: runID, Mode: agentcontrol.RunResolutionSpecified}, operationID, eventID, now, executionposture.Live)
 	if err != nil {
 		t.Fatal(err)
 	}

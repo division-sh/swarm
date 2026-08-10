@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -298,8 +300,18 @@ func RunDecisionRouteQuery(runID string) ClaimQuery {
 }
 
 type ScanRequest struct {
-	runID  string
-	global bool
+	runID            string
+	global           bool
+	executionPosture executionposture.Posture
+}
+
+func (r ScanRequest) WithExecutionPosture(posture executionposture.Posture) ScanRequest {
+	r.executionPosture = posture
+	return r
+}
+
+func (r ScanRequest) Admit(mode executionmode.Mode) error {
+	return r.executionPosture.Admit(mode, "pipeline obligation claim")
 }
 
 func GlobalScanRequest() ScanRequest {
@@ -311,6 +323,9 @@ func RunScanRequest(runID string) ScanRequest {
 }
 
 func (r ScanRequest) Validate() error {
+	if !r.executionPosture.Valid() {
+		return errors.New("pipeline scan execution posture is required")
+	}
 	if r.global {
 		if r.runID != "" {
 			return errors.New("global pipeline scan cannot select a run")

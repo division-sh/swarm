@@ -20,6 +20,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -616,7 +617,8 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
+			ExecutionPosture: executionposture.Live,
+			Now:              func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: owner, Observability: owner, AgentConversations: owner, Idempotency: owner, Events: bus,
 			Source: semanticview.Wrap(runStartTestBundle("scan.requested")),
 			Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
@@ -1334,10 +1336,15 @@ func (p *failOnceAuditEventPublisher) CheckDirectRoutes(ctx context.Context, evt
 }
 
 func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher) *Handler {
+	return eventReplayTestHandlerWithPosture(t, pg, bus, executionposture.Live)
+}
+
+func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher, posture executionposture.Posture) *Handler {
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			ExecutionPosture:   posture,
 			Now:                func() time.Time { return time.Now().UTC() },
 			Ready:              func() bool { return true },
 			Database:           fakePinger{},

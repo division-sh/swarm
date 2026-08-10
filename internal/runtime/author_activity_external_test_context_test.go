@@ -21,6 +21,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -137,6 +138,9 @@ func newExternalRuntimeTestPipelineCoordinator(
 	opts runtimepipeline.PipelineCoordinatorOptions,
 ) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	owner, ok := selected.(externalRuntimeTestWorkflowOwner)
 	if !ok {
 		t.Fatalf("selected workflow test owner %T lacks exact decision and expiry roles", selected)
@@ -174,6 +178,9 @@ func newExternalRuntimeTestPipelineCoordinator(
 
 func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps runtimepkg.RuntimeDeps) runtimepkg.RuntimeDeps {
 	t.Helper()
+	if deps.Config != nil && !deps.Config.Runtime.ExecutionPosture.Valid() {
+		deps.Config.Runtime.ExecutionPosture = executionposture.Live
+	}
 	owner, ok := selected.(externalRuntimeTestWorkflowOwner)
 	if !ok {
 		t.Fatalf("selected workflow test owner %T lacks exact decision and expiry roles", selected)
@@ -300,6 +307,9 @@ func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtime
 
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}

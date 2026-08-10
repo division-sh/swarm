@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -18,7 +19,7 @@ import (
 )
 
 func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
@@ -46,7 +47,7 @@ func TestNewRuntime_FullyMockedBundleBootsWithoutCredential(t *testing.T) {
 }
 
 func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}}
 	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -78,7 +79,7 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 }
 
 func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}}
 	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))

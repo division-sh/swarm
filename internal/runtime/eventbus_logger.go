@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -21,12 +22,13 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, bundleSourceFact runtimecorrelation.BundleSourceFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
 	}
 	opts := runtimebus.EventBusOptions{
+		ExecutionPosture:          posture,
 		Logger:                    hook,
 		InterceptorProvider:       interceptorProvider,
 		ContractBundle:            source,

@@ -148,7 +148,12 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.add(localPreflightWorkspacePrerequisite, code, severity, status, workspaceBackendDecisionDetail(workspaceBackend), remediation)
 	if req.CheckContractSecrets {
-		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile)
+		posture, postureErr := req.Config.ProcessExecutionPosture()
+		if postureErr != nil {
+			report.add(localPreflightContractSecretPrerequisite, "runtime_execution_posture_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, postureErr.Error(), "set runtime.execution_posture to exactly live or mock_only")
+			return report.finalize()
+		}
+		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile, posture)
 		if err != nil {
 			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective connector declarations or agent LLM selection")
 			return report.finalize()

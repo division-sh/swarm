@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -85,7 +86,7 @@ func TestPostgresGenericScheduleEmptyTerminalPreparationTransfersExactClaim(t *t
 			scheduler := &selectedStoreLifecycleScheduler{}
 			planner := &terminalSchedulePlannerProbe{}
 			dispatcher := &terminalScheduleDispatcherProbe{}
-			lifecycle, err := runtimegenericschedule.NewLifecycle(selected, scheduler, planner, dispatcher, nil)
+			lifecycle, err := runtimegenericschedule.NewLifecycle(selected, scheduler, planner, dispatcher, nil, executionposture.Live)
 			if err != nil {
 				t.Fatal(err)
 			}
