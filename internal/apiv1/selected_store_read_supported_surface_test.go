@@ -77,6 +77,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	eventID := uuid.NewString()
 	base := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 	identity := sqliteAgentUsageIdentity(t, agentID)
+	intent := apiTestResolvedIntent(t, agentID, "Provide operator-read proof for the selected PostgreSQL store.")
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("operator read identity fields: %v", err)
@@ -84,7 +85,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	if err := selected.UpsertAgent(ctx, manager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
-			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Config: json.RawMessage(`{"system_prompt":"usage"}`),
+			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Intent: intent,
 		},
 		Status: "active", StartedAt: base.Add(-time.Minute),
 	}); err != nil {
@@ -176,15 +177,25 @@ func TestPostgresBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	parsedJSON, err := json.Marshal(map[string]any{
+		"agents": map[string]any{
+			"bundle-agent": apiTestCatalogAgentDefinition(t, "bundle-agent", "Handle the bundle catalog proof."),
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode postgres bundle catalog projection: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
-		VALUES ($1, $2, '{}'::jsonb, NULL, '{"source":"postgres-test"}'::jsonb, $3)
+		VALUES ($1, $2, $3::jsonb, NULL, '{"source":"postgres-test"}'::jsonb, $4)
 	`, bundleHash, `agents:
-  bundle-agent:
-    role: worker
-    model: regular
-    type: managed
-`, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
+	  bundle-agent:
+	    intent:
+	      inline: Handle the bundle catalog proof.
+	    role: worker
+	    model: regular
+	    type: managed
+	`, parsedJSON, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed postgres bundle catalog: %v", err)
 	}
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{BundleCatalog: selected})})
