@@ -22,6 +22,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -102,6 +103,48 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after conflict = %d, want no duplicate replay", count)
+	}
+}
+
+func TestOperatorReplayMockOnlyRejectsLiveOriginalBeforeMutation(t *testing.T) {
+	for _, replay := range []struct {
+		name string
+		body func(eventID string) string
+	}{
+		{name: "event.replay", body: func(eventID string) string {
+			return eventReplayBody(eventID, nil, "mock-only-event-replay")
+		}},
+		{name: "agent.replay", body: func(eventID string) string {
+			return agentReplayBody(eventID, "agent-a", "mock-only-agent-replay")
+		}},
+	} {
+		t.Run(replay.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			_, db, _ := testutil.StartPostgres(t)
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			bus := eventReplayTestBus(t, pg)
+			seedActiveOperatorReplayAgent(t, ctx, pg, "agent-a")
+			original := seedReplayableOperatorEvent(t, ctx, pg, "scan.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
+			if original.ExecutionMode != "live" {
+				t.Fatalf("original execution mode = %q, want live", original.ExecutionMode)
+			}
+			beforeEvents := countOperatorReplayEvents(t, ctx, db)
+			beforeDeliveries := countEventDeliveries(t, db, original.EventID)
+
+			response := rpcCall(t, eventReplayTestHandlerWithPosture(t, pg, bus, executionposture.MockOnly), replay.body(original.EventID))
+			if response.Error == nil {
+				t.Fatalf("%s response = %#v, want mock-only live replay rejection", replay.name, response)
+			}
+			if got := countOperatorReplayEvents(t, ctx, db); got != beforeEvents {
+				t.Fatalf("events after rejected %s = %d, want %d", replay.name, got, beforeEvents)
+			}
+			if got := countEventDeliveries(t, db, original.EventID); got != beforeDeliveries {
+				t.Fatalf("original deliveries after rejected %s = %d, want %d", replay.name, got, beforeDeliveries)
+			}
+			if got := countAPIIdempotencyRows(t, db); got != 0 {
+				t.Fatalf("idempotency rows after rejected %s = %d, want 0", replay.name, got)
+			}
+		})
 	}
 }
 
@@ -1341,10 +1384,15 @@ func (p *failOnceAuditEventPublisher) CheckDirectRoutes(ctx context.Context, evt
 }
 
 func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher) *Handler {
+	return eventReplayTestHandlerWithPosture(t, pg, bus, executionposture.Live)
+}
+
+func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bus eventReplayPublisher, posture executionposture.Posture) *Handler {
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
+			ExecutionPosture:   posture,
 			Now:                func() time.Time { return time.Now().UTC() },
 			Ready:              func() bool { return true },
 			Database:           fakePinger{},

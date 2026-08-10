@@ -17,6 +17,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -254,6 +255,7 @@ type PersistenceRoles struct {
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
+	ExecutionPosture               executionposture.Posture
 	BaseContext                    context.Context
 	BundleSourceFact               runtimecorrelation.BundleSourceFact
 	LifecycleStore                 AgentLifecyclePersistence

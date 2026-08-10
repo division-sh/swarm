@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -96,6 +98,52 @@ func TestExecutableEventCommitRequiresCurrentPublicationClaimOnSQLiteAndPostgres
 	}
 }
 
+func TestMockOnlyPipelineScanRejectsPersistedLiveWorkBeforeClaimOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(pipelineObligationParityStore)
+			owner := selected.PipelineObligations()
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC())
+
+			blocked, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.MockOnly))
+			if err != nil {
+				t.Fatalf("open mock_only scan: %v", err)
+			}
+			if _, err := owner.ClaimBatch(ctx, blocked, 1); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+				t.Fatalf("mock_only ClaimBatch error = %v, want live-work rejection", err)
+			}
+			if err := owner.CloseScan(ctx, blocked); err != nil && !errors.Is(err, runtimepipelineobligation.ErrStaleScan) {
+				t.Fatalf("close rejected scan: %v", err)
+			}
+
+			live, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
+			if err != nil {
+				t.Fatalf("open live scan after rejection: %v", err)
+			}
+			batch, err := owner.ClaimBatch(ctx, live, 1)
+			if err != nil {
+				t.Fatalf("claim live scan after rejection: %v", err)
+			}
+			if len(batch.Work) != 1 || batch.Work[0].Event.ID() != eventID {
+				t.Fatalf("live scan work = %#v, want untouched event %s", batch.Work, eventID)
+			}
+			if err := owner.CloseScan(ctx, live); err != nil {
+				t.Fatalf("close live scan: %v", err)
+			}
+		})
+	}
+}
+
 func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []struct {
 		name string
@@ -127,7 +175,7 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 			}
 			laterID := commitPipelineParityEvent(t, ctx, selected, runID, base.Add(heldCount*time.Microsecond))
 
-			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("OpenScan: %v", err)
 			}
@@ -165,7 +213,7 @@ func TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndP
 					t.Fatalf("release blocker: %v", err)
 				}
 			}
-			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("OpenScan after exhaustion: %v", err)
 			}
@@ -211,7 +259,7 @@ func TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAnd
 				)
 			}
 
-			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("OpenScan: %v", err)
 			}
@@ -323,7 +371,7 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	}); err != nil {
 		t.Fatalf("commit boundary-visible event: %v", err)
 	}
-	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 	if err != nil {
 		t.Fatalf("OpenScan: %v", err)
 	}
@@ -377,7 +425,7 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	if err := owner.CloseScan(ctx, scan); err != nil {
 		t.Fatalf("CloseScan: %v", err)
 	}
-	fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 	if err != nil {
 		t.Fatalf("OpenScan fresh: %v", err)
 	}
@@ -416,7 +464,7 @@ func TestPostgresPipelineScanSnapshotRetainsRouteAfterPostBoundaryDeferral(t *te
 		t.Fatalf("read target insertion identity: %v", err)
 	}
 
-	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 	if err != nil {
 		t.Fatalf("OpenScan: %v", err)
 	}
@@ -492,7 +540,7 @@ func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
 
-			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("OpenScan: %v", err)
 			}
@@ -519,7 +567,7 @@ func TestPipelineScanExaminesDeferredDecisionRouteOncePerPassOnSQLiteAndPostgres
 				t.Fatalf("CloseScan: %v", err)
 			}
 
-			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+			fresh, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("OpenScan fresh: %v", err)
 			}
@@ -551,7 +599,7 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 				eventID := commitPipelineParityEvent(t, ctx, selected, runID, at)
 				insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, at)
 
-				scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+				scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 				if err != nil {
 					t.Fatalf("OpenScan: %v", err)
 				}
@@ -690,7 +738,7 @@ func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(
 
 			for _, mode := range []string{"cancel", "abandon"} {
 				t.Run(mode, func(t *testing.T) {
-					scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID))
+					scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
 					if err != nil {
 						t.Fatalf("OpenScan: %v", err)
 					}
@@ -826,7 +874,7 @@ func TestPipelineScanRechecksDecisionEligibilityAfterEachMutationOnSQLiteAndPost
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, firstID, runID, at)
 			insertProducerIdentityDecisionObligation(t, fixture, ctx, secondID, runID, at.Add(time.Microsecond))
 
-			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+			scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 			if err != nil {
 				t.Fatalf("OpenScan: %v", err)
 			}

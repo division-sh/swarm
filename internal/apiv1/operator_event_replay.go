@@ -262,6 +262,9 @@ func performEventReplay(
 		}
 		publisher = selected.Runtime.Bus
 	}
+	if err := opts.ExecutionPosture.Admit(original.ExecutionMode, req.Method+" direct-route replay"); err != nil {
+		return eventReplayPerformed{}, err
+	}
 	originalDeliveries, selectedSubscribers, err := eventReplayTargetsForRequest(original, requestedSubscribers, requestedIdentity)
 	if err != nil {
 		return eventReplayPerformed{}, err
@@ -365,6 +368,9 @@ func ensureEventReplayAudit(
 			return errors.New("event replay publisher is required for selected runtime context")
 		}
 		publisher = selected.Runtime.Bus
+	}
+	if err := opts.ExecutionPosture.Admit(original.ExecutionMode, req.Method+" audit publication"); err != nil {
+		return err
 	}
 	originalDeliveries, _, err := eventReplayTargetsForRequest(original, stored.SubscribersReplayed, stored.AgentIdentity)
 	if err != nil {

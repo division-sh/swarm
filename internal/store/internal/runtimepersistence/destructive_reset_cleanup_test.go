@@ -13,6 +13,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -1090,7 +1091,7 @@ func destructiveResetDirectiveReservation(t *testing.T, runID, key, requestHash 
 	event, err := runtimeagentcontrol.NewDirectiveEvent(request, runtimeagentcontrol.RunTargetResolution{
 		RunID: runID,
 		Mode:  runtimeagentcontrol.RunResolutionSpecified,
-	}, operationID, eventID, now)
+	}, operationID, eventID, now, executionposture.Live)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}

@@ -23,6 +23,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -817,7 +818,7 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 			return err
 		},
 	}
-	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
+	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler, executionposture.Live)
 	store.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	trigger := eventtest.RunCreatingRootIngressWithMode(
 		"",

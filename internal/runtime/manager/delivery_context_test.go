@@ -53,7 +53,7 @@ func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalRecei
 	identity := runtimeagentidentitytest.RootRuntime(t, "agent-1", "manager-delivery-context-test")
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: identity, AgentID: identity.AgentID(), Generation: 3}
 	loopCtx := runtimeeffects.WithLifecycleToken(context.Background(), token)
-	controller := runtimeeffects.NewController(deliveryContextEffectStore{})
+	controller := liveTestEffectController(deliveryContextEffectStore{})
 	loopCtx = runtimeeffects.WithController(loopCtx, controller)
 	loopCtx = managedExecutionTestContext(t, loopCtx)
 	deliveryOwner, ok := worklifetime.OccurrenceFromContext(delivery.Context())

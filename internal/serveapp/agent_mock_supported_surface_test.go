@@ -18,6 +18,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -42,7 +43,7 @@ func TestMockAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
 func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	harness := effecttest.New()
 	runtimes, err := buildForkChatSandboxLLMRuntimes(
-		&config.Config{LLM: config.LLMConfig{Backend: "claude_cli"}},
+		&config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.MockOnly}, LLM: config.LLMConfig{Backend: "claude_cli"}},
 		nil,
 		toolgateway.Binding{},
 		nil,
@@ -86,7 +87,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 	for key, value := range map[string]string{
 		"webhook_signing.telegram": "telegram-secret",
-		"telegram_bot_token":       "live-activity-path-token",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
@@ -189,6 +189,7 @@ func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) strin
 	t.Helper()
 	lines := []string{
 		"runtime:",
+		"  execution_posture: mock_only",
 		"  recovery_on_startup: true",
 		"workspace:",
 		"  data_source: " + t.TempDir(),

@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testcatalog"
@@ -153,7 +154,7 @@ func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	source := semanticview.Wrap(bundle)
-	_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, runtime.DefaultWorkflowContractValidationOptions(nil))
+	_, validationErr := runtime.ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, runtime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if validationErr != nil {
 		if _, err := newTier8Runtime(t, bundle); err == nil {
 			t.Fatal("expected NewRuntime to fail when authoritative startup validation fails")

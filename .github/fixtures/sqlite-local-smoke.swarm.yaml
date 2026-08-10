@@ -1,3 +1,6 @@
+runtime:
+  execution_posture: live
+
 provider_triggers:
   packs:
     platform_dirs:

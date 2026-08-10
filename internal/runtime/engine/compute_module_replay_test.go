@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -84,7 +85,7 @@ func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Co
 	t.Helper()
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["node_id"] = nodeID
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
+	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Message:   "Compute module replay evidence recorded",

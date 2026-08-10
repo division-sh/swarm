@@ -30,6 +30,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -66,7 +67,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	installInboundStandingRecoveryOwner(t, bus, runID, provider)
-	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
 
@@ -169,7 +170,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	installInboundStandingRecoveryOwner(t, bus, runID, provider)
-	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
 
@@ -272,7 +273,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	installInboundStandingRecoveryOwner(t, bus, runID, provider)
-	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(controller)
 

@@ -54,7 +54,7 @@ func proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T, fixtu
 	t.Helper()
 	requireLegacyEffectTablesAbsent(t, fixture)
 	registrations := nonCompletionRegistrationsForParity(t)
-	controller := runtimeeffects.NewController(fixture.store)
+	controller := liveTestEffectController(fixture.store)
 	for _, registration := range registrations {
 		registration := registration
 		t.Run(registration.Adapter, func(t *testing.T) {
@@ -189,7 +189,7 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 	}
 	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 7, Identity: identity, AgentID: agentID, Generation: 3}
 	authority := runtimeeffects.NormalAgentAuthority(token, fmt.Sprintf("agent:%s:%d:%d", agentID, token.RuntimeEpoch, token.Generation), now.Add(5*time.Minute))
-	ctx = runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, token), runtimeeffects.NewController(store))
+	ctx = runtimeeffects.WithController(runtimeeffects.WithLifecycleToken(ctx, token), liveTestEffectController(store))
 	ctx = managedNormalEffectStoreTestContext(t, ctx, authority)
 	return neutralEffectParityFixture{store: store, db: db, sqlite: sqlite, authority: authority, ctx: ctx}
 }

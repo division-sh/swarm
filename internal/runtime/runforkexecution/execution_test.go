@@ -42,6 +42,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -166,7 +167,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			}
 			runtimeTopologyBefore := selectedContractDynamicRuntimeGlobalSnapshot(t, ctx, db)
 
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID:         sourceRunID,
 				At:                  sourceEventID,
 				ConfirmSourceFreeze: true,
@@ -332,7 +333,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				t.Fatalf("load source status before activation: %v", err)
 			}
 
-			result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+			result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 				ForkRunID:           materialized.ForkRunID,
 				ConfirmSourceFreeze: true,
 				Store:               pg,
@@ -522,7 +523,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -759,6 +760,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	workOwner := testGatewayWorkOwner(t)
 	var manager *runtimemanager.AgentManager
 	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
+		ExecutionPosture:    executionposture.Live,
 		WorkOwner:           workOwner,
 		PipelineObligations: pg.PipelineObligations(),
 		ContractBundle:      loaded.Source,
@@ -858,7 +860,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	commitRunForkTestEvent(t, sourceCtx, pg, sourceEvent, preflight.DeliveryRoutes)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -948,7 +950,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		BundleSourceFact:    testPersistedBundleSourceFact(projection.BundleHash),
@@ -1032,7 +1034,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	commitRunForkTestEvent(t, ctx, pg, laterEvent, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: laterEventID, ConfirmSourceFreeze: true,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
@@ -1070,7 +1072,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -1125,7 +1127,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	agent := &selectedContractForkTestAgent{}
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -1381,7 +1383,7 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 			seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
 			seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceEventID, ConfirmSourceFreeze: true,
 				Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
@@ -1663,7 +1665,7 @@ fi
 	seedSelectedExecutionRootSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, ConfirmSourceFreeze: true,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
@@ -1916,6 +1918,7 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	container := buildSelectedForkProofContainer(t, ctx, db)
 
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		LLMBackend:        llmselection.BackendClaudeCLI,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -1951,7 +1954,7 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	proof := container.Proof()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
-	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(pg))
+	ctx = runtimeeffects.WithController(ctx, liveTestEffectController(pg))
 	ctx = managedexecution.WithAdmission(ctx, container.admission)
 	surfaceIDs, err := swaruntime.ValidateManagedProviderPreflight(
 		ctx, cfg, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), binding,
@@ -1962,7 +1965,7 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 			RunID:                proof.ForkRunID,
 			StartupOwnerID:       proof.AuthorityExecutionOwner,
 			StartupGeneration:    proof.RuntimeGeneration,
-			EffectController:     runtimeeffects.NewController(pg),
+			EffectController:     liveTestEffectController(pg),
 			CapabilityStore:      pg,
 			EffectAuthority: func(string, string) (runtimeeffects.Authority, error) {
 				return container.authority, nil
@@ -2115,6 +2118,9 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		},
 		SourceRunID: sourceRunID, ForkRunID: forkRunID, ForkEventID: forkEventID, SourceEvents: []string{forkEventID},
 		ExecutionOwner: runfork.RunForkSelectedContractExecutionOwner, DeferredWorkAdmission: deferredWorkAdmission,
+		AgentRuntime: selectedContractAgentRuntimePlan{Options: SelectedContractAgentRuntimeOptions{
+			ExecutionPosture: executionposture.Live,
+		}},
 	})
 	if err != nil {
 		t.Fatalf("buildSelectedContractForkLocalRuntimeContainer: %v", err)
@@ -2180,7 +2186,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 		AgentIdentity: actorIdentity, SessionID: sessionID, Memory: agentmemory.PlatformDefault(),
 		FlowInstance: actorIdentity.FlowInstance(),
 	})
-	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(storetest.AdmitPostgresRuntimeStore(t, db)))
+	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(storetest.AdmitPostgresRuntimeStore(t, db)))
 	effectCtx = managedexecution.WithAdmission(effectCtx, container.admission)
 	effectCtx = managedcapabilities.WithContext(effectCtx, surface)
 	if _, err := executor.Execute(effectCtx, "selected_http", map[string]any{}); err != nil {
@@ -2305,7 +2311,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, ConfirmSourceFreeze: true,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
@@ -2448,6 +2454,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		SourceEvents:          []string{forkEventID},
 		ExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		DeferredWorkAdmission: deferredWorkAdmission,
+		AgentRuntime: selectedContractAgentRuntimePlan{Options: SelectedContractAgentRuntimeOptions{
+			ExecutionPosture: executionposture.Live,
+		}},
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		runForkTestRuntimeInstanceID,
@@ -2511,7 +2520,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		FlowInstance:  targetIdentity.FlowInstance(),
 	}
 	providerCtx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewCompletionController(winner.store, winner.store, winner.store, selectedForkDiscardSpendProjection{})),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), liveTestCompletionController(winner.store, winner.store, winner.store, selectedForkDiscardSpendProjection{})),
 		"served-standalone-authority-race",
 	)
 	providerCtx = managedexecution.WithAdmission(providerCtx, winner.container.admission)
@@ -2687,7 +2696,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution()})
+	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{ExecutionPosture: executionposture.Live, WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution()})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2721,8 +2730,9 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				},
 			}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config:     &config.Config{},
-				LLMRuntime: selectedContractCleanupRuntime{},
+				ExecutionPosture: executionposture.Live,
+				Config:           &config.Config{},
+				LLMRuntime:       selectedContractCleanupRuntime{},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
 					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
 				},
@@ -2780,7 +2790,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -2875,7 +2885,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
 
-	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		ForkRunID:           materialized.ForkRunID,
 		ConfirmSourceFreeze: true,
 		Store:               pg,
@@ -2992,7 +3002,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 		runforkrevision.FamilyCommittedReplayScopes,
 	)
 
-	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
+	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		ForkRunID:      materialized.ForkRunID,
 		Store:          pg,
 		ExecutionOwner: selectedContractExecutionOwnerForTest(t, pg),
@@ -3076,7 +3086,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	}
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -3205,7 +3215,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), forkAt)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  forkPointEventID,
 		ConfirmSourceFreeze: true,
@@ -3343,7 +3353,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 		runforkrevision.FamilyAgentTurns,
 	)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -3430,7 +3440,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_subscribed", at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -3517,7 +3527,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 		t.Fatalf("install conflicting replay-scope trigger: %v", err)
 	}
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -3560,7 +3570,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "ghost.event", at, loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -3625,7 +3635,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -3692,7 +3702,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 		runforkrevision.FamilyDeadLetters,
 	)
 
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,

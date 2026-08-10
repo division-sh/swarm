@@ -16,6 +16,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -181,6 +182,9 @@ func (*unavailablePipelineTestRunLifecycle) MarkTerminalRun(context.Context, run
 // allowing a focused unit test to state only the durable role it exercises.
 // Calling an unstated role still panics through its nil embedded test interface.
 func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions) PipelineCoordinatorOptions {
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
@@ -237,6 +241,13 @@ func newDurablePipelineCoordinatorForTest(bus Bus, db *sql.DB, opts PipelineCoor
 	return pc
 }
 
+func newPreviewPipelineCoordinatorForTest(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
+	return newPreviewPipelineCoordinator(bus, opts)
+}
+
 func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
 	if p.store == nil {
 		return []string{"store"}
@@ -272,13 +283,17 @@ func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
 
 func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 	module := staticSemanticWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})}
-	if preview := newPreviewPipelineCoordinator(previewBus{}, PipelineCoordinatorOptions{Module: module}); preview == nil {
+	if preview := newPreviewPipelineCoordinator(previewBus{}, PipelineCoordinatorOptions{
+		Module:           module,
+		ExecutionPosture: executionposture.Live,
+	}); preview == nil {
 		t.Fatal("explicit preview coordinator was not constructed")
 	}
 
 	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, PipelineCoordinatorOptions{
-		Module:      module,
-		Persistence: WorkflowPersistence{store: &workflowInstanceStore{}},
+		Module:           module,
+		ExecutionPosture: executionposture.Live,
+		Persistence:      WorkflowPersistence{store: &workflowInstanceStore{}},
 	}); durable != nil {
 		t.Fatal("durable coordinator accepted incomplete persistence roles")
 	}

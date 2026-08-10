@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/gorilla/websocket"
 )
 
@@ -426,11 +427,12 @@ func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabil
 		cards = cardStores[0]
 	}
 	readOpts := testOperatorCapabilities{
-		Now:           func() time.Time { return time.Unix(1700001410, 0).UTC() },
-		Ready:         func() bool { return true },
-		Database:      fakePinger{err: nil},
-		Observability: observability,
-		DecisionCards: cards,
+		ExecutionPosture: executionposture.Live,
+		Now:              func() time.Time { return time.Unix(1700001410, 0).UTC() },
+		Ready:            func() bool { return true },
+		Database:         fakePinger{err: nil},
+		Observability:    observability,
+		DecisionCards:    cards,
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.2.3",

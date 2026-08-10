@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -26,12 +27,12 @@ func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			TerminalStages: []string{"done"},
 		},
-	}))
+	}), executionposture.Live)
 	trackerB := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			TerminalStages: []string{"closed"},
 		},
-	}))
+	}), executionposture.Live)
 
 	if got, want := trackerA.TerminalInstanceStates(), []string{"done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("trackerA.TerminalInstanceStates() = %#v, want %#v", got, want)
@@ -59,7 +60,7 @@ func TestBudgetTrackerUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
 				"child": {"done"},
 			},
 		},
-	}))
+	}), executionposture.Live)
 
 	if got, want := tracker.TerminalInstanceStates(), []string{"archived"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("TerminalInstanceStates() = %#v, want root-only %#v", got, want)
@@ -138,7 +139,7 @@ func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyS
 	})
 	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
 		"budget": map[string]any{"system_monthly_cap": 1},
-	}}, mailbox, nil, source)
+	}}, mailbox, nil, source, executionposture.Live)
 
 	tracker.ProjectCommittedCompletionSpend(testAuthorActivityContext(context.Background()), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
 	events := eventStore.appendedEvents()
@@ -176,7 +177,7 @@ func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 		"budget_warning_percent": {Value: 50}, "budget_throttle_percent": {Value: 75}, "budget_emergency_percent": {Value: 90},
 	}}})
-	tracker := NewBudgetTracker(spendStore, bus, &config.Config{Extensions: map[string]any{"budget": map[string]any{"system_monthly_cap": 1}}}, nil, nil, source)
+	tracker := NewBudgetTracker(spendStore, bus, &config.Config{Extensions: map[string]any{"budget": map[string]any{"system_monthly_cap": 1}}}, nil, nil, source, executionposture.Live)
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	inbound := eventtest.RunCreatingRootIngressWithMode(parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), executionmode.Mock)
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
@@ -220,7 +221,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 			"global_monthly_cap":     1,
 			"per_entity_monthly_cap": 1,
 		},
-	}}, nil, nil, source)
+	}}, nil, nil, source, executionposture.Live)
 
 	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("ProjectRecoveryBudgetState: %v", err)

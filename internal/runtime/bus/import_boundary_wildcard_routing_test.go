@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -611,7 +612,7 @@ func assertImportBoundaryWildcardAuthorizationAmbiguityFailsClosedAcrossSurfaces
 	if importBoundaryWildcardReportContains(report.Findings, "event_consumer_exists", "producer/task.done") {
 		t.Fatalf("verify findings = %#v, ambiguity should replace the generic missing-consumer warning", report.Findings)
 	}
-	validationOpts := swruntime.DefaultWorkflowContractValidationOptions(nil)
+	validationOpts := swruntime.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	validationOpts.CheckMCPReachable = false
 	validationOpts.FatalBootWarnings = false
 	validationOpts.FatalToolImplementationWarning = false

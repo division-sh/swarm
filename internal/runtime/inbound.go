@@ -21,7 +21,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -79,6 +79,7 @@ type InboundGateway struct {
 	standingAdmissions      map[string]*shutdownAdmission
 	publicationMu           sync.Mutex
 	publicationFlights      map[string]chan struct{}
+	executionPosture        executionposture.Posture
 }
 
 func (g *InboundGateway) claimPublicationFlight(key string) (<-chan struct{}, bool, func()) {
@@ -108,7 +109,7 @@ func (g *InboundGateway) SetAdmissionGuard(begin func(context.Context) (context.
 	}
 }
 
-func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
+func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, posture executionposture.Posture, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
@@ -118,6 +119,7 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdown
 		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
+		executionPosture:        posture,
 	}
 	return g
 }
@@ -438,7 +440,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	published, evidence, authorProjection, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now)
+	published, evidence, authorProjection, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now, g.executionPosture)
 	if projectionErr != nil {
 		writeInboundPublicationError(w, projectionErr)
 		return
@@ -566,7 +568,7 @@ func writeInboundPublicationError(w http.ResponseWriter, err error) {
 	http.Error(w, message, status)
 }
 
-func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, error) {
+func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time, posture executionposture.Posture) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, error) {
 	var noEvidence events.Event
 	delivery, err := target.AdmissionPlan.ProjectDelivery(admitted)
 	if err != nil {
@@ -595,7 +597,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 		event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: events.EventFacts{
 			ID: eventID, Type: output.Name, Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "inbound-gateway"},
 			Payload: mustJSON(output.Payload), Envelope: envelope, RoutingSource: routingSource,
-			CreatedAt: now, ExecutionMode: executionmode.Live,
+			CreatedAt: now, ExecutionMode: posture.RootMode(),
 		}, RunID: request.ResolvedRunID})
 		if err != nil {
 			return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, err
@@ -620,7 +622,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 	evidence, err := events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
 		ID: request.MarkerEventID, Type: events.EventTypePlatformInboundRecord,
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"}, Payload: evidencePayload,
-		Envelope: events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), CreatedAt: now, ExecutionMode: executionmode.Live,
+		Envelope: events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), CreatedAt: now, ExecutionMode: posture.RootMode(),
 	}, RunID: request.ResolvedRunID})
 	if err != nil {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, err

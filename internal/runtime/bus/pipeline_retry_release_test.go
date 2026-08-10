@@ -14,6 +14,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -421,7 +422,10 @@ func TestIngressResumeDrainsPartialBatchesUntilExplicitTerminationOnSQLiteAndPos
 				t.Fatal("pause ingress did not change state")
 			}
 			publisher := &recordingIngressRecoveryPublisher{bus: fixture.bus}
-			controller := runtimeingress.NewController(ingressStore, publisher, runtimeingress.Options{ReleaseLimit: 2})
+			controller := runtimeingress.NewController(ingressStore, publisher, runtimeingress.Options{
+				ExecutionPosture: executionposture.Live,
+				ReleaseLimit:     2,
+			})
 			fixture.bus.SetRuntimeIngressDispatchGate(controller)
 			t.Cleanup(func() {
 				fixture.bus.SetRuntimeIngressDispatchGate(nil)
@@ -748,7 +752,10 @@ func TestControllerCancellationBetweenBatchesAbandonsCursorOnSQLiteAndPostgres(t
 						t.Fatalf("pause ingress: %v", err)
 					}
 					publisher := &recordingIngressRecoveryPublisher{bus: fixture.bus, cancelAfterFirst: cancel}
-					controller := runtimeingress.NewController(ingressStore, publisher, runtimeingress.Options{ReleaseLimit: 2})
+					controller := runtimeingress.NewController(ingressStore, publisher, runtimeingress.Options{
+						ExecutionPosture: executionposture.Live,
+						ReleaseLimit:     2,
+					})
 					fixture.bus.SetRuntimeIngressDispatchGate(controller)
 					t.Cleanup(func() {
 						fixture.bus.SetRuntimeIngressDispatchGate(nil)

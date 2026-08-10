@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -184,7 +183,7 @@ func (s *captureConversationStore) capturedWatchdogUpdate() ConversationWatchdog
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, publisher)
-	ctx := runtimeactors.WithActor(withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-1", ""), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(withTestStatelessMemory(t, liveLLMTestContext(), "agent-1", ""), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
 		Model:         "regular",
@@ -235,7 +234,7 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, publisher)
-	ctx := runtimeactors.WithActor(withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-2", ""), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(withTestStatelessMemory(t, liveLLMTestContext(), "agent-2", ""), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-2",
 		Model:         "cheap",
@@ -331,7 +330,7 @@ func TestAnthropicAPIRuntime_StartSessionPreservesBusinessPrompt(t *testing.T) {
 
 func TestPublishAgentStarted_LogsActiveTransitionOnlyAfterRealDeliveryMark(t *testing.T) {
 	publisher := &eventPublisherStub{markChanged: true}
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(liveLLMTestContext(), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
 		EntityID:      "entity-1",
@@ -514,7 +513,7 @@ func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
 		markErr:    errors.New("mark boom"),
 		publishErr: errors.New("publish boom"),
 	}
-	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
+	ctx := runtimeactors.WithActor(liveLLMTestContext(), runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
 		EntityID:      "entity-1",
@@ -668,7 +667,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 	runtime.httpClient = server.Client()
-	runtime.completionController = runtimeeffects.NewCompletionController(effects, effects, effects, effects)
+	runtime.completionController = liveTestCompletionController(effects, effects, effects, effects)
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(

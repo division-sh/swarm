@@ -38,7 +38,7 @@ func TestAgentRuntimeSetLazilyBindsExactMockInsteadOfConfiguredLiveAdapter(t *te
 	live := &observedClaudeRuntime{}
 	runtimes, err := NewAgentRuntimeSet(profile, RuntimeFactory{
 		Cfg:                  cfg,
-		CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
+		CompletionController: liveTestCompletionController(harness, harness, harness, harness),
 	}, live)
 	if err != nil {
 		t.Fatalf("NewAgentRuntimeSet: %v", err)

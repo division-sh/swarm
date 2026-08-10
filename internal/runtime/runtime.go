@@ -38,7 +38,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -153,7 +153,7 @@ type validatedRuntimeDeps struct {
 	ManagedCredentials         runtimemanagedcredentials.Store
 	MockConnectorResponses     *providerconnectors.MockResponsePlan
 	BootEffectReachability     runtimebootverify.SourceBootEffectReachability
-	ExecutionMode              runtimeeffects.ExecutionMode
+	ExecutionPosture           executionposture.Posture
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
@@ -249,6 +249,7 @@ type Runtime struct {
 	managedCapabilitiesStore   managedcapabilities.Persistence
 
 	Config             *config.Config
+	ExecutionPosture   executionposture.Posture
 	Options            RuntimeOptions
 	Bus                *runtimebus.EventBus
 	Logger             *RuntimeLogger
@@ -563,11 +564,11 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 	}
 }
 
-func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
-	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, false)
+func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, false)
 }
 
-func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, posture executionposture.Posture, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
 		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
@@ -577,7 +578,7 @@ func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llms
 			return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workspace validation failed: %w", err)
 		}
 	}
-	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
+	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials, posture)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.LLMProfile = profile
@@ -710,9 +711,9 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
-	executionMode, err := llmselection.ExecutionModeForProfile(profile)
+	posture, err := cfg.ProcessExecutionPosture()
 	if err != nil {
-		return validatedRuntimeDeps{}, fmt.Errorf("runtime execution mode validation failed: %w", err)
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
 	if deps.WorkflowPersistence.Configured() && !deps.WorkflowPersistence.Valid() {
 		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime workflow persistence mutation owner is required")
@@ -749,7 +750,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		opts.WorkflowModule = workflowModule
 		source = wrappedSource
 	}
-	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, allowValidationHarness)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -790,7 +791,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		ManagedCredentials:         opts.ManagedCredentials,
 		MockConnectorResponses:     mockConnectorResponses,
 		BootEffectReachability:     bootEffectReachability,
-		ExecutionMode:              executionMode,
+		ExecutionPosture:           posture,
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
@@ -1007,6 +1008,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		ownerID:                   newRuntimeOwnerID(),
 		bootID:                    uuid.NewString(),
 		Config:                    cfg,
+		ExecutionPosture:          boot.ExecutionPosture,
 		Options:                   opts,
 		Workspace:                 opts.WorkspaceLifecycle,
 		MCPTurns:                  mcpTurns,
@@ -1047,11 +1049,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 
 	if runtimeDeps.RuntimeLogStore != nil {
-		rt.Logger = NewRuntimeLogger(runtimeDeps.RuntimeLogStore)
+		rt.Logger = NewRuntimeLogger(runtimeDeps.RuntimeLogStore, rt.ExecutionPosture)
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
-	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.ExecutionPosture, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -1076,7 +1078,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
 	rt.Bus = bus
-	rt.RuntimeIngress = runtimeingress.NewController(runtimeDeps.RuntimeIngressStore, rt.Bus, runtimeingress.Options{})
+	rt.RuntimeIngress = runtimeingress.NewController(runtimeDeps.RuntimeIngressStore, rt.Bus, runtimeingress.Options{ExecutionPosture: rt.ExecutionPosture})
 	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
 	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence)
 	if runtimeDeps.GenericScheduleStore != nil {
@@ -1086,6 +1088,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			rt.Bus,
 			rt.Bus.EngineDispatcher(),
 			genericScheduleRuntimeLogger{logger: rt.Logger},
+			rt.ExecutionPosture,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("build generic schedule lifecycle: %w", err)
@@ -1102,6 +1105,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
 		}
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
+			ExecutionPosture:      boot.ExecutionPosture,
 			ReceiverExecution:     eventreceiver.NormalExecution(),
 			Module:                opts.WorkflowModule,
 			Persistence:           runtimeDeps.WorkflowPersistence,
@@ -1170,7 +1174,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 
 	if runtimeDeps.BudgetSpendStore != nil {
-		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source)
+		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source, rt.ExecutionPosture)
 	}
 
 	backendProfile, err := cfg.LLMBackendProfile()
@@ -1179,7 +1183,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 	var completionController *runtimeeffects.Controller
 	if runtimeDeps.EffectsStore != nil && runtimeDeps.CompletionStore != nil && runtimeDeps.CompletionHeartbeatStore != nil {
-		completionController = runtimeeffects.NewCompletionController(runtimeDeps.EffectsStore, runtimeDeps.CompletionStore, runtimeDeps.CompletionHeartbeatStore, rt.Budget)
+		completionController = runtimeeffects.NewCompletionController(runtimeDeps.EffectsStore, runtimeDeps.CompletionStore, runtimeDeps.CompletionHeartbeatStore, rt.Budget).WithExecutionPosture(boot.ExecutionPosture)
 	}
 	if opts.LLMRuntime == nil && completionController == nil {
 		return nil, fmt.Errorf("selected runtime store does not implement completion execution authority")
@@ -1305,6 +1309,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
 	}
 	managerOptions := runtimemanager.AgentManagerOptions{
+		ExecutionPosture:   boot.ExecutionPosture,
 		BaseContext:        rt.authorActivityContext(context.Background()),
 		BundleSourceFact:   rt.Options.BundleSourceFact,
 		LifecycleStore:     lifecycleStore,
@@ -1362,7 +1367,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	managerRef = rt.Manager
 
 	if runtimeDeps.InboundStore != nil {
-		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, runtimeDeps.InboundStore)
+		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)
@@ -1612,7 +1617,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				return fmt.Errorf("restore generic schedules: %w", err)
 			}
 			startupRecoveryDecision.ScheduleReplayCount = reconciled
-			if err := ensureBootWorkflowSchedules(ctx, rt.GenericSchedules, rt.Pipeline); err != nil {
+			if err := ensureBootWorkflowSchedules(ctx, rt.GenericSchedules, rt.Pipeline, rt.ExecutionPosture); err != nil {
 				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
 				return fmt.Errorf("ensure boot generic schedules: %w", err)
 			}
@@ -1849,7 +1854,7 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 		"failure": *decision.Failure, "failed_event_id": nil, "timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if rt.Bus != nil {
-		recoveryEvent, publishErr := newStandaloneRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now())
+		recoveryEvent, publishErr := newStandaloneRuntimePlatformDiagnosticEvent(events.EventType("platform.recovery_failed"), payload, events.EventEnvelope{}, time.Now(), rt.ExecutionPosture)
 		if publishErr == nil {
 			publishErr = rt.Bus.Publish(ctx, recoveryEvent)
 		}
@@ -2156,7 +2161,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 	eventID := uuid.NewString()
 	evt, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
 		ID: eventID, Type: t, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: payload, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		Payload: payload, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: time.Now(), ExecutionMode: rt.ExecutionPosture.RootMode(),
 	}})
 	if err != nil {
 		return "", err
@@ -2184,7 +2189,7 @@ func (rt *Runtime) verifyBootPublished(ch <-chan *worklifetime.EventDelivery) er
 
 var bootWorkflowTimerPolicyPlaceholder = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}`)
 
-func ensureBootWorkflowSchedules(ctx context.Context, schedules *runtimegenericschedule.Lifecycle, workflow runtimepipeline.WorkflowRuntime) error {
+func ensureBootWorkflowSchedules(ctx context.Context, schedules *runtimegenericschedule.Lifecycle, workflow runtimepipeline.WorkflowRuntime, posture executionposture.Posture) error {
 	if schedules == nil || workflow == nil {
 		return nil
 	}
@@ -2193,7 +2198,7 @@ func ensureBootWorkflowSchedules(ctx context.Context, schedules *runtimegenerics
 		return nil
 	}
 	for _, timer := range source.WorkflowTimers() {
-		command, ok, err := bootWorkflowTimerSchedule(source, timer)
+		command, ok, err := bootWorkflowTimerSchedule(source, timer, posture)
 		if err != nil {
 			return err
 		}
@@ -2207,7 +2212,7 @@ func ensureBootWorkflowSchedules(ctx context.Context, schedules *runtimegenerics
 	return nil
 }
 
-func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) (runtimegenericschedule.AdmissionCommand, bool, error) {
+func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, posture executionposture.Posture) (runtimegenericschedule.AdmissionCommand, bool, error) {
 	startTrigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
 	if err != nil || !startTrigger.IsBoot() {
 		return runtimegenericschedule.AdmissionCommand{}, false, nil
@@ -2238,7 +2243,7 @@ func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontract
 		TaskID:        handle.TaskID(),
 		Payload:       payload,
 		RoutingSource: events.NewPlatformControlRoutingSource(),
-		ExecutionMode: executionmode.Live,
+		ExecutionMode: posture.RootMode(),
 		Due:           runtimegenericschedule.DelayDue(interval),
 	}
 	if timer.Recurring {

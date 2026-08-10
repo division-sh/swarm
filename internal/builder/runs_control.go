@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/google/uuid"
@@ -101,7 +100,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 			ID: uuid.NewString(), Type: events.EventType(eventName),
 			Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "builder"},
 			Payload:  encoded, Envelope: events.EventEnvelope{EntityID: entityID},
-			CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
+			CreatedAt: time.Now().UTC(), ExecutionMode: rt.ExecutionPosture.RootMode(),
 		}, RunID: runID})
 		if err != nil {
 			h.deleteRun(runID)

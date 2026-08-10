@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -20,7 +21,8 @@ func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ingress := runtimeingress.NewController(pg, bus, runtimeingress.Options{
-		Now: func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
+		ExecutionPosture: executionposture.Live,
+		Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 	})
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	bus.SetRuntimeIngressDispatchGate(ingress)

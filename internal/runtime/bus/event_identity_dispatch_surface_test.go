@@ -24,6 +24,7 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -269,6 +270,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected.(*store.SQLiteRuntimeStore))
 		}
 		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+			ExecutionPosture:        executionposture.Live,
 			Module:                  standingDispatchWorkflowModule{},
 			Persistence:             workflowPersistence,
 			RunLifecycle:            selected,
@@ -565,6 +567,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	}, runtimemanager.AgentManagerOptions{
 		BundleSourceFact: authorActivityTestBundleSourceFact,
 		DeliveryStore:    f.store,
+		ExecutionPosture: executionposture.Live,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
 			RouteRestorer: f.bus, RouteRetirer: f.bus, RouteRemover: f.bus,

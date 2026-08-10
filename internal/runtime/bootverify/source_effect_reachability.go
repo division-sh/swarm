@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -31,7 +32,7 @@ type SourceBootEffectContext struct {
 
 // PrepareSourceBootEffectContext imports connector packs, compiles the exact
 // mock response plan, and derives effect reachability as one operation.
-func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefault llmselection.Profile) (SourceBootEffectContext, error) {
+func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefault llmselection.Profile, posture executionposture.Posture) (SourceBootEffectContext, error) {
 	effectiveSource, err := providerconnectors.SourceWithConnectorPackImports(source)
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("provider connector pack import failed: %w", err)
@@ -40,7 +41,7 @@ func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefaul
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("provider connector mock response compilation failed: %w", err)
 	}
-	reachability, err := ResolveSourceBootEffectReachability(effectiveSource, configuredDefault, plan)
+	reachability, err := ResolveSourceBootEffectReachability(effectiveSource, configuredDefault, plan, posture)
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("resolve source boot effect reachability: %w", err)
 	}
@@ -55,9 +56,12 @@ func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefaul
 // can still execute for one effective source. Any live-selected agent or
 // declarative workflow activity keeps its outbound tools reachable; an
 // all-mock source waives only exact responders with no live workflow entrance.
-func ResolveSourceBootEffectReachability(source semanticview.Source, configuredDefault llmselection.Profile, plan *providerconnectors.MockResponsePlan) (SourceBootEffectReachability, error) {
+func ResolveSourceBootEffectReachability(source semanticview.Source, configuredDefault llmselection.Profile, plan *providerconnectors.MockResponsePlan, posture executionposture.Posture) (SourceBootEffectReachability, error) {
 	if source == nil {
 		return SourceBootEffectReachability{}, fmt.Errorf("semantic source is required")
+	}
+	if !posture.Valid() {
+		return SourceBootEffectReachability{}, fmt.Errorf("runtime execution posture is required")
 	}
 
 	agents := semanticview.AgentDeclarations(source)
@@ -84,6 +88,24 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 		}
 	}
 	fact.liveAgentIDs = sortedSetKeysLocal(liveAgentLabels)
+	if posture == executionposture.MockOnly && len(fact.liveAgentIDs) > 0 {
+		return SourceBootEffectReachability{}, fmt.Errorf("runtime.execution_posture=mock_only requires every effective agent to select mock execution; live agents: %s", strings.Join(fact.liveAgentIDs, ", "))
+	}
+	if posture == executionposture.MockOnly {
+		for toolID, sites := range fact.liveWorkflowActivitySites {
+			entries := sourceToolEntriesByID(source)[toolID]
+			if len(sites) > 0 && !exactMockResponderAdmitsEveryEntry(plan, toolID, entries) {
+				return SourceBootEffectReachability{}, fmt.Errorf("runtime.execution_posture=mock_only requires an exact mock response for provider activity tool %q at %s", toolID, strings.Join(sites, ", "))
+			}
+		}
+		fact.unreachableOutboundTools = map[string]struct{}{}
+		for toolID, entries := range sourceToolEntriesByID(source) {
+			if exactMockResponderAdmitsEveryEntry(plan, toolID, entries) {
+				fact.unreachableOutboundTools[toolID] = struct{}{}
+			}
+		}
+		return fact, nil
+	}
 	if len(agents) == 0 || len(fact.liveAgentIDs) > 0 {
 		return fact, nil
 	}

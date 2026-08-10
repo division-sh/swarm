@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -139,6 +140,7 @@ type pipelineCandidate struct {
 	attemptCount       int
 	nextAttemptAt      time.Time
 	createdAt          time.Time
+	executionMode      executionmode.Mode
 }
 
 func (s *PipelinePostgresOwner) PipelineObligations() runtimepipelineobligation.Store {
@@ -458,6 +460,9 @@ func claimPipelineBatch(
 				return batch, err
 			}
 			candidate := candidates[i]
+			if err := state.request.Admit(candidate.executionMode); err != nil {
+				return batch, err
+			}
 			// Continuation advances before a claim can be released or retained.
 			state.after = &candidate
 			if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
@@ -1403,8 +1408,10 @@ func (s *PipelinePostgresOwner) postgresPipelineCandidatePage(
 				     , route.attempt_count
 				     , route.next_attempt_at
 				     , route.created_at
+				     , e.execution_mode
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
+				JOIN events e ON e.event_id = route.event_id
 				WHERE route.status = 'pending'
 				  AND route.next_attempt_at <= now()
 				  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
@@ -1446,7 +1453,7 @@ func (s *PipelinePostgresOwner) postgresPipelineCandidatePage(
 	}
 	args = append(args, limit)
 	rows, err := s.backend.QueryContext(ctx, fmt.Sprintf(`
-			SELECT e.event_id::text, e.insertion_sequence, 0, e.created_at, e.created_at
+			SELECT e.event_id::text, e.insertion_sequence, 0, e.created_at, e.created_at, e.execution_mode
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt
@@ -1529,8 +1536,10 @@ func (s *PipelineSQLiteOwner) sqlitePipelineCandidatePage(
 				     , route.attempt_count
 				     , route.next_attempt_at
 				     , route.created_at
+				     , e.execution_mode
 				FROM decision_card_route_obligations route
 				JOIN runs run ON run.run_id = route.run_id
+				JOIN events e ON e.event_id = route.event_id
 				WHERE route.status = 'pending'
 				  AND route.next_attempt_at <= ?
 				  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
@@ -1567,7 +1576,7 @@ func (s *PipelineSQLiteOwner) sqlitePipelineCandidatePage(
 	args = append(args, diagnosticDirectReplayEventArgs()...)
 	args = append(args, limit)
 	rows, err := s.backend.QueryContext(ctx, `
-			SELECT e.event_id, e.insertion_sequence, 0, e.created_at, e.created_at
+			SELECT e.event_id, e.insertion_sequence, 0, e.created_at, e.created_at, e.execution_mode
 			FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt
@@ -1632,6 +1641,7 @@ func scanPipelineCandidates(rows *sql.Rows, decisionRoute bool, operation string
 			&candidate.attemptCount,
 			&nextRaw,
 			&createdRaw,
+			&candidate.executionMode,
 		); err != nil {
 			return nil, fmt.Errorf("%s: %w", operation, err)
 		}

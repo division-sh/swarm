@@ -385,6 +385,7 @@ func selectedContractPipelineCoordinatorOptions(
 	instanceActivator runtimepipeline.FlowInstanceActivator,
 ) runtimepipeline.PipelineCoordinatorOptions {
 	return runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture:        agentRuntime.ExecutionPosture,
 		WorkOwner:               agentRuntime.AgentManagerOptions.WorkOwner,
 		ReceiverExecution:       agentRuntime.AgentManagerOptions.ReceiverExecution,
 		Module:                  loaded.Module,

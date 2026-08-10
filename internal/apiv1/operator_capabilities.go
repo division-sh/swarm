@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -40,10 +41,11 @@ type StandingServiceController interface {
 // declared methods. Runtime selection remains explicit on the families that
 // can target a loaded bundle context.
 type HealthHandlerOptions struct {
-	Now      func() time.Time
-	Ready    func() bool
-	Database Pinger
-	Bundle   runtimecontracts.BundleIdentity
+	ExecutionPosture executionposture.Posture
+	Now              func() time.Time
+	Ready            func() bool
+	Database         Pinger
+	Bundle           runtimecontracts.BundleIdentity
 }
 
 type RuntimeIdentityHandlerOptions struct {
@@ -78,6 +80,7 @@ type MailboxHandlerOptions struct {
 }
 
 type EventPublicationOptions struct {
+	ExecutionPosture executionposture.Posture
 	Now              func() time.Time
 	Idempotency      APIIdempotencyStore
 	Events           EventPublisher
@@ -102,12 +105,13 @@ type EventPublishHandlerOptions struct {
 }
 
 type EventReplayHandlerOptions struct {
-	Now             func() time.Time
-	Idempotency     APIIdempotencyStore
-	Events          EventReplayOwner
-	Observability   ObservabilityReadStore
-	AgentIdentities AgentIdentityResolver
-	RuntimeContexts *runtime.RuntimeContextManager
+	ExecutionPosture executionposture.Posture
+	Now              func() time.Time
+	Idempotency      APIIdempotencyStore
+	Events           EventReplayOwner
+	Observability    ObservabilityReadStore
+	AgentIdentities  AgentIdentityResolver
+	RuntimeContexts  *runtime.RuntimeContextManager
 }
 
 type BundleRegisterHandlerOptions struct {
@@ -197,13 +201,14 @@ type TestSetupHandlerOptions struct {
 }
 
 type SubscriptionOptions struct {
-	Now             func() time.Time
-	Ready           func() bool
-	Database        Pinger
-	Observability   ObservabilityReadStore
-	DecisionCards   decisioncard.Store
-	ProposedEffects decisioncard.ProposedEffectStore
-	Bundle          runtimecontracts.BundleIdentity
+	ExecutionPosture executionposture.Posture
+	Now              func() time.Time
+	Ready            func() bool
+	Database         Pinger
+	Observability    ObservabilityReadStore
+	DecisionCards    decisioncard.Store
+	ProposedEffects  decisioncard.ProposedEffectStore
+	Bundle           runtimecontracts.BundleIdentity
 }
 
 func MergeOperatorHandlers(groups ...map[string]MethodHandler) map[string]MethodHandler {

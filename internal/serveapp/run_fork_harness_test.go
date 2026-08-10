@@ -91,6 +91,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 1
 	}
 	cfg := cfgResult.Config
+	posture, err := cfg.ProcessExecutionPosture()
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "fork failed: resolve execution posture: %v\n", err)
+		}
+		return 1
+	}
 	storeSelection, err := cliapp.ResolveRuntimeStoreSelection(repo, *storeMode, storeModeSet, cfg)
 	if err != nil {
 		if out != nil {
@@ -152,6 +159,9 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		result, err := runForkOwner.activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 			ForkRunID:           strings.TrimSpace(*runID),
 			ConfirmSourceFreeze: *confirmSourceFreeze,
+			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
+				Config: cfg, ExecutionPosture: posture,
+			},
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
 				RepoRoot:         repo,
 				PlatformSpecPath: resolvedPlatformSpecPath,
@@ -345,6 +355,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config:              cfg,
+				ExecutionPosture:    posture,
 				EntityStore:         stores.ToolEntityStore,
 				HumanTaskStore:      stores.HumanTaskStore,
 				SessionRegistry:     stores.SessionRegistry,

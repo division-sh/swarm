@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
 
@@ -59,6 +60,9 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 	t.Helper()
 	acquirer := newTestRuntimeAcquirer(t, nil).(*testRuntimeAcquirer)
 	opts.WorkOwner = acquirer.owner
+	if !opts.ExecutionPosture.Valid() {
+		opts.ExecutionPosture = executionposture.Live
+	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
@@ -87,7 +91,7 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 	if err := bus.SetDeliveryContinuationOwner(&builderTestDeliveryOwner{}); err != nil {
 		t.Fatalf("set builder test delivery continuation owner: %v", err)
 	}
-	rt := &runtimepkg.Runtime{Bus: bus}
+	rt := &runtimepkg.Runtime{Bus: bus, ExecutionPosture: opts.ExecutionPosture}
 	acquirer.runtime = rt
 	return rt, acquirer
 }

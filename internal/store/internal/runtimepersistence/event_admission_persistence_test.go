@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -978,7 +979,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 	pg := admitTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     diaglog.LevelWarn,
 		Message:   "admitted global runtime log",
@@ -1005,7 +1006,7 @@ func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
+	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     diaglog.LevelWarn,
 		Message:   "admitted sqlite global runtime log",

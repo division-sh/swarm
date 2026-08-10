@@ -20,6 +20,7 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/runforkrevision/revision.go":                                         "private immutable fork-revision fact capture",
 	"internal/store/internal/adminpersistence/destructive_reset_cleanup.go":                               "named destructive-reset physical cleanup",
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": "selected-fork physical cleanup after typed terminalization",
+	"internal/store/internal/backend/pipelinepersistence/standing_service.go":                             "standing-service pre-mutation execution-posture inspection",
 	"internal/store/testsql/event.go":                                                                     "named hostile rollback injection used only by tests",
 }
 

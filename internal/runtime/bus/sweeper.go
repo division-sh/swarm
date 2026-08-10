@@ -157,11 +157,11 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		paused, err = ingressGate.QueueableIngressPaused(ctx)
 	}
 	if err != nil {
-		closeErr := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest())
+		closeErr := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture))
 		return runtimepipelineobligation.SweepResult{}, errors.Join(err, closeErr)
 	}
 	if paused {
-		if err := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest()); err != nil {
+		if err := eb.closePipelineScan(context.WithoutCancel(ctx), runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(eb.executionPosture)); err != nil {
 			return runtimepipelineobligation.SweepResult{}, err
 		}
 		return runtimepipelineobligation.SweepResult{Blocked: true}, nil
@@ -176,6 +176,7 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 }
 
 func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int) (result runtimepipelineobligation.SweepResult, err error) {
+	request = request.WithExecutionPosture(eb.executionPosture)
 	ctx, err = eb.admitBundleSourceFact(ctx)
 	if err != nil {
 		return result, err

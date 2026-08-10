@@ -14,6 +14,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
@@ -317,7 +318,7 @@ func newRunDispositionDirectiveRequest(t *testing.T, resolution string) runtimea
 	if resolution != runtimeagentcontrol.RunResolutionNewRunAllocated {
 		req.RunID = runID
 	}
-	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: resolution}, operationID, eventID, now)
+	event, err := runtimeagentcontrol.NewDirectiveEvent(req, runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: resolution}, operationID, eventID, now, executionposture.Live)
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}

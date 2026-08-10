@@ -32,6 +32,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -451,6 +452,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				return claudeAttemptProofChainDepthAgent{id: cfg.ID}, nil
 			}, runtimemanager.AgentManagerOptions{
+				ExecutionPosture: executionposture.Live,
 				BaseContext:      claudeAttemptProofContext(),
 				LifecycleStore:   backend.store,
 				DeliveryStore:    backend.store,
@@ -532,7 +534,7 @@ func newClaudeAttemptProofManagerForGeneration(
 	}
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-attempt-proof-token")
 	eventBus, workOwner, coordinator := newClaudeAttemptProofEventBus(t, backend, generation)
-	cfg := &config.Config{}
+	cfg := &config.Config{Runtime: config.RuntimeConfig{ExecutionPosture: executionposture.Live}}
 	cfg.Workspace.DockerBin = dockerBin
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.OutputFormat = surface.outputFormat
@@ -545,12 +547,13 @@ func newClaudeAttemptProofManagerForGeneration(
 		eventBus,
 		runtimellm.ClaudeCLIRuntimeOptions{
 			ProviderCredentials:  runtimellm.NewProviderCredentialResolver(runtimecredentials.NewEnvStore()),
-			CompletionController: runtimeeffects.NewCompletionController(backend.store, backend.store, backend.store, claudeAttemptProofSpendProjection{}),
+			CompletionController: liveTestCompletionController(backend.store, backend.store, backend.store, claudeAttemptProofSpendProjection{}),
 		},
 	)
 	manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &claudeAttemptProofAgent{runtime: runtime, config: cfg, calls: calls}, nil
 	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live,
 		BaseContext:      claudeAttemptProofContext(),
 		LifecycleStore:   backend.store,
 		DeliveryStore:    backend.store,
@@ -619,6 +622,7 @@ func newClaudeAttemptProofEventBus(
 	}
 	t.Cleanup(lease.Release)
 	eventBus, err := runtimebus.NewEventBusWithOptions(backend.store, runtimebus.EventBusOptions{
+		ExecutionPosture:    executionposture.Live,
 		RuntimeInstanceID:   claudeAttemptProofRuntimeID,
 		BundleSourceFact:    claudeAttemptProofBundleSourceFact,
 		WorkOwner:           workOwner,

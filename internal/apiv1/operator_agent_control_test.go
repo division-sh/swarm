@@ -14,6 +14,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -267,8 +268,9 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
-		BaseContext: testAuthorActivityContext(context.Background()),
-		WorkOwner:   workOwner,
+		ExecutionPosture: executionposture.Live,
+		BaseContext:      testAuthorActivityContext(context.Background()),
+		WorkOwner:        workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
@@ -336,8 +338,9 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
-		BaseContext: testAuthorActivityContextForSource(context.Background(), bootFact),
-		WorkOwner:   workOwner,
+		ExecutionPosture: executionposture.Live,
+		BaseContext:      testAuthorActivityContextForSource(context.Background(), bootFact),
+		WorkOwner:        workOwner,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,

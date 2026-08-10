@@ -163,6 +163,13 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 			} else if set {
 				runOpts.configPath = path
 				runOpts.changedFlags["config"] = true
+				rootFlags := rootCommandFlagState{}
+				if runOpts.apiOptions.rootFlags != nil {
+					rootFlags = *runOpts.apiOptions.rootFlags
+				}
+				rootFlags.configPath = path
+				rootFlags.configPathSet = true
+				runOpts.apiOptions.rootFlags = &rootFlags
 			}
 			return runRunCommand(cmd.Context(), repo, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
@@ -222,7 +229,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 	if strings.TrimSpace(opts.connectURL) == "" {
 		repo = assetCommandRepoRoot(repo)
 		var err error
-		opts, err = opts.withLocalForegroundServeAuth()
+		opts, err = opts.withLocalForegroundServeAuth(repo)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
@@ -334,8 +341,10 @@ func (o runCommandOptions) validate() error {
 	return nil
 }
 
-func (o runCommandOptions) withLocalForegroundServeAuth() (runCommandOptions, error) {
-	auth, err := ResolveServeAPIAuth("", DefaultServeOptions())
+func (o runCommandOptions) withLocalForegroundServeAuth(repo string) (runCommandOptions, error) {
+	serveOpts := DefaultServeOptions()
+	serveOpts.ConfigPath = o.configPath
+	auth, err := ResolveServeAPIAuth(repo, serveOpts)
 	if err != nil {
 		return o, err
 	}
@@ -516,7 +525,11 @@ func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runComma
 	if strings.TrimSpace(project.CanonicalProjectRoot) == "" {
 		return nil, nil
 	}
-	swarmDir, err := resolveCLISwarmDir(opts.apiOptions.swarmDirResolutionOptions())
+	cliCfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	if err != nil {
+		return nil, err
+	}
+	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.swarmDirResolutionOptions(), cliCfg)
 	if err != nil {
 		return nil, err
 	}

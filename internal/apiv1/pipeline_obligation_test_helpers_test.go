@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -14,7 +15,7 @@ func claimNextAPIPipelineWork(
 	owner runtimepipelineobligation.Store,
 ) (runtimepipelineobligation.ClaimedWork, bool, error) {
 	t.Helper()
-	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
+	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest().WithExecutionPosture(executionposture.Live))
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, false, err
 	}

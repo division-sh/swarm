@@ -23,6 +23,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -195,6 +196,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 	}
 	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture:        executionposture.Live,
 		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},
 		Persistence:             workflowPersistence,
 		RunLifecycle:            selected,

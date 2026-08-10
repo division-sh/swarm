@@ -90,7 +90,7 @@ func managedClaudeProviderTurnTestContext(t testing.TB, executionKind managedcap
 	})
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
-	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(harness))
+	ctx = runtimeeffects.WithController(ctx, liveTestEffectController(harness))
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "claude-provider-turn")
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = managedcapabilities.WithContext(ctx, surface)

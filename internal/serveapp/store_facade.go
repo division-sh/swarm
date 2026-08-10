@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -154,6 +155,7 @@ type selectedAPICapabilityRequest struct {
 	Credentials             runtimecredentials.Store
 	ManagedCredentials      runtimemanagedcredentials.Store
 	ProviderCredentials     runtimecredentials.Store
+	ExecutionPosture        executionposture.Posture
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)

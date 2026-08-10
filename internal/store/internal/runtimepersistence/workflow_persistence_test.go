@@ -13,6 +13,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -106,6 +107,7 @@ func completeWorkflowTestCoordinatorOptions(
 	bus := workflowTestBus{}
 	return runtimepipeline.PipelineCoordinatorOptions{
 		ReceiverExecution:       eventreceiver.NormalExecution(),
+		ExecutionPosture:        executionposture.Live,
 		Module:                  workflowTestModule{},
 		Persistence:             persistence,
 		RunLifecycle:            selected,

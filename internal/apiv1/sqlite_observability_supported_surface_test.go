@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -322,7 +323,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 		t.Fatalf("BindAgentSession: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(store)
+	logger := runtimepkg.NewRuntimeLogger(store, executionposture.Live)
 	logCtx := runtimecorrelation.WithRunID(ctx, runID)
 	if err := logger.Log(logCtx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",

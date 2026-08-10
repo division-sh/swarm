@@ -64,10 +64,11 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	contractsRoot := writeServeRuntimeNativeBashFixture(t)
+	configPath := writeTestVerifyRuntimeConfig(t)
 
 	t.Run("verify text", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--contracts", contractsRoot, "--config", writeTestVerifyRuntimeConfig(t)}, &stdout, &stderr, Run)
+		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--contracts", contractsRoot, "--config", configPath}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("verify code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -76,7 +77,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 	t.Run("verify json", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--contracts", contractsRoot, "--config", writeTestVerifyRuntimeConfig(t), "--json"}, &stdout, &stderr, Run)
+		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--contracts", contractsRoot, "--config", configPath, "--json"}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -97,6 +98,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 			"describe",
 			"--contracts", contractsRoot,
+			"--config", configPath,
 		}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("describe code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
@@ -109,6 +111,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 			"describe",
 			"--contracts", contractsRoot,
+			"--config", configPath,
 			"--json",
 		}, &stdout, &stderr, Run)
 		if code != 0 {

@@ -119,7 +119,7 @@ func (r *managedRoundRuntime) ContinueSession(ctx context.Context, session *Sess
 		return nil, err
 	}
 	ctx = managedcapabilities.WithContext(ctx, observed)
-	ctx, _, err = prepareCompletionContext(ctx, runtimeeffects.NewCompletionController(r.harness, r.harness, r.harness, r.harness), nil, session, "")
+	ctx, _, err = prepareCompletionContext(ctx, liveTestCompletionController(r.harness, r.harness, r.harness, r.harness), nil, session, "")
 	if err != nil {
 		return nil, err
 	}

@@ -19,6 +19,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -110,7 +111,7 @@ func startProviderTriggerSmokeServer(
 	if bus != nil {
 		bus.SetProviderOutputAuthorizationVerifier(testProviderTriggerCatalog(t))
 	}
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil)
+	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live)
 	gateway.SetCredentialStore(providerTriggerSmokeCredentialStore{target.SigningSecret: signingSecret})
 	inboundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &providerTriggerSmokeCaptureWriter{ResponseWriter: w, status: http.StatusOK}

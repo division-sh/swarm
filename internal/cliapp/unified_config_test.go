@@ -190,6 +190,8 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 		t.Fatalf("mkdir user config: %v", err)
 	}
 	writeRuntimeConfigText(t, userPath, strings.Join([]string{
+		"runtime:",
+		"  execution_posture: live",
 		"serve:",
 		"  api_listen_addr: 127.0.0.1:1111",
 		"paths:",

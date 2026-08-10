@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -367,6 +368,9 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if statuses[0].OverrideActor != "tester" || statuses[0].OverrideReason != "maintenance" || statuses[0].OverrideAt.IsZero() {
 		t.Fatalf("suspended status = %#v", statuses[0])
 	}
+	assertStandingMockOnlyLifecycleRejectsLiveWorkBeforeMutation(
+		t, store, store.backend.ConstructionHandle(), fixtureCtx, workflowStore, serviceID, created.RunID, created.Generation,
+	)
 
 	resumed, err := workflowStore.ResumeStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "tester"})
 	if err != nil {
@@ -626,6 +630,9 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if pipelineOutcome != "dead_letter" || pipelineReason != "standing_suspended" {
 		t.Fatalf("unsettled pipeline receipt = %s/%s", pipelineOutcome, pipelineReason)
 	}
+	assertStandingMockOnlyLifecycleRejectsLiveWorkBeforeMutation(
+		t, selected, db, fixtureCtx, workflowStore, serviceID, created[0].RunID, created[0].Generation,
+	)
 	if _, err := workflowStore.ResumeStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "tester"}); err != nil {
 		t.Fatalf("ResumeStandingService: %v", err)
 	}
@@ -639,6 +646,76 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if got := continuationSignals.Load(); got != 2 {
 		t.Fatalf("reset continuation signals = %d, want 2", got)
 	}
+}
+
+func assertStandingMockOnlyLifecycleRejectsLiveWorkBeforeMutation(
+	t *testing.T,
+	selected workflowTestSelectedStore,
+	db *sql.DB,
+	ctx context.Context,
+	liveCoordinator *runtimepipeline.PipelineCoordinator,
+	serviceID, runID string,
+	generation int64,
+) {
+	t.Helper()
+	workflowTimer := newWorkflowTimerDDLProofRow(runID)
+	if err := insertWorkflowTimerDDLProofRow(ctx, db, selected, workflowTimer); err != nil {
+		t.Fatalf("insert standing posture timer fixture: %v", err)
+	}
+
+	options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected), selected)
+	options.ExecutionPosture = executionposture.MockOnly
+	mockCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
+	if mockCoordinator == nil {
+		t.Fatal("construct mock-only standing lifecycle coordinator")
+	}
+
+	assertRejected := func(operation string, mutate func() error) {
+		t.Helper()
+		err := mutate()
+		if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+			t.Fatalf("%s error = %v, want mock-only live-work rejection", operation, err)
+		}
+		statuses, statusErr := liveCoordinator.ListStandingServiceStatuses(ctx)
+		if statusErr != nil {
+			t.Fatalf("load standing status after rejected %s: %v", operation, statusErr)
+		}
+		var found bool
+		for _, status := range statuses {
+			if status.ServiceID != serviceID {
+				continue
+			}
+			found = true
+			if status.RunID != runID || status.Generation != generation || status.EffectiveState != "suspended" || status.OperatorOverride != "suspended" {
+				t.Fatalf("standing status after rejected %s = %#v", operation, status)
+			}
+		}
+		if !found {
+			t.Fatalf("standing service %s missing after rejected %s", serviceID, operation)
+		}
+		var runStatus string
+		var queryErr error
+		if _, postgres := selected.(*PostgresStore); postgres {
+			queryErr = db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&runStatus)
+		} else {
+			queryErr = db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, runID).Scan(&runStatus)
+		}
+		if queryErr != nil {
+			t.Fatalf("load standing run after rejected %s: %v", operation, queryErr)
+		}
+		if runStatus != "paused" {
+			t.Fatalf("standing run status after rejected %s = %q, want paused", operation, runStatus)
+		}
+	}
+
+	assertRejected("resume", func() error {
+		_, err := mockCoordinator.ResumeStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "tester"})
+		return err
+	})
+	assertRejected("reset", func() error {
+		_, err := mockCoordinator.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "tester"})
+		return err
+	})
 }
 
 func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *testing.T) {

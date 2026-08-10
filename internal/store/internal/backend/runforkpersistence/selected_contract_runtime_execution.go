@@ -100,6 +100,9 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	if !nonEmptyStrings(req.ContainerPlanFingerprint, req.ActorCensusFingerprint, req.EffectiveConfigFingerprint) {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance requires container, actor, and config fingerprints")
 	}
+	if !req.ExecutionMode.Valid() {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance requires an exact execution mode")
+	}
 	var bindingID, sourceRunID, forkEventID, mode, contractsRoot, bundleHash, workflowName, workflowVersion string
 	if err := tx.QueryRowContext(ctx, dialect.lockBindingSQL(), dialect.uuid(admission.ForkRunID)).Scan(
 		&bindingID, &sourceRunID, &forkEventID, &mode, &contractsRoot, &bundleHash, &workflowName, &workflowVersion,
@@ -144,6 +147,7 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 		ContainerPlanFingerprint: req.ContainerPlanFingerprint, ActorCensusFingerprint: req.ActorCensusFingerprint,
 		EffectiveConfigFingerprint: req.EffectiveConfigFingerprint, State: "prepared",
 		ExecutionOwner: "selected-issue:" + executionID + ":" + uuid.NewString(), LeaseExpiresAt: now.Add(selectedContractRuntimeExecutionLease), FenceGeneration: 1,
+		ExecutionMode: req.ExecutionMode,
 	}
 	args := []any{issued.ExecutionID, issued.ForkRunID, issued.SourceRunID, bindingID, issued.ForkEventID, issued.Generation,
 		issued.ExecutableCoordinateFingerprint, issued.AdmissionFingerprint, issued.ContainerPlanFingerprint, issued.ActorCensusFingerprint,
@@ -206,7 +210,7 @@ func claimSelectedContractRuntimeExecutionPostgres(ctx context.Context, db inter
 
 func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sqlite bool, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
 	owner = strings.TrimSpace(owner)
-	if owner == "" || strings.TrimSpace(issued.ExecutionOwner) == "" || issued.LeaseExpiresAt.IsZero() || !validUUIDStrings(issued.ExecutionID, issued.ForkRunID) {
+	if owner == "" || strings.TrimSpace(issued.ExecutionOwner) == "" || issued.LeaseExpiresAt.IsZero() || !issued.ExecutionMode.Valid() || !validUUIDStrings(issued.ExecutionID, issued.ForkRunID) {
 		return runtimeeffects.Authority{}, fmt.Errorf("selected-contract runtime claim requires execution identity and owner")
 	}
 	if lease <= 0 {
@@ -233,7 +237,7 @@ func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sq
 	}
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthoritySelectedContractFork, ID: issued.ExecutionID, ExecutionOwner: owner, LeaseExpiresAt: expires,
-		FenceGeneration: issued.FenceGeneration, ExecutionMode: runtimeeffects.ExecutionModeLive,
+		FenceGeneration: issued.FenceGeneration, ExecutionMode: issued.ExecutionMode,
 		SelectedFork: runtimeeffects.SelectedContractForkAuthority{ExecutionID: issued.ExecutionID, ForkRunID: issued.ForkRunID, Generation: issued.Generation,
 			AdmissionFingerprint: issued.AdmissionFingerprint, ContainerPlanFingerprint: issued.ContainerPlanFingerprint,
 			ActorCensusFingerprint: issued.ActorCensusFingerprint, EffectiveConfigFingerprint: issued.EffectiveConfigFingerprint},

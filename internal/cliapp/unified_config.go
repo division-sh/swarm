@@ -729,6 +729,7 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"serve.mcp_listen_addr":                   {},
 		"serve.api_token_file":                    {Elevated: true, SecretReference: true},
 		"runtime":                                 section,
+		"runtime.execution_posture":               {},
 		"runtime.recovery_on_startup":             {},
 		"runtime.max_concurrent_agents":           {Split: "tracked split: runtime.max_concurrent_agents is not wired to runtime enforcement; no supported replacement"},
 		"runtime.event_poll_interval":             {Split: "tracked split: runtime.event_poll_interval is not wired to runtime polling; no supported replacement"},

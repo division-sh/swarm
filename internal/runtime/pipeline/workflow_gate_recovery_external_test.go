@@ -27,6 +27,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -112,6 +113,7 @@ type proposedEffectProofCredentialStore struct {
 }
 
 func newGateRecoveryCoordinator(bus gateRecoveryRuntimeBus, selected gateRecoveryStoreCase, opts runtimepipeline.PipelineCoordinatorOptions) *runtimepipeline.PipelineCoordinator {
+	opts.ExecutionPosture = executionposture.Live
 	opts.ReceiverExecution = eventreceiver.NormalExecution()
 	opts.Persistence = selected.persistence
 	opts.DeliveryStore = selected.events

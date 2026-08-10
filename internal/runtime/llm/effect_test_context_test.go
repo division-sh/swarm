@@ -16,6 +16,10 @@ func unmanagedLLMTestContext() context.Context {
 	return runtimeeffects.WithDifferentOwner(context.Background(), runtimeeffects.OwnerBuildTestInfrastructure)
 }
 
+func liveLLMTestContext() context.Context {
+	return runtimeeffects.WithExecutionMode(unmanagedLLMTestContext(), runtimeeffects.ExecutionModeLive)
+}
+
 func llmTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 	t.Helper()
 	process := worklifetime.NewProcess()

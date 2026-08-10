@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -142,6 +143,7 @@ type agentLifecycleCoordinator struct {
 	retryDone          <-chan struct{}
 	cells              map[runtimeagentidentity.Identity]*agentLifecycleCell
 	routes             AgentRouteBus
+	executionPosture   executionposture.Posture
 }
 
 func (c *agentLifecycleCoordinator) context() context.Context {
@@ -1170,7 +1172,7 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(ctx context.Context, 
 	}
 	leaseCtx = runtimeeffects.WithLifecycleToken(leaseCtx, snapshot.Token)
 	if c.effectsStore != nil {
-		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(c.effectsStore))
+		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(c.effectsStore).WithExecutionPosture(c.executionPosture))
 	}
 	lease := &agentExecutionLease{agentExecutionSnapshot: snapshot, Context: leaseCtx}
 	lease.release = sync.OnceFunc(func() {
@@ -1359,7 +1361,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	}
 	loopCtx := runtimeeffects.WithLifecycleToken(generationCtx, token)
 	if c.effectsStore != nil {
-		loopCtx = runtimeeffects.WithController(loopCtx, runtimeeffects.NewController(c.effectsStore))
+		loopCtx = runtimeeffects.WithController(loopCtx, runtimeeffects.NewController(c.effectsStore).WithExecutionPosture(c.executionPosture))
 	}
 	done := make(chan struct{})
 	settled := make(chan struct{})

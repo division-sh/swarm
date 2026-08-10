@@ -7,6 +7,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -14,8 +15,8 @@ import (
 )
 
 func TestEventBusRejectsMalformedFailureBeforeRuntimeLog(t *testing.T) {
-	logger := NewRuntimeLogger(nil)
-	eventBus, err := newRuntimeEventBus(nil, runtimebus.DurableDependencies{}, nil, logger, nil, runtimecorrelation.BundleSourceFact{}, "", nil, nil, nil, nil, nil, nil, nil, nil)
+	logger := NewRuntimeLogger(nil, executionposture.Live)
+	eventBus, err := newRuntimeEventBus(nil, runtimebus.DurableDependencies{}, nil, logger, nil, executionposture.Live, runtimecorrelation.BundleSourceFact{}, "", nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newRuntimeEventBus: %v", err)
 	}

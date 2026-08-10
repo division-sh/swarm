@@ -514,7 +514,7 @@ func callMCPGateway(t *testing.T, gateway *Gateway, contextToken string, request
 func TestGatewayHandleMCP_ProviderCallCoordinateSeparatesSiblingsAndFencesReplay(t *testing.T) {
 	harness := effecttest.New()
 	registry := newTestTurnContextRegistry()
-	controller := runtimeeffects.NewController(harness)
+	controller := liveTestEffectController(harness)
 	putTurn := func(token, identity string) {
 		putTestTurnContext(t, registry, token, TurnContext{
 			Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()},
@@ -894,7 +894,7 @@ func TestGatewayHandleMCP_ManagedCallWithoutProviderCoordinateFailsBeforeExecuto
 		Actor:              models.AgentConfig{ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()},
 		LifecycleToken:     harness.Token,
 		HasLifecycleToken:  true,
-		EffectController:   runtimeeffects.NewController(harness),
+		EffectController:   liveTestEffectController(harness),
 		LogicalIdentity:    "provider-turn",
 		HasLogicalIdentity: true,
 		CapabilitySurface:  testCapabilitySurface(t, models.AgentConfig{ID: harness.Token.AgentID, Identity: harness.Token.Identity, FlowPath: harness.Token.Identity.FlowInstance()}, "write_file"),

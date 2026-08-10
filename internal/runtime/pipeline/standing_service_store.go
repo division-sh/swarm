@@ -11,6 +11,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
 
@@ -101,9 +102,10 @@ type StandingServiceReconciliation struct {
 }
 
 type StandingServiceOperation struct {
-	ServiceID string
-	Actor     string
-	Reason    string
+	ServiceID        string
+	Actor            string
+	Reason           string
+	ExecutionPosture executionposture.Posture
 }
 
 type StandingServiceStatus struct {
@@ -137,6 +139,7 @@ type StandingServicePersistence interface {
 	SuspendStandingService(context.Context, StandingServiceOperation) (StandingServiceReconciliation, error)
 	ResumeStandingService(context.Context, StandingServiceOperation) (StandingServiceReconciliation, error)
 	ResetStandingService(context.Context, StandingServiceOperation) (StandingServiceReconciliation, error)
+	AdmitStandingServiceRun(context.Context, string, executionposture.Posture) error
 	PublishStandingService(context.Context, string, string, int64) (int64, error)
 	StandingRunUsesIntrinsicRecovery(context.Context, string) (bool, error)
 	ListStandingServiceStatuses(context.Context) ([]StandingServiceStatus, error)
@@ -201,6 +204,13 @@ func (s *workflowInstanceStore) ResetStandingService(ctx context.Context, operat
 	result, err := s.standingServices.ResetStandingService(ctx, operation)
 	s.consumeStandingServiceCommit(result, err)
 	return result, err
+}
+
+func (s *workflowInstanceStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
+	if s == nil || s.standingServices == nil {
+		return errors.New("standing service persistence owner is required")
+	}
+	return s.standingServices.AdmitStandingServiceRun(ctx, runID, posture)
 }
 
 func (s *workflowInstanceStore) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {

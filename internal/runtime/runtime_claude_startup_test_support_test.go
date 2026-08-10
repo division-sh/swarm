@@ -105,7 +105,7 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 		ExecutionAuthorityID: startupAuthorityID,
 		StartupOwnerID:       "startup-test-owner",
 		StartupGeneration:    1,
-		EffectController:     runtimeeffects.NewController(store),
+		EffectController:     liveTestEffectController(store),
 		CapabilityStore:      &startupCapabilityStore{},
 		EffectAuthority: func(probeID, actorID string) (runtimeeffects.Authority, error) {
 			return runtimeeffects.Authority{

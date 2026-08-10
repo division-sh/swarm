@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 )
 
@@ -70,6 +71,7 @@ func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testi
 		t.Fatal(err)
 	}
 	eb, err := NewEphemeralEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+		ExecutionPosture:  executionposture.Live,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
@@ -108,6 +110,7 @@ func TestExplicitEphemeralEventBusAllowsOwnerlessPublish(t *testing.T) {
 		}
 	})
 	eb, err := NewEphemeralEventBusWithOptions(store, EventBusOptions{
+		ExecutionPosture:  executionposture.Live,
 		RuntimeInstanceID: "ownerless-source-runtime",
 		WorkOwner:         runtimeOwner,
 		ReceiverExecution: eventreceiver.NormalExecution(),

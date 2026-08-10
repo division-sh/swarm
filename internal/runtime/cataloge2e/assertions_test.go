@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -269,6 +270,7 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
 	bus := catalogPersistenceBus{}
 	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture:        executionposture.Live,
 		Module:                  &fixtureWorkflowModule{},
 		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:            pg,

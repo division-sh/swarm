@@ -223,7 +223,7 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 			SourceLoader:                   runForkSourceLoader,
 			ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config: req.Config, EntityStore: stores.ToolEntityStore, HumanTaskStore: stores.HumanTaskStore,
+				Config: req.Config, ExecutionPosture: req.ExecutionPosture, EntityStore: stores.ToolEntityStore, HumanTaskStore: stores.HumanTaskStore,
 				SessionRegistry: stores.SessionRegistry, ConversationStore: stores.ConversationStore,
 				MailboxStore: stores.MailboxStore, Workspace: req.Workspaces,
 				Credentials: req.Credentials, ManagedCredentials: req.ManagedCredentials, ProviderCredentials: req.ProviderCredentials,
@@ -753,7 +753,11 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
 		}
 	}
-	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
+	posture, err := req.Config.ProcessExecutionPosture()
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
@@ -830,6 +834,10 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 	if err != nil {
 		return nil, err
 	}
+	posture, err := cfg.ProcessExecutionPosture()
+	if err != nil {
+		return nil, err
+	}
 	registry := sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
 	return runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
 		Cfg:                  cfg,
@@ -839,7 +847,7 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 		Workspaces:           workspaces,
 		ToolGateway:          binding,
 		Credentials:          providerCredentials,
-		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector),
+		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector).WithExecutionPosture(posture),
 	}, nil)
 }
 
@@ -1275,6 +1283,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Credentials:             credentialStore,
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     providerCredentialStore,
+		ExecutionPosture:        rt.ExecutionPosture,
 		RuntimeContextManager:   runtimeContextManager,
 	})
 	if err != nil {
@@ -1283,7 +1292,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	readyFn := func() bool { return ready.Load() }
 	publication := apiv1.EventPublicationOptions{
-		Idempotency: stores.IdempotencyStore, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
+		ExecutionPosture: rt.ExecutionPosture,
+		Idempotency:      stores.IdempotencyStore, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
 		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
 		Source: source, Bundle: bootBundleIdentity,
@@ -1295,7 +1305,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		SupportedTransports: []string{"tcp"},
 	}
 	handlers := apiv1.MergeOperatorHandlers(
-		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{Ready: readyFn, Database: apiStoreCaps.Database, Bundle: bootBundleIdentity}),
+		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Bundle: bootBundleIdentity}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity}),
 		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
@@ -1309,7 +1319,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Mailbox: stores.MailboxAPIStore, NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment, Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: stores.IdempotencyStore, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source}),
 		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
@@ -1324,7 +1334,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		ProcessWorkOwner: processWorkOwner,
 		Handlers:         handlers,
 		Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{
-			Ready: readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
+			ExecutionPosture: rt.ExecutionPosture,
+			Ready:            readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
 			DecisionCards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Bundle: bootBundleIdentity,
 		}),
 	})
@@ -1383,7 +1394,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if opts.TestRuntimeContextsReadyHook != nil {
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
-	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores, runtimeContexts, rt.Bus); err != nil {
+	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores, runtimeContexts, rt.Bus, rt.ExecutionPosture); err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
 	}

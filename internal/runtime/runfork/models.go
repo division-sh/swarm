@@ -1171,6 +1171,7 @@ type SelectedContractRuntimeExecutionIssueRequest struct {
 	ContainerPlanFingerprint   string
 	ActorCensusFingerprint     string
 	EffectiveConfigFingerprint string
+	ExecutionMode              executionmode.Mode
 	Now                        time.Time
 }
 
@@ -1189,6 +1190,7 @@ type SelectedContractRuntimeExecution struct {
 	ExecutionOwner                  string
 	LeaseExpiresAt                  time.Time
 	FenceGeneration                 uint64
+	ExecutionMode                   executionmode.Mode
 }
 
 func RunForkSelectedContractRuntimeFingerprint(value any) (string, error) {

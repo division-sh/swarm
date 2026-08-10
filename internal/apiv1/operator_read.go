@@ -13,6 +13,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -45,11 +46,12 @@ type healthPingResult struct {
 }
 
 type healthCheckResult struct {
-	Alive     bool                            `json:"alive"`
-	Ready     bool                            `json:"ready"`
-	DBOK      bool                            `json:"db_ok"`
-	RuntimeOK bool                            `json:"runtime_ok"`
-	Bundle    runtimecontracts.BundleIdentity `json:"bundle"`
+	Alive            bool                            `json:"alive"`
+	Ready            bool                            `json:"ready"`
+	DBOK             bool                            `json:"db_ok"`
+	RuntimeOK        bool                            `json:"runtime_ok"`
+	ExecutionPosture executionposture.Posture        `json:"execution_posture"`
+	Bundle           runtimecontracts.BundleIdentity `json:"bundle"`
 }
 
 type RuntimeIdentityResult struct {
@@ -106,7 +108,7 @@ func OperatorHealthHandlers(opts HealthHandlerOptions) map[string]MethodHandler 
 			return healthPingResult{OK: true, TS: now().UTC().Format(time.RFC3339Nano)}, nil
 		},
 		"health.check": func(ctx context.Context, _ Request) (any, error) {
-			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Bundle), nil
+			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Bundle, opts.ExecutionPosture), nil
 		},
 	}
 }

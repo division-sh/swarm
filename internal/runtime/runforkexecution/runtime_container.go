@@ -23,6 +23,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -173,14 +174,14 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	mode := runtimeeffects.ExecutionModeLive
+	posture := req.AgentRuntime.Options.ExecutionPosture
+	if !posture.Valid() {
+		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("selected-contract execution posture is invalid")
+	}
+	mode := runtimeeffects.ExecutionMode(posture.RootMode())
 	var profile llmselection.Profile
 	if cfg := req.AgentRuntime.Options.Config; cfg != nil {
 		profile, err = cfg.LLMBackendProfile()
-		if err != nil {
-			return selectedContractForkLocalRuntimeContainer{}, err
-		}
-		mode, err = llmselection.ExecutionModeForProfile(profile)
 		if err != nil {
 			return selectedContractForkLocalRuntimeContainer{}, err
 		}
@@ -190,7 +191,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 		Admission: req.Admission, ContainerPlanFingerprint: containerFingerprint,
-		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint,
+		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint, ExecutionMode: mode,
 	})
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
@@ -200,7 +201,6 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	authority.ExecutionMode = mode
 	proof.RuntimeExecutionID = issued.ExecutionID
 	proof.RuntimeGeneration = issued.Generation
 	proof.AuthorityExecutionOwner = authorityOwner
@@ -264,7 +264,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	defer func() { _ = forkOwner.RetireAndWait(context.Background()) }()
 	ctx = worklifetime.WithOccurrence(ctx, forkOwner)
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
-	controller := runtimeeffects.NewController(c.ports.effects)
+	controller := runtimeeffects.NewController(c.ports.effects).WithExecutionPosture(c.req.AgentRuntime.Options.ExecutionPosture)
 	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
 		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
 	)
@@ -298,6 +298,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
+		ExecutionPosture:            req.AgentRuntime.Options.ExecutionPosture,
 		WorkOwner:                   forkOwner,
 		RuntimeInstanceID:           c.runtimeInstanceID,
 		ReceiverExecution:           receiverExecution,
@@ -306,7 +307,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
 		DeliveryAuthority:           deliveryAuthority,
 		ContractBundle:              req.LoadedSource.Source,
-		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs),
+		Logger:                      selectedContractRuntimeContainerLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture),
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
 		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
@@ -429,7 +430,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 				err,
 			)
 		}
-		if err := runtimepkg.NewRuntimeLogger(c.ports.logs).Log(eventCtx, runtimepkg.RuntimeLogEntry{
+		if err := runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture).Log(eventCtx, runtimepkg.RuntimeLogEntry{
 			Level:     diaglog.LevelInfo,
 			Message:   "Selected-contract fork event completed local dispatch",
 			Component: "run_fork",
@@ -557,11 +558,11 @@ type selectedContractRuntimeContainerLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
 
-func selectedContractRuntimeContainerLogger(persistence runtimepkg.RuntimeLogPersistence) runtimebus.LoggerHook {
+func selectedContractRuntimeContainerLogger(persistence runtimepkg.RuntimeLogPersistence, posture executionposture.Posture) runtimebus.LoggerHook {
 	if persistence == nil {
 		return nil
 	}
-	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(persistence)}
+	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(persistence, posture)}
 }
 
 func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {

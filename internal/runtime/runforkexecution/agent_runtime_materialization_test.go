@@ -22,6 +22,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -87,6 +88,7 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ExecutionPosture: executionposture.Live,
 		BundleSourceFact: selectedContractAgentTestSourceFact(t),
 		WorkOwner:        runtimeOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -222,6 +224,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	owner := testGatewayWorkOwner(t)
 	mockIdentity := selectedContractTestRootAgentIdentity(t, "mock-agent")
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ExecutionPosture: executionposture.Live,
 		BundleSourceFact: selectedContractAgentTestSourceFact(t),
 		WorkOwner:        owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -234,8 +237,9 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []agentidentity.Identity{mockIdentity}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config:     &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}},
-				LLMRuntime: runtimellm.NoopRuntime{},
+				ExecutionPosture: executionposture.Live,
+				Config:           &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}},
+				LLMRuntime:       runtimellm.NoopRuntime{},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
 					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
 				},
@@ -331,13 +335,14 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
 		authority,
 		admission,
-		runtimeeffects.NewCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}),
+		liveTestCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}),
 		runtimecorrelation.RuntimeLineage{},
 	)
 	if err != nil {
 		t.Fatalf("construct selected-contract receiver execution: %v", err)
 	}
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		ExecutionPosture:  executionposture.Live,
 		BundleSourceFact:  selectedContractAgentTestSourceFact(t),
 		WorkOwner:         owner,
 		ReceiverExecution: receiverExecution,
@@ -355,6 +360,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
 			}}},
 			Options: SelectedContractAgentRuntimeOptions{
+				ExecutionPosture: executionposture.Live,
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 					return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
 				},

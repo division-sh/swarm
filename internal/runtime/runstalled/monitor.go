@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
 const (
@@ -63,12 +63,13 @@ type Publisher interface {
 type PolicyResolver func(flowInstance string) Policy
 
 type Monitor struct {
-	Reader         Reader
-	Publisher      Publisher
-	PolicyResolver PolicyResolver
-	PageLimit      int
-	PollInterval   time.Duration
-	OnError        func(error)
+	Reader           Reader
+	Publisher        Publisher
+	ExecutionPosture executionposture.Posture
+	PolicyResolver   PolicyResolver
+	PageLimit        int
+	PollInterval     time.Duration
+	OnError          func(error)
 }
 
 type CheckResult struct {
@@ -220,7 +221,7 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 		Facts: events.EventFacts{
 			Type: events.EventType(EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
 			Payload: payload, Envelope: events.EventEnvelope{FlowInstance: snapshot.FlowInstance},
-			CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
+			CreatedAt: now.UTC(), ExecutionMode: m.ExecutionPosture.RootMode(),
 		},
 		RunID: runID,
 	})

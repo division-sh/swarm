@@ -39,6 +39,7 @@ import (
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -311,7 +312,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		LockOwner:            "worker-1",
 		Events:               bus,
 		Credentials:          credentials.Store,
-		CompletionController: runtimeeffects.NewCompletionController(pg, pg, pg, discardCompletionSpendProjection{}),
+		CompletionController: liveTestCompletionController(pg, pg, pg, discardCompletionSpendProjection{}),
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
@@ -512,7 +513,7 @@ printf '{"result":"ok"}'
 		Conversations:        pg,
 		Events:               bus,
 		Credentials:          credentials.Store,
-		CompletionController: runtimeeffects.NewCompletionController(pg, pg, pg, discardCompletionSpendProjection{}),
+		CompletionController: liveTestCompletionController(pg, pg, pg, discardCompletionSpendProjection{}),
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
@@ -668,7 +669,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	entityID := uuid.NewString()
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassAuthorizationDenied,
 		"cross_flow_write_forbidden",
@@ -991,7 +992,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: false,
+			RecoveryOnStartup: false, ExecutionPosture: executionposture.Live,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1083,7 +1084,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true,
+			RecoveryOnStartup: true, ExecutionPosture: executionposture.Live,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1191,7 +1192,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	seedConformanceAgent(t, ctx, pg, "agent-1")
 
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
@@ -1211,10 +1212,11 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 
 	am := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		BaseContext:     testAuthorActivityRuntimeContext(context.Background()),
-		Sessions:        registry,
-		SessionResetter: pg,
-		WorkOwner:       workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture: executionposture.Live,
+		BaseContext:      testAuthorActivityRuntimeContext(context.Background()),
+		Sessions:         registry,
+		SessionResetter:  pg,
+		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
@@ -1356,7 +1358,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true,
+			RecoveryOnStartup: true, ExecutionPosture: executionposture.Live,
 		},
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
@@ -1391,6 +1393,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live,
 		WorkOwner:        rt.WorkOccurrence(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
@@ -1431,7 +1434,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
-	logger := runtimepkg.NewRuntimeLogger(pg)
+	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
 	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
@@ -1692,6 +1695,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		t.Fatalf("construct workflow mutation event bus: %v", err)
 	}
 	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
+		ExecutionPosture:        executionposture.Live,
 		Module:                  module,
 		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,
