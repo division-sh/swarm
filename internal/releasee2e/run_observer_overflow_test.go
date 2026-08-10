@@ -116,10 +116,6 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if err := stdoutWriter.Close(); err != nil {
 		t.Fatalf("close parent release stdout writer: %v", err)
 	}
-	if err := waitForReleaseDockerRecordClass(ctx, fakeRoot, "mcp_emit"); err != nil {
-		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
-		t.Fatalf("wait for managed Claude completion: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
-	}
 	type stdoutResult struct {
 		output []byte
 		err    error
@@ -141,6 +137,10 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		output, err := io.ReadAll(stdoutReader)
 		stdoutDone <- stdoutResult{output: output, err: err}
 	}()
+	if err := waitForReleaseDockerRecordClass(ctx, fakeRoot, "mcp_emit"); err != nil {
+		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
+		t.Fatalf("wait for managed Claude completion: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
+	}
 	stdoutRead := <-stdoutDone
 	if stdoutRead.err != nil {
 		t.Fatal(stdoutRead.err)
