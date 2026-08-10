@@ -15,7 +15,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -133,7 +132,7 @@ func workflowGateSupersededEvent(card decisioncard.Card, activation gateruntime.
 			ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
 			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
 			Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.Route.InstancePath),
-			RoutingSource: routingSource, CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
+			RoutingSource: routingSource, CreatedAt: now.UTC(), ExecutionMode: card.ExecutionMode,
 		},
 		RunID: card.RunID,
 	})

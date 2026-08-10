@@ -46,6 +46,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -3386,7 +3387,8 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	instanceMetadata["entity_id"] = entityID
 	instanceMetadata["flow_path"] = "root"
 	instanceMetadata["instance_id"] = "root"
-	if _, err := workflow.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, runID), runtimepipeline.WorkflowInstance{
+	materializeCtx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
 		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
@@ -4611,7 +4613,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	default:
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
-	if _, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
@@ -7663,8 +7665,8 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		t.Fatalf("bind delivery session %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, owner_kind, fire_event, routing_source, fire_at, status)
-		VALUES ($1::uuid, $2, $3::uuid, 'system', 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, now() + interval '1 hour', 'active')
+		INSERT INTO timers (timer_id, timer_name, run_id, owner_kind, fire_event, routing_source, execution_mode, fire_at, status)
+		VALUES ($1::uuid, $2, $3::uuid, 'system', 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now() + interval '1 hour', 'active')
 	`, timerID, "timer-"+source, runID); err != nil {
 		t.Fatalf("seed timer %s: %v", source, err)
 	}

@@ -22,6 +22,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -98,6 +99,52 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
 			if len(upserts) != 1 || upserts[0].EventType != joinTimeoutEvent {
 				t.Fatalf("selected-store join schedules = %#v, want one timeout", upserts)
+			}
+		})
+	}
+}
+
+func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bundle := workflowJoinLifecycleBundle()
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+				Module:      &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence: workflowPersistenceForTest(store),
+			})
+			path := "orders/" + uuid.NewString()
+			entityID := FlowInstanceEntityID(path)
+			enteredAt := time.Now().UTC()
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
+				CurrentState: "dispatching", EnteredStageAt: enteredAt, Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
+			})); err != nil {
+				t.Fatal(err)
+			}
+			route := testWorkflowInstanceRoute(path)
+			instance, found, err := store.Load(ctx, route)
+			if err != nil || !found {
+				t.Fatalf("load workflow instance: found=%v err=%v", found, err)
+			}
+			instance.CurrentState = "awaiting"
+			instance.EnteredStageAt = enteredAt
+			transition, err := runtimeworkflowlifecycle.NewTransition("dispatching", "awaiting", "dispatching->awaiting")
+			if err != nil {
+				t.Fatal(err)
+			}
+			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(
+				route, entityID, uuid.NewString(), "order.accepted", executionmode.Mock, enteredAt, &transition,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, "dispatching", []runtimeworkflowlifecycle.Effect{effect}); err != nil {
+				t.Fatalf("commit mock workflow transition: %v", err)
+			}
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if len(upserts) != 1 || upserts[0].ExecutionMode != executionmode.Mock {
+				t.Fatalf("mock join schedules = %#v, want one mock timeout", upserts)
 			}
 		})
 	}
@@ -351,10 +398,25 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
 				t.Fatal(err)
 			}
-			if err := pc.applyWorkflowJoinIntents(ctx, testWorkflowInstanceRoute(path), entityID, "awaiting", "reviewing", time.Now().UTC()); err != nil {
+			transitionAt := time.Now().UTC()
+			transition, err := runtimeworkflowlifecycle.NewTransition("awaiting", "reviewing", "test-stage-transition")
+			if err != nil {
+				t.Fatal(err)
+			}
+			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(testWorkflowInstanceRoute(path), entityID, uuid.NewString(), "approval.completed", executionmode.Live, transitionAt, &transition)
+			if err != nil {
 				t.Fatal(err)
 			}
 			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			if err != nil || !ok {
+				t.Fatalf("load before stage transition = %v, %v", ok, err)
+			}
+			instance.CurrentState = "reviewing"
+			instance.EnteredStageAt = transitionAt
+			if err := commitTestWorkflowLifecycleMutation(ctx, pc, testWorkflowInstanceRoute(path), instance, "awaiting", []runtimeworkflowlifecycle.Effect{effect}); err != nil {
+				t.Fatal(err)
+			}
+			instance, ok, err = store.Load(ctx, testWorkflowInstanceRoute(path))
 			if err != nil || !ok {
 				t.Fatalf("load stage-scoped joins = %v, %v", ok, err)
 			}
@@ -739,17 +801,6 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			}
 			if len(schedules.schedules) != 0 {
 				t.Fatalf("legacy schedule callback survived = %#v", schedules.schedules)
-			}
-			armed, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
-			if err != nil || !ok {
-				t.Fatalf("load armed zero join = %v, %v", ok, err)
-			}
-			armedCarrier, err := runtimeengine.StateCarrierFromPersisted(armed.Metadata, armed.StateBuckets)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := pc.reconcileClosedJoinSchedules(ctx, testWorkflowInstanceRoute(path), entityID, armedCarrier); err != nil {
-				t.Fatalf("reconcile pending zero join: %v", err)
 			}
 			if schedules.cancelOwned != 0 {
 				t.Fatalf("pending expected-zero completion was canceled before fire: %#v", schedules.cancels)

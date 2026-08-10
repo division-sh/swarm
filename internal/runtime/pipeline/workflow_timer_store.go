@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 const (
@@ -30,6 +31,7 @@ type WorkflowTimerActivation struct {
 	RoutingSource       events.RoutingSource
 	OwnerAgent          string
 	EventType           string
+	ExecutionMode       executionmode.Mode
 	Payload             []byte
 	FireAt              time.Time
 	Recurring           bool
@@ -54,6 +56,7 @@ type WorkflowTimerActivationPersistenceRecord struct {
 	Route               runtimeflowidentity.Route
 	RoutingSource       events.RoutingSource
 	EventType           string
+	ExecutionMode       executionmode.Mode
 	Payload             []byte
 	FireAt              time.Time
 	Recurring           bool
@@ -83,7 +86,7 @@ func DecodeWorkflowTimerActivationPersistenceRecord(record WorkflowTimerActivati
 	}
 	activation := WorkflowTimerActivation{
 		Ref: ref, RunID: record.RunID, EntityID: record.EntityID, Route: record.Route,
-		RoutingSource: record.RoutingSource, OwnerAgent: record.OwnerAgent, EventType: record.EventType, Payload: record.Payload,
+		RoutingSource: record.RoutingSource, OwnerAgent: record.OwnerAgent, EventType: record.EventType, ExecutionMode: record.ExecutionMode, Payload: record.Payload,
 		FireAt: record.FireAt, Recurring: record.Recurring, Status: record.Status,
 		FiredAt: record.FiredAt, CreatedAt: record.CreatedAt, SourceTimerID: record.SourceTimerID,
 		ForkedFromRunID: record.ForkedFromRunID, ForkedFromEventID: record.ForkedFromEventID,
@@ -144,6 +147,7 @@ func (a WorkflowTimerActivation) normalized() WorkflowTimerActivation {
 	a.Route = runtimeflowidentity.StoredRoute(a.Route.ScopeKey, a.Route.InstanceID, a.Route.InstancePath)
 	a.OwnerAgent = strings.TrimSpace(a.OwnerAgent)
 	a.EventType = strings.TrimSpace(a.EventType)
+	a.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(a.ExecutionMode)))
 	a.Status = strings.ToLower(strings.TrimSpace(a.Status))
 	a.SourceTimerID = strings.TrimSpace(a.SourceTimerID)
 	a.ForkedFromRunID = strings.TrimSpace(a.ForkedFromRunID)
@@ -182,6 +186,9 @@ func (a WorkflowTimerActivation) validate() error {
 	}
 	if a.OwnerAgent == "" || a.EventType == "" {
 		return fmt.Errorf("workflow timer activation requires owner agent and fire event")
+	}
+	if !a.ExecutionMode.Valid() {
+		return fmt.Errorf("workflow timer activation execution_mode %q is invalid", a.ExecutionMode)
 	}
 	if _, err := events.AdmitRuntimeControlEventType(events.EventType(a.EventType), a.RoutingSource); err != nil {
 		return fmt.Errorf("workflow timer activation event/source admission: %w", err)
@@ -281,7 +288,7 @@ func requireSameWorkflowTimerActivationFacts(actual, expected WorkflowTimerActiv
 	actual, expected = actual.normalized(), expected.normalized()
 	if actual.Ref != expected.Ref || actual.RunID != expected.RunID || actual.EntityID != expected.EntityID ||
 		actual.Route != expected.Route || actual.RoutingSource.Kind() != expected.RoutingSource.Kind() || actual.RoutingSource.Route() != expected.RoutingSource.Route() || actual.OwnerAgent != expected.OwnerAgent ||
-		actual.EventType != expected.EventType || actual.Recurring != expected.Recurring ||
+		actual.EventType != expected.EventType || actual.ExecutionMode != expected.ExecutionMode || actual.Recurring != expected.Recurring ||
 		actual.RecurrenceInterval != expected.RecurrenceInterval || !actual.CreatedAt.Equal(expected.CreatedAt) ||
 		actual.SourceTimerID != expected.SourceTimerID || actual.ForkedFromRunID != expected.ForkedFromRunID ||
 		actual.ForkedFromEventID != expected.ForkedFromEventID || actual.ReconstructionOwner != expected.ReconstructionOwner ||

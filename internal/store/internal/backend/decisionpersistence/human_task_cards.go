@@ -12,7 +12,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -402,7 +401,7 @@ func humanTaskExpiredEvent(card decisioncard.Card, continuation decisioncard.Hum
 			Envelope: events.EnvelopeForFlowInstance(
 				events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance,
 			),
-			RoutingSource: routingSource, CreatedAt: now, ExecutionMode: executionmode.Live,
+			RoutingSource: routingSource, CreatedAt: now, ExecutionMode: card.ExecutionMode,
 		},
 		RunID: card.RunID,
 	})

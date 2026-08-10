@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -79,6 +80,30 @@ func TestFlowOwnedScheduleEventSourceAdmissionRoundTripsOnBothStores(t *testing.
 	}
 }
 
+func TestGenericScheduleExecutionModeRoundTripsOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, _, ctx := tc.open(t)
+			schedule := testAgentOwnedSchedule(t, runtimepipeline.Schedule{
+				RunID: runtimecorrelation.RunIDFromContext(ctx), AgentID: "mock-producer",
+				EventType: "producer/work.ready", Mode: "once", At: time.Now().UTC().Add(time.Hour),
+				FlowInstance: "producer/instance-1", EntityID: uuid.NewString(), TaskID: "mock-mode-round-trip",
+				Payload: json.RawMessage(`{"work_id":"selected-store"}`), ExecutionMode: executionmode.Mock,
+			})
+			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
+				t.Fatalf("persist mock schedule: %v", err)
+			}
+			active, err := selected.LoadActiveSchedules(ctx)
+			if err != nil || len(active) != 1 {
+				t.Fatalf("load mock schedule = %#v, %v", active, err)
+			}
+			if active[0].ExecutionMode != executionmode.Mock {
+				t.Fatalf("restored execution mode = %q, want mock", active[0].ExecutionMode)
+			}
+		})
+	}
+}
+
 func TestAgentScheduleRestoreRejectsForeignRoutingSourceOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,7 +162,7 @@ func TestSystemJoinScheduleRestoreRejectsForeignDeclarationOnBothStores(t *testi
 				RunID: runtimecorrelation.RunIDFromContext(ctx), AgentID: "workflow-runtime", OwnerKind: runtimepipeline.ScheduleOwnerSystem,
 				EventType: "platform.join_timeout", Mode: "once", At: time.Now().UTC().Add(time.Hour),
 				EntityID: entityID, FlowInstance: flowInstance, TaskID: handle.TaskID(), Payload: mustJSONForStoreTest(t, handle.PayloadMetadata()),
-				RoutingSource: routingSource,
+				RoutingSource: routingSource, ExecutionMode: executionmode.Live,
 			}
 			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
 				t.Fatalf("persist system join schedule: %v", err)
@@ -209,8 +234,8 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload,
-						routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
-					) VALUES (?, ?, ?, ?, 'timer-proof', 'timer-proof', 'timer-proof', 'timer.timeout', ?, ?, ?, false, 'runtime', 'system', 'workflow_timer', 'active', ?)
+						routing_source, execution_mode, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+					) VALUES (?, ?, ?, ?, 'timer-proof', 'timer-proof', 'timer-proof', 'timer.timeout', ?, ?, 'live', ?, false, 'runtime', 'system', 'workflow_timer', 'active', ?)
 				`, activationID, runID, ref.TaskID(), entityID, string(payload), string(routingSourceJSON), fireAt, fireAt.Add(-time.Hour))
 				if err != nil {
 					t.Fatalf("insert SQLite workflow activation: %v", err)
@@ -219,9 +244,9 @@ func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *te
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload,
-						routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+						routing_source, execution_mode, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
 					) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'timer-proof', 'timer-proof', 'timer-proof', 'timer.timeout', $5::jsonb,
-					          $6::jsonb, $7, false, 'runtime', 'system', 'workflow_timer', 'active', $8)
+					          $6::jsonb, 'live', $7, false, 'runtime', 'system', 'workflow_timer', 'active', $8)
 				`, activationID, runID, ref.TaskID(), entityID, string(payload), string(routingSourceJSON), fireAt, fireAt.Add(-time.Hour))
 				if err != nil {
 					t.Fatalf("insert PostgreSQL workflow activation: %v", err)
@@ -350,6 +375,8 @@ func TestWorkflowTimerFreshSchemaOneInvalidFactMatrixOnBothStores(t *testing.T) 
 		{name: "blank flow instance", mutate: func(row *workflowTimerDDLProofRow) { row.flowInstance = " " }},
 		{name: "blank activation identity", mutate: func(row *workflowTimerDDLProofRow) { row.timerName = " " }},
 		{name: "blank fire event", mutate: func(row *workflowTimerDDLProofRow) { row.fireEvent = " " }},
+		{name: "missing execution mode", mutate: func(row *workflowTimerDDLProofRow) { row.executionMode = nil }},
+		{name: "invalid execution mode", mutate: func(row *workflowTimerDDLProofRow) { row.executionMode = "preview" }},
 		{name: "node owner", mutate: func(row *workflowTimerDDLProofRow) { row.ownerNode = "workflow-node" }},
 		{name: "blank agent owner", mutate: func(row *workflowTimerDDLProofRow) { row.ownerAgent = " " }},
 		{name: "cron recurrence", mutate: func(row *workflowTimerDDLProofRow) { row.recurrenceCron = "@daily" }},
@@ -417,6 +444,7 @@ type workflowTimerDDLProofRow struct {
 	fireEvent           string
 	payload             string
 	routingSource       string
+	executionMode       any
 	fireAt              time.Time
 	recurring           bool
 	recurrenceCron      any
@@ -461,6 +489,7 @@ func newWorkflowTimerDDLProofRow(runID string) workflowTimerDDLProofRow {
 		fireEvent:      "timer.timeout",
 		payload:        `{"business":true}`,
 		routingSource:  string(routingSourceJSON),
+		executionMode:  string(executionmode.Live),
 		fireAt:         createdAt.Add(time.Hour),
 		ownerAgent:     "workflow-runtime",
 		status:         "active",
@@ -476,7 +505,7 @@ func insertWorkflowTimerDDLProofRow(
 ) error {
 	args := []any{
 		row.timerID, row.runID, row.timerName, row.entityID, row.flowScopeKey, row.flowInstanceID, row.flowInstance, row.fireEvent,
-		row.payload, row.routingSource, row.fireAt, row.recurring, row.recurrenceCron, row.recurrenceInterval,
+		row.payload, row.routingSource, row.executionMode, row.fireAt, row.recurring, row.recurrenceCron, row.recurrenceInterval,
 		row.ownerNode, row.ownerAgent, row.status, row.firedAt, row.createdAt, row.sourceTimerID,
 		row.forkedFromRunID, row.forkedFromEventID, row.reconstructionOwner,
 	}
@@ -484,13 +513,13 @@ func insertWorkflowTimerDDLProofRow(
 		_, err := db.ExecContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload,
-				routing_source, fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
+				routing_source, execution_mode, fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
 				owner_kind, task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
 				forked_from_event_id, reconstruction_owner
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb,
-				$10::jsonb, $11, $12, $13, $14, $15, $16, 'system', 'workflow_timer', $17, $18, $19,
-				$20::uuid, $21::uuid, $22::uuid, $23
+				$10::jsonb, $11, $12, $13, $14, $15, $16, $17, 'system', 'workflow_timer', $18, $19, $20,
+				$21::uuid, $22::uuid, $23::uuid, $24
 			)
 		`, args...)
 		return err
@@ -498,11 +527,11 @@ func insertWorkflowTimerDDLProofRow(
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload,
-			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
+			routing_source, execution_mode, fire_at, recurring, recurrence_cron, recurrence_interval, owner_node, owner_agent,
 			owner_kind, task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
 			forked_from_event_id, reconstruction_owner
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
 		)
 	`, args...)
 	return err

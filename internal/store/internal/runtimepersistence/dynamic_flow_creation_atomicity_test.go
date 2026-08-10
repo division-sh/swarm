@@ -21,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -142,6 +143,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	sourceFact := mustExternalStoreTestBundleSourceFact()
 	bundleHash, bundleSource := sourceFact.StorageValues()
 	if sqlite {

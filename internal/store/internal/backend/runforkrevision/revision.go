@@ -601,6 +601,7 @@ const canonicalTimersProjectionSQL = `
 	           'timer_id', t.timer_id, 'timer_name', t.timer_name,
 	           'entity_id', t.entity_id, 'flow_instance', t.flow_instance,
 	           'fire_event', t.fire_event, 'fire_payload', t.fire_payload,
+	           'execution_mode', t.execution_mode,
 	           'fire_at', t.fire_at, 'recurring', t.recurring,
 	           'recurrence_cron', t.recurrence_cron,
 	           'recurrence_interval', t.recurrence_interval,

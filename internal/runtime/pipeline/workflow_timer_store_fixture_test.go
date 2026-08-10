@@ -40,17 +40,17 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id,
 				flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
-				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
+				execution_mode, status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', ?, 'active', ?,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', ?, ?, 'active', ?,
 			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
-			workflowTimerTaskFamily, activation.CreatedAt, activation.SourceTimerID,
+			workflowTimerTaskFamily, activation.ExecutionMode, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	} else {
 		result, err = tx.ExecContext(ctx, `
@@ -58,18 +58,18 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id,
 				flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
-				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
+				execution_mode, status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, NULLIF($13, ''),
-		        NULL, $14, 'system', $15, 'active', $16, NULLIF($17, '')::uuid, NULLIF($18, '')::uuid,
-		        NULLIF($19, '')::uuid, NULLIF($20, ''))
+		        NULL, $14, 'system', $15, $16, 'active', $17, NULLIF($18, '')::uuid, NULLIF($19, '')::uuid,
+		        NULLIF($20, '')::uuid, NULLIF($21, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
-			workflowTimerTaskFamily, activation.CreatedAt, activation.SourceTimerID,
+			workflowTimerTaskFamily, activation.ExecutionMode, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	}
 	if err != nil {
@@ -196,7 +196,7 @@ func workflowTimerSelectColumns() string {
 			COALESCE(t.flow_instance_id, ''), COALESCE(t.flow_instance, ''),
 			t.fire_event, COALESCE(t.fire_payload, '{}'), t.routing_source, t.fire_at, t.recurring,
 			COALESCE(t.recurrence_interval, ''), COALESCE(t.owner_node, ''),
-			COALESCE(t.owner_agent, ''), t.task_type, t.status, t.fired_at, t.created_at,
+			COALESCE(t.owner_agent, ''), t.task_type, t.execution_mode, t.status, t.fired_at, t.created_at,
 			COALESCE(CAST(t.source_timer_id AS TEXT), ''),
 			COALESCE(CAST(t.forked_from_run_id AS TEXT), ''),
 			COALESCE(CAST(t.forked_from_event_id AS TEXT), ''),
@@ -217,7 +217,7 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 		&activationID, &taskID, &activation.RunID, &activation.EntityID, &activation.Route.ScopeKey,
 		&activation.Route.InstanceID, &activation.Route.InstancePath,
 		&activation.EventType, &payloadRaw, &routingSourceRaw, &fireAtRaw, &activation.Recurring, &intervalRaw,
-		&ownerNode, &activation.OwnerAgent, &taskType, &activation.Status, &firedAtRaw, &createdAtRaw,
+		&ownerNode, &activation.OwnerAgent, &taskType, &activation.ExecutionMode, &activation.Status, &firedAtRaw, &createdAtRaw,
 		&activation.SourceTimerID, &activation.ForkedFromRunID, &activation.ForkedFromEventID,
 		&activation.ReconstructionOwner,
 	); err != nil {

@@ -72,6 +72,9 @@ func commitWorkflowEngineScheduleMutation(ctx context.Context, tx *sql.Tx, postg
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
+	if err := sc.NormalizeExecutionMode(); err != nil {
+		return err
+	}
 	identity, err := scheduleAgentIdentityFields(sc)
 	if err != nil {
 		return err
@@ -149,32 +152,32 @@ func commitWorkflowEngineScheduleMutation(ctx context.Context, tx *sql.Tx, postg
 	if postgres {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
+				run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_cron, recurrence_interval,
 				owner_node, owner_agent, owner_kind, agent_name_owner, agent_name_source,
 				agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				reply_context_id, task_type, status
 			) VALUES (
-				NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb, $7::jsonb,
-				$8, $9, NULLIF($10,''), NULL,
-				NULL, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
-				NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''),
-				NULLIF($18, ''), $19, 'active'
+				NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb, $7::jsonb, $8,
+				$9, $10, NULLIF($11,''), NULL,
+				NULL, $12, $13, NULLIF($14, ''), NULLIF($15, ''),
+				NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''),
+				NULLIF($19, ''), $20, 'active'
 			)
-		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), fireAt,
+		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), sc.ExecutionMode, fireAt,
 			recurring, sc.Cron, sc.AgentID, sc.OwnerKind, identity.NameOwner, identity.NameSource, identity.RoutePresence,
 			identity.FlowScopeKey, identity.FlowInstanceID, sc.Context.ReplyContextID(), taskType)
 	} else {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_cron, owner_agent, owner_kind, agent_name_owner,
 				agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				reply_context_id, task_type, status, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''),
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''),
 			          NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, 'active', ?)
 		`, uuid.NewString(), sqliteNullUUID(sc.RunID), timerName, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance),
-			sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), fireAt, recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.OwnerKind,
+			sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), sc.ExecutionMode, fireAt, recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.OwnerKind,
 			identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID,
 			sc.Context.ReplyContextID(), taskType, time.Now().UTC())
 	}

@@ -651,6 +651,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
+			ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Mock)
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
@@ -672,6 +673,9 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			cardAnchor := mustStageGateAnchor(t, cards.created[0])
 			if len(bus.publishes) != 1 || bus.publishes[0].FlowInstance() != cardAnchor.Route.InstancePath || bus.publishes[0].EntityID() != entityID {
 				t.Fatalf("terminated-flow supersession events = %#v, want card flow %q and entity %q", bus.publishes, cardAnchor.Route.InstancePath, entityID)
+			}
+			if cards.created[0].ExecutionMode != executionmode.Mock || bus.publishes[0].ExecutionMode() != executionmode.Mock {
+				t.Fatalf("terminated-flow modes = card:%q event:%q, want mock", cards.created[0].ExecutionMode, bus.publishes[0].ExecutionMode())
 			}
 		})
 	}

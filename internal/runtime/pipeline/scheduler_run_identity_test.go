@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -27,6 +28,7 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 		EntityID:      "33333333-3333-3333-3333-333333333333",
 		FlowInstance:  "flow-a/1",
 		TaskID:        "task-a",
+		ExecutionMode: executionmode.Live,
 	}
 	base.RoutingSource = mustFlowOwnedScheduleSourceForFlow(t, "flow-a", base.FlowInstance, base.EntityID)
 	scA := base
@@ -76,7 +78,7 @@ func TestSchedulerBindsTaskToContextualStandingOccurrence(t *testing.T) {
 	}
 	scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
 	requestCtx, cancelRequest := context.WithCancel(worklifetime.WithOccurrence(context.Background(), standing))
-	schedule := Schedule{AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "standing-owner", RoutingSource: events.NewPlatformControlRoutingSource()}
+	schedule := Schedule{AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "standing-owner", RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live}
 	if err := scheduler.Register(requestCtx, schedule); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -151,8 +153,8 @@ func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
 			}
 			scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
 			schedules := []Schedule{
-				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource()},
-				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource()},
+				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live},
+				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live},
 			}
 			ctx := worklifetime.WithOccurrence(context.Background(), owner)
 			registered := make([]*scheduledTask, 0, len(schedules))
@@ -308,7 +310,7 @@ func TestSchedulerParkRestoreLinearizesFiringOnceAndCron(t *testing.T) {
 				})
 				schedule := Schedule{
 					RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer." + mode,
-					OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(),
+					OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
 				}
 				if mode == "once" {
 					schedule.At = time.Now()
@@ -422,7 +424,7 @@ func TestSchedulerPrunesCompletedOneShotHistory(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		if err := scheduler.Register(context.Background(), Schedule{
 			AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now(), TaskID: uuid.NewString(),
-			RoutingSource: events.NewPlatformControlRoutingSource(),
+			RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
 		}); err != nil {
 			t.Fatalf("Register(%d): %v", i, err)
 		}
@@ -453,6 +455,7 @@ func TestSchedulerOneShotPreservesReplyContextToFire(t *testing.T) {
 		At:            time.Now().Add(10 * time.Millisecond),
 		TaskID:        "reply-resume",
 		RoutingSource: events.NewPlatformControlRoutingSource(),
+		ExecutionMode: executionmode.Live,
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -474,7 +477,7 @@ func TestScheduleRootRoutingSourceRequiresExactEntityScope(t *testing.T) {
 	handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef("", "join-node", "item.completed", "awaiting", "items", "window-1"))
 	schedule := Schedule{
 		AgentID: runtimeWorkflowID, OwnerKind: ScheduleOwnerSystem, EventType: joinTimeoutEvent,
-		EntityID: "entity-root", TaskID: handle.TaskID(), Payload: mustJSON(handle.PayloadMetadata()), RoutingSource: source,
+		EntityID: "entity-root", TaskID: handle.TaskID(), Payload: mustJSON(handle.PayloadMetadata()), RoutingSource: source, ExecutionMode: executionmode.Live,
 	}
 	if err := schedule.ValidateRoutingSource(); err != nil {
 		t.Fatalf("exact root source: %v", err)
@@ -502,7 +505,7 @@ func TestScheduleSystemJoinRequiresExactHandleDeclaration(t *testing.T) {
 		AgentID: runtimeWorkflowID, OwnerKind: ScheduleOwnerSystem, EventType: joinTimeoutEvent,
 		Mode: "once", At: time.Now().Add(time.Hour), EntityID: entityID, FlowInstance: flowInstance,
 		TaskID: handle.TaskID(), Payload: mustJSON(handle.PayloadMetadata()),
-		RoutingSource: mustFlowOwnedScheduleSourceForFlow(t, flowID, flowInstance, entityID),
+		RoutingSource: mustFlowOwnedScheduleSourceForFlow(t, flowID, flowInstance, entityID), ExecutionMode: executionmode.Live,
 	}
 	if _, _, err := validateSchedule(schedule); err != nil {
 		t.Fatalf("exact system join declaration: %v", err)
@@ -554,6 +557,7 @@ func TestScheduleFlowOwnedRoutingSourceRequiresExactAgentFlowScope(t *testing.T)
 		EntityID:      entityID,
 		FlowInstance:  flowInstance,
 		RoutingSource: mustFlowOwnedScheduleSourceForFlow(t, "flow-a", flowInstance, entityID),
+		ExecutionMode: executionmode.Live,
 	}
 	if _, _, err := validateSchedule(schedule); err != nil {
 		t.Fatalf("exact agent flow source: %v", err)

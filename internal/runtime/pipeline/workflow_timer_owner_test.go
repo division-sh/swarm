@@ -22,6 +22,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -79,6 +80,33 @@ func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) 
 			)
 			if _, _, recognized, err := pc.workflowTimers.AuthorizeAcceptedEvent(ctx, wrong); err == nil || !recognized {
 				t.Fatalf("wrong event id authorization recognized=%v err=%v, want recognized rejection", recognized, err)
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bus := &recordingPipelineBus{}
+			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
+				t, store, ctx, bus, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Mock,
+			)
+			if activation.ExecutionMode != executionmode.Mock {
+				t.Fatalf("persisted activation execution mode = %q, want mock", activation.ExecutionMode)
+			}
+			mode, err := initialWorkflowTimerExecutionMode(ctx, []WorkflowTimerActivation{activation})
+			if err != nil || mode != executionmode.Mock {
+				t.Fatalf("reconciliation execution mode = %q err=%v, want persisted mock", mode, err)
+			}
+
+			outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
+			if err != nil || outcome != WorkflowTimerFireCommitted {
+				t.Fatalf("FireWorkflowTimer outcome=%q err=%v, want committed", outcome, err)
+			}
+			if got := bus.publishedEvent(0).ExecutionMode(); got != executionmode.Mock {
+				t.Fatalf("fired event execution mode = %q, want mock", got)
 			}
 		})
 	}
@@ -270,7 +298,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			if err != nil {
 				t.Fatalf("build progressed transition: %v", err)
 			}
-			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(route, entityID, uuid.NewString(), "test.workflow_progressed", transitionAt, &transition)
+			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(route, entityID, uuid.NewString(), "test.workflow_progressed", executionmode.Live, transitionAt, &transition)
 			if err != nil {
 				t.Fatalf("build progressed lifecycle effect: %v", err)
 			}
@@ -359,7 +387,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.workflowTimers.Reconcile(txctx, rootRoute, entityID, "waiting", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseEvent, EventID: uuid.NewString(),
-					EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute),
+					EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute), ExecutionMode: executionmode.Live,
 				})
 			}); err != nil {
 				t.Fatalf("arm event timer: %v", err)
@@ -450,7 +478,7 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 					return pc.workflowTimers.Reconcile(txctx, route, entityID, "waiting", "waiting", workflowTimerCause{
 						Kind: workflowTimerCauseEvent, EventID: uuid.NewString(),
-						EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute),
+						EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute), ExecutionMode: executionmode.Live,
 					})
 				}); err != nil {
 					t.Fatalf("reconcile %s event timer: %v", instanceFlow, err)
@@ -683,7 +711,7 @@ func TestWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBoth
 				}
 
 				cause := workflowTimerCause{
-					Kind: workflowTimerCauseInitial, OccurredAt: activation.CreatedAt, ToState: "waiting",
+					Kind: workflowTimerCauseInitial, OccurredAt: activation.CreatedAt, ToState: "waiting", ExecutionMode: executionmode.Live,
 				}
 				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 					return pc.workflowTimers.Reconcile(txctx, workflowTimerRootRoute(ctx), entityID, "", "waiting", cause)
@@ -714,7 +742,7 @@ func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *t
 			unrelatedAt := canonicalWorkflowTimerTime(first.FireAt.Add(time.Minute))
 			unrelated := workflowTimerCause{
 				Kind: workflowTimerCauseEvent, EventID: uuid.NewString(), EventType: "work.noted", OccurredAt: unrelatedAt,
-				FromState: "waiting", ToState: "waiting",
+				FromState: "waiting", ToState: "waiting", ExecutionMode: executionmode.Live,
 			}
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.workflowTimers.Reconcile(txctx, workflowTimerRootRoute(ctx), entityID, "waiting", "waiting", unrelated)
@@ -729,7 +757,7 @@ func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *t
 			reentryAt := canonicalWorkflowTimerTime(unrelatedAt.Add(time.Minute))
 			reentry := workflowTimerCause{
 				Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "review.reopened", OccurredAt: reentryAt,
-				TransitionID: "done_to_waiting", FromState: "done", ToState: "waiting",
+				TransitionID: "done_to_waiting", FromState: "done", ToState: "waiting", ExecutionMode: executionmode.Live,
 			}
 			activate := func() error {
 				return store.runPipelineMutation(ctx, func(txctx context.Context) error {
@@ -780,7 +808,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.workflowTimers.Reconcile(txctx, rootRoute, entityID, "", "waiting", workflowTimerCause{
-					Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting",
+					Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting", ExecutionMode: executionmode.Live,
 				})
 			}); err != nil {
 				t.Fatalf("activate state-entry timer: %v", err)
@@ -1091,14 +1119,14 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 			eventID := uuid.NewString()
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				initial := workflowTimerCause{
-					Kind: workflowTimerCauseInitial, EventType: "state:waiting", OccurredAt: createdAt, ToState: "waiting",
+					Kind: workflowTimerCauseInitial, EventType: "state:waiting", OccurredAt: createdAt, ToState: "waiting", ExecutionMode: executionmode.Live,
 				}
 				if err := pc.workflowTimers.Reconcile(txctx, rootRoute, entityID, "", "waiting", initial); err != nil {
 					return err
 				}
 				return pc.workflowTimers.Reconcile(txctx, rootRoute, entityID, "waiting", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt,
-					FromState: "waiting", ToState: "waiting",
+					FromState: "waiting", ToState: "waiting", ExecutionMode: executionmode.Live,
 				})
 			}); err != nil {
 				t.Fatalf("reconcile initial and event entrances: %v", err)
@@ -1111,7 +1139,7 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 				semanticview.Wrap(bundle),
 				runtimecorrelation.RunIDFromContext(ctx), entityID, rootRoute, bundle.Semantics.Timers[0],
 				activations[0].Ref.Generation,
-				workflowTimerCause{Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt, FromState: "waiting", ToState: "waiting"},
+				workflowTimerCause{Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt, FromState: "waiting", ToState: "waiting", ExecutionMode: executionmode.Live},
 				time.Hour,
 			)
 			if err != nil {
@@ -1199,10 +1227,10 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 				_, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+						fire_payload, routing_source, execution_mode, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
 					) VALUES (?, ?, ?, ?, 'generic', 'generic.tick', '{}',
 					          json_object('kind', 'flow_owned_control', 'route', json_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', ?)),
-					          ?, false, 'generic', 'system', 'timer', 'active', ?)
+					          'live', ?, false, 'generic', 'system', 'timer', 'active', ?)
 				`, lookalikeID, runID, lookalikeTaskID, entityID, entityID, activation.FireAt, activation.CreatedAt)
 				if err != nil {
 					t.Fatalf("insert SQLite generic prefix lookalike: %v", err)
@@ -1211,10 +1239,10 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 				_, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+						fire_payload, routing_source, execution_mode, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
 					) VALUES (
 						$1::uuid, $2::uuid, $3, $4::uuid, 'generic', 'generic.tick',
-						'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', $4::text)),
+							'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', $4::text)), 'live',
 						$5, false, 'generic', 'system', 'timer', 'active', $6
 					)
 				`, lookalikeID, runID, lookalikeTaskID, entityID, activation.FireAt, activation.CreatedAt)
@@ -1310,7 +1338,7 @@ func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T)
 			err = store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.workflowTimers.Reconcile(txctx, workflowTimerRootRoute(ctx), entityID, "waiting", "done", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "work.completed",
-					OccurredAt: transitionAt, TransitionID: uuid.NewString(), FromState: "waiting", ToState: "done",
+					OccurredAt: transitionAt, TransitionID: uuid.NewString(), FromState: "waiting", ToState: "done", ExecutionMode: executionmode.Live,
 				})
 			})
 			if err != nil {
@@ -1468,7 +1496,7 @@ func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBo
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.workflowTimers.Reconcile(txctx, workflowTimerRootRoute(ctx), entityID, "waiting", "done", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "work.completed",
-					OccurredAt: cancelAt, TransitionID: "waiting_to_done", FromState: "waiting", ToState: "done",
+					OccurredAt: cancelAt, TransitionID: "waiting_to_done", FromState: "waiting", ToState: "done", ExecutionMode: executionmode.Live,
 				})
 			}); err != nil {
 				t.Fatalf("cancel first activation: %v", err)
@@ -1477,7 +1505,7 @@ func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBo
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 				return pc.workflowTimers.Reconcile(txctx, workflowTimerRootRoute(ctx), entityID, "done", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "work.reopened",
-					OccurredAt: reenterAt, TransitionID: "done_to_waiting", FromState: "done", ToState: "waiting",
+					OccurredAt: reenterAt, TransitionID: "done_to_waiting", FromState: "done", ToState: "waiting", ExecutionMode: executionmode.Live,
 				})
 			}); err != nil {
 				t.Fatalf("activate replacement timer: %v", err)
@@ -2180,8 +2208,13 @@ func seedWorkflowTimerOwnerActivationAt(
 	delay string,
 	created time.Time,
 	register bool,
+	executionModes ...executionmode.Mode,
 ) (*PipelineCoordinator, string, WorkflowTimerActivation) {
 	t.Helper()
+	executionMode := executionmode.Live
+	if len(executionModes) > 0 {
+		executionMode = executionModes[0]
+	}
 	entityID := uuid.NewString()
 	createdAt := canonicalWorkflowTimerTime(created)
 	if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, workflowTimerRootRoute(ctx).InstancePath, WorkflowInstance{
@@ -2204,7 +2237,7 @@ func seedWorkflowTimerOwnerActivationAt(
 	})
 	if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 		return pc.workflowTimers.Reconcile(txctx, workflowTimerRootRoute(ctx), entityID, "", "waiting", workflowTimerCause{
-			Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting",
+			Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting", ExecutionMode: executionMode,
 		})
 	}); err != nil {
 		t.Fatalf("activate workflow timer: %v", err)

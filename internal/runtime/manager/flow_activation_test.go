@@ -268,6 +268,7 @@ type flowActivationTestInstanceStore struct {
 	afterTopologyMark       func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
 	beforeCreation          func()
 	respectReadinessContext bool
+	lifecycleModes          []executionmode.Mode
 }
 
 type flowActivationTestStore struct {
@@ -526,7 +527,12 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 	return runtimepipeline.WorkflowInitialMaterializationCreated, nil
 }
 
-func (s *flowActivationTestInstanceStore) PrepareInitialEntryLifecycle(_ context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+func (s *flowActivationTestInstanceStore) PrepareInitialEntryLifecycle(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		return runtimepipeline.WorkflowInstance{}, runtimepipeline.WorkflowLifecycleMutationPlan{}, errors.New("test flow activation lifecycle requires execution mode")
+	}
+	s.lifecycleModes = append(s.lifecycleModes, mode)
 	instance.CreatedAt = occurredAt.UTC()
 	instance.EnteredStageAt = occurredAt.UTC()
 	return instance, runtimepipeline.WorkflowLifecycleMutationPlan{}, nil
@@ -1421,6 +1427,22 @@ func testFlowActivationTriggerEventWithMode(eventID string, mode executionmode.M
 		events.EventType("spawn.requested"),
 		"spawner", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), mode)
 
+}
+
+func TestFlowInstanceActivationExecutionModeAuthority(t *testing.T) {
+	req := runtimepipeline.FlowInstanceActivationRequest{TriggerEvent: testFlowActivationTriggerEventWithMode(uuid.NewString(), executionmode.Mock)}
+	if mode, err := flowInstanceActivationExecutionMode(context.Background(), req); err != nil || mode != executionmode.Mock {
+		t.Fatalf("trigger mode = %q, %v, want mock", mode, err)
+	}
+	if _, err := flowInstanceActivationExecutionMode(runtimeeffects.WithExecutionMode(context.Background(), executionmode.Live), req); err == nil {
+		t.Fatal("conflicting context and trigger modes were accepted")
+	}
+	if mode, err := flowInstanceActivationExecutionMode(runtimeeffects.WithExecutionMode(context.Background(), executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{}); err != nil || mode != executionmode.Live {
+		t.Fatalf("explicit root mode = %q, %v, want live", mode, err)
+	}
+	if _, err := flowInstanceActivationExecutionMode(context.Background(), runtimepipeline.FlowInstanceActivationRequest{}); err == nil {
+		t.Fatal("missing execution mode authority was accepted")
+	}
 }
 
 func decodeFlowActivationEventPayload(t *testing.T, event events.Event) map[string]any {
@@ -2831,7 +2853,8 @@ func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *
 
 func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle("task.started")
 	const runID = "11111111-1111-1111-1111-111111111115"
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
@@ -2864,6 +2887,9 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if got := autoEmit.ExecutionMode(); got != executionmode.Mock {
 		t.Fatalf("published execution mode = %q, want mock", got)
+	}
+	if len(instances.lifecycleModes) != 1 || instances.lifecycleModes[0] != executionmode.Mock {
+		t.Fatalf("initial lifecycle modes = %#v, want [mock]", instances.lifecycleModes)
 	}
 	if got, _ := autoEmit.ContextMap("")["source_event_id"].(string); got != triggerEventID {
 		t.Fatalf("event context source_event_id = %q, want trigger event %q", got, triggerEventID)

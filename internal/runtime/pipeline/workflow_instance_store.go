@@ -18,6 +18,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -472,7 +473,11 @@ func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	if !ok {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires canonical instance identity")
 	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.Instance.Route(), identity.RowID(), normalized.CurrentState, occurredAt)
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok || !mode.Valid() {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires typed execution mode authority")
+	}
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.Instance.Route(), identity.RowID(), normalized.CurrentState, mode, occurredAt)
 	if err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
 	}

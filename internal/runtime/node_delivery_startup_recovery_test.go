@@ -794,7 +794,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				FlowRoutes:          bus,
 			})
 
-			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
@@ -886,7 +886,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				FlowRoutes:          bus,
 			})
 
-			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed healthy workflow instance: %v", err)
 			}
 
@@ -900,7 +900,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				"display_slug": "Poison", "source_record_id": "poison-record", "flow_path": poisonTarget.FlowInstance,
 				"instance_id": "poison", "entity_id": poisonEntityID,
 			}
-			if _, err := pc.MaterializeInitialEntry(ctx, poisonInstance, time.Now().UTC()); err != nil {
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), poisonInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed poison workflow instance: %v", err)
 			}
 			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
@@ -1044,7 +1044,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				},
 			})
 
-			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 

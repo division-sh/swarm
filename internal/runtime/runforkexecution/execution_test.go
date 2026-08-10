@@ -147,12 +147,12 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event,
-						fire_payload, routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
+						fire_payload, routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, $2::uuid, $3, $4::uuid, 'flow-a', '1', 'flow-a/1', 'timer.check',
 						'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
-						$5, 'test-node', 'system', 'workflow_timer', 'active', $6
+						'live', $5, 'test-node', 'system', 'workflow_timer', 'active', $6
 					)
 				`, sourceTimerID, sourceRunID, ref.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 					t.Fatalf("seed source workflow timer: %v", err)

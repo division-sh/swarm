@@ -57,6 +57,9 @@ func (s *SchedulePostgresOwner) UpsertSchedule(ctx context.Context, sc runtimepi
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
+	if err := sc.NormalizeExecutionMode(); err != nil {
+		return err
+	}
 	var err error
 	sc, err = sc.AdmitEventIdentity()
 	if err != nil {
@@ -260,20 +263,20 @@ func (s *SchedulePostgresOwner) upsertScheduleSpec(ctx context.Context, sc runti
 		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
+			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, agent_name_owner, agent_name_source,
 			agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 			reply_context_id, task_type, status
 		)
 		VALUES (
-			NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb, $7::jsonb,
-			$8, $9, NULLIF($10,''), NULL,
-			NULL, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
-			NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''),
-			NULLIF($18, ''), $19, 'active'
+			NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb, $7::jsonb, $8,
+			$9, $10, NULLIF($11,''), NULL,
+			NULL, $12, $13, NULLIF($14, ''), NULLIF($15, ''),
+			NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''),
+			NULLIF($19, ''), $20, 'active'
 		)
-		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), string(routingSource), fireAt, recurring, sc.Cron, sc.AgentID,
+		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), string(routingSource), sc.ExecutionMode, fireAt, recurring, sc.Cron, sc.AgentID,
 			sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey,
 			identityFields.FlowInstanceID, sc.Context.ReplyContextID(), taskType)
 		if err != nil {
@@ -337,7 +340,8 @@ func (s *SchedulePostgresOwner) loadActiveSchedulesSpec(ctx context.Context) ([]
 			COALESCE(t.flow_instance, ''),
 			t.fire_payload,
 			t.routing_source,
-			COALESCE(t.reply_context_id, '')
+				t.execution_mode,
+				COALESCE(t.reply_context_id, '')
 		FROM timers t
 		LEFT JOIN runs run ON run.run_id = t.run_id
 		WHERE t.status = 'active'
@@ -386,6 +390,7 @@ func (s *SchedulePostgresOwner) loadActiveSchedulesSpec(ctx context.Context) ([]
 			&sc.FlowInstance,
 			&payload,
 			&routingSourceRaw,
+			&sc.ExecutionMode,
 			&replyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan active timer: %w", err)
@@ -418,6 +423,9 @@ func (s *SchedulePostgresOwner) loadActiveSchedulesSpec(ctx context.Context) ([]
 		}
 		if err := sc.NormalizeOwner(); err != nil {
 			return nil, fmt.Errorf("load schedule owner: %w", err)
+		}
+		if err := sc.NormalizeExecutionMode(); err != nil {
+			return nil, fmt.Errorf("load schedule execution mode: %w", err)
 		}
 		sc, err = sc.AdmitEventIdentity()
 		if err != nil {

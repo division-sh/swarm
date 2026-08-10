@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 type Kind uint8
@@ -39,42 +40,45 @@ func (t Transition) To() string   { return t.to }
 func (t Transition) ID() string   { return t.id }
 
 type Effect struct {
-	kind       Kind
-	route      runtimeflowidentity.Route
-	instanceID string
-	stage      string
-	eventID    string
-	eventType  string
-	occurredAt time.Time
-	transition *Transition
+	kind          Kind
+	route         runtimeflowidentity.Route
+	instanceID    string
+	stage         string
+	eventID       string
+	eventType     string
+	executionMode executionmode.Mode
+	occurredAt    time.Time
+	transition    *Transition
 }
 
-func NewInitialEntry(route runtimeflowidentity.Route, instanceID, stage string, occurredAt time.Time) (Effect, error) {
+func NewInitialEntry(route runtimeflowidentity.Route, instanceID, stage string, mode executionmode.Mode, occurredAt time.Time) (Effect, error) {
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	effect := Effect{
-		kind:       KindInitialEntry,
-		route:      route,
-		instanceID: strings.TrimSpace(instanceID),
-		stage:      strings.TrimSpace(stage),
-		occurredAt: occurredAt.UTC(),
+		kind:          KindInitialEntry,
+		route:         route,
+		instanceID:    strings.TrimSpace(instanceID),
+		stage:         strings.TrimSpace(stage),
+		executionMode: mode,
+		occurredAt:    occurredAt.UTC(),
 	}
-	if !effect.route.Valid() || effect.instanceID == "" || effect.stage == "" || effect.occurredAt.IsZero() {
-		return Effect{}, fmt.Errorf("initial workflow entry requires instance, stage, and exact occurrence time")
+	if !effect.route.Valid() || effect.instanceID == "" || effect.stage == "" || !effect.executionMode.Valid() || effect.occurredAt.IsZero() {
+		return Effect{}, fmt.Errorf("initial workflow entry requires instance, stage, execution mode, and exact occurrence time")
 	}
 	return effect, nil
 }
 
-func NewAcceptedEvent(route runtimeflowidentity.Route, instanceID, eventID, eventType string, occurredAt time.Time, transition *Transition) (Effect, error) {
+func NewAcceptedEvent(route runtimeflowidentity.Route, instanceID, eventID, eventType string, mode executionmode.Mode, occurredAt time.Time, transition *Transition) (Effect, error) {
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	effect := Effect{
-		kind:       KindAcceptedEvent,
-		route:      route,
-		instanceID: strings.TrimSpace(instanceID),
-		eventID:    strings.TrimSpace(eventID),
-		eventType:  strings.TrimSpace(eventType),
-		occurredAt: occurredAt.UTC(),
+		kind:          KindAcceptedEvent,
+		route:         route,
+		instanceID:    strings.TrimSpace(instanceID),
+		eventID:       strings.TrimSpace(eventID),
+		eventType:     strings.TrimSpace(eventType),
+		executionMode: mode,
+		occurredAt:    occurredAt.UTC(),
 	}
-	if !effect.route.Valid() || effect.instanceID == "" || effect.eventID == "" || effect.eventType == "" || effect.occurredAt.IsZero() {
+	if !effect.route.Valid() || effect.instanceID == "" || effect.eventID == "" || effect.eventType == "" || !effect.executionMode.Valid() || effect.occurredAt.IsZero() {
 		return Effect{}, fmt.Errorf("accepted workflow event requires instance and exact event identity")
 	}
 	if transition != nil {
@@ -87,13 +91,14 @@ func NewAcceptedEvent(route runtimeflowidentity.Route, instanceID, eventID, even
 	return effect, nil
 }
 
-func (e Effect) Kind() Kind                       { return e.kind }
-func (e Effect) Route() runtimeflowidentity.Route { return e.route }
-func (e Effect) InstanceID() string               { return e.instanceID }
-func (e Effect) InitialStage() string             { return e.stage }
-func (e Effect) EventID() string                  { return e.eventID }
-func (e Effect) EventType() string                { return e.eventType }
-func (e Effect) OccurredAt() time.Time            { return e.occurredAt }
+func (e Effect) Kind() Kind                        { return e.kind }
+func (e Effect) Route() runtimeflowidentity.Route  { return e.route }
+func (e Effect) InstanceID() string                { return e.instanceID }
+func (e Effect) InitialStage() string              { return e.stage }
+func (e Effect) EventID() string                   { return e.eventID }
+func (e Effect) EventType() string                 { return e.eventType }
+func (e Effect) ExecutionMode() executionmode.Mode { return e.executionMode }
+func (e Effect) OccurredAt() time.Time             { return e.occurredAt }
 
 func (e Effect) Transition() (Transition, bool) {
 	if e.transition == nil {

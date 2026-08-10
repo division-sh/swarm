@@ -187,17 +187,17 @@ func insertTimerObligationProofRowTx(
 	timerID := uuid.NewString()
 	query := `
 		INSERT INTO timers (
-			timer_id, run_id, timer_name, fire_event, routing_source, fire_at, recurring,
+			timer_id, run_id, timer_name, fire_event, routing_source, execution_mode, fire_at, recurring,
 			owner_agent, owner_kind, task_type, status, created_at
-		) VALUES (?, NULLIF(?, ''), ?, 'timer.proof', '{"kind":"platform_control","route":{}}', ?, ?, 'timer-proof', 'system', ?, 'active', ?)
+		) VALUES (?, NULLIF(?, ''), ?, 'timer.proof', '{"kind":"platform_control","route":{}}', 'live', ?, ?, 'timer-proof', 'system', ?, 'active', ?)
 	`
 	args := []any{timerID, runID, "proof-" + timerID, fireAt, family == "scheduled_task" || family == "global_recurring", family, fireAt.Add(-time.Hour)}
 	if _, ok := selected.(*PostgresStore); ok {
 		query = `
 			INSERT INTO timers (
-				timer_id, run_id, timer_name, fire_event, routing_source, fire_at, recurring,
+				timer_id, run_id, timer_name, fire_event, routing_source, execution_mode, fire_at, recurring,
 				owner_agent, owner_kind, task_type, status, created_at
-			) VALUES ($1::uuid, NULLIF($2, '')::uuid, $3, 'timer.proof', '{"kind":"platform_control","route":{}}'::jsonb, $4, $5, 'timer-proof', 'system', $6, 'active', $7)
+			) VALUES ($1::uuid, NULLIF($2, '')::uuid, $3, 'timer.proof', '{"kind":"platform_control","route":{}}'::jsonb, 'live', $4, $5, 'timer-proof', 'system', $6, 'active', $7)
 		`
 	}
 	if _, err := exec.ExecContext(ctx, query, args...); err != nil {

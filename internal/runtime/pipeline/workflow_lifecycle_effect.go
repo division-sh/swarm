@@ -64,6 +64,7 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowide
 		entityID.String(),
 		event.ID(),
 		string(event.Type()),
+		event.ExecutionMode(),
 		event.CreatedAt(),
 		transition,
 	)

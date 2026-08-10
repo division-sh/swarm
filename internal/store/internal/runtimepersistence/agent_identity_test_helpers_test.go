@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -72,6 +73,9 @@ func testAgentDeliveryRoute(t testing.TB, agentID, flowInstance string) events.D
 
 func testAgentOwnedSchedule(t testing.TB, schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
 	t.Helper()
+	if !schedule.ExecutionMode.Valid() {
+		schedule.ExecutionMode = executionmode.Live
+	}
 	if strings.TrimSpace(schedule.FlowInstance) == "" {
 		schedule.FlowInstance = "store-schedule"
 	}

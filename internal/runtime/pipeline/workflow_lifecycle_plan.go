@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -203,20 +204,41 @@ func (pc *PipelineCoordinator) prepareWorkflowLifecycleMutation(ctx context.Cont
 	if pc == nil || instance == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return prepared, fmt.Errorf("workflow lifecycle planning requires selected workflow persistence and semantic source")
 	}
+	mode, err := workflowLifecycleExecutionMode(effects)
+	if err != nil {
+		return PreparedWorkflowLifecycleMutation{}, err
+	}
 	for index, effect := range effects {
 		if err := pc.planWorkflowLifecycleEffect(ctx, instance, effect, &prepared); err != nil {
 			return PreparedWorkflowLifecycleMutation{}, fmt.Errorf("workflow lifecycle effect %d: %w", index, err)
 		}
 	}
 	if reconcileGenerations {
-		if err := pc.planSupersededWorkflowArtifacts(ctx, instance, &prepared.Commit); err != nil {
+		if err := pc.planSupersededWorkflowArtifacts(ctx, instance, mode, &prepared.Commit); err != nil {
 			return PreparedWorkflowLifecycleMutation{}, err
 		}
 	}
 	return prepared, nil
 }
 
-func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Context, instance *WorkflowInstance, plan *WorkflowLifecycleMutationPlan) error {
+func workflowLifecycleExecutionMode(effects []runtimeworkflowlifecycle.Effect) (executionmode.Mode, error) {
+	if len(effects) == 0 {
+		return "", fmt.Errorf("workflow lifecycle planning requires an execution-mode-bearing effect")
+	}
+	mode := effects[0].ExecutionMode()
+	if !mode.Valid() {
+		return "", fmt.Errorf("workflow lifecycle effect 0 requires typed execution mode authority")
+	}
+	for index := 1; index < len(effects); index++ {
+		candidate := effects[index].ExecutionMode()
+		if !candidate.Valid() || candidate != mode {
+			return "", fmt.Errorf("workflow lifecycle effect %d execution mode conflicts with the mutation", index)
+		}
+	}
+	return mode, nil
+}
+
+func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Context, instance *WorkflowInstance, mode executionmode.Mode, plan *WorkflowLifecycleMutationPlan) error {
 	if instance == nil || plan == nil {
 		return nil
 	}
@@ -266,7 +288,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}
@@ -314,7 +336,7 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
 	}
 	fromState, toState := "", ""
-	cause := workflowTimerCause{OccurredAt: effect.OccurredAt()}
+	cause := workflowTimerCause{OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
 	switch effect.Kind() {
 	case runtimeworkflowlifecycle.KindInitialEntry:
 		toState = strings.TrimSpace(effect.InitialStage())
@@ -337,7 +359,7 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	if err := pc.planWorkflowTimerEffect(ctx, *instance, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
 		return err
 	}
-	if err := pc.planWorkflowJoinEffect(ctx, instance, entityID, fromState, toState, effect.OccurredAt(), &prepared.Commit); err != nil {
+	if err := pc.planWorkflowJoinEffect(ctx, instance, entityID, fromState, toState, effect.ExecutionMode(), effect.OccurredAt(), &prepared.Commit); err != nil {
 		return err
 	}
 	if err := pc.planWorkflowGateEffect(ctx, instance, entityID, fromState, toState, cause.EventType, effect.OccurredAt(), prepared); err != nil {
@@ -408,7 +430,10 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, instance *WorkflowInstance, entityID, currentStage, nextStage string, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, instance *WorkflowInstance, entityID, currentStage, nextStage string, mode executionmode.Mode, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
+	if !mode.Valid() {
+		return fmt.Errorf("workflow join lifecycle requires an exact causal execution mode")
+	}
 	entityID = strings.TrimSpace(entityID)
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
@@ -435,7 +460,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}
@@ -500,7 +525,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}

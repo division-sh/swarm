@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/robfig/cron/v3"
 )
 
@@ -38,6 +39,7 @@ type Schedule struct {
 	TaskID        string
 	Payload       []byte
 	RoutingSource events.RoutingSource
+	ExecutionMode executionmode.Mode
 }
 
 type scheduledProjectionKind uint8
@@ -195,6 +197,17 @@ func (s *Schedule) NormalizeOwner() error {
 		return fmt.Errorf("schedule owner_kind %q is invalid", s.OwnerKind)
 	}
 	return nil
+}
+
+func (s *Schedule) NormalizeExecutionMode() error {
+	if s == nil {
+		return errors.New("schedule is required")
+	}
+	s.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(s.ExecutionMode)))
+	if s.ExecutionMode.Valid() {
+		return nil
+	}
+	return fmt.Errorf("schedule execution_mode %q is invalid", s.ExecutionMode)
 }
 
 type Scheduler struct {
@@ -1215,6 +1228,9 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := sc.NormalizeOwner(); err != nil {
+		return Schedule{}, cronSpec{}, err
+	}
+	if err := sc.NormalizeExecutionMode(); err != nil {
 		return Schedule{}, cronSpec{}, err
 	}
 	var err error

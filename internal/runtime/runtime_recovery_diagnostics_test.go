@@ -21,6 +21,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -823,6 +824,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 			At:            time.Now().Add(time.Minute),
 			TaskID:        "recover-me",
 			RoutingSource: events.NewPlatformControlRoutingSource(),
+			ExecutionMode: executionmode.Live,
 		}},
 	}
 	eventStore := startupRecoveryMinimalEventStore{}
@@ -971,6 +973,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 			At:            time.Now().Add(time.Minute),
 			TaskID:        "recover-me",
 			RoutingSource: events.NewPlatformControlRoutingSource(),
+			ExecutionMode: executionmode.Live,
 		}},
 	}
 	eventStore := startupRecoveryMinimalEventStore{}
@@ -1132,6 +1135,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 				At:            time.Now().Add(time.Minute),
 				TaskID:        "replay-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 			{
 				AgentID:       "runtime",
@@ -1141,6 +1145,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 				At:            time.Now().Add(2 * time.Minute),
 				TaskID:        "skip-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 			{
 				AgentID:       "runtime",
@@ -1150,6 +1155,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 				At:            time.Now().Add(3 * time.Minute),
 				TaskID:        "drop-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 		},
 		claims: []recordedScheduleClaim{
@@ -1456,6 +1462,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 				At:            time.Now().Add(2 * time.Minute),
 				TaskID:        "skip-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 			{
 				AgentID:       "runtime",
@@ -1465,6 +1472,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 				At:            time.Now().Add(3 * time.Minute),
 				TaskID:        "drop-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 		},
 		claims: []recordedScheduleClaim{

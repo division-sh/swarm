@@ -1638,13 +1638,13 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval,
+			routing_source, execution_mode, fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1::uuid, 'workflow-sidecar', $2::uuid, 'review/inst-1', 'timer.workflow', '{}'::jsonb,
 			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'review', 'flow_instance', 'review/inst-1', 'entity_id', $2::text)),
-			$3, false, NULL, NULL,
+			'live', $3, false, NULL, NULL,
 			'workflow_instance_store', NULL, 'system', 'timer', 'active'
 		)
 	`, runID, entityID, time.Now().Add(30*time.Minute).UTC()); err != nil {
@@ -1668,12 +1668,12 @@ func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *t
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_name, fire_event, fire_payload,
-			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval,
+			routing_source, execution_mode, fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1, $2, $3::jsonb,
-			jsonb_build_object('kind', 'platform_control'),
+			jsonb_build_object('kind', 'platform_control'), 'live',
 			$4, false, NULL, NULL,
 			NULL, $5, 'system', 'timer', 'active'
 		)

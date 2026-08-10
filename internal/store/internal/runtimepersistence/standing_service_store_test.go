@@ -307,7 +307,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if _, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.backend.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status) VALUES (?, ?, ?, 'timer.fire', '{"kind":"platform_control","route":{}}', ?, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := store.backend.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, status) VALUES (?, ?, ?, 'timer.fire', '{"kind":"platform_control","route":{}}', 'live', ?, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	continuationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-lifecycle", 1)
@@ -579,7 +579,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if _, err := claimDeliveryFixture(fixtureCtx, selected, workEvent, workRoute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', '{"kind":"platform_control","route":{}}'::jsonb, $4, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', '{"kind":"platform_control","route":{}}'::jsonb, 'live', $4, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	continuationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-lifecycle", 1)

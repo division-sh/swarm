@@ -635,15 +635,15 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved late mutation: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, fire_at, owner_kind)
+		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, execution_mode, fire_at, owner_kind)
 		VALUES ($1::uuid, 'cleanup timer', $2::uuid, $3::uuid, 'flow/a', 'timer.fire',
-		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $3::text)), now(), 'system')
+		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $3::text)), 'live', now(), 'system')
 	`, cleanupTimerID, runID, entityID); err != nil {
 		t.Fatalf("seed cleanup timer: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, routing_source, fire_at, owner_kind, task_type)
-		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, now(), 'system', 'global_recurring')
+		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, task_type)
+		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now(), 'system', 'global_recurring')
 	`, preservedTimerID, cleanupTimerID); err != nil {
 		t.Fatalf("seed preserved source timer: %v", err)
 	}
@@ -1339,10 +1339,10 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed entity mutation: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, fire_at, owner_kind) VALUES
-			($1::uuid, 'run timer', $4::uuid, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), now(), 'system'),
-			($2::uuid, 'fork run timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), now(), 'system'),
-			($3::uuid, 'fork event timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), now(), 'system')
+		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, execution_mode, fire_at, owner_kind) VALUES
+			($1::uuid, 'run timer', $4::uuid, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), 'live', now(), 'system'),
+			($2::uuid, 'fork run timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), 'live', now(), 'system'),
+			($3::uuid, 'fork event timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), 'live', now(), 'system')
 	`, timerRun, timerForkRun, timerForkEvent, runA, entityID); err != nil {
 		t.Fatalf("seed timers: %v", err)
 	}
@@ -1353,8 +1353,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed timer forked_from_event_id: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, fire_event, routing_source, fire_at, owner_kind, task_type)
-		VALUES ($1::uuid, 'global timer', 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, now(), 'system', 'global_recurring')
+		INSERT INTO timers (timer_id, timer_name, fire_event, routing_source, execution_mode, fire_at, owner_kind, task_type)
+		VALUES ($1::uuid, 'global timer', 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now(), 'system', 'global_recurring')
 	`, globalTimer); err != nil {
 		t.Fatalf("seed global timer: %v", err)
 	}

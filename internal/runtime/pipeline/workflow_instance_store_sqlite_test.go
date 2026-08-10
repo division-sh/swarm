@@ -605,6 +605,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			fire_event TEXT,
 			fire_payload TEXT,
 			routing_source TEXT NOT NULL,
+			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
 			fire_at TIMESTAMP,
 			recurring BOOLEAN,
 			recurrence_cron TEXT,

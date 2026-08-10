@@ -53,35 +53,35 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id,
-				flow_instance, fire_event, fire_payload, routing_source,
+				flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, NULLIF($13, ''),
-		        NULL, $14, 'system', 'workflow_timer', 'active', $15, NULLIF($16, '')::uuid,
-		        NULLIF($17, '')::uuid, NULLIF($18, '')::uuid, NULLIF($19, ''))
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, NULLIF($14, ''),
+		        NULL, $15, 'system', 'workflow_timer', 'active', $16, NULLIF($17, '')::uuid,
+		        NULLIF($18, '')::uuid, NULLIF($19, '')::uuid, NULLIF($20, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
-			activation.EventType, string(activation.Payload), string(routingSource), activation.FireAt,
+			activation.EventType, string(activation.Payload), string(routingSource), activation.ExecutionMode, activation.FireAt,
 			activation.Recurring, interval, activation.OwnerAgent, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	} else {
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id,
-				flow_instance, fire_event, fire_payload, routing_source,
+				flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', 'workflow_timer', 'active', ?,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', 'workflow_timer', 'active', ?,
 			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
-			activation.EventType, string(activation.Payload), string(routingSource), activation.FireAt,
+			activation.EventType, string(activation.Payload), string(routingSource), activation.ExecutionMode, activation.FireAt,
 			activation.Recurring, interval, activation.OwnerAgent, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	}
@@ -155,7 +155,7 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 	query := `
 		SELECT timer_name, CAST(run_id AS TEXT), CAST(entity_id AS TEXT), flow_scope_key,
 		       flow_instance_id, flow_instance,
-		       fire_event, fire_payload, routing_source, fire_at, recurring, COALESCE(recurrence_interval, ''),
+		       fire_event, fire_payload, routing_source, execution_mode, fire_at, recurring, COALESCE(recurrence_interval, ''),
 		       owner_agent, status, fired_at, created_at, COALESCE(CAST(source_timer_id AS TEXT), ''),
 		       COALESCE(CAST(forked_from_run_id AS TEXT), ''), COALESCE(CAST(forked_from_event_id AS TEXT), ''),
 		       COALESCE(reconstruction_owner, '')
@@ -173,7 +173,7 @@ func loadWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&taskID, &activation.RunID, &activation.EntityID, &activation.Route.ScopeKey,
 		&activation.Route.InstanceID, &activation.Route.InstancePath,
-		&activation.EventType, &payloadRaw, &routingSourceRaw, &fireAtRaw, &activation.Recurring, &interval,
+		&activation.EventType, &payloadRaw, &routingSourceRaw, &activation.ExecutionMode, &fireAtRaw, &activation.Recurring, &interval,
 		&activation.OwnerAgent, &status, &firedAtRaw, &createdAtRaw, &activation.SourceTimerID,
 		&activation.ForkedFromRunID, &activation.ForkedFromEventID, &activation.ReconstructionOwner,
 	)

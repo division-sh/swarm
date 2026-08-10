@@ -10,9 +10,14 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
+
+func withLiveWorkflowInitialEntry(ctx context.Context) context.Context {
+	return runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+}
 
 func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, route runtimeflowidentity.Route, entityID, nextState, sourceEvent string) error {
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
@@ -79,7 +84,11 @@ func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, r
 	if !found {
 		return fmt.Errorf("test workflow instance %s is missing", entityID)
 	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(instance.StorageRef), entityID, instance.CurrentState, instance.EnteredStageAt)
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(instance.StorageRef), entityID, instance.CurrentState, mode, instance.EnteredStageAt)
 	if err != nil {
 		return err
 	}

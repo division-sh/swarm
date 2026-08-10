@@ -1432,7 +1432,7 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 func scheduledEvent(sc runtimepipeline.Schedule) (events.Event, error) {
 	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType(sc.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.scheduler"},
-		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), RoutingSource: sc.RoutingSource, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), RoutingSource: sc.RoutingSource, CreatedAt: time.Now(), ExecutionMode: sc.ExecutionMode,
 		Envelope: events.EventEnvelope{
 			EntityID:     sc.EffectiveEntityID(),
 			FlowInstance: sc.EffectiveFlowInstance(),
@@ -2357,6 +2357,7 @@ func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontract
 		TaskID:        handle.TaskID(),
 		Payload:       workflowTimerPayload(timer),
 		RoutingSource: events.NewPlatformControlRoutingSource(),
+		ExecutionMode: executionmode.Live,
 	}
 	if timer.Recurring {
 		sc.Mode = "cron"

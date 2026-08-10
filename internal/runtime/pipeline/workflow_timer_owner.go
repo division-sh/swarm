@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -33,13 +34,14 @@ const (
 )
 
 type workflowTimerCause struct {
-	Kind         workflowTimerCauseKind
-	EventID      string
-	EventType    string
-	OccurredAt   time.Time
-	TransitionID string
-	FromState    string
-	ToState      string
+	Kind          workflowTimerCauseKind
+	EventID       string
+	EventType     string
+	OccurredAt    time.Time
+	TransitionID  string
+	FromState     string
+	ToState       string
+	ExecutionMode executionmode.Mode
 }
 
 func (c workflowTimerCause) normalized() workflowTimerCause {
@@ -50,6 +52,7 @@ func (c workflowTimerCause) normalized() workflowTimerCause {
 	c.TransitionID = strings.TrimSpace(c.TransitionID)
 	c.FromState = strings.TrimSpace(c.FromState)
 	c.ToState = strings.TrimSpace(c.ToState)
+	c.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(c.ExecutionMode)))
 	return c
 }
 
@@ -57,6 +60,9 @@ func (c workflowTimerCause) validateForActivation() error {
 	c = c.normalized()
 	if c.OccurredAt.IsZero() {
 		return fmt.Errorf("workflow timer activation requires an exact causal time")
+	}
+	if !c.ExecutionMode.Valid() {
+		return fmt.Errorf("workflow timer activation requires an exact causal execution mode")
 	}
 	switch c.Kind {
 	case workflowTimerCauseInitial:
@@ -329,7 +335,6 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	if err != nil {
 		return err
 	}
-
 	currentState := strings.TrimSpace(instance.CurrentState)
 	initialState := strings.TrimSpace(workflowInitialStateForFlow(source, instance.WorkflowName))
 	if initialState == "" {
@@ -342,18 +347,26 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		if err != nil {
 			return err
 		}
-		cause := workflowTimerCause{
-			Kind:       workflowTimerCauseInitial,
-			EventType:  "state:" + currentState,
-			OccurredAt: instance.CreatedAt,
-			ToState:    currentState,
-		}
-		if err := cause.validateForActivation(); err != nil {
-			return err
-		}
+		var initialMode executionmode.Mode
 		for _, declaration := range workflowTimerDeclarationsForInstance(source, instance) {
-			if !workflowTimerShouldStartOnTransition(declaration, "", currentState, cause.EventType) {
+			if !workflowTimerShouldStartOnTransition(declaration, "", currentState, "state:"+currentState) {
 				continue
+			}
+			if !initialMode.Valid() {
+				initialMode, err = initialWorkflowTimerExecutionMode(ctx, active)
+				if err != nil {
+					return err
+				}
+			}
+			cause := workflowTimerCause{
+				Kind:          workflowTimerCauseInitial,
+				ExecutionMode: initialMode,
+				EventType:     "state:" + currentState,
+				OccurredAt:    instance.CreatedAt,
+				ToState:       currentState,
+			}
+			if err := cause.validateForActivation(); err != nil {
+				return err
 			}
 			if err := validateWorkflowTimerTopology(source, declaration); err != nil {
 				return err
@@ -421,10 +434,11 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 					declaration,
 					activation.Ref.Generation,
 					workflowTimerCause{
-						Kind:       workflowTimerCauseInitial,
-						EventType:  "state:" + initialState,
-						OccurredAt: activation.CreatedAt,
-						ToState:    initialState,
+						Kind:          workflowTimerCauseInitial,
+						ExecutionMode: activation.ExecutionMode,
+						EventType:     "state:" + initialState,
+						OccurredAt:    activation.CreatedAt,
+						ToState:       initialState,
 					},
 					interval,
 				)
@@ -472,6 +486,30 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		}
 	}
 	return nil
+}
+
+func initialWorkflowTimerExecutionMode(ctx context.Context, active []WorkflowTimerActivation) (executionmode.Mode, error) {
+	var persisted executionmode.Mode
+	for _, activation := range active {
+		if activation.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial {
+			continue
+		}
+		mode := activation.ExecutionMode
+		if !mode.Valid() {
+			return "", fmt.Errorf("workflow initial timer %s has invalid execution mode", activation.Ref.ActivationID)
+		}
+		if persisted.Valid() && persisted != mode {
+			return "", fmt.Errorf("workflow initial timers disagree on execution mode")
+		}
+		persisted = mode
+	}
+	if persisted.Valid() {
+		return persisted, nil
+	}
+	if mode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok && mode.Valid() {
+		return mode, nil
+	}
+	return "", fmt.Errorf("workflow initial timer reconciliation requires typed execution mode authority")
 }
 
 func (l *WorkflowTimerLifecycle) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
@@ -594,6 +632,7 @@ func workflowTimerActivationForCause(
 		RoutingSource: routingSource,
 		OwnerAgent:    strings.TrimSpace(declaration.Owner),
 		EventType:     string(admittedEvent),
+		ExecutionMode: cause.ExecutionMode,
 		Payload:       []byte("{}"),
 		FireAt:        canonicalWorkflowTimerTime(cause.OccurredAt.Add(interval)),
 		Recurring:     declaration.Recurring,
@@ -889,7 +928,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
 			TaskID:   occurrence.TaskID(), Payload: json.RawMessage(append([]byte(nil), hint.Payload...)),
 			Envelope:      events.EventEnvelope{EntityID: hint.EntityID, FlowInstance: hint.Route.InstancePath},
-			RoutingSource: hint.RoutingSource, CreatedAt: firedAt, ExecutionMode: executionmode.Live,
+			RoutingSource: hint.RoutingSource, CreatedAt: firedAt, ExecutionMode: hint.ExecutionMode,
 		},
 		RunID: hint.RunID,
 	})

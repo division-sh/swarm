@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -49,7 +50,7 @@ func TestWorkflowInitialMaterializationRejectsUnownedLifecycleEmissions(t *testi
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	store.lifecycleOwner = &workflowInitialMaterializationTestOwner{emissions: 1}
-	ctx := sqliteExactOnceRunContext(t, db)
+	ctx := withLiveWorkflowInitialEntry(sqliteExactOnceRunContext(t, db))
 	instance := WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 		WorkflowVersion: "1.0.0", CurrentState: "pending",
@@ -120,7 +121,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			name: "sqlite",
 			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
+				return newSQLiteWorkflowInstanceStoreForTest(t, db), withLiveWorkflowInitialEntry(sqliteExactOnceRunContext(t, db))
 			},
 		},
 		{
@@ -128,7 +129,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return newPostgresWorkflowInstanceStoreForTest(db), testPipelineRunContext(t, db)
+				return newPostgresWorkflowInstanceStoreForTest(db), withLiveWorkflowInitialEntry(testPipelineRunContext(t, db))
 			},
 		},
 	} {
@@ -254,7 +255,7 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 	t.Cleanup(cleanup)
 	db.SetMaxOpenConns(6)
 	db.SetMaxIdleConns(6)
-	ctx, cancel := context.WithTimeout(testPipelineRunContext(t, db), 10*time.Second)
+	ctx, cancel := context.WithTimeout(withLiveWorkflowInitialEntry(testPipelineRunContext(t, db)), 10*time.Second)
 	defer cancel()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	owner := &concurrentWorkflowInitialMaterializationTestOwner{}
@@ -364,7 +365,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			name: "sqlite",
 			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
+				return newSQLiteWorkflowInstanceStoreForTest(t, db), withLiveWorkflowInitialEntry(sqliteExactOnceRunContext(t, db))
 			},
 		},
 		{
@@ -372,7 +373,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return newPostgresWorkflowInstanceStoreForTest(db), testPipelineRunContext(t, db)
+				return newPostgresWorkflowInstanceStoreForTest(db), withLiveWorkflowInitialEntry(testPipelineRunContext(t, db))
 			},
 		},
 	} {
@@ -772,7 +773,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	}
 }
 
-func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
+func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing.T) {
 	runID := uuid.NewString()
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
@@ -800,7 +801,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	}
 	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
 	store.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
-	trigger := eventtest.RunCreatingRootIngress(
+	trigger := eventtest.RunCreatingRootIngressWithMode(
 		"",
 		events.EventType("spawn.requested"),
 		"",
@@ -811,9 +812,10 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 		time.Now().UTC(),
+		executionmode.Mock,
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Mock)
 	err := pc.createFlowInstance(ctx, triggerCtx, handlerExecutionPlan{
 		Template:       "review",
 		InstanceIDFrom: "payload.instance_id",
@@ -832,6 +834,9 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	}
 	if len(activations) != 1 {
 		t.Fatalf("workflow timer activations = %d, want 1: %#v", len(activations), activations)
+	}
+	if activations[0].ExecutionMode != executionmode.Mock {
+		t.Fatalf("workflow timer execution mode = %q, want mock", activations[0].ExecutionMode)
 	}
 	activation := activations[0]
 	if activation.Ref.Declaration != "review.awaiting_review.expired" {

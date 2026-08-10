@@ -38,7 +38,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
@@ -127,7 +127,7 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("new authored timer EventBus: %v", err)
@@ -200,7 +200,7 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			bundle := workflowTimerServedLifecycleBundle(true)
 			bundle.Semantics.Timers[0].Delay = "5s"
 			source := semanticview.Wrap(bundle)
@@ -289,7 +289,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
@@ -607,7 +607,7 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			bundle := workflowTimerServedLifecycleBundle(false)
 			bundle.Semantics.Timers[0].Delay = "200ms"
 			source := semanticview.Wrap(bundle)
@@ -706,7 +706,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(workflowTimerServedLifecycleBundle(false))
 			failingOwner, failures := failNextWorkflowTimerPipelineDisposition(t, selected.events)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{

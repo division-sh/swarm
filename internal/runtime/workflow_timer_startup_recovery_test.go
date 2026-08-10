@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -174,6 +175,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				TaskID:        occurrence.TaskID(),
 				Payload:       []byte(`{}`),
 				RoutingSource: routingSource,
+				ExecutionMode: executionmode.Live,
 			}
 			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
 				t.Fatalf("persist generic occurrence-shaped schedule: %v", err)
@@ -295,7 +297,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 
 			seedRuntime, seedProcess := newRuntime(selected)
-			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
+			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      "workflow-timer-startup",
 				StorageRef:      "workflow-timer-startup",
@@ -427,7 +429,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			seedRuntime, seedProcess := newRuntime()
 			occurredAt := time.Now().UTC().Add(-time.Second)
-			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
+			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      "workflow-timer-startup",
 				StorageRef:      "workflow-timer-startup",

@@ -182,6 +182,22 @@ func uniqueNonEmptyStrings(in []string) []string {
 }
 
 func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	executionMode := actor.ExecutionMode
+	if causalMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
+		if causalMode == runtimeeffects.ExecutionModeMock || executionMode == runtimeeffects.ExecutionModeMock {
+			executionMode = runtimeeffects.ExecutionModeMock
+		} else if causalMode != executionMode {
+			return nil, failures.New(failures.ClassAuthorizationDenied, "schedule_execution_mode_conflict", "tool-executor", "schedule.authorize_execution_mode", map[string]any{
+				"action": "schedule_create", "actor_id": actor.ID,
+				"actor_execution_mode": actor.ExecutionMode, "causal_execution_mode": causalMode,
+			})
+		}
+	}
+	if !executionMode.Valid() {
+		return nil, failures.New(failures.ClassAuthorizationDenied, "schedule_execution_mode_missing", "tool-executor", "schedule.authorize_execution_mode", map[string]any{
+			"action": "schedule_create", "actor_id": actor.ID, "actor_execution_mode": actor.ExecutionMode,
+		})
+	}
 	if e.scheduler == nil {
 		return nil, failures.NewDetail("dependency_unavailable", "tool-executor", "schedule.create", map[string]any{"dependency": "scheduler"})
 	}
@@ -267,6 +283,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		TaskID:        in.TaskID,
 		Payload:       payload,
 		RoutingSource: routingSource,
+		ExecutionMode: executionMode,
 	}
 	if err := e.scheduler.Register(ctx, schedule); err != nil {
 		return nil, err
