@@ -59,7 +59,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	)
 	seedTemplateFlowPilotPipelineEvent(t, db, ctx, evt)
 	seedTemplateFlowPilotPipelineNodeDelivery(t, db, ctx, evt.ID(), "account-node", target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node"), Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node"), Target: events.MustExistingEntityTarget(target)}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {

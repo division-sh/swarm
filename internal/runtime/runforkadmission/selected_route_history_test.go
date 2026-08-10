@@ -134,10 +134,10 @@ func TestAdmitSelectedContractRouteHistoryRetainsEveryStampedRecipient(t *testin
 
 func testStampedConnectRoute(t testing.TB, subscriberID string) events.DeliveryRoute {
 	t.Helper()
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(subscriberID), Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"}}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(subscriberID), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"})}
 	digest := sha256.Sum256([]byte("edge:" + subscriberID))
 	pinDigest := sha256.Sum256([]byte("pin:consumer.scan.requested"))
-	claim, err := events.AdmitConnectExecutionClaim(digest, pinDigest, route, events.EventType("scan.requested"))
+	claim, err := events.AdmitConnectExecutionClaim(digest, pinDigest, route.Recipient, "scan", "scan-node", events.EventType("scan.requested"))
 	if err != nil {
 		t.Fatalf("admit connect execution claim: %v", err)
 	}

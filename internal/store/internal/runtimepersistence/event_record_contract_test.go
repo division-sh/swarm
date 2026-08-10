@@ -235,12 +235,17 @@ func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateIns
 	if selected.ReceiverEndpoint().Readback().Pin == "" {
 		t.Fatalf("compiled connect graph has no receiver pin %q", receiverPin)
 	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("claim-node")}
-	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, route)
+	target := events.RouteIdentity{FlowID: "claim-flow", FlowInstance: "claim-flow"}
+	blueprint := runtimepinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("claim-node"), Target: target}
+	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, blueprint)
 	if err != nil {
 		t.Fatalf("mint connect execution claim: %v", err)
 	}
-	route.ConnectClaim = claim
+	route := events.DeliveryRoute{
+		Recipient:    blueprint.Recipient,
+		Target:       events.MustEntitylessReceiverTarget(target),
+		ConnectClaim: claim,
+	}
 	return route
 }
 

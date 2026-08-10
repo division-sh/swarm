@@ -848,9 +848,9 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 }
 
 func activityBoringNodeRoute(evt events.Event, nodeID string) events.DeliveryRoute {
-	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: events.RouteIdentity{
+	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: "research", FlowInstance: "research/" + strings.TrimSpace(evt.EntityID()), EntityID: strings.TrimSpace(evt.EntityID()),
-	},
+	}),
 	}
 }
 

@@ -149,7 +149,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		workflowEventEntityID(triggerCtx.Event),
 	))
 	source := pc.SemanticSource()
-	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
+	stampedOwner, exactDelivery := stampedDeliveryTargetOwnership(ctx)
+	if exactDelivery {
+		entityID = stampedOwner.Route().EntityID
+		if err := prepareStampedSelectOrCreateState(source, flowID, handler, triggerCtx.Event, stampedOwner, &triggerCtx.State); err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+	}
+	if !exactDelivery && handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
 		selected, err := pc.selectHandlerEntityForFlow(ctx, flowID, nodeID, handler, triggerCtx.Event)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
@@ -158,7 +165,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		triggerCtx.Event = selected.Event
 		triggerCtx.State = selected.State
 	}
-	if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
+	if !exactDelivery && handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
 		selected, err := pc.selectOrCreateHandlerEntityForFlow(ctx, flowID, nodeID, handler, triggerCtx.Event)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
@@ -169,7 +176,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	originalEntityID := entityID
 	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
-	resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
+	var targetOwnership []events.DeliveryTargetOwnership
+	if exactDelivery {
+		targetOwnership = append(targetOwnership, stampedOwner)
+	}
+	resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State, targetOwnership...)
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
@@ -350,10 +361,15 @@ func resolveHandlerEntityIDForFlow(
 	entityID string,
 	evt events.Event,
 	state *WorkflowState,
+	targetOwnership ...events.DeliveryTargetOwnership,
 ) (string, events.Event, error) {
 	entityID = strings.TrimSpace(entityID)
 	if handler.CreateEntity {
-		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
+		sourceEntityID := strings.TrimSpace(evt.EntityID())
+		stampedEntityID := ""
+		if len(targetOwnership) > 0 && targetOwnership[0].MaterializingEntity() {
+			stampedEntityID = targetOwnership[0].Route().EntityID
+		}
 		instanceID := canonicalHandlerInstanceID(flowID, evt)
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
 		if source != nil && strings.TrimSpace(flowID) == strings.TrimSpace(source.WorkflowName()) {
@@ -372,6 +388,9 @@ func resolveHandlerEntityIDForFlow(
 		}
 		if !instance.Route().Valid() {
 			return "", evt, fmt.Errorf("create_entity requires an exact workflow instance route")
+		}
+		if stampedEntityID != "" && stampedEntityID != instance.EntityID {
+			return "", evt, fmt.Errorf("create_entity stamped target %q disagrees with canonical future entity %q", stampedEntityID, instance.EntityID)
 		}
 		instance.ParentEntityID = sourceEntityID
 		entityID = instance.EntityID
@@ -413,6 +432,12 @@ func resolveHandlerEntityIDForFlow(
 }
 
 func canonicalHandlerInstanceID(flowID string, evt events.Event) string {
+	if targetInstance := strings.Trim(strings.TrimSpace(evt.TargetRoute().FlowInstance), "/"); targetInstance != "" {
+		if idx := strings.LastIndex(targetInstance, "/"); idx >= 0 {
+			return strings.TrimSpace(targetInstance[idx+1:])
+		}
+		return targetInstance
+	}
 	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
 		if idx := strings.LastIndex(flowInstance, "/"); idx >= 0 {
 			return strings.TrimSpace(flowInstance[idx+1:])

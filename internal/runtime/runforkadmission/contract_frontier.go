@@ -253,7 +253,7 @@ func contractFrontierRecipientFromStampedRoute(route events.DeliveryRoute) (runf
 		return runfork.RunForkContractFrontierRecipient{}, false
 	}
 	return runfork.NewRunForkContractFrontierRecipient(
-		route.Recipient, route.Target.FlowInstance, "stamped_connect_claim", route.AgentIdentity,
+		route.Recipient, route.Target.Route().FlowInstance, "stamped_connect_claim", route.AgentIdentity,
 	), true
 }
 

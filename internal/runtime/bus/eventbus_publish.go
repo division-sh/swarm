@@ -820,7 +820,7 @@ func resolveCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) (events
 	}
 	targets := make([]events.RouteIdentity, 0, len(plan.DeliveryIntents))
 	for _, route := range plan.DeliveryRoutes() {
-		if target := route.Target.Normalized(); !target.Empty() {
+		if target := route.Target.Route(); !target.Empty() {
 			targets = append(targets, target)
 		}
 	}
@@ -1233,7 +1233,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 	}
 	seen := map[nodeDeliveryRouteKey]struct{}{}
 	for _, route := range deliveryRoutes {
-		target := route.Target.Normalized()
+		target := route.Target.Route()
 		key := nodeDeliveryRouteKey{
 			recipient: route.Recipient, target: target,
 			replyContextID: route.Context.ReplyContextID(), projection: route.PayloadProjection.Fingerprint(),
@@ -1514,7 +1514,15 @@ func (eb *EventBus) materializePublishRecipientPlan(ctx context.Context, evt eve
 	}
 	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
-	return routePlan.Normalized(), nil
+	projection, err := eb.deliveryPlanner.recipientPolicy.loadSelectedRunTargetOwnerProjection(runtimecorrelation.WithInboundEvent(ctx, evt))
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	projection, err = projection.withActivationPlans(routePlan.ActivationPlans)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	return projection.resolveRoutePlan(routePlan)
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {

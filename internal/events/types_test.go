@@ -108,7 +108,7 @@ func TestRoutingSourceVariantsRequireExactClaims(t *testing.T) {
 		{name: "flow context only", route: RouteIdentity{FlowID: "root"}, wantError: true},
 		{name: "entity fact only", route: RouteIdentity{EntityID: "entity-1"}, wantError: true},
 		{name: "flow and entity without instance", route: RouteIdentity{FlowID: "root", EntityID: "entity-1"}, wantError: true},
-		{name: "instance without entity", route: RouteIdentity{FlowID: "root", FlowInstance: "root/one"}, wantError: true},
+		{name: "entityless exact instance", route: RouteIdentity{FlowID: "root", FlowInstance: "root/one"}},
 		{name: "exact instance", route: RouteIdentity{FlowID: "root", FlowInstance: "root/one", EntityID: "entity-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestDeliveryPayloadProjectionIsCanonicalAndIsolated(t *testing.T) {
 func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
 	first, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
 	second, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
-	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("validator"), Target: RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"}}
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("validator"), Target: MustEntitylessReceiverTarget(RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"})}
 	left, right := route, route
 	left.PayloadProjection, right.PayloadProjection = first, second
 	if err := ValidateDeliveryRouteProjections([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {
@@ -220,7 +220,8 @@ func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {
 	receiverPinDigest := sha256.Sum256([]byte("receiver-pin"))
 	claim := ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: receiverPinDigest,
-		recipientKind: deliveryRecipientNode, recipientID: "node-b", handlerEvent: "flow.completed", present: true,
+		recipientKind: deliveryRecipientNode, recipientID: "node-b",
+		handlerFlowID: "review", handlerNodeID: "node-b", handlerEvent: "flow.completed", present: true,
 	}
 	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("node-a"), ConnectClaim: claim}
 	if _, err := route.Identity(); err == nil || !strings.Contains(err.Error(), "does not match") {

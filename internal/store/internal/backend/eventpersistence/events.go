@@ -239,11 +239,11 @@ func (s *EventPostgresOwner) ListEventDeliveryTargets(ctx context.Context, event
 		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
 			continue
 		}
-		route := snapshot.Route.Target
-		if route.Empty() {
+		owner := snapshot.Route.Target
+		if owner.Empty() {
 			continue
 		}
-		out[strings.TrimSpace(snapshot.SubscriberID)] = route
+		out[strings.TrimSpace(snapshot.SubscriberID)] = owner.Route()
 	}
 	if len(out) == 0 {
 		return nil, nil

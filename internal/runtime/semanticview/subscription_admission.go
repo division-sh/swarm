@@ -51,15 +51,16 @@ type AuthoredSubscriptionRequest struct {
 // typed relation, route materialization, and handler execution. Route patterns
 // remain private so raw authored strings cannot bypass classification.
 type AuthoredSubscriptionAdmission struct {
-	consumerKind   AuthoredSubscriptionConsumerKind
-	consumerID     string
-	authored       string
-	localEvent     string
-	persistedValue string
-	routePatterns  []string
-	class          AuthoredSubscriptionAdmissionClass
-	failure        AuthoredSubscriptionFailure
-	message        string
+	consumerKind    AuthoredSubscriptionConsumerKind
+	consumerID      string
+	authored        string
+	localEvent      string
+	persistedValue  string
+	routePatterns   []string
+	localizedEvents []string
+	class           AuthoredSubscriptionAdmissionClass
+	failure         AuthoredSubscriptionFailure
+	message         string
 }
 
 func (a AuthoredSubscriptionAdmission) Admitted() bool {
@@ -105,6 +106,11 @@ func (a AuthoredSubscriptionAdmission) Matches(eventType string) bool {
 	eventType = eventidentity.Normalize(eventType)
 	if eventType == "" {
 		return false
+	}
+	for _, localized := range a.localizedEvents {
+		if eventidentity.Normalize(localized) == eventType {
+			return true
+		}
 	}
 	candidates := a.routePatterns
 	if !a.Pattern() {
@@ -181,12 +187,15 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 			}
 			if resolution.Scoped {
 				patterns := make([]string, 0, len(resolution.Patterns))
+				localizedEvents := make([]string, 0, len(resolution.Patterns))
 				for _, pattern := range resolution.Patterns {
 					patterns = append(patterns, pattern.EventPattern)
+					localizedEvents = append(localizedEvents, pattern.LocalizedEvent)
 				}
 				result.class = AuthoredSubscriptionImportedPattern
 				result.persistedValue = req.Authored
 				result.routePatterns = normalizedSubscriptionValues(patterns)
+				result.localizedEvents = normalizedSubscriptionValues(localizedEvents)
 				return result
 			}
 		}
@@ -301,7 +310,26 @@ func ResolveNodeSubscriptionHandler(source Source, nodeID, eventType string) Nod
 	if source == nil {
 		return NodeSubscriptionHandlerResolution{}
 	}
-	handlers := source.NodeEventHandlers(nodeID)
+	owner, ok := source.NodeContractSource(nodeID)
+	if !ok {
+		return NodeSubscriptionHandlerResolution{}
+	}
+	return ResolveFlowNodeSubscriptionHandler(source, owner.FlowID, nodeID, eventType)
+}
+
+// ResolveFlowNodeSubscriptionHandler resolves one concrete event against the
+// exact typed declaration owner. The explicit flow owner prevents duplicate
+// node IDs in different scopes from becoming implicit routing authority.
+func ResolveFlowNodeSubscriptionHandler(source Source, flowID, nodeID, eventType string) NodeSubscriptionHandlerResolution {
+	if source == nil {
+		return NodeSubscriptionHandlerResolution{}
+	}
+	flowID = strings.TrimSpace(flowID)
+	nodeID = strings.TrimSpace(nodeID)
+	handlers, packageKey, ok := flowNodeEventHandlers(source, flowID, nodeID)
+	if !ok {
+		return NodeSubscriptionHandlerResolution{}
+	}
 	keys := make([]string, 0, len(handlers))
 	for key := range handlers {
 		keys = append(keys, key)
@@ -314,7 +342,17 @@ func ResolveNodeSubscriptionHandler(source Source, nodeID, eventType string) Nod
 	exact := make([]handlerCandidate, 0, len(keys))
 	patterns := make([]handlerCandidate, 0, len(keys))
 	for _, key := range keys {
-		admission := ClassifyNodeSubscription(source, nodeID, key)
+		localEvents, inputEvents := authoredSubscriptionFlowEvents(source, flowID)
+		admission := ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
+			ConsumerKind: AuthoredSubscriptionConsumerNode,
+			ConsumerID:   nodeID,
+			FlowID:       flowID,
+			FlowPath:     source.FlowPath(flowID),
+			PackageKey:   packageKey,
+			LocalEvents:  localEvents,
+			InputEvents:  inputEvents,
+			Authored:     key,
+		})
 		if !admission.Admitted() {
 			continue
 		}
@@ -326,29 +364,87 @@ func ResolveNodeSubscriptionHandler(source Source, nodeID, eventType string) Nod
 		exact = append(exact, candidate)
 	}
 	candidates := append(exact, patterns...)
-	owner, _ := source.NodeContractSource(nodeID)
-	flowPath := source.FlowPath(owner.FlowID)
-	inputEvents := source.FlowInputEvents(owner.FlowID)
+	flowPath := source.FlowPath(flowID)
+	inputEvents := source.FlowInputEvents(flowID)
 	for _, candidate := range candidates {
 		key := candidate.key
 		admission := candidate.admission
-		if !admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {
+		localized := eventidentity.Normalize(admission.LocalEvent())
+		if eventidentity.Normalize(eventType) != localized && !admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {
 			continue
 		}
-		handler := handlers[key]
-		if bundle, ok := Bundle(source); ok && bundle != nil {
-			if externalized, matched := bundle.NodeEventHandler(nodeID, key); matched {
-				handler = externalized
-			}
-		}
 		return NodeSubscriptionHandlerResolution{
-			Handler:         handler,
+			Handler:         handlers[key],
 			HandlerEventKey: strings.TrimSpace(key),
 			Admission:       admission,
 			Matched:         true,
 		}
 	}
 	return NodeSubscriptionHandlerResolution{}
+}
+
+func flowNodeEventHandlers(source Source, flowID, nodeID string) (map[string]runtimecontracts.SystemNodeEventHandler, string, bool) {
+	node, packageKey, ok := ResolveFlowNodeDeclaration(source, flowID, nodeID)
+	if !ok {
+		return nil, "", false
+	}
+	return node.EventHandlers, packageKey, true
+}
+
+// ResolveFlowNodeDeclaration returns the node from one exact flow scope. It
+// does not fall back to a same-named node in another flow.
+func ResolveFlowNodeDeclaration(source Source, flowID, nodeID string) (runtimecontracts.SystemNodeContract, string, bool) {
+	if source == nil {
+		return runtimecontracts.SystemNodeContract{}, "", false
+	}
+	flowID = strings.TrimSpace(flowID)
+	nodeID = strings.TrimSpace(nodeID)
+	if scope, ok := source.FlowScopeByID(flowID); ok {
+		for key, node := range scope.Nodes {
+			if strings.TrimSpace(key) == nodeID || strings.TrimSpace(node.ID) == nodeID {
+				return node, strings.TrimSpace(scope.PackageKey), true
+			}
+		}
+	}
+	var projectNode runtimecontracts.SystemNodeContract
+	projectPackage := ""
+	projectMatches := 0
+	for _, project := range source.ProjectScopes() {
+		ownerFlowID := strings.TrimSpace(project.OwningFlowID)
+		if ownerFlowID == "" {
+			ownerFlowID = strings.TrimSpace(source.WorkflowName())
+		}
+		if ownerFlowID != flowID {
+			continue
+		}
+		for key, node := range project.Nodes {
+			if strings.TrimSpace(key) != nodeID && strings.TrimSpace(node.ID) != nodeID {
+				continue
+			}
+			projectNode = node
+			projectPackage = strings.TrimSpace(project.Key)
+			projectMatches++
+		}
+	}
+	if projectMatches == 1 {
+		return projectNode, projectPackage, true
+	}
+	if projectMatches > 1 {
+		return runtimecontracts.SystemNodeContract{}, "", false
+	}
+	if flowID != "" && flowID != strings.TrimSpace(source.WorkflowName()) {
+		return runtimecontracts.SystemNodeContract{}, "", false
+	}
+	bundle, ok := Bundle(source)
+	if !ok || bundle == nil {
+		return runtimecontracts.SystemNodeContract{}, "", false
+	}
+	for key, node := range bundle.Nodes {
+		if strings.TrimSpace(key) == nodeID || strings.TrimSpace(node.ID) == nodeID {
+			return node, "", true
+		}
+	}
+	return runtimecontracts.SystemNodeContract{}, "", false
 }
 
 func failedAuthoredSubscription(result AuthoredSubscriptionAdmission, failure AuthoredSubscriptionFailure, message string) AuthoredSubscriptionAdmission {

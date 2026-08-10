@@ -573,7 +573,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	if err := events.ValidateDeliveryRoutes(deliveryRoutes); err != nil {
 		return err
 	}
-	liveRecipients := connectRoutePlanLiveRecipients(deliveryRoutes)
+	liveRecipients := deliveryRouteLiveRecipients(deliveryRoutes)
 	routed := make(map[string]struct{}, len(liveRecipients))
 	for _, recipient := range liveRecipients {
 		routed[recipient.Recipient.ID()] = struct{}{}
@@ -937,7 +937,7 @@ func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map
 			recipient:     route.Recipient,
 			agentIdentity: route.AgentIdentity,
 		}
-		out[key] = append(out[key], route.Target.Normalized())
+		out[key] = append(out[key], route.Target.Route())
 	}
 	if len(out) == 0 {
 		return nil
@@ -1015,7 +1015,7 @@ func workflowRuntimeInternalCarrierTargets(deliveryRoutes []events.DeliveryRoute
 		if !route.Recipient.IsNode() {
 			continue
 		}
-		target := route.Target.Normalized()
+		target := route.Target.Route()
 		if target.Empty() {
 			continue
 		}

@@ -371,7 +371,7 @@ func deliveryDeadLetterRecord(record eventrecord.Record, snapshot runtimedeliver
 	}
 	flowInstance := strings.Trim(strings.TrimSpace(record.FlowInstance), "/")
 	if flowInstance == "" {
-		flowInstance = strings.Trim(strings.TrimSpace(snapshot.Route.Normalized().Target.FlowInstance), "/")
+		flowInstance = strings.Trim(strings.TrimSpace(snapshot.Route.Normalized().Target.Route().FlowInstance), "/")
 	}
 	if flowInstance == "" {
 		// An event and delivery route with no flow coordinate is the declared

@@ -171,7 +171,7 @@ func (eb *EventBus) FinalizeEnginePublications(ctx context.Context, evidence []r
 		if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
 			eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 		}
-		eb.setPendingInternalDeliveryRoutes(prepared.Event.ID(), prepared.plan.InternalDeliveryRoutes())
+		eb.setPendingInternalDelivery(prepared.Event.ID(), prepared.plan.InternalRecipientIDs(), prepared.plan.InternalDeliveryRoutes())
 		eb.stageCommittedOutboxOperation(committed.plan.intent, committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs)
 	}
 	return nil
@@ -376,18 +376,15 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		recipients = uniqueStrings(intent.Recipients)
 	}
-	pendingInternalRoutes := d.bus.pendingInternalDeliveryRoutes(intent.Event.ID())
+	pendingInternal := d.bus.pendingInternalDeliveryForEvent(intent.Event.ID())
 	if len(recipients) > 0 && !deliveryRoutesCoverAgentRecipients(deliveryRoutes, recipients) {
 		return false, runtimepipelineobligation.Continue(), fmt.Errorf("event %s has persisted agent recipients without exact identity-bearing delivery routes", intent.Event.ID())
 	}
-	internalRecipients := deliveryRouteNodeRecipientIDs(pendingInternalRoutes)
+	internalRecipients := append([]string(nil), pendingInternal.recipients...)
 	if len(internalRecipients) == 0 {
 		internalRecipients = deliveryRouteNodeRecipientIDs(deliveryRoutes)
 	}
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
-	if len(deliveryRoutes) > 0 && len(pendingInternalRoutes) == 0 {
-		liveRecipients = uniqueStrings(append(deliveryRouteRecipientIDs(deliveryRoutes), recipients...))
-	}
 	if len(liveRecipients) == 0 {
 		d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
 		if intent.Event.HasTargetRoute() {
@@ -418,7 +415,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 
 func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, eventID string) []events.DeliveryRoute {
 	persistedRoutes := eb.deliveryRoutesForEvent(ctx, eventID)
-	pendingInternalRoutes := eb.pendingInternalDeliveryRoutes(eventID)
+	pendingInternalRoutes := eb.pendingInternalDeliveryForEvent(eventID).routes
 	return events.NormalizeDeliveryRoutes(append(persistedRoutes, pendingInternalRoutes...))
 }
 
@@ -429,32 +426,45 @@ func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimepipelineob
 	return runtimepipelineobligation.ScopeSubscribed
 }
 
-func (eb *EventBus) setPendingInternalDeliveryRoutes(eventID string, deliveryRoutes []events.DeliveryRoute) {
+type pendingInternalDelivery struct {
+	recipients []string
+	routes     []events.DeliveryRoute
+}
+
+func (eb *EventBus) setPendingInternalDelivery(eventID string, recipients []string, deliveryRoutes []events.DeliveryRoute) {
 	if eb == nil {
 		return
 	}
 	eventID = strings.TrimSpace(eventID)
+	recipients = uniqueStrings(recipients)
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	if eventID == "" || len(deliveryRoutes) == 0 {
+	if eventID == "" || (len(recipients) == 0 && len(deliveryRoutes) == 0) {
 		delete(eb.pendingInternalByID, eventID)
 		return
 	}
-	eb.pendingInternalByID[eventID] = append([]events.DeliveryRoute(nil), deliveryRoutes...)
+	eb.pendingInternalByID[eventID] = pendingInternalDelivery{
+		recipients: append([]string(nil), recipients...),
+		routes:     append([]events.DeliveryRoute(nil), deliveryRoutes...),
+	}
 }
 
-func (eb *EventBus) pendingInternalDeliveryRoutes(eventID string) []events.DeliveryRoute {
+func (eb *EventBus) pendingInternalDeliveryForEvent(eventID string) pendingInternalDelivery {
 	if eb == nil {
-		return nil
+		return pendingInternalDelivery{}
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return nil
+		return pendingInternalDelivery{}
 	}
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
-	return append([]events.DeliveryRoute(nil), eb.pendingInternalByID[eventID]...)
+	pending := eb.pendingInternalByID[eventID]
+	return pendingInternalDelivery{
+		recipients: append([]string(nil), pending.recipients...),
+		routes:     append([]events.DeliveryRoute(nil), pending.routes...),
+	}
 }
 
 func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {

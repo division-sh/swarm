@@ -12,7 +12,7 @@ import (
 )
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
-	routes := []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+	routes := []plannedDeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
 		FlowInstance: "consumer/inst-1",
 		EntityID:     "ent-consumer",
 	},
@@ -56,15 +56,18 @@ func TestRoutePlanRejectsMalformedOrUnpairedPersistentDeliveryIntent(t *testing.
 
 func TestRoutePlanPendingLifecycleAuthorityPersistsWithoutLiveDispatch(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "agent-a", "route-plan-test", "flow", "instance-a", "flow/instance-a")
-	nodeRoute := RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.RouteIdentity{
+	targetRoute := events.RouteIdentity{
 		FlowID:       "flow",
 		FlowInstance: "flow/instance-a",
 		EntityID:     "entity-a",
-	},
+	}
+	targetOwner := events.MustExistingEntityTarget(targetRoute)
+	nodeRoute := RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("node-a"), TargetBlueprint: targetRoute, TargetOwnership: targetOwner,
 		Persist: true,
 	}
 	pendingAgentRoute := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
-		Target:                nodeRoute.Target,
+		TargetBlueprint:       targetRoute,
+		TargetOwnership:       targetOwner,
 		Persist:               true,
 		PendingAgentLifecycle: true,
 	}

@@ -173,11 +173,11 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     consumerOwner,
-	},
+	}),
 	}
 	producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
 		FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("sealed-producer"),

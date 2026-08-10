@@ -14,7 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
@@ -379,7 +382,7 @@ func (s *directRecipientTransactionalStore) deliveryRoutes(eventID string) []eve
 func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.Recipient == want.Recipient &&
-			route.Target.Normalized() == want.Target.Normalized() {
+			route.Target == want.Target {
 			return true
 		}
 	}
@@ -426,7 +429,7 @@ func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) boo
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, got := range events.NormalizeDeliveryRoutes(r.routes) {
-		if got.Recipient == route.Recipient && got.Target.Normalized() == route.Target.Normalized() {
+		if got.Recipient == route.Recipient && got.Target == route.Target {
 			return true
 		}
 	}
@@ -1134,20 +1137,32 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("Begin: %v", err)
 	}
 	store := &directRecipientTransactionalStore{}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("target-node"), Target: events.RouteIdentity{
-		FlowInstance: "review/inst-1",
-	},
+	flow := runtimecontracts.FlowContractView{
+		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"target-node": {ID: "target-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.started": {}}},
+		},
 	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
+	}}
+	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient("target-node"), Target: events.RouteIdentity{
+		FlowInstance: "review/inst-1",
+	}, Handler: runtimepipeline.MustDeliveryTargetHandler("review", "target-node").ForEvent("task.started")}
+	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustEntitylessReceiverTarget(wantBlueprint.Target)}
 	guardSawMaterializedRoute := false
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
-		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+		ContractBundle: semanticview.Wrap(bundle),
+		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			if len(plan.DeliveryRoutes) != 0 {
 				t.Fatalf("pre-materialized delivery routes = %#v, want none", plan.DeliveryRoutes)
 			}
-			return []events.DeliveryRoute{want}, nil
+			return []runtimebus.DeliveryRouteBlueprint{wantBlueprint}, nil
 		},
 		RecipientPlanGuard: func(ctx context.Context, evt events.Event, plan runtimebus.PublishRecipientPlan) error {
 			if err := ctx.Err(); err != nil {
@@ -1383,7 +1398,7 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	}
 }
 
-func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterceptors(t *testing.T) {
+func TestEngineOutboxAndDispatcher_DoesNotFabricateRoutesForPendingInternalDeliveries(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -1433,11 +1448,10 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime")}
-	if !interceptor.seen(wantRoute) {
-		t.Fatalf("delivery route interceptor did not receive pending internal route %#v", wantRoute)
+	if len(interceptor.routes) != 0 {
+		t.Fatalf("delivery route interceptor received fabricated pending internal routes %#v", interceptor.routes)
 	}
-	requireNoBusEvent(t, internalCh, "route-intercepted pending internal event")
+	requireBusEvent(t, internalCh, "pending internal event without a semantic delivery route")
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

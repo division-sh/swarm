@@ -216,7 +216,11 @@ func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSourc
 		if route.EntityID == "" || route.FlowID != "" || route.FlowInstance != "" {
 			return RoutingSource{}, fmt.Errorf("root routing source requires entity_id and forbids flow identity")
 		}
-	case RoutingSourceStaticFlow, RoutingSourceConcreteTemplateInstance, RoutingSourceFlowOwnedControl:
+	case RoutingSourceStaticFlow, RoutingSourceConcreteTemplateInstance:
+		if route.FlowID == "" || route.FlowInstance == "" {
+			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id and flow_instance", kind.StorageCode())
+		}
+	case RoutingSourceFlowOwnedControl:
 		if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
 			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id, flow_instance, and entity_id", kind.StorageCode())
 		}
@@ -626,7 +630,7 @@ func (r DeliveryRecipient) Code() string  { return r.kind.storageCode() }
 type DeliveryRoute struct {
 	Recipient         DeliveryRecipient         `json:"-"`
 	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
-	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
+	Target            DeliveryTargetOwnership   `json:"delivery_target_ownership,omitempty"`
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
@@ -636,7 +640,7 @@ type deliveryRouteWire struct {
 	SubscriberType    string                    `json:"subscriber_type"`
 	SubscriberID      string                    `json:"subscriber_id"`
 	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
-	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
+	Target            DeliveryTargetOwnership   `json:"delivery_target_ownership,omitempty"`
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
@@ -688,6 +692,8 @@ type ConnectExecutionClaim struct {
 	receiverPinDigest [sha256.Size]byte
 	recipientKind     deliveryRecipientKind
 	recipientID       string
+	handlerFlowID     string
+	handlerNodeID     string
 	handlerEvent      string
 	present           bool
 }
@@ -702,19 +708,27 @@ const (
 // AdmitConnectExecutionClaim accepts a digest produced by the compiled
 // connect owner. Raw edge, pin, handler, and recipient strings never cross
 // this boundary.
-func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, route DeliveryRoute, handlerEvent EventType) (ConnectExecutionClaim, error) {
-	route = route.Normalized()
-	kind := route.Recipient.kind
-	if route.Recipient.Empty() {
+func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, recipient DeliveryRecipient, handlerFlowID, handlerNodeID string, handlerEvent EventType) (ConnectExecutionClaim, error) {
+	kind := recipient.kind
+	if recipient.Empty() {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires an admitted node or agent recipient")
 	}
 	handler := eventidentity.Normalize(string(handlerEvent))
 	if handler == "" || handler != string(handlerEvent) {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires a canonical handler event")
 	}
+	handlerFlowID = strings.TrimSpace(handlerFlowID)
+	handlerNodeID = strings.TrimSpace(handlerNodeID)
+	if recipient.IsNode() && (handlerFlowID == "" || handlerNodeID == "") {
+		return ConnectExecutionClaim{}, fmt.Errorf("connect node execution claim requires an exact handler owner")
+	}
+	if recipient.IsAgent() && (handlerFlowID != "" || handlerNodeID != "") {
+		return ConnectExecutionClaim{}, fmt.Errorf("connect agent execution claim cannot carry a node handler owner")
+	}
 	return ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: receiverPinDigest,
-		recipientKind: kind, recipientID: route.Recipient.ID(), handlerEvent: handler, present: true,
+		recipientKind: kind, recipientID: recipient.ID(), handlerFlowID: handlerFlowID,
+		handlerNodeID: handlerNodeID, handlerEvent: handler, present: true,
 	}, nil
 }
 
@@ -733,14 +747,21 @@ func (c ConnectExecutionClaim) validateRecipient(recipient DeliveryRecipient) er
 func (c ConnectExecutionClaim) Equal(other ConnectExecutionClaim) bool {
 	return c.present == other.present && (!c.present ||
 		(c.digest == other.digest && c.receiverPinDigest == other.receiverPinDigest &&
-			c.recipientKind == other.recipientKind && c.recipientID == other.recipientID && c.handlerEvent == other.handlerEvent))
+			c.recipientKind == other.recipientKind && c.recipientID == other.recipientID &&
+			c.handlerFlowID == other.handlerFlowID && c.handlerNodeID == other.handlerNodeID && c.handlerEvent == other.handlerEvent))
 }
 
 func (c ConnectExecutionClaim) NodeHandlerEvent(nodeID string) (EventType, bool) {
-	if !c.present || c.recipientKind != deliveryRecipientNode || c.recipientID != strings.TrimSpace(nodeID) {
-		return "", false
+	_, _, eventType, ok := c.NodeHandlerOwner(nodeID)
+	return eventType, ok
+}
+
+func (c ConnectExecutionClaim) NodeHandlerOwner(recipientID string) (string, string, EventType, bool) {
+	if !c.present || c.recipientKind != deliveryRecipientNode || c.recipientID != strings.TrimSpace(recipientID) ||
+		c.handlerFlowID == "" || c.handlerNodeID == "" || c.handlerEvent == "" {
+		return "", "", "", false
 	}
-	return EventType(c.handlerEvent), c.handlerEvent != ""
+	return c.handlerFlowID, c.handlerNodeID, EventType(c.handlerEvent), true
 }
 
 func (c ConnectExecutionClaim) MarshalJSON() ([]byte, error) {
@@ -752,10 +773,13 @@ func (c ConnectExecutionClaim) MarshalJSON() ([]byte, error) {
 		ReceiverPinDigest string `json:"receiver_pin_sha256"`
 		RecipientKind     string `json:"recipient_kind"`
 		RecipientID       string `json:"recipient_id"`
+		HandlerFlowID     string `json:"handler_flow_id,omitempty"`
+		HandlerNodeID     string `json:"handler_node_id,omitempty"`
 		HandlerEvent      string `json:"handler_event"`
 	}{
 		Digest: hex.EncodeToString(c.digest[:]), ReceiverPinDigest: hex.EncodeToString(c.receiverPinDigest[:]),
-		RecipientKind: c.recipientKind.storageCode(), RecipientID: c.recipientID, HandlerEvent: c.handlerEvent,
+		RecipientKind: c.recipientKind.storageCode(), RecipientID: c.recipientID,
+		HandlerFlowID: c.handlerFlowID, HandlerNodeID: c.handlerNodeID, HandlerEvent: c.handlerEvent,
 	})
 }
 
@@ -768,6 +792,8 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 		ReceiverPinDigest string `json:"receiver_pin_sha256"`
 		RecipientKind     string `json:"recipient_kind"`
 		RecipientID       string `json:"recipient_id"`
+		HandlerFlowID     string `json:"handler_flow_id"`
+		HandlerNodeID     string `json:"handler_node_id"`
 		HandlerEvent      string `json:"handler_event"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
@@ -806,9 +832,18 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || eventidentity.Normalize(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
 		return fmt.Errorf("connect execution claim recipient or handler event is invalid")
 	}
+	handlerFlowID := strings.TrimSpace(encoded.HandlerFlowID)
+	handlerNodeID := strings.TrimSpace(encoded.HandlerNodeID)
+	if kind == deliveryRecipientNode && (handlerFlowID == "" || handlerNodeID == "") {
+		return fmt.Errorf("connect node execution claim handler owner is invalid")
+	}
+	if kind == deliveryRecipientAgent && (handlerFlowID != "" || handlerNodeID != "") {
+		return fmt.Errorf("connect agent execution claim cannot carry a node handler owner")
+	}
 	*c = ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: pinDigest, recipientKind: kind,
-		recipientID: strings.TrimSpace(encoded.RecipientID), handlerEvent: encoded.HandlerEvent, present: true,
+		recipientID: strings.TrimSpace(encoded.RecipientID), handlerFlowID: handlerFlowID,
+		handlerNodeID: handlerNodeID, handlerEvent: encoded.HandlerEvent, present: true,
 	}
 	return nil
 }
@@ -879,6 +914,9 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 	if err := r.ConnectClaim.validateRecipient(r.Recipient); err != nil {
 		return DeliveryRouteIdentity{}, err
 	}
+	if err := r.Target.Validate(); err != nil {
+		return DeliveryRouteIdentity{}, fmt.Errorf("delivery target ownership: %w", err)
+	}
 	switch {
 	case r.Recipient.IsAgent():
 		if err := r.AgentIdentity.Validate(); err != nil {
@@ -887,9 +925,15 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		if r.AgentIdentity.AgentID() != r.Recipient.ID() {
 			return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber id does not match agent identity")
 		}
+		if r.Target.EntitylessReceiver() {
+			return DeliveryRouteIdentity{}, fmt.Errorf("targeted agent delivery cannot carry entityless_receiver ownership")
+		}
 	case r.Recipient.IsNode():
 		if !r.AgentIdentity.IsZero() {
 			return DeliveryRouteIdentity{}, fmt.Errorf("node delivery route cannot carry agent identity")
+		}
+		if r.Target.Empty() {
+			return DeliveryRouteIdentity{}, fmt.Errorf("node delivery route requires typed target ownership")
 		}
 	default:
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type %q is unsupported", r.Recipient.Code())
@@ -904,13 +948,13 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		connectClaim = &claim
 	}
 	canonical, err := json.Marshal(struct {
-		SubscriberType string                 `json:"subscriber_type"`
-		SubscriberID   string                 `json:"subscriber_id"`
-		AgentIdentity  agentidentity.Identity `json:"agent_identity,omitempty"`
-		Target         RouteIdentity          `json:"target"`
-		Context        DeliveryContext        `json:"context"`
-		Projection     map[string]string      `json:"projection"`
-		ConnectClaim   *ConnectExecutionClaim `json:"connect_claim,omitempty"`
+		SubscriberType string                  `json:"subscriber_type"`
+		SubscriberID   string                  `json:"subscriber_id"`
+		AgentIdentity  agentidentity.Identity  `json:"agent_identity,omitempty"`
+		Target         DeliveryTargetOwnership `json:"target_ownership"`
+		Context        DeliveryContext         `json:"context"`
+		Projection     map[string]string       `json:"projection"`
+		ConnectClaim   *ConnectExecutionClaim  `json:"connect_claim,omitempty"`
 	}{
 		SubscriberType: r.Recipient.Code(),
 		SubscriberID:   r.Recipient.ID(),
@@ -1781,7 +1825,7 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 	return DeliveryRoute{
 		Recipient:         r.Recipient,
 		AgentIdentity:     r.AgentIdentity.Normalize(),
-		Target:            r.Target.Normalized(),
+		Target:            r.Target,
 		Context:           r.Context.Normalized(),
 		PayloadProjection: r.PayloadProjection.Normalized(),
 		ConnectClaim:      r.ConnectClaim,
@@ -1867,7 +1911,7 @@ func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {
 		if err != nil {
 			return fmt.Errorf("delivery route %s=%s has invalid payload projection: %w", route.Recipient.Code(), route.Recipient.ID(), err)
 		}
-		target := route.Target
+		target := route.Target.Route()
 		key := projectionRouteKey{recipient: route.Recipient, target: target, replyContextID: route.Context.ReplyContextID()}
 		fingerprint := projection.Fingerprint()
 		if previous, exists := seen[key]; exists && previous != fingerprint {

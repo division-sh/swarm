@@ -128,6 +128,7 @@ func workflowNodeEventHandlerForDelivery(source semanticview.Source, nodeID stri
 type workflowNodeEventHandlerResolution struct {
 	Handler         runtimecontracts.SystemNodeEventHandler
 	HandlerEventKey string
+	FlowID          string
 	Matched         bool
 	Failure         string
 }
@@ -146,15 +147,20 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 	}
 	route, deliveryRouted := workflowNodeDeliveryRoute(ctx)
 	if deliveryRouted && !route.ConnectClaim.Empty() {
-		handlerEvent, authorized := route.ConnectClaim.NodeHandlerEvent(nodeID)
+		handlerFlowID, handlerNodeID, handlerEvent, authorized := route.ConnectClaim.NodeHandlerOwner(nodeID)
 		if !authorized {
 			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim does not authorize node %s", strings.TrimSpace(nodeID))}
 		}
-		resolved := workflowNodeExactEventHandlerResolution(source, nodeID, string(handlerEvent))
-		if !resolved.Matched {
-			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim authorizes event %s but node %s has no matching handler", handlerEvent, strings.TrimSpace(nodeID))}
+		handlerResolution := semanticview.ResolveFlowNodeSubscriptionHandler(source, handlerFlowID, handlerNodeID, string(handlerEvent))
+		if !handlerResolution.Matched {
+			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim authorizes event %s but declaration node %s has no matching handler", handlerEvent, handlerNodeID)}
 		}
-		return resolved
+		return workflowNodeEventHandlerResolution{
+			Handler:         handlerResolution.Handler,
+			HandlerEventKey: handlerResolution.HandlerEventKey,
+			FlowID:          handlerFlowID,
+			Matched:         true,
+		}
 	}
 	if deliveryRouted {
 		// Direct typed-pubsub delivery remains owned by the semantic source. Only
@@ -162,7 +168,7 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 		if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
 			return resolved
 		}
-		if resolved := workflowNodeDirectDeliveryHandlerResolution(source, nodeID, rawEventType, evt.RoutingSource(), route.Target); resolved.Matched {
+		if resolved := workflowNodeDirectDeliveryHandlerResolution(source, nodeID, rawEventType, evt.RoutingSource(), route.Target.Route()); resolved.Matched {
 			return resolved
 		}
 		return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("node delivery event %s has no semantic handler or stamped connect claim", rawEventType)}
@@ -176,7 +182,7 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nodeID, eventType string, producer events.RoutingSource, target events.RouteIdentity) workflowNodeEventHandlerResolution {
 	producerRoute := producer.Route().Normalized()
 	target = target.Normalized()
-	if producerRoute.FlowInstance == "" || producerRoute.FlowInstance != target.FlowInstance || producerRoute.EntityID == "" || producerRoute.EntityID != target.EntityID {
+	if producerRoute.FlowInstance == "" || producerRoute.FlowInstance != target.FlowInstance {
 		return workflowNodeEventHandlerResolution{}
 	}
 	if target.FlowID != "" && producerRoute.FlowID != target.FlowID {
@@ -202,6 +208,7 @@ func workflowNodeExactEventHandlerResolution(source semanticview.Source, nodeID,
 	return workflowNodeEventHandlerResolution{
 		Handler:         resolved.Handler,
 		HandlerEventKey: resolved.HandlerEventKey,
+		FlowID:          workflowNodeFlowID(source, nodeID),
 		Matched:         true,
 	}
 }
@@ -219,6 +226,7 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 		return workflowNodeEventHandlerResolution{
 			Handler:         resolved.Handler,
 			HandlerEventKey: resolved.HandlerEventKey,
+			FlowID:          workflowNodeFlowID(source, nodeID),
 			Matched:         true,
 		}
 	}
@@ -710,7 +718,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Cont
 		if route.Recipient.ID() != nodeID {
 			return false
 		}
-		return pc.workflowNodeMatchesDeliveryTarget(nodeID, route.Target)
+		return pc.workflowNodeMatchesDeliveryTarget(nodeID, route.Target.Route())
 	}
 	return pc.workflowNodeMatchesDeliveryTarget(nodeID, eventTarget)
 }

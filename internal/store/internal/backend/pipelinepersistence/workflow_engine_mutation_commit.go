@@ -470,6 +470,7 @@ func commitWorkflowEngineMutation(
 		Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications)),
 		PostCommit:   command.PostCommit,
 	}
+	entityless := !command.EntitylessTarget.Empty()
 	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
 			if postgres {
@@ -481,14 +482,26 @@ func commitWorkflowEngineMutation(
 				return err
 			}
 		}
-		before, err := loadWorkflowEngineStateProjection(txctx, tx, postgres, command.State)
-		if err != nil {
-			return err
+		var before runtimemutationlog.EntityStateProjection
+		if entityless {
+			if postgres {
+				err = requirePostgresRunActive(txctx, tx, command.EntitylessRunID)
+			} else {
+				err = requireSQLiteRunActive(txctx, tx, command.EntitylessRunID)
+			}
+			if err != nil {
+				return err
+			}
+		} else {
+			before, err = loadWorkflowEngineStateProjection(txctx, tx, postgres, command.State)
+			if err != nil {
+				return err
+			}
+			if err := commitWorkflowEngineState(txctx, tx, postgres, command.State, false); err != nil {
+				return err
+			}
 		}
-		if err := commitWorkflowEngineState(txctx, tx, postgres, command.State, false); err != nil {
-			return err
-		}
-		if command.RouteRetirement != nil {
+		if !entityless && command.RouteRetirement != nil {
 			sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Route}}
 			if _, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, sets); err != nil {
 				return fmt.Errorf("retire terminal workflow route: %w", err)
@@ -496,30 +509,32 @@ func commitWorkflowEngineMutation(
 			retirement := *command.RouteRetirement
 			result.RouteRetirement = &retirement
 		}
-		before, err = commitWorkflowEngineInitialValues(txctx, tx, story, store, postgres, command.State, before)
-		if err != nil {
-			return err
-		}
 		runtimeStory := runtimeAuthorActivityMutation(story)
-		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeStory, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
-		if err != nil {
-			return err
-		}
-		if command.Lifecycle.RequestCompletionCandidate {
-			candidate, err := requestCandidate(txctx, tx, command.State.RunID)
+		if !entityless {
+			before, err = commitWorkflowEngineInitialValues(txctx, tx, story, store, postgres, command.State, before)
 			if err != nil {
 				return err
 			}
-			if err := prepare(handoff, candidate); err != nil {
+			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeStory, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
+			if err != nil {
 				return err
 			}
-		}
-		if err := commitWorkflowEngineMutationLog(txctx, tx, story, store, postgres, command.State, before); err != nil {
-			return err
-		}
-		for index, proposed := range command.ProposedEffects {
-			if err := store.workflowDecisionLifecycleOwner().InsertProposedEffectTx(txctx, runtimeStory, tx, proposed.Card, proposed.Continuation); err != nil {
-				return fmt.Errorf("commit workflow engine proposed effect %d: %w", index, err)
+			if command.Lifecycle.RequestCompletionCandidate {
+				candidate, err := requestCandidate(txctx, tx, command.State.RunID)
+				if err != nil {
+					return err
+				}
+				if err := prepare(handoff, candidate); err != nil {
+					return err
+				}
+			}
+			if err := commitWorkflowEngineMutationLog(txctx, tx, story, store, postgres, command.State, before); err != nil {
+				return err
+			}
+			for index, proposed := range command.ProposedEffects {
+				if err := store.workflowDecisionLifecycleOwner().InsertProposedEffectTx(txctx, runtimeStory, tx, proposed.Card, proposed.Continuation); err != nil {
+					return fmt.Errorf("commit workflow engine proposed effect %d: %w", index, err)
+				}
 			}
 		}
 		for index, value := range command.Publications {

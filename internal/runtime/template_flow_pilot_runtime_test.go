@@ -86,7 +86,10 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
 		t.Fatalf("preflight failure/routes = %q/%#v, want one deterministic template route", preflight.TargetFailure, preflight.DeliveryRoutes)
 	}
-	if target := preflight.DeliveryRoutes[0].Target; target.FlowID != "account" || !strings.HasPrefix(target.FlowInstance, "account/") || target.EntityID == "" {
+	if !preflight.DeliveryRoutes[0].Target.MaterializingEntity() {
+		t.Fatalf("preflight target ownership = %q, want materializing_entity", preflight.DeliveryRoutes[0].Target.Code())
+	}
+	if target := preflight.DeliveryRoutes[0].Target.Route(); target.FlowID != "account" || !strings.HasPrefix(target.FlowInstance, "account/") || target.EntityID == "" {
 		t.Fatalf("preflight target = %#v, want account template flow instance", target)
 	}
 	assertRuntimeDBCount(t, ctx, db, `

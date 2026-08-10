@@ -20,7 +20,7 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryTargets(ctx context.Context, event
 	out := map[string]events.RouteIdentity{}
 	for _, route := range routes {
 		if route.Recipient.IsAgent() && !route.Target.Empty() {
-			out[route.Recipient.ID()] = route.Target
+			out[route.Recipient.ID()] = route.Target.Route()
 		}
 	}
 	if len(out) == 0 {

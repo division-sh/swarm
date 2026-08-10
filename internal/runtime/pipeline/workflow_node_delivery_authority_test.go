@@ -74,7 +74,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	target := events.RouteIdentity{
 		FlowID: "delivery-authority", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
 	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.MustExistingEntityTarget(target)}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), route.Recipient.ID(), target)
 	targetEvt := eventtest.TargetRouted(evt, target)
 	delivery, err := events.NewDeliveryEvent(targetEvt, route)
@@ -127,7 +127,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWit
 	}, time.Now().UTC())
 	ctx := testAuthorActivityContext(t, runCtx)
 	seedPipelineEventRecord(t, ctx, db, evt)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("receiver-node"), Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("receiver-node"), Target: events.MustExistingEntityTarget(target)}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.Recipient.ID(), target)
 	delivery, err := events.NewDeliveryEvent(evt, route)
 	if err != nil {
@@ -291,9 +291,9 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			route := events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.RouteIdentity{
+				Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 					FlowID: "delivery-retry", FlowInstance: runID, EntityID: entityID,
-				},
+				}),
 			}
 			if err := owner.commitInitial(ctx, evt, route); err != nil {
 				t.Fatalf("commit node delivery: %v", err)
@@ -478,7 +478,7 @@ func seedDeliveryAuthorityNodeDeliveryForTarget(t *testing.T, db *sql.DB, eventI
 	if err != nil {
 		t.Fatalf("load delivery authority event: %v", err)
 	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.MustExistingEntityTarget(target)}
 	if err := owner.commitInitial(testAuthorActivityContext(t, context.Background()), evt, route); err != nil {
 		t.Fatalf("seed target delivery authority node delivery: %v", err)
 	}
@@ -493,9 +493,9 @@ func seedDeliveryAuthorityTerminalNodeDelivery(t *testing.T, db *sql.DB, eventID
 	if err != nil {
 		t.Fatalf("load terminal delivery authority event: %v", err)
 	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.RouteIdentity{
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: "delivery-authority", FlowInstance: "delivery-authority", EntityID: evt.EntityID(),
-	}}
+	})}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("commit terminal delivery authority: %v", err)
 	}

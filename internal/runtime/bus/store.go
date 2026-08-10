@@ -374,6 +374,7 @@ type ActiveTargetDescriptor struct {
 	EntityID      string
 	FlowInstance  string
 	AddressFields map[string]string
+	Materializing bool
 }
 
 func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
@@ -383,6 +384,7 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 		EntityID:      strings.TrimSpace(d.EntityID),
 		FlowInstance:  flowInstance,
 		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
+		Materializing: d.Materializing,
 	}
 }
 

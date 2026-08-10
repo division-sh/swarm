@@ -2482,7 +2482,7 @@ func decodeRoute(
 	agentFields agentidentity.StorageFields,
 	targetRaw, contextRaw, projectionRaw, connectClaimRaw []byte,
 ) (events.DeliveryRoute, error) {
-	var target events.RouteIdentity
+	var target events.DeliveryTargetOwnership
 	var deliveryContext events.DeliveryContext
 	var projection events.DeliveryPayloadProjection
 	var connectClaim events.ConnectExecutionClaim

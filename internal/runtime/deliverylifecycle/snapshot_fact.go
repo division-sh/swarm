@@ -24,7 +24,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		SubscriberType            string                           `json:"subscriber_type"`
 		SubscriberID              string                           `json:"subscriber_id"`
 		AgentIdentity             agentidentity.Identity           `json:"agent_identity"`
-		DeliveryTargetRoute       events.RouteIdentity             `json:"delivery_target_route"`
+		DeliveryTargetOwnership   events.DeliveryTargetOwnership   `json:"delivery_target_ownership"`
 		DeliveryContext           events.DeliveryContext           `json:"delivery_context"`
 		DeliveryPayloadProjection events.DeliveryPayloadProjection `json:"delivery_payload_projection"`
 		Status                    string                           `json:"status"`
@@ -75,7 +75,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	}
 	route := events.DeliveryRoute{
 		Recipient:     recipient,
-		AgentIdentity: fact.AgentIdentity, Target: fact.DeliveryTargetRoute, Context: fact.DeliveryContext,
+		AgentIdentity: fact.AgentIdentity, Target: fact.DeliveryTargetOwnership, Context: fact.DeliveryContext,
 		PayloadProjection: fact.DeliveryPayloadProjection,
 	}.Normalized()
 	derived, err := route.Identity()

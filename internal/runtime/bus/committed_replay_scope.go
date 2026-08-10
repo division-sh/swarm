@@ -34,25 +34,12 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		}
 	}
 	if scope == runtimepipelineobligation.ScopeSubscribed && hasNodeDeliveryRoute(persistedRoutes) {
-		if hasFlowInstanceNodeDeliveryRoute(persistedRoutes) {
-			internal := deliveryRouteNodeRecipientIDs(persistedRoutes)
-			live := uniqueStrings(append(deliveryRouteAgentRecipientIDs(persistedRoutes), internal...))
-			return live, internal, persistedRoutes, nil
-		}
-		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
+		internal, err := eb.replayNodeCarriersForCommittedEvent(ctx, evt, persistedRoutes)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		live := uniqueStrings(append(deliveryRouteAgentRecipientIDs(persistedRoutes), internal...))
-		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
-		for _, recipient := range internal {
-			typedRecipient := events.MustNodeDeliveryRecipient(recipient)
-			if hasDeliveryRouteRecipient(routes, typedRecipient) {
-				continue
-			}
-			routes = append(routes, events.DeliveryRoute{Recipient: typedRecipient})
-		}
-		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
+		return live, internal, persistedRoutes, nil
 	}
 	switch scope {
 	case runtimepipelineobligation.ScopeDirect:
@@ -83,22 +70,29 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	}
 }
 
+func (eb *EventBus) replayNodeCarriersForCommittedEvent(_ context.Context, _ events.Event, routes []events.DeliveryRoute) ([]string, error) {
+	persisted := deliveryRouteNodeRecipientIDs(routes)
+	eb.mu.RLock()
+	if eb.internalHandles[workflowRuntimeInternalCarrierID] != nil {
+		eb.mu.RUnlock()
+		return []string{workflowRuntimeInternalCarrierID}, nil
+	}
+	exact := make([]string, 0, len(persisted))
+	for _, recipient := range persisted {
+		if eb.internalHandles[recipient] != nil {
+			exact = append(exact, recipient)
+		}
+	}
+	eb.mu.RUnlock()
+	if exact = uniqueStrings(exact); len(exact) > 0 {
+		return exact, nil
+	}
+	return persisted, nil
+}
+
 func hasNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.Recipient.IsNode() {
-			return true
-		}
-	}
-	return false
-}
-
-func hasFlowInstanceNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
-	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if !route.Recipient.IsNode() {
-			continue
-		}
-		target := route.Target.Normalized()
-		if target.FlowID != "" && target.FlowInstance != "" {
 			return true
 		}
 	}

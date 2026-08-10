@@ -296,7 +296,7 @@ func (s *fanInBarrierRouteProofSink) requireDelivery(t *testing.T, eventID strin
 		if got := delivery.Event().ID(); got != eventID {
 			t.Fatalf("fan-in proof event = %s, want %s", got, eventID)
 		}
-		if got := delivery.HandoffRoute().Target.Normalized(); got != wantTarget.Normalized() {
+		if got := delivery.HandoffRoute().Target.Route().Normalized(); got != wantTarget.Normalized() {
 			t.Fatalf("fan-in proof handoff target = %#v, want %#v", got, wantTarget.Normalized())
 		}
 		if got := delivery.Event().TargetRoute().Normalized(); got != wantTarget.Normalized() {
@@ -399,7 +399,7 @@ func requireFanInBarrierRouteProof(
 	if err != nil {
 		t.Fatalf("load fan-in proof routes: %v", err)
 	}
-	if len(routes) != 1 || routes[0].Recipient.ID() != "portfolio-collector" || routes[0].Target.Normalized() != wantTarget.Normalized() {
+	if len(routes) != 1 || routes[0].Recipient.ID() != "portfolio-collector" || !routes[0].Target.ExistingEntity() || routes[0].Target.Route().Normalized() != wantTarget.Normalized() {
 		t.Fatalf("fan-in proof routes = %#v, want portfolio-collector at %#v", routes, wantTarget.Normalized())
 	}
 	query := `SELECT route_settlement::text FROM events WHERE event_id = $1::uuid`
@@ -461,7 +461,7 @@ func requireFanInBarrierPublicRouteProof(
 		t.Fatalf("public fan-in settlement = deliveries:%#v no_delivery:%#v", view.Deliveries, view.NoDelivery)
 	}
 	delivery := view.Deliveries[0]
-	if delivery.SubscriberID != "portfolio-collector" || delivery.Target.FlowID != wantTarget.FlowID ||
+	if delivery.SubscriberID != "portfolio-collector" || delivery.Target.Kind != "existing_entity" || delivery.Target.FlowID != wantTarget.FlowID ||
 		delivery.Target.FlowInstance != wantTarget.FlowInstance || delivery.Target.EntityID != wantTarget.EntityID {
 		t.Fatalf("public fan-in delivery = %#v, want exact target %#v", delivery, wantTarget.Normalized())
 	}
@@ -693,7 +693,7 @@ func requireFanInBarrierReportTargets(
 		}
 		matched := false
 		for _, route := range routes {
-			if route.Recipient.ID() == "portfolio-collector" && route.Target.Normalized() == wantTarget.Normalized() {
+			if route.Recipient.ID() == "portfolio-collector" && route.Target.Route().Normalized() == wantTarget.Normalized() {
 				matched = true
 			}
 		}

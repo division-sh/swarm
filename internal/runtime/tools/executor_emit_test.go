@@ -73,10 +73,11 @@ func (l emitWorkflowInstanceLoader) Load(_ context.Context, route runtimeflowide
 }
 
 type emitRoutePlanStore struct {
-	events map[string]events.Event
-	routes map[string][]events.DeliveryRoute
-	scopes map[string]runtimepipelineobligation.CommittedScope
-	active []string
+	events       map[string]events.Event
+	routes       map[string][]events.DeliveryRoute
+	scopes       map[string]runtimepipelineobligation.CommittedScope
+	active       []string
+	targetOwners []runtimebus.ActiveTargetDescriptor
 }
 
 func newEmitRoutePlanStore() *emitRoutePlanStore {
@@ -115,6 +116,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, runtimebus.EventBusOptions{
 		BundleSourceFact: sourceFact,
 		ContractBundle:   source,
+		Durable:          runtimebus.DurableDependencies{TargetOwners: store},
 		WorkOwner:        owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
@@ -159,6 +161,10 @@ func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, even
 		}
 	}
 	return out, nil
+}
+
+func (s *emitRoutePlanStore) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
 func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
@@ -1038,7 +1044,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 		Role: "reviewer", FlowID: "review", FlowPath: route.InstancePath, EntityID: entityID,
 		EmitEvents: []string{"assessment.reported"},
 	}
-	exec := NewExecutorWithOptions(eventBus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 	inbound := toolTestInboundEvent(
 		events.EventType(route.InstancePath+"/assessment.requested"), nil,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath),
@@ -1052,7 +1058,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	routes := store.routes[eventID]
 	want := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient("review-finalize"),
-		Target:    events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath, EntityID: entityID},
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath}),
 	}
 	if !emitDeliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want same-instance template node %#v", routes, want)
@@ -1103,13 +1109,13 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     runtimeflowidentity.EntityID("consumer"),
-	},
+	}),
 	}
-	if got := persisted.TargetRoute().Normalized(); got != wantRoute.Target.Normalized() {
+	if got := persisted.TargetRoute().Normalized(); got != wantRoute.Target.Route().Normalized() {
 		t.Fatalf("persisted event target route = %#v, want canonical connect target %#v", got, wantRoute.Target)
 	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
@@ -1177,7 +1183,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	if got := persisted.TargetRoute(); got != parentRoute {
 		t.Fatalf("persisted target route = %#v, want parent route %#v", got, parentRoute)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("root-receiver"), Target: parentRoute}
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("root-receiver"), Target: events.MustExistingEntityTarget(parentRoute)}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
 	}

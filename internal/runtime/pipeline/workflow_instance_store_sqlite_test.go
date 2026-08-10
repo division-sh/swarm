@@ -676,6 +676,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			source_route TEXT NOT NULL CHECK (json_valid(source_route)),
 			target_route TEXT NOT NULL CHECK (json_valid(target_route)),
 			target_set TEXT NOT NULL CHECK (json_valid(target_set)),
+			route_settlement TEXT NOT NULL CHECK (json_valid(route_settlement)),
 			operator_reference_event_id TEXT,
 			handler_node TEXT,
 			idempotency_key TEXT,

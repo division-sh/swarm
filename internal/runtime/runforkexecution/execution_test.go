@@ -3876,18 +3876,18 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 	}{
 		{
 			name: "create fresh projected route accepts fork-local path",
-			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
+			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}),
 				PayloadProjection: projection,
 			}},
 		},
 		{
 			name:    "select canonical path drift is rejected",
-			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}}},
+			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
 			wantErr: true,
 		},
 		{
 			name:    "select-or-create canonical path drift is rejected",
-			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}}},
+			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
 			wantErr: true,
 		},
 	}

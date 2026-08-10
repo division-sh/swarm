@@ -54,10 +54,10 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			)
 			routes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity,
-					Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: uuid.NewString()},
+					Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: uuid.NewString()}),
 				},
 				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity,
-					Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/two", EntityID: uuid.NewString()},
+					Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/two", EntityID: uuid.NewString()}),
 				},
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {

@@ -48,7 +48,7 @@ func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) 
 	if target := evt.TargetRoute().Normalized(); target.EntityID != "" {
 		return target.EntityID
 	}
-	return strings.TrimSpace(evt.EntityID())
+	return ""
 }
 
 func handlerGuardID(spec *runtimecontracts.GuardSpec) string {

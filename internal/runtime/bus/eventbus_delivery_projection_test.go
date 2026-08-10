@@ -71,7 +71,11 @@ func TestCreateSyntheticCarryFailsClosedOnDynamicPayloadCollisionBeforeHandler(t
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
 	evt := eventtest.RunCreatingRootIngress("collision-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"validation_case_id":"producer-value"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"})}
+	route := events.DeliveryRoute{
+		Recipient:         events.MustNodeDeliveryRecipient("validator"),
+		Target:            events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"}),
+	}
 	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"validator"}, []events.DeliveryRoute{route})
 	if err == nil || !strings.Contains(err.Error(), "delivery payload projection conflicts with producer field") {
 		t.Fatalf("delivery error = %v, want synthetic carry collision", err)
@@ -89,7 +93,7 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/one", EntityID: "entity-1"},
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/one", EntityID: "entity-1"}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "case-1"}),
 	}
 	interceptor := &projectionCaptureInterceptor{}
