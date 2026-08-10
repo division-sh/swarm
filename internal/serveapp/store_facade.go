@@ -123,7 +123,8 @@ type selectedAPICapabilities struct {
 	Database                  apiv1.Pinger
 	Runs                      apiv1.RunReadStore
 	Entities                  apiv1.EntityReadStore
-	AgentConversations        apiv1.AgentConversationReadStore
+	Agents                    apiv1.AgentReadStore
+	Conversations             apiv1.ConversationReadStore
 	Observability             apiv1.ObservabilityReadStore
 	RunBundleContext          apiv1.RunBundleContextStore
 	TestSetup                 apiv1.TestSetupStore
@@ -243,8 +244,8 @@ func (f selectedRuntimeStoreFacade) apiRunBundleContextStore() apiv1.RunBundleCo
 	return f.stores.RunBundleContextStore
 }
 
-func (f selectedRuntimeStoreFacade) apiReadStores() (apiv1.RunReadStore, apiv1.EntityReadStore, apiv1.AgentConversationReadStore, apiv1.ObservabilityReadStore) {
-	return f.stores.RunReadStore, f.stores.EntityReadStore, f.stores.AgentConversationReadStore, f.stores.ObservabilityStore
+func (f selectedRuntimeStoreFacade) apiReadStores() (apiv1.RunReadStore, apiv1.EntityReadStore, apiv1.AgentReadStore, apiv1.ConversationReadStore, apiv1.ObservabilityReadStore) {
+	return f.stores.RunReadStore, f.stores.EntityReadStore, f.stores.AgentReadStore, f.stores.ConversationReadStore, f.stores.ObservabilityStore
 }
 
 func (f selectedRuntimeStoreFacade) bundleRuntimeCatalogStore() selectedBundleRuntimeCatalogStore {
@@ -268,17 +269,18 @@ func (f selectedRuntimeStoreFacade) runStalledReader() runStalledReadStore {
 }
 
 func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-	runs, entities, agentConversations, observability := f.apiReadStores()
+	runs, entities, agents, conversations, observability := f.apiReadStores()
 	testSetup, _ := entities.(apiv1.TestSetupStore)
 	caps := selectedAPICapabilities{
-		Database:           f.pinger(),
-		Runs:               runs,
-		Entities:           entities,
-		AgentConversations: agentConversations,
-		Observability:      observability,
-		RunBundleContext:   f.apiRunBundleContextStore(),
-		TestSetup:          testSetup,
-		RuntimeContexts:    req.RuntimeContextManager,
+		Database:         f.pinger(),
+		Runs:             runs,
+		Entities:         entities,
+		Agents:           agents,
+		Conversations:    conversations,
+		Observability:    observability,
+		RunBundleContext: f.apiRunBundleContextStore(),
+		TestSetup:        testSetup,
+		RuntimeContexts:  req.RuntimeContextManager,
 	}
 	if f.stores.APIOptionalCapabilityBuilder == nil {
 		return caps, nil

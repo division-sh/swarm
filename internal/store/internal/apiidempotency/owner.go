@@ -21,6 +21,7 @@ const apiIdempotencyLockNamespace = "swarm:api-idempotency:"
 type PostgresOwner struct {
 	backend     *postgresbackend.Backend
 	schemaGuard func() error
+	acquire     func(context.Context, *postgresbackend.Backend, string) (*postgresbackend.AdvisoryLockLease, error)
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*PostgresOwner, error) {
@@ -30,14 +31,14 @@ func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*P
 	if schemaGuard == nil {
 		return nil, fmt.Errorf("api idempotency postgres schema guard is required")
 	}
-	return &PostgresOwner{backend: backend, schemaGuard: schemaGuard}, nil
+	return &PostgresOwner{backend: backend, schemaGuard: schemaGuard, acquire: acquireAPIIdempotencyLease}, nil
 }
 
 func (s *PostgresOwner) WithAPIIdempotency(
 	ctx context.Context,
 	req apiidempotencycontract.Request,
 	execute func(context.Context) (apiidempotencycontract.Completion, error),
-) (apiidempotencycontract.Completion, bool, error) {
+) (completion apiidempotencycontract.Completion, replay bool, err error) {
 	if execute == nil {
 		return apiidempotencycontract.Completion{}, false, fmt.Errorf("api idempotency executor is required")
 	}
@@ -68,26 +69,31 @@ func (s *PostgresOwner) WithAPIIdempotency(
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
-	releaseCapacity := s.backend.RetainConnectionCapacity()
-	defer releaseCapacity()
-	conn, err := s.backend.Conn(ctx)
-	if err != nil {
-		return apiidempotencycontract.Completion{}, false, fmt.Errorf("acquire api idempotency connection: %w", err)
-	}
-	defer conn.Close()
-
 	lockKey := apiIdempotencyLockKey(req.Method, req.ActorTokenID, req.IdempotencyKey)
-	if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, lockKey); err != nil {
-		return apiidempotencycontract.Completion{}, false, fmt.Errorf("lock api idempotency key: %w", err)
+	acquire := s.acquire
+	if acquire == nil {
+		acquire = acquireAPIIdempotencyLease
 	}
-	defer func() {
-		_, _ = conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext($1))`, lockKey)
-	}()
-
-	if err := purgeExpiredAPIIdempotency(ctx, conn, req.Now); err != nil {
+	lease, err := acquire(ctx, s.backend, lockKey)
+	if err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
-	existing, ok, err := loadAPIIdempotency(ctx, conn, req)
+	defer func() {
+		if releaseErr := lease.ReleaseTerminal(context.WithoutCancel(ctx)); releaseErr != nil {
+			completion = apiidempotencycontract.Completion{}
+			replay = false
+			err = errors.Join(err, fmt.Errorf("release api idempotency authority: %w", releaseErr))
+		}
+	}()
+	session := lease.Session()
+	if session == nil {
+		return apiidempotencycontract.Completion{}, false, fmt.Errorf("api idempotency authority has no current session")
+	}
+
+	if err := purgeExpiredAPIIdempotency(ctx, session, req.Now); err != nil {
+		return apiidempotencycontract.Completion{}, false, err
+	}
+	existing, ok, err := loadAPIIdempotency(ctx, session, req)
 	if err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
@@ -106,7 +112,7 @@ func (s *PostgresOwner) WithAPIIdempotency(
 		}, true, nil
 	}
 
-	completion, err := execute(ctx)
+	completion, err = execute(ctx)
 	if err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
@@ -116,10 +122,38 @@ func (s *PostgresOwner) WithAPIIdempotency(
 	if strings.TrimSpace(completion.ResourceID) == "" {
 		completion.ResourceID = req.ResourceID
 	}
-	if err := storeAPIIdempotency(ctx, conn, req, completion); err != nil {
+	if err := storeAPIIdempotency(ctx, session, req, completion); err != nil {
 		return apiidempotencycontract.Completion{}, false, err
 	}
 	return completion, false, nil
+}
+
+func acquireAPIIdempotencyLease(ctx context.Context, backend *postgresbackend.Backend, lockKey string) (*postgresbackend.AdvisoryLockLease, error) {
+	if backend == nil || !backend.Valid() {
+		return nil, fmt.Errorf("api idempotency postgres backend is required")
+	}
+	releaseCapacity := backend.RetainConnectionCapacity()
+	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLeaseWith(ctx, backend, lockKey,
+		func(ctx context.Context, session *postgresbackend.SessionAuthority, key string) (bool, error) {
+			_, err := session.ExecContext(ctx, `SELECT pg_advisory_lock(hashtext($1))`, key)
+			return err == nil, err
+		})
+	if err != nil {
+		releaseCapacity()
+		return nil, fmt.Errorf("lock api idempotency key: %w", err)
+	}
+	if !acquired || lease == nil {
+		releaseCapacity()
+		return nil, fmt.Errorf("lock api idempotency key: blocking acquisition returned without authority")
+	}
+	if !lease.InstallTerminalOwner(releaseCapacity, nil, nil) {
+		releaseCapacity()
+		return nil, errors.Join(
+			fmt.Errorf("lock api idempotency key: authority retired before ownership transfer"),
+			lease.ReleaseTerminal(context.WithoutCancel(ctx)),
+		)
+	}
+	return lease, nil
 }
 
 type apiIdempotencyRecord struct {

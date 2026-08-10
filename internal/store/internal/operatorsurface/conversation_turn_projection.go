@@ -1,4 +1,4 @@
-package runforkpersistence
+package operatorsurface
 
 import (
 	"bytes"
@@ -12,10 +12,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimeturnactivity "github.com/division-sh/swarm/internal/runtime/turnactivity"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/google/uuid"
 )
 
 const (
@@ -53,43 +57,153 @@ type conversationTurnRecord struct {
 
 type ConversationTurnRecord = conversationTurnRecord
 
-type operatorRowScanner interface {
-	Scan(dest ...any) error
+type conversationProjection struct {
+	postgres    *postgresbackend.Backend
+	sqlite      *sqlitebackend.Backend
+	schemaGuard func() error
 }
 
-func (s *RunForkPostgresOwner) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	owner, err := postgresConversationForkStore(s)
-	if err != nil {
-		return operatorread.OperatorConversationTurnListResult{}, err
+func (s conversationProjection) requireCurrentSchema() error {
+	if (s.postgres == nil) == (s.sqlite == nil) {
+		return fmt.Errorf("conversation projection requires exactly one backend")
 	}
-	return owner.listOperatorConversationTurns(ctx, opts)
+	return requireSchema("conversation projection", s.schemaGuard)
 }
 
-func (s *RunForkSQLiteOwner) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	owner, err := sqliteConversationForkStore(s)
-	if err != nil {
-		return operatorread.OperatorConversationTurnListResult{}, err
+func (s conversationProjection) bind(query string) string {
+	if s.sqlite != nil {
+		return query
 	}
-	return owner.listOperatorConversationTurns(ctx, opts)
-}
-
-func (s *RunForkPostgresOwner) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	owner, err := postgresConversationForkStore(s)
-	if err != nil {
-		return operatorread.OperatorPublicConversationTurnDetail{}, err
+	var out strings.Builder
+	out.Grow(len(query) + 16)
+	index := 1
+	for _, r := range query {
+		if r == '?' {
+			fmt.Fprintf(&out, "$%d", index)
+			index++
+			continue
+		}
+		out.WriteRune(r)
 	}
-	return owner.loadOperatorConversationTurn(ctx, sessionID, turnID)
+	return out.String()
 }
 
-func (s *RunForkSQLiteOwner) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	owner, err := sqliteConversationForkStore(s)
-	if err != nil {
-		return operatorread.OperatorPublicConversationTurnDetail{}, err
+func (s conversationProjection) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
+	query = s.bind(query)
+	if s.sqlite != nil {
+		return s.sqlite.QueryRowContext(ctx, query, args...)
 	}
-	return owner.loadOperatorConversationTurn(ctx, sessionID, turnID)
+	return s.postgres.QueryRowContext(ctx, query, args...)
 }
 
-func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Context, sessionID string) (operatorread.OperatorConversationSummary, error) {
+func (s conversationProjection) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	query = s.bind(query)
+	if s.sqlite != nil {
+		return s.sqlite.QueryContext(ctx, query, args...)
+	}
+	return s.postgres.QueryContext(ctx, query, args...)
+}
+
+func (s conversationProjection) conversationQuerySources() []string {
+	if s.sqlite != nil {
+		return sqliteOperatorConversationQuerySources()
+	}
+	return operatorConversationQuerySources()
+}
+
+func (s *ConversationPostgres) projection() conversationProjection {
+	return conversationProjection{postgres: s.backend, schemaGuard: s.schemaGuard}
+}
+
+func (s *ConversationSQLite) projection() conversationProjection {
+	return conversationProjection{sqlite: s.backend, schemaGuard: s.schemaGuard}
+}
+
+func (s *ConversationPostgres) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return s.projection().listOperatorConversationTurns(ctx, opts)
+}
+
+func (s *ConversationSQLite) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return s.projection().listOperatorConversationTurns(ctx, opts)
+}
+
+func (s *ConversationPostgres) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return s.projection().loadOperatorConversationTurn(ctx, sessionID, turnID)
+}
+
+func (s *ConversationSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return s.projection().loadOperatorConversationTurn(ctx, sessionID, turnID)
+}
+
+func (s *ConversationPostgres) LoadConversationForkSource(ctx context.Context, sessionID string) (runtimerunfork.ConversationForkSource, error) {
+	return s.projection().loadConversationForkSource(ctx, sessionID)
+}
+
+func (s *ConversationSQLite) LoadConversationForkSource(ctx context.Context, sessionID string) (runtimerunfork.ConversationForkSource, error) {
+	return s.projection().loadConversationForkSource(ctx, sessionID)
+}
+
+func (s conversationProjection) loadConversationForkSource(ctx context.Context, rawSessionID string) (runtimerunfork.ConversationForkSource, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(rawSessionID))
+	if err != nil {
+		return runtimerunfork.ConversationForkSource{}, &operatorread.EntityReadParamError{Field: "source_session_id", Reason: "must be a UUID"}
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimerunfork.ConversationForkSource{}, err
+	}
+	rows, err := s.query(ctx, fmt.Sprintf(`
+		SELECT
+			session_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance, run_id
+		FROM (
+			%s
+		) conversations
+		WHERE session_id = ?
+		LIMIT 2
+	`, strings.Join(s.conversationQuerySources(), "\nUNION ALL\n")), parsed.String())
+	if err != nil {
+		return runtimerunfork.ConversationForkSource{}, fmt.Errorf("load conversation fork source: %w", err)
+	}
+	defer rows.Close()
+
+	items := []runtimerunfork.ConversationForkSource{}
+	for rows.Next() {
+		var item runtimerunfork.ConversationForkSource
+		var identityFields runtimeagentidentity.StorageFields
+		if err := rows.Scan(
+			&item.SessionID,
+			&identityFields.AgentID,
+			&identityFields.NameOwner,
+			&identityFields.NameSource,
+			&identityFields.RoutePresence,
+			&identityFields.FlowScopeKey,
+			&identityFields.FlowInstanceID,
+			&identityFields.FlowInstancePath,
+			&item.RunID,
+		); err != nil {
+			return runtimerunfork.ConversationForkSource{}, err
+		}
+		item.SessionID = strings.TrimSpace(item.SessionID)
+		item.RunID = strings.TrimSpace(item.RunID)
+		item.Identity, err = runtimeagentidentity.FromStorageFields(identityFields)
+		if err != nil {
+			return runtimerunfork.ConversationForkSource{}, fmt.Errorf("load conversation fork source identity: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return runtimerunfork.ConversationForkSource{}, err
+	}
+	if len(items) == 0 {
+		return runtimerunfork.ConversationForkSource{}, operatorread.ErrSessionNotFound
+	}
+	if len(items) > 1 {
+		return runtimerunfork.ConversationForkSource{}, &operatorread.EntityReadParamError{Field: "source_session_id", Reason: "ambiguous source session"}
+	}
+	return items[0], nil
+}
+
+func (s conversationProjection) loadOperatorConversationSummary(ctx context.Context, sessionID string) (operatorread.OperatorConversationSummary, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return operatorread.OperatorConversationSummary{}, operatorread.ErrSessionNotFound
@@ -101,7 +215,7 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 	if len(sources) == 0 {
 		return operatorread.OperatorConversationSummary{}, operatorread.ErrSessionNotFound
 	}
-	row := s.queryRow(ctx, s.db, fmt.Sprintf(`
+	row := s.queryRow(ctx, fmt.Sprintf(`
 		SELECT CAST(session_id AS TEXT), agent_id, COALESCE(CAST(run_id AS TEXT), ''), kind,
 			COALESCE(flow_instance, ''), memory_enabled, memory_source,
 			COALESCE(status, ''), COALESCE(turn_count, 0), COALESCE(message_count, 0),
@@ -150,7 +264,7 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 	}
 	item.Summary = runtimeState.Summary
 	item.Metadata = projectOperatorConversationSummaryMetadata(runtimeState)
-	if err := s.queryRow(ctx, s.db, `
+	if err := s.queryRow(ctx, `
 		SELECT execution_mode
 		FROM agent_turns
 		WHERE session_id = ?
@@ -176,7 +290,7 @@ func requiredConversationTime(raw any, field string) (time.Time, error) {
 	return value.UTC(), nil
 }
 
-func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+func (s conversationProjection) listOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	if err := s.requirePublicConversationProjectionAccess(); err != nil {
 		return operatorread.OperatorConversationTurnListResult{}, err
 	}
@@ -201,7 +315,7 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 		args = append(args, cursorAt.UTC(), cursorAt.UTC(), cursor.TurnID)
 	}
 	args = append(args, opts.Limit+1)
-	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
+	rows, err := s.query(ctx, fmt.Sprintf(`
 		WITH ordered AS (
 			SELECT
 				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
@@ -259,7 +373,7 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 	return operatorread.OperatorConversationTurnListResult{Conversation: summary, Turns: turns, NextCursor: nextCursor}, nil
 }
 
-func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	if err := s.requirePublicConversationProjectionAccess(); err != nil {
 		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
@@ -276,7 +390,7 @@ func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context,
 	if err != nil {
 		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
-	row := s.queryRow(ctx, s.db, fmt.Sprintf(`
+	row := s.queryRow(ctx, fmt.Sprintf(`
 		WITH ordered AS (
 			SELECT
 				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
@@ -312,127 +426,59 @@ func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context,
 	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn}, nil
 }
 
-func (s conversationForkStore) requirePublicConversationProjectionAccess() error {
-	return s.requireCurrentSchema()
-}
-
-func (s conversationForkStore) resolveConversationTurnCoordinateByID(ctx context.Context, sessionID, turnID string) (runtimerunfork.ConversationForkPointDescriptor, error) {
+func (s conversationProjection) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	if err := s.requirePublicConversationProjectionAccess(); err != nil {
+		return nil, err
+	}
 	sessionID = strings.TrimSpace(sessionID)
-	turnID = strings.TrimSpace(turnID)
-	if turnID == "" {
-		return runtimerunfork.ConversationForkPointDescriptor{}, operatorread.ErrTurnNotFound
+	if sessionID == "" {
+		return nil, operatorread.ErrSessionNotFound
 	}
-	row := s.queryRow(ctx, s.db, `
+	row := s.queryRow(ctx, `
 		WITH ordered AS (
-			SELECT ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
+			SELECT
+				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
 				CAST(turn_id AS TEXT) AS turn_id,
-				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
+				COALESCE(CAST(run_id AS TEXT), '') AS run_id,
+				agent_id, CAST(session_id AS TEXT) AS session_id,
+				COALESCE(CAST(entity_id AS TEXT), '') AS entity_id,
+				COALESCE(CAST(trigger_event_id AS TEXT), '') AS trigger_event_id,
+				COALESCE(trigger_event_type, '') AS trigger_event_type,
+				COALESCE(task_id, '') AS task_id,
+				COALESCE(CAST(turn_blocks AS TEXT), '[]') AS turn_blocks,
+				parse_ok, COALESCE(latency_ms, 0) AS latency_ms,
+				COALESCE(retry_count, 0) AS retry_count,
+				COALESCE(usage_exactness, '') AS usage_exactness,
+				execution_mode, input_tokens, output_tokens,
+				COALESCE(CAST(failure AS TEXT), 'null') AS failure,
 				created_at
 			FROM agent_turns
 			WHERE session_id = ?
 		)
-		SELECT ordinal, turn_id, event_id, created_at
+		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id,
+			trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok,
+			latency_ms, retry_count, usage_exactness, execution_mode, input_tokens,
+			output_tokens, failure, created_at
 		FROM ordered
-		WHERE turn_id = ?
-	`, sessionID, turnID)
-	item, err := scanConversationTurnCoordinate(row, "turn", "", nil)
-	if errors.Is(err, sql.ErrNoRows) {
-		return runtimerunfork.ConversationForkPointDescriptor{}, operatorread.ErrTurnNotFound
-	}
-	if err != nil {
-		return runtimerunfork.ConversationForkPointDescriptor{}, err
-	}
-	return item, nil
-}
-
-func (s conversationForkStore) resolveConversationTurnCoordinateByEvent(ctx context.Context, sessionID, eventID string) (runtimerunfork.ConversationForkPointDescriptor, error) {
-	rows, err := s.query(ctx, s.db, `
-		WITH ordered AS (
-			SELECT ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
-				CAST(turn_id AS TEXT) AS turn_id,
-				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
-				created_at
-			FROM agent_turns
-			WHERE session_id = ?
-		)
-		SELECT ordinal, turn_id, event_id, created_at
-		FROM ordered
-		WHERE event_id = ?
-		ORDER BY created_at ASC, turn_id ASC
-		LIMIT 2
-	`, sessionID, eventID)
-	if err != nil {
-		return runtimerunfork.ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation event coordinate: %w", err)
-	}
-	defer rows.Close()
-	matches := make([]runtimerunfork.ConversationForkPointDescriptor, 0, 2)
-	for rows.Next() {
-		item, err := scanConversationTurnCoordinate(rows, "event", eventID, nil)
-		if err != nil {
-			return runtimerunfork.ConversationForkPointDescriptor{}, err
-		}
-		matches = append(matches, item)
-	}
-	if err := rows.Err(); err != nil {
-		return runtimerunfork.ConversationForkPointDescriptor{}, err
-	}
-	if len(matches) == 0 {
-		return runtimerunfork.ConversationForkPointDescriptor{}, operatorread.ErrEventNotFound
-	}
-	if len(matches) > 1 {
-		return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point.event_id", Reason: "event matches multiple source turns"}
-	}
-	return matches[0], nil
-}
-
-func (s conversationForkStore) resolveConversationTurnCoordinateAt(ctx context.Context, sessionID string, at time.Time) (runtimerunfork.ConversationForkPointDescriptor, error) {
-	at = at.UTC()
-	row := s.queryRow(ctx, s.db, `
-		WITH ordered AS (
-			SELECT ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
-				CAST(turn_id AS TEXT) AS turn_id,
-				COALESCE(CAST(trigger_event_id AS TEXT), '') AS event_id,
-				created_at
-			FROM agent_turns
-			WHERE session_id = ?
-		)
-		SELECT ordinal, turn_id, event_id, created_at
-		FROM ordered
-		WHERE created_at <= ?
 		ORDER BY created_at DESC, turn_id DESC
 		LIMIT 1
-	`, sessionID, at)
-	item, err := scanConversationTurnCoordinate(row, "time", "", &at)
+	`, sessionID)
+	record, err := scanConversationTurnRecord(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point.at", Reason: "does not select a source turn"}
+		return nil, nil
 	}
 	if err != nil {
-		return runtimerunfork.ConversationForkPointDescriptor{}, err
+		return nil, fmt.Errorf("load latest conversation turn: %w", err)
 	}
-	return item, nil
+	turn, err := projectPublicConversationTurn(record)
+	if err != nil {
+		return nil, err
+	}
+	return &turn, nil
 }
 
-func scanConversationTurnCoordinate(scanner operatorRowScanner, kind, selectedEventID string, at *time.Time) (runtimerunfork.ConversationForkPointDescriptor, error) {
-	var (
-		item          runtimerunfork.ConversationForkPointDescriptor
-		storedEventID string
-		selectedAtRaw any
-	)
-	if err := scanner.Scan(&item.TurnIndex, &item.TurnID, &storedEventID, &selectedAtRaw); err != nil {
-		return runtimerunfork.ConversationForkPointDescriptor{}, err
-	}
-	selectedAt, err := requiredConversationTime(selectedAtRaw, "selected_at")
-	if err != nil {
-		return runtimerunfork.ConversationForkPointDescriptor{}, err
-	}
-	item.Kind = kind
-	item.EventID = strings.TrimSpace(selectedEventID)
-	if item.EventID == "" && kind != "turn" {
-		item.EventID = strings.TrimSpace(storedEventID)
-	}
-	item.At = at
-	item.SelectedAt = selectedAt
-	return item, nil
+func (s conversationProjection) requirePublicConversationProjectionAccess() error {
+	return requireSchema("conversation projection", s.schemaGuard)
 }
 
 func normalizeOperatorConversationTurnListOptions(opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListOptions, *conversationTurnCursor, error) {

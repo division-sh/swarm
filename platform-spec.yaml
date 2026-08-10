@@ -5341,6 +5341,14 @@ engine:
         - API, dashboard, builder, monitoring, digest, bundle-delete, and destructive-reset consumers MUST NOT accept raw SQL, concrete selected stores, generic query executors, or transaction callbacks.
       public_read_projection_contract:
         canonical_models: internal/operatorread
+        public_capability_ports:
+        - internal/operatorread.RunReader
+        - internal/operatorread.EntityReader
+        - internal/operatorread.AgentReader
+        - internal/operatorread.AgentDeliveryLifecycleReader
+        - internal/operatorread.AgentUsageReader
+        - internal/operatorread.ConversationReader
+        - internal/operatorread.ObservabilityReader
         private_backend_owners:
         - internal/store/internal/operatorsurface.RunPostgres and RunSQLite
         - internal/store/internal/operatorsurface.EntityPostgres and EntitySQLite
@@ -5355,6 +5363,8 @@ engine:
         - internal/cliapp fork-chat admission
         rules:
         - Each private owner implements one bounded semantic family over a private backend root; no broad OperatorPostgres, OperatorSQLite, generic query adapter, or runtime role assertion exists.
+        - Public conversation turn/list/get SQL and conversation-fork source resolution belong to the bounded ConversationPostgres and ConversationSQLite owners. Run-fork consumes only the typed runtime/runfork ConversationForkSource fact and MUST NOT consume SQL source fragments or reinterpret public conversation rows.
+        - Run, agent, conversation, observability, and bundle parity claims require selected-store public API execution on each claimed backend; store-unit and fake-handler tests cannot substitute for that proof.
         - PostgreSQL and SQLite decode canonical persisted facts into the same consumer-owned models and fail closed on malformed or missing authority.
         - Dashboard constructors accept typed projections only. Missing owners and read or stream failures are explicit errors; empty-success, fabricated not-found, loose Details reconstruction, and silent SSE continuation are forbidden.
         - The retired internal/digest SQL source and runtime digest persistence contract have no replacement because no supported production consumer exists.
@@ -5558,7 +5568,7 @@ engine:
       - broader docs/CI/repo-wide closeout owned by #1089
       - production multi-writer SQLite budget concurrency semantics
     - name: operator_agent_usage_read_rows
-      owner: internal/store.OperatorAgentUsageReadStore consumed by api_specification.method_catalog.agent.usage through apiv1.OperatorReadOptions.AgentUsage
+      owner: internal/operatorread.AgentUsageReader consumed by api_specification.method_catalog.agent.usage through apiv1.AgentConversationHandlerOptions.Usage
       promoted_by: '#1157'
       sqlite_owner: internal/store.SQLiteRuntimeStore.LoadOperatorAgentUsage over canonical agents and spend_ledger rows
       postgres_owner: internal/store.PostgresStore.LoadOperatorAgentUsage over canonical agents and spend_ledger rows
@@ -5652,7 +5662,7 @@ engine:
       - broader startup recovery/replay policy outside the rows explicitly terminalized by serve abandon
       - production multi-writer SQLite semantics
     - name: api_idempotency_rows
-      owner: internal/store API idempotency persistence contract
+      owner: internal/apiidempotency Store contract backed by private selected-store owners
       sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency
       postgres_owner: internal/store.PostgresStore.WithAPIIdempotency
       promoted_by: '#1214'
@@ -5662,8 +5672,10 @@ engine:
         across the callback, because callbacks may write through selected runtime owners such as EventBus.Publish and
         SQLiteRuntimeStore.AppendEventTx. SQLite uses process-local serialization keyed by the selected SQLite database
         path plus short database operations for purge/load/completion rows; Postgres remains authoritative for production
-        concurrency through its advisory-lock owner. Callback or publish failure must leave no idempotency completion for
-        the failed request.
+        concurrency through its advisory-lock owner. PostgreSQL advisory-lock ownership is bound to one exact reserved session;
+        terminal unlock, unlock-result verification, session close, and capacity restoration are part of the operation result.
+        Any terminal release failure clears fabricated completion/replay success and fails closed. Callback, publish, or release
+        failure must leave no idempotency completion for the failed request.
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
     - name: runtime_session_registry_rows
@@ -5787,7 +5799,7 @@ engine:
       postgres_owner: internal/store.PostgresStore conversation and agent turn methods
       scope: SQLite persists local-runtime conversation state and turns for the selected backend.
     - name: operator_trace_event_log_read_rows
-      owner: apiv1.ObservabilityReadStore and v1 run.trace, event.subscribe, runtime.logs/runtime.subscribe_logs surfaces
+      owner: internal/operatorread.ObservabilityReader consumed by apiv1.ObservabilityHandlerOptions and SubscriptionOptions for v1 run.trace, event.subscribe, runtime.logs/runtime.subscribe_logs surfaces
       sqlite_owner: internal/store.SQLiteRuntimeStore observability read methods
       postgres_owner: internal/store.PostgresStore observability read methods
       scope: >
@@ -16304,7 +16316,7 @@ multi_bundle_persistence:
       runtime_owners:
         - internal/runtime.RuntimeContextManager
         - internal/runtime.BundleContext
-        - internal/apiv1.OperatorReadOptions.RuntimeContexts
+        - internal/apiv1 exact mutating handler option RuntimeContexts fields
       reason: Boot-pinned multi-context serve now routes supported runtime mutations through loaded BundleContext ownership, disables unscoped startup recovery/restore in multi-context processes, and marks loaded contexts unavailable/unloaded after authoritative bundle.delete/runtime.nuke include_bundles=true operations. Dynamic Load, scoped recovery filters, final matrix, ambient CLI context, cross-bundle fork, and cleanup siblings remain separately gated.
       dynamic_load_disposition: >
         #1209 records the current Dynamic Load source-authority decision: no post-readiness RuntimeContextManager Load,

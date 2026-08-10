@@ -59,7 +59,8 @@ type BundleCatalogHandlerOptions struct {
 }
 
 type AgentConversationHandlerOptions struct {
-	Conversations     AgentConversationReadStore
+	Agents            AgentReadStore
+	Conversations     ConversationReadStore
 	DeliveryLifecycle AgentDeliveryLifecycleReadStore
 	Usage             AgentUsageReadStore
 }
@@ -101,12 +102,12 @@ type EventPublishHandlerOptions struct {
 }
 
 type EventReplayHandlerOptions struct {
-	Now                func() time.Time
-	Idempotency        APIIdempotencyStore
-	Events             EventReplayOwner
-	Observability      ObservabilityReadStore
-	AgentConversations AgentConversationReadStore
-	RuntimeContexts    *runtime.RuntimeContextManager
+	Now             func() time.Time
+	Idempotency     APIIdempotencyStore
+	Events          EventReplayOwner
+	Observability   ObservabilityReadStore
+	AgentIdentities AgentIdentityResolver
+	RuntimeContexts *runtime.RuntimeContextManager
 }
 
 type BundleRegisterHandlerOptions struct {

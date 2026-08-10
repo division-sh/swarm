@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -14,8 +16,11 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
-type RunDiagnosticsSource interface {
+type PipelineObligationSource interface {
 	PipelineObligations() runtimepipelineobligation.Store
+}
+
+type TimerObligationSource interface {
 	ReadTimerObligations(context.Context, runtimetimerobligation.Scope, time.Time) (runtimetimerobligation.Snapshot, error)
 }
 
@@ -23,7 +28,7 @@ type AgentRuntimeSource interface {
 	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
 }
 
-type ConversationRuntimeSource interface {
+type conversationTurnReader interface {
 	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
 	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 }
@@ -32,10 +37,20 @@ type DeadLetterProjection interface {
 	LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]operatorread.OperatorDeadLetterRecord, error)
 }
 
+type agentDeliveryProjection interface {
+	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
+	ListPendingAgentDeliveryDetails(context.Context, operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error)
+	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
+	DeliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
+	DeliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
+	DeliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
+}
+
 type RunPostgres struct {
 	backend     *postgresbackend.Backend
 	schemaGuard func() error
-	runtime     RunDiagnosticsSource
+	pipeline    PipelineObligationSource
+	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
 }
 
@@ -48,14 +63,14 @@ type AgentPostgres struct {
 	backend      *postgresbackend.Backend
 	schemaGuard  func() error
 	runtime      AgentRuntimeSource
-	conversation ConversationRuntimeSource
+	conversation conversationTurnReader
+	delivery     agentDeliveryProjection
 	deadLetters  DeadLetterProjection
 }
 
 type ConversationPostgres struct {
 	backend     *postgresbackend.Backend
 	schemaGuard func() error
-	runtime     ConversationRuntimeSource
 }
 
 type ObservabilityPostgres struct {
@@ -70,14 +85,14 @@ func requirePostgresBackend(backend *postgresbackend.Backend) error {
 	return nil
 }
 
-func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime RunDiagnosticsSource, deadLetters DeadLetterProjection) (*RunPostgres, error) {
+func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection) (*RunPostgres, error) {
 	if err := requirePostgresBackend(backend); err != nil {
 		return nil, err
 	}
-	if runtime == nil || deadLetters == nil {
+	if pipeline == nil || timers == nil || deadLetters == nil {
 		return nil, fmt.Errorf("run diagnostics sources are required")
 	}
-	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime, deadLetters: deadLetters}, nil
+	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, pipeline: pipeline, timers: timers, deadLetters: deadLetters}, nil
 }
 
 func NewEntityPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*EntityPostgres, error) {
@@ -87,24 +102,25 @@ func NewEntityPostgres(backend *postgresbackend.Backend, schemaGuard func() erro
 	return &EntityPostgres{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func NewAgentPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime AgentRuntimeSource, conversation ConversationRuntimeSource, deadLetters DeadLetterProjection) (*AgentPostgres, error) {
+func NewAgentPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime AgentRuntimeSource, conversation conversationTurnReader, delivery agentDeliveryProjection, deadLetters DeadLetterProjection) (*AgentPostgres, error) {
 	if err := requirePostgresBackend(backend); err != nil {
 		return nil, err
 	}
 	if runtime == nil || conversation == nil || deadLetters == nil {
 		return nil, fmt.Errorf("agent read sources are required")
 	}
-	return &AgentPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime, conversation: conversation, deadLetters: deadLetters}, nil
+	owner := &AgentPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime, conversation: conversation, delivery: delivery, deadLetters: deadLetters}
+	if owner.delivery == nil {
+		owner.delivery = owner
+	}
+	return owner, nil
 }
 
-func NewConversationPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime ConversationRuntimeSource) (*ConversationPostgres, error) {
+func NewConversationPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*ConversationPostgres, error) {
 	if err := requirePostgresBackend(backend); err != nil {
 		return nil, err
 	}
-	if runtime == nil {
-		return nil, fmt.Errorf("conversation runtime source is required")
-	}
-	return &ConversationPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime}, nil
+	return &ConversationPostgres{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
 func NewObservabilityPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*ObservabilityPostgres, error) {
@@ -153,31 +169,16 @@ func (s *AgentPostgres) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 	return s.runtime.LoadAgents(ctx)
 }
 
-func (s *AgentPostgres) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return s.conversation.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *AgentPostgres) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return s.conversation.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
 func (s *AgentPostgres) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
 	return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
-}
-
-func (s *ConversationPostgres) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return s.runtime.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *ConversationPostgres) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return s.runtime.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }
 
 type RunSQLite struct {
 	backend     *sqlitebackend.Backend
 	schemaGuard func() error
 	nowFn       func() time.Time
-	runtime     RunDiagnosticsSource
+	pipeline    PipelineObligationSource
+	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
 }
 
@@ -191,14 +192,14 @@ type AgentSQLite struct {
 	schemaGuard  func() error
 	nowFn        func() time.Time
 	runtime      AgentRuntimeSource
-	conversation ConversationRuntimeSource
+	conversation conversationTurnReader
+	delivery     agentDeliveryProjection
 	deadLetters  DeadLetterProjection
 }
 
 type ConversationSQLite struct {
 	backend     *sqlitebackend.Backend
 	schemaGuard func() error
-	runtime     ConversationRuntimeSource
 }
 
 type ObservabilitySQLite struct {
@@ -213,14 +214,14 @@ func requireSQLiteBackend(backend *sqlitebackend.Backend) error {
 	return nil
 }
 
-func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime RunDiagnosticsSource, deadLetters DeadLetterProjection) (*RunSQLite, error) {
+func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection) (*RunSQLite, error) {
 	if err := requireSQLiteBackend(backend); err != nil {
 		return nil, err
 	}
-	if runtime == nil || deadLetters == nil {
+	if pipeline == nil || timers == nil || deadLetters == nil {
 		return nil, fmt.Errorf("run diagnostics sources are required")
 	}
-	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime, deadLetters: deadLetters}, nil
+	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, pipeline: pipeline, timers: timers, deadLetters: deadLetters}, nil
 }
 
 func NewEntitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*EntitySQLite, error) {
@@ -230,24 +231,25 @@ func NewEntitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (
 	return &EntitySQLite{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func NewAgentSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime AgentRuntimeSource, conversation ConversationRuntimeSource, deadLetters DeadLetterProjection) (*AgentSQLite, error) {
+func NewAgentSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime AgentRuntimeSource, conversation conversationTurnReader, delivery agentDeliveryProjection, deadLetters DeadLetterProjection) (*AgentSQLite, error) {
 	if err := requireSQLiteBackend(backend); err != nil {
 		return nil, err
 	}
 	if runtime == nil || conversation == nil || deadLetters == nil {
 		return nil, fmt.Errorf("agent read sources are required")
 	}
-	return &AgentSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime, conversation: conversation, deadLetters: deadLetters}, nil
+	owner := &AgentSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime, conversation: conversation, delivery: delivery, deadLetters: deadLetters}
+	if owner.delivery == nil {
+		owner.delivery = owner
+	}
+	return owner, nil
 }
 
-func NewConversationSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, runtime ConversationRuntimeSource) (*ConversationSQLite, error) {
+func NewConversationSQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*ConversationSQLite, error) {
 	if err := requireSQLiteBackend(backend); err != nil {
 		return nil, err
 	}
-	if runtime == nil {
-		return nil, fmt.Errorf("conversation runtime source is required")
-	}
-	return &ConversationSQLite{backend: backend, schemaGuard: schemaGuard, runtime: runtime}, nil
+	return &ConversationSQLite{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
 func NewObservabilitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*ObservabilitySQLite, error) {
@@ -299,24 +301,8 @@ func (s *AgentSQLite) LoadAgents(ctx context.Context) ([]runtimemanager.Persiste
 	return s.runtime.LoadAgents(ctx)
 }
 
-func (s *AgentSQLite) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return s.conversation.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *AgentSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return s.conversation.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
 func (s *AgentSQLite) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
 	return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
-}
-
-func (s *ConversationSQLite) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return s.runtime.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *ConversationSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return s.runtime.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }
 
 func requireSchema(name string, guard func() error) error {

@@ -20,7 +20,7 @@ type testOperatorCapabilities struct {
 	Runs                      RunReadStore
 	Observability             ObservabilityReadStore
 	Entities                  EntityReadStore
-	AgentConversations        AgentConversationReadStore
+	AgentConversations        any
 	AgentDeliveryLifecycle    AgentDeliveryLifecycleReadStore
 	AgentUsage                AgentUsageReadStore
 	BundleCatalog             BundleCatalogReadStore
@@ -74,6 +74,8 @@ func (c testOperatorCapabilities) decisionCards() DecisionCardHandlerOptions {
 }
 
 func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
+	agents, _ := c.AgentConversations.(AgentReadStore)
+	conversations, _ := c.AgentConversations.(ConversationReadStore)
 	return MergeOperatorHandlers(
 		OperatorHealthHandlers(HealthHandlerOptions{Now: c.Now, Ready: c.Ready, Database: c.Database, Bundle: c.Bundle}),
 		OperatorRuntimeIdentityHandlers(RuntimeIdentityHandlerOptions{Identity: c.RuntimeIdentity}),
@@ -91,7 +93,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorRuntimeNukeHandlers(RuntimeNukeHandlerOptions{Now: c.Now, Coordinator: c.ResetCoordinator, Idempotency: c.Idempotency}),
 		OperatorObservabilityHandlers(ObservabilityHandlerOptions{Observability: c.Observability}),
 		OperatorEntityHandlers(EntityHandlerOptions{Entities: c.Entities}),
-		OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Conversations: c.AgentConversations, DeliveryLifecycle: c.AgentDeliveryLifecycle, Usage: c.AgentUsage}),
+		OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Agents: agents, Conversations: conversations, DeliveryLifecycle: c.AgentDeliveryLifecycle, Usage: c.AgentUsage}),
 		OperatorBundleCatalogHandlers(BundleCatalogHandlerOptions{Catalog: c.BundleCatalog}),
 		testOperatorBundleRegisterHandlers(c),
 		OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
@@ -119,7 +121,8 @@ func testOperatorConversationForkHandlers(c testOperatorCapabilities) map[string
 
 func testOperatorEventReplayHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 	events, _ := c.Events.(EventReplayOwner)
-	return OperatorEventReplayHandlers(EventReplayHandlerOptions{Now: c.Now, Idempotency: c.Idempotency, Events: events, Observability: c.Observability, AgentConversations: c.AgentConversations, RuntimeContexts: c.RuntimeContexts})
+	agentIdentities, _ := c.AgentConversations.(AgentIdentityResolver)
+	return OperatorEventReplayHandlers(EventReplayHandlerOptions{Now: c.Now, Idempotency: c.Idempotency, Events: events, Observability: c.Observability, AgentIdentities: agentIdentities, RuntimeContexts: c.RuntimeContexts})
 }
 
 func testOperatorRunForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {

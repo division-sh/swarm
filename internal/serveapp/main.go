@@ -173,7 +173,8 @@ type storeBundle struct {
 	RunQuiescenceStore             runtimerunquiescence.ServeAbandonStore
 	RunReadStore                   apiv1.RunReadStore
 	EntityReadStore                apiv1.EntityReadStore
-	AgentConversationReadStore     apiv1.AgentConversationReadStore
+	AgentReadStore                 apiv1.AgentReadStore
+	ConversationReadStore          apiv1.ConversationReadStore
 	RunBundleContextStore          apiv1.RunBundleContextStore
 	BundleRuntimeCatalogStore      selectedBundleRuntimeCatalogStore
 	BundleSourceCatalogStore       selectedBundleSourceCatalogStore
@@ -406,7 +407,8 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		RunQuiescenceStore:          pg,
 		RunReadStore:                pg,
 		EntityReadStore:             pg,
-		AgentConversationReadStore:  pg,
+		AgentReadStore:              pg,
+		ConversationReadStore:       pg,
 		RunBundleContextStore:       pg,
 		BundleRuntimeCatalogStore:   pg,
 		BundleSourceCatalogStore:    pg,
@@ -1298,7 +1300,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
-		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Conversations: apiStoreCaps.AgentConversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
+		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
 		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
@@ -1307,7 +1309,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Mailbox: stores.MailboxAPIStore, NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment, Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentConversations: apiStoreCaps.AgentConversations, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: stores.IdempotencyStore, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source}),
 		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
@@ -2285,7 +2287,8 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			RunQuiescenceStore:          sqliteStore,
 			RunReadStore:                sqliteStore,
 			EntityReadStore:             sqliteStore,
-			AgentConversationReadStore:  sqliteStore,
+			AgentReadStore:              sqliteStore,
+			ConversationReadStore:       sqliteStore,
 			RunBundleContextStore:       sqliteStore,
 			RunStalledReader:            sqliteStore,
 		}

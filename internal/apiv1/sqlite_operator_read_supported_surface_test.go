@@ -163,5 +163,6 @@ func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 }
 
-var _ AgentConversationReadStore = (*storepkg.SQLiteRuntimeStore)(nil)
+var _ AgentReadStore = (*storepkg.SQLiteRuntimeStore)(nil)
+var _ ConversationReadStore = (*storepkg.SQLiteRuntimeStore)(nil)
 var _ BundleCatalogReadStore = (*storepkg.SQLiteRuntimeStore)(nil)

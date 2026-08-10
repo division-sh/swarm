@@ -24,7 +24,7 @@ import (
 )
 
 type agentDiagnosePaginationStore interface {
-	AgentConversationReadStore
+	AgentReadStore
 	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
 }
 

@@ -20,50 +20,18 @@ type Pinger interface {
 	Ping(context.Context) error
 }
 
-type RunReadStore interface {
-	LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
-	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
-	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
-}
-
-type ObservabilityReadStore interface {
-	LoadRunDebugTracePage(context.Context, string, operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error)
-	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
-	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
-	ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
-	ListOperatorRuntimeIncidents(context.Context, operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error)
-}
-
-type EntityReadStore interface {
-	ListOperatorEntities(context.Context, operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
-	LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)
-	AggregateOperatorEntities(context.Context, operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error)
-}
+type RunReadStore = operatorread.RunReader
+type ObservabilityReadStore = operatorread.ObservabilityReader
+type EntityReadStore = operatorread.EntityReader
 
 type AgentIdentityResolver interface {
 	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
 }
 
-type AgentConversationReadStore interface {
-	AgentIdentityResolver
-	ListOperatorAgents(context.Context, operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error)
-	LoadOperatorAgent(context.Context, agentidentity.Identity) (operatorread.OperatorAgentDetail, error)
-	LoadOperatorAgentDiagnosis(context.Context, agentidentity.Identity, operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error)
-	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error)
-	ListOperatorConversations(context.Context, operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error)
-	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
-}
-
-type AgentDeliveryLifecycleReadStore interface {
-	AgentIdentityResolver
-	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error)
-}
-
-type AgentUsageReadStore interface {
-	AgentIdentityResolver
-	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error)
-}
+type AgentReadStore = operatorread.AgentReader
+type ConversationReadStore = operatorread.ConversationReader
+type AgentDeliveryLifecycleReadStore = operatorread.AgentDeliveryLifecycleReader
+type AgentUsageReadStore = operatorread.AgentUsageReader
 
 type BundleCatalogReadStore interface {
 	ListBundleCatalog(context.Context, bundlecatalog.ListOptions) (bundlecatalog.ListResult, error)
@@ -263,9 +231,16 @@ func requireEntityReadStore(reads EntityReadStore) (EntityReadStore, error) {
 	return reads, nil
 }
 
-func requireAgentConversationReadStore(reads AgentConversationReadStore) (AgentConversationReadStore, error) {
+func requireAgentReadStore(reads AgentReadStore) (AgentReadStore, error) {
 	if reads == nil {
-		return nil, fmt.Errorf("agent/conversation read store is required")
+		return nil, fmt.Errorf("agent read store is required")
+	}
+	return reads, nil
+}
+
+func requireConversationReadStore(reads ConversationReadStore) (ConversationReadStore, error) {
+	if reads == nil {
+		return nil, fmt.Errorf("conversation read store is required")
 	}
 	return reads, nil
 }
@@ -447,10 +422,10 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 	if opts.DeliveryLifecycle != nil {
 		handlers["agent.delivery_lifecycle"] = lifecycleHandler
 	}
-	if opts.Conversations != nil {
+	if opts.Agents != nil || opts.Conversations != nil {
 		for name, handler := range map[string]MethodHandler{
 			"agent.list": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireAgentReadStore(opts.Agents)
 				if err != nil {
 					return nil, err
 				}
@@ -465,7 +440,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 			"agent.get": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireAgentReadStore(opts.Agents)
 				if err != nil {
 					return nil, err
 				}
@@ -487,7 +462,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 			"agent.diagnose": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireAgentReadStore(opts.Agents)
 				if err != nil {
 					return nil, err
 				}
@@ -526,7 +501,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 			"agent.delivery_diagnostics": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireAgentReadStore(opts.Agents)
 				if err != nil {
 					return nil, err
 				}
@@ -580,7 +555,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 			"conversation.list": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -589,7 +564,11 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 					return nil, err
 				}
 				if listOpts.AgentID != "" {
-					identity, err := resolveOperatorAgentIdentityParam(ctx, reads, req.Params, listOpts.AgentID)
+					agents, err := requireAgentReadStore(opts.Agents)
+					if err != nil {
+						return nil, err
+					}
+					identity, err := resolveOperatorAgentIdentityParam(ctx, agents, req.Params, listOpts.AgentID)
 					if err != nil {
 						return nil, err
 					}
@@ -609,7 +588,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 			"conversation.list_turns": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -641,7 +620,7 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 			"conversation.get_turn": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.Conversations)
+				reads, err := requireConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -666,6 +645,12 @@ func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map
 				return result, nil
 			},
 		} {
+			if strings.HasPrefix(name, "agent.") && opts.Agents == nil {
+				continue
+			}
+			if strings.HasPrefix(name, "conversation.") && opts.Conversations == nil {
+				continue
+			}
 			handlers[name] = handler
 		}
 	}

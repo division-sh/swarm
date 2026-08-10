@@ -27,66 +27,18 @@ type observabilityPositionCursor struct {
 	LastSeen  string `json:"last_seen,omitempty"`
 }
 
-type OperatorObservabilityReadOwner interface {
-	requireCurrentSchema() error
-	deliverySnapshotsForEvent(context.Context, string) ([]runtimedelivery.Snapshot, error)
-}
-
-type operatorObservabilityQueryer interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-type OperatorObservabilityReadSurface struct {
-	db    operatorObservabilityQueryer
-	owner OperatorObservabilityReadOwner
-}
-
-func NewOperatorObservabilityReadSurface(db operatorObservabilityQueryer, owner OperatorObservabilityReadOwner) *OperatorObservabilityReadSurface {
-	if db == nil || owner == nil {
-		return nil
-	}
-	return &OperatorObservabilityReadSurface{db: db, owner: owner}
-}
-
-func (s *ObservabilityPostgres) operatorObservabilityReadSurface() *OperatorObservabilityReadSurface {
-	if s == nil {
-		return nil
-	}
-	return NewOperatorObservabilityReadSurface(s.backend, s)
-}
-
-func (s *ObservabilityPostgres) ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
-	return s.operatorObservabilityReadSurface().ListOperatorEvents(ctx, opts)
-}
-
-func (s *ObservabilityPostgres) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
-	return s.operatorObservabilityReadSurface().LoadOperatorEvent(ctx, eventID)
-}
-
-func (s *ObservabilityPostgres) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
-	return s.operatorObservabilityReadSurface().ListOperatorRuntimeLogs(ctx, opts)
-}
-
-func (s *ObservabilityPostgres) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
-	return s.operatorObservabilityReadSurface().ListOperatorRuntimeIncidents(ctx, opts)
-}
-
 func (s *ObservabilityPostgres) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
-	return s.operatorObservabilityReadSurface().loadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+	return s.loadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 }
 
-func (r *OperatorObservabilityReadSurface) requireOperatorObservabilityAccess() error {
-	if r == nil || r.db == nil {
+func (r *ObservabilityPostgres) requireOperatorObservabilityAccess() error {
+	if r == nil || r.backend == nil {
 		return fmt.Errorf("operator observability read surface is required")
 	}
-	if r.owner == nil {
-		return fmt.Errorf("operator observability read surface requires accepted store ownership")
-	}
-	return r.owner.requireCurrentSchema()
+	return r.requireCurrentSchema()
 }
 
-func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
+func (r *ObservabilityPostgres) ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
 	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return operatorread.OperatorEventListResult{}, err
 	}
@@ -166,7 +118,7 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 			pageWhere = append(pageWhere, fmt.Sprintf("(e.created_at %s $%d OR (e.created_at = $%d AND e.event_id::text %s $%d))", comparison, timeArg, timeArg, comparison, idArg))
 		}
 		pageArgs = append(pageArgs, opts.Limit+1)
-		rows, err := r.db.QueryContext(ctx, `
+		rows, err := r.backend.QueryContext(ctx, `
 			SELECT e.event_id::text, e.created_at
 			FROM events e
 			WHERE `+strings.Join(pageWhere, " AND ")+fmt.Sprintf(`
@@ -255,7 +207,7 @@ func operatorEventMatchesListFilter(event operatorread.OperatorEventFull, filter
 	return true
 }
 
-func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
+func (r *ObservabilityPostgres) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
 	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return operatorread.OperatorEventFull{}, err
 	}
@@ -267,7 +219,7 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 	if err != nil {
 		return operatorread.OperatorEventFull{}, operatorread.ErrEventNotFound
 	}
-	row, found, err := loadPostgresEventIdentity(ctx, r.db, parsedEventID.String())
+	row, found, err := loadPostgresEventIdentity(ctx, r.backend, parsedEventID.String())
 	if err != nil {
 		return operatorread.OperatorEventFull{}, fmt.Errorf("load operator event: %w", err)
 	}
@@ -301,8 +253,8 @@ func (r *OperatorObservabilityReadSurface) LoadOperatorEvent(ctx context.Context
 	return event, nil
 }
 
-func (r *OperatorObservabilityReadSurface) loadOperatorEventDeliveries(ctx context.Context, eventID string) ([]operatorread.OperatorEventDelivery, error) {
-	snapshots, err := r.owner.deliverySnapshotsForEvent(ctx, eventID)
+func (r *ObservabilityPostgres) loadOperatorEventDeliveries(ctx context.Context, eventID string) ([]operatorread.OperatorEventDelivery, error) {
+	snapshots, err := r.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("load operator event deliveries: %w", err)
 	}
@@ -346,8 +298,8 @@ func nullTimePtr(value sql.NullTime) *time.Time {
 	return &at
 }
 
-func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx context.Context, eventID string) ([]operatorread.OperatorDeadLetterRecord, error) {
-	rows, err := r.db.QueryContext(ctx, `
+func (r *ObservabilityPostgres) loadOperatorEventDeadLetters(ctx context.Context, eventID string) ([]operatorread.OperatorDeadLetterRecord, error) {
+	rows, err := r.backend.QueryContext(ctx, `
 		SELECT
 			dl.dead_letter_id::text,
 			COALESCE(dl.delivery_id::text, ''),
@@ -385,8 +337,8 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 	return out, nil
 }
 
-func (r *OperatorObservabilityReadSurface) loadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
-	rows, err := r.db.QueryContext(ctx, `
+func (r *ObservabilityPostgres) loadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+	rows, err := r.backend.QueryContext(ctx, `
 		SELECT
 			dl.dead_letter_id::text,
 			dl.delivery_id::text,
@@ -425,7 +377,7 @@ func (r *OperatorObservabilityReadSurface) loadOperatorDeliveryDeadLetters(ctx c
 	return out, nil
 }
 
-func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
+func (r *ObservabilityPostgres) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
 	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return operatorread.OperatorRuntimeLogListResult{}, err
 	}
@@ -466,7 +418,7 @@ func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeLogs(ctx context.C
 		compareOrder = "ASC"
 	}
 	args = append(args, opts.Limit+1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.backend.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			e.event_id::text,
 			COALESCE(e.run_id::text, ''),
@@ -537,13 +489,13 @@ func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeLogs(ctx context.C
 	return operatorread.OperatorRuntimeLogListResult{Logs: logs, NextCursor: nextCursor}, nil
 }
 
-func (r *OperatorObservabilityReadSurface) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
+func (r *ObservabilityPostgres) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
 	if err := r.requireOperatorObservabilityAccess(); err != nil {
 		return operatorread.OperatorRuntimeIncidentListResult{}, err
 	}
 	opts = defaultOperatorRuntimeIncidentListOptions(opts)
 	cutoff := time.Now().UTC().Add(-time.Duration(opts.SinceHours) * time.Hour)
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.backend.QueryContext(ctx, `
 		SELECT
 			e.event_id::text,
 			COALESCE(e.run_id::text, ''),

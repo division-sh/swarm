@@ -59,7 +59,8 @@ type selectedConcreteRuntimeStore interface {
 	apiv1.APIIdempotencyStore
 	apiv1.RunReadStore
 	apiv1.EntityReadStore
-	apiv1.AgentConversationReadStore
+	apiv1.AgentReadStore
+	apiv1.ConversationReadStore
 	apiv1.RunBundleContextStore
 	apiv1.BundleCatalogReadStore
 	apiv1.ConversationForkReadStore
@@ -175,7 +176,8 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 		{Name: "RunQuiescenceStore", Classification: selectedStoreRoleServeControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "serve abandon-active-runs quiescence is a selected control capability"},
 		{Name: "RunReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "run.get/list/diagnose reads are selected public read capabilities"},
 		{Name: "EntityReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "entity.get/list/aggregate reads are selected public read capabilities"},
-		{Name: "AgentConversationReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, Issue: 1782, SpecRef: selectedFacadeSpec, Reason: "agent/conversation reads were promoted as pure operator-read capabilities"},
+		{Name: "AgentReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, Issue: 1782, SpecRef: selectedFacadeSpec, Reason: "agent reads are an exact selected public capability"},
+		{Name: "ConversationReadStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, Issue: 1782, SpecRef: selectedFacadeSpec, Reason: "conversation reads are an exact selected public capability"},
 		{Name: "RunBundleContextStore", Classification: selectedStoreRolePublicAPIReadControl, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "served event.publish run-bundle context reads are selected public read capabilities"},
 		{Name: "BundleRuntimeCatalogStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "DB-loaded bundle runtime catalog remains a spec-classified Postgres-only product capability"},
 		{Name: "BundleSourceCatalogStore", Classification: selectedStoreRoleOptionalProductPostgres, RequiredOn: selectedStoreRolePostgres, ForbiddenOn: selectedStoreRoleSQLite, SpecRef: selectedFacadeSpec, Reason: "bundle source catalog writes/register/delete are spec-classified optional product lifecycle capabilities"},

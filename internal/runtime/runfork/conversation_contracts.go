@@ -62,6 +62,14 @@ type ConversationForkCreateRequest struct {
 	Now             time.Time
 }
 
+// ConversationForkSource is the exact persisted conversation identity needed
+// to establish fork lineage. Conversation projection owns its resolution.
+type ConversationForkSource struct {
+	SessionID string
+	RunID     string
+	Identity  runtimeagentidentity.Identity
+}
+
 type ConversationForkListOptions struct {
 	SourceSessionID string
 	Limit           int

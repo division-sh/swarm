@@ -26,6 +26,7 @@ type conversationForkStore struct {
 	sqlite    *RunForkSQLiteOwner
 	admission schemaAdmissionOwner
 	effects   conversationForkEffectOwner
+	sources   conversationForkSourceReader
 }
 
 type conversationForkEffectOwner interface {
@@ -66,14 +67,14 @@ func postgresConversationForkStore(s *RunForkPostgresOwner) (conversationForkSto
 	if s == nil || s.backend == nil {
 		return conversationForkStore{}, fmt.Errorf("postgres store is required")
 	}
-	return conversationForkStore{db: s.backend, dialect: conversationForkPostgres, admission: s, effects: s.EffectPostgresOwner}, nil
+	return conversationForkStore{db: s.backend, dialect: conversationForkPostgres, admission: s, effects: s.EffectPostgresOwner, sources: s.conversations}, nil
 }
 
 func sqliteConversationForkStore(s *RunForkSQLiteOwner) (conversationForkStore, error) {
 	if s == nil || s.backend == nil {
 		return conversationForkStore{}, fmt.Errorf("sqlite runtime store is required")
 	}
-	return conversationForkStore{db: s.backend, dialect: conversationForkSQLite, sqlite: s, admission: s, effects: s.EffectSQLiteOwner}, nil
+	return conversationForkStore{db: s.backend, dialect: conversationForkSQLite, sqlite: s, admission: s, effects: s.EffectSQLiteOwner, sources: s.conversations}, nil
 }
 
 func (s conversationForkStore) requireCurrentSchema() error {
@@ -125,13 +126,6 @@ func (s conversationForkStore) currentLeaseSQL() string {
 		return "lease_expires_at>CURRENT_TIMESTAMP"
 	}
 	return sqliteCurrentLeaseSQL
-}
-
-func (s conversationForkStore) conversationQuerySources() []string {
-	if s.dialect == conversationForkSQLite {
-		return sqliteOperatorConversationQuerySources()
-	}
-	return operatorConversationQuerySources()
 }
 
 func (s conversationForkStore) runMutation(ctx context.Context, serializable bool, fn func(context.Context, *sql.Tx) error) error {

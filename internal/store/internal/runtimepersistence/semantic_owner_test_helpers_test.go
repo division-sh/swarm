@@ -27,6 +27,7 @@ import (
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
@@ -56,7 +57,7 @@ type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
 type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord
 type conversationForkTimeValue = storerunfork.ConversationForkTimeValue
-type conversationTurnRecord = storerunfork.ConversationTurnRecord
+type conversationTurnRecord = storeoperatorsurface.ConversationTurnRecord
 type externalEffectStorySource = storeeffect.ExternalEffectStorySource
 type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt
 type completionRecoveryAuthorityEvidence = storeeffect.CompletionRecoveryAuthorityEvidence
@@ -106,8 +107,8 @@ var writePipelineDispositionTx = storepipeline.WritePipelineDispositionTx
 var replayClaimLockKey = storepipeline.ReplayClaimLockKey
 var expireHumanTaskCards = storedecision.ExpireHumanTaskCards
 var completionRecoverySettlement = storeeffect.CompletionRecoverySettlement
-var operatorConversationTurnListItemFromPublic = storerunfork.OperatorConversationTurnListItemFromPublic
-var projectPublicConversationTurn = storerunfork.ProjectPublicConversationTurn
+var operatorConversationTurnListItemFromPublic = storeoperatorsurface.OperatorConversationTurnListItemFromPublic
+var projectPublicConversationTurn = storeoperatorsurface.ProjectPublicConversationTurn
 var corruptPipelineScopeDisposition = storepipeline.CorruptPipelineScopeDisposition
 var projectBusRunLifecycleSnapshot = storerunlifecycle.ProjectBusRunLifecycleSnapshot
 var externalEffectAuthorityCurrentPostgres = storeeffect.ExternalEffectAuthorityCurrentPostgres

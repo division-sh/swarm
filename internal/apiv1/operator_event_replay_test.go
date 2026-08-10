@@ -158,7 +158,7 @@ type completeOperatorReplayProofStore interface {
 	RunReadStore
 	ObservabilityReadStore
 	APIIdempotencyStore
-	AgentConversationReadStore
+	AgentIdentityResolver
 	activeAPIV1RuntimeBusAgentStore
 }
 
