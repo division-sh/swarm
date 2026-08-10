@@ -21,9 +21,9 @@ type recordingGenericScheduleWakeupOwner struct {
 	activationIDs []string
 }
 
-func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeup(_ context.Context, activationID string) error {
+func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ context.Context, activationID string) (bool, error) {
 	s.activationIDs = append(s.activationIDs, activationID)
-	return nil
+	return false, nil
 }
 
 func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {

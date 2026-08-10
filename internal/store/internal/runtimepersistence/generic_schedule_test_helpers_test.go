@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -67,7 +68,8 @@ func testAgentGenericScheduleCommand(t testing.TB, runID, agentID, flowInstance,
 		ScheduleKey: key, RunID: runID, EntityID: entityID, FlowInstance: path,
 		OwnerKind: runtimegenericschedule.OwnerAgent, OwnerID: identity.AgentID(), AgentIdentity: identity,
 		EventType: flowID + ".timer_fired", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
-		Due: due, TaskID: key,
+		ExecutionMode: executionmode.Live,
+		Due:           due, TaskID: key,
 	}
 }
 
@@ -81,7 +83,8 @@ func testRootGenericScheduleCommand(t testing.TB, runID, entityID, key string, d
 		ScheduleKey: key, RunID: runID, EntityID: entityID,
 		OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime-test",
 		EventType: "test.timer_fired", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
-		Due: due, TaskID: key,
+		ExecutionMode: executionmode.Live,
+		Due:           due, TaskID: key,
 	}
 }
 
@@ -89,7 +92,8 @@ func testGlobalGenericScheduleCommand(key string, due runtimegenericschedule.Due
 	return runtimegenericschedule.AdmissionCommand{
 		ScheduleKey: key, OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime-test",
 		EventType: "platform.test_timer_fired", Payload: semanticvalue.EmptyObject(), RoutingSource: events.NewPlatformControlRoutingSource(),
-		Due: due, TaskID: key,
+		ExecutionMode: executionmode.Live,
+		Due:           due, TaskID: key,
 	}
 }
 
@@ -127,6 +131,7 @@ func cancelGenericScheduleFixture(t testing.TB, ctx context.Context, store runti
 type workflowTimerDDLProofRow struct {
 	timerID, runID, timerName, entityID, flowScopeKey, flowInstanceID, flowInstance string
 	fireEvent, payload, routingSource, recurrenceInterval                           string
+	executionMode                                                                   executionmode.Mode
 	ownerNode, ownerAgent, status                                                   string
 	fireAt, firedAt, createdAt                                                      time.Time
 	recurring                                                                       bool
@@ -153,14 +158,14 @@ func newWorkflowTimerDDLProofRow(runID string) workflowTimerDDLProofRow {
 		timerID: timerID, runID: runID, timerName: ref.TaskID(), entityID: entityID,
 		flowScopeKey: "root", flowInstanceID: "root", flowInstance: "root", fireEvent: "timer.timeout",
 		payload: `{"business":true}`, routingSource: string(routingSourceJSON), fireAt: createdAt.Add(time.Hour),
-		ownerAgent: "workflow-runtime", status: "active", createdAt: createdAt,
+		executionMode: executionmode.Live, ownerAgent: "workflow-runtime", status: "active", createdAt: createdAt,
 	}
 }
 
 func insertWorkflowTimerDDLProofRow(ctx context.Context, db *sql.DB, store any, row workflowTimerDDLProofRow) error {
 	args := []any{
 		row.timerID, row.runID, row.timerName, row.entityID, row.flowScopeKey, row.flowInstanceID, row.flowInstance, row.fireEvent,
-		row.payload, row.routingSource, row.fireAt, row.recurring, nullableScheduleFixtureText(row.recurrenceInterval),
+		row.payload, row.routingSource, row.executionMode, row.fireAt, row.recurring, nullableScheduleFixtureText(row.recurrenceInterval),
 		nullableScheduleFixtureText(row.ownerNode), row.ownerAgent, row.status, nullableScheduleFixtureTime(row.firedAt), row.createdAt, row.sourceTimerID,
 		row.forkedFromRunID, row.forkedFromEventID, row.reconstructionOwner,
 	}
@@ -168,13 +173,13 @@ func insertWorkflowTimerDDLProofRow(ctx context.Context, db *sql.DB, store any, 
 		_, err := db.ExecContext(ctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload,
-				routing_source, fire_at, recurring, recurrence_interval, owner_node, owner_agent,
+				routing_source, execution_mode, fire_at, recurring, recurrence_interval, owner_node, owner_agent,
 				owner_kind, task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
 				forked_from_event_id, reconstruction_owner
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb,
-				$10::jsonb, $11, $12, $13, $14, $15, 'system', 'workflow_timer', $16, $17, $18,
-				$19::uuid, $20::uuid, $21::uuid, $22
+				$10::jsonb, $11, $12, $13, $14, $15, $16, 'system', 'workflow_timer', $17, $18, $19,
+				$20::uuid, $21::uuid, $22::uuid, $23
 			)
 		`, args...)
 		return err
@@ -182,11 +187,11 @@ func insertWorkflowTimerDDLProofRow(ctx context.Context, db *sql.DB, store any, 
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload,
-			routing_source, fire_at, recurring, recurrence_interval, owner_node, owner_agent,
+			routing_source, execution_mode, fire_at, recurring, recurrence_interval, owner_node, owner_agent,
 			owner_kind, task_type, status, fired_at, created_at, source_timer_id, forked_from_run_id,
 			forked_from_event_id, reconstruction_owner
 		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'system', 'workflow_timer', ?, ?, ?, ?, ?, ?, ?
 		)
 	`, args...)
 	return err

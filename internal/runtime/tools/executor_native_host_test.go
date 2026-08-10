@@ -220,7 +220,7 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	}
 
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		ModelRuntime:      nativeCapabilityRuntimeStub{},
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 		WorkspaceResolver: manager,
 	})
 	exec.execWorkspaceFn = func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
@@ -322,7 +322,7 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		ModelRuntime:      nativeCapabilityRuntimeStub{},
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 		WorkspaceResolver: manager,
 	})
 	actorCtx := models.WithActor(ctx, actor)
@@ -453,7 +453,7 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.T) {
 	workspaceDir := t.TempDir()
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		ModelRuntime: nativeCapabilityRuntimeStub{
+		ModelRuntimes: staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{
 			caps: llm.NativeToolCapabilities{
 				Bash:      true,
 				FileIO:    true,

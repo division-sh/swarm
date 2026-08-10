@@ -6864,7 +6864,9 @@ engine:
         durable activation, an inert process-local wakeup, one deterministic occurrence, and a typed commit result. A
         workflow_timer row is owned by WorkflowTimerLifecycle and is never interpreted by this owner.
       admission: >
-        Every command carries an explicit schedule_key and typed due basis. The selected store compares the complete
+        Every command carries an explicit schedule_key, mandatory live-or-mock execution_mode, and typed due basis. Agent
+        schedules copy exact causal execution mode, join schedules copy exact lifecycle-effect mode, and boot schedules are
+        explicitly live. Missing mode fails before mutation. The selected store compares the complete
         immutable command under `{scope, schedule_key}` before reading a clock. A missing key creates one activation and
         stamps admitted_at, initial due, and current due once in the same transaction; identical content returns the same
         current or terminal activation as exact replay; changed content is a conflict. Absolute agent and join coordinates,
@@ -6905,7 +6907,10 @@ engine:
         outer selected-store transaction while delegating generic and workflow rows to distinct private family owners. Each
         returns exact activation evidence for post-commit wakeup retirement. One family-typed post-commit reconciler consumes
         that evidence for every live operation, including public run.stop, and attempts every committed cancellation even if
-        one retirement fails. Reconciliation failure is diagnostic recovery evidence after an already committed stop; it
+        one retirement fails. Each family lifecycle attempts exact reconciliation and queues its existing bounded,
+        coalesced recovery loop on transient failure. Public run.stop reports complete, recovery pending, or recovery failed
+        with diagnostic evidence in its idempotently recorded response; replay returns that exact committed response without
+        re-executing the stop. Reconciliation failure is diagnostic recovery evidence after an already committed stop; it
         never replays the stop transaction. No raw mixed-family status writer, public SQL transaction, copied comparison SQL,
         migration reader, or compatibility path is supported.
       reply_and_scope: >
@@ -13912,7 +13917,9 @@ platform_tables:
         root for a root entity schedule, flow_owned_control for a declared flow execution, or platform_control for a closed
         global system schedule;
         firing and recovery copy it without deriving ownership from flow_instance or other row shape. execution_mode carries
-        the exact causal authority for every delayed event and is copied unchanged across restore and fire. fire_payload carries business input only; it must not carry workflow
+        mandatory immutable causal authority for every delayed event. Admission, exact-replay comparison, selected-store
+        persistence, restore, occurrence events, revision projection, and readback copy it unchanged; missing or invalid mode
+        fails closed and live/mock conflicts are never exact replay. fire_payload carries business input only; it must not carry workflow
         activation, occurrence, generation, status, or reconstruction authority. fire_at is the current persisted occurrence
         coordinate. One-shot completion changes status to fired; recurring completion keeps status active and advances fire_at
         atomically. Generic schedule readers must exclude typed workflow activation rows. reply_context_id separately carries
@@ -28704,6 +28711,26 @@ api_specification:
           ok:
             type: boolean
             const: true
+      RunStopRecoveryResult:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status:
+            type: string
+            enum: [complete, pending, failed]
+          diagnostic:
+            type: string
+      RunStopResult:
+        type: object
+        additionalProperties: false
+        required: [ok, recovery]
+        properties:
+          ok:
+            type: boolean
+            const: true
+          recovery:
+            $ref: '#/components/schemas/RunStopRecoveryResult'
       StandingServiceMutationResult:
         type: object
         additionalProperties: false
@@ -30128,7 +30155,9 @@ api_specification:
         platform/pipeline receipt, run.stop preserves that receipt as the authoritative routing outcome while
         terminalizing the pending delivery. When a stopped event lacks a platform/pipeline receipt and no active
         delivery remains, the store writes a stopped-run pipeline dead-letter so missing-pipeline-receipt replay
-        cannot resurrect abandoned work.
+        cannot resurrect abandoned work. The committed response reports timer projection recovery as complete,
+        pending in the family lifecycle recovery loops, or failed with a diagnostic. Idempotent replay returns that
+        exact response and never repeats the committed stop.
       scope:
         required:
         - write:runs
@@ -30146,7 +30175,7 @@ api_specification:
         name: result
         required: true
         schema:
-          $ref: '#/components/schemas/OkResult'
+          $ref: '#/components/schemas/RunStopResult'
       errors:
       - RUN_NOT_FOUND
       - RUN_ALREADY_TERMINAL

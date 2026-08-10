@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -248,6 +249,13 @@ func TestGenericScheduleAdmissionReplayConflictAndCancellationOnBothStores(t *te
 			if created.Outcome != runtimegenericschedule.AdmissionCreated || !created.Activation.AdmittedAt.Equal(base) || !created.Activation.InitialDueAt.Equal(base.Add(10*time.Minute)) {
 				t.Fatalf("created activation = %#v", created)
 			}
+			if created.Activation.Command.ExecutionMode != executionmode.Live {
+				t.Fatalf("created execution mode = %q, want live", created.Activation.Command.ExecutionMode)
+			}
+			loaded, found, err := store.LoadGenericScheduleActivation(ctx, created.Activation.ID)
+			if err != nil || !found || loaded.Command.ExecutionMode != executionmode.Live {
+				t.Fatalf("execution mode readback = found:%v activation:%#v err:%v", found, loaded, err)
+			}
 
 			clock = base.Add(24 * time.Hour)
 			replayed, err := store.AdmitGenericSchedule(ctx, command)
@@ -263,6 +271,11 @@ func TestGenericScheduleAdmissionReplayConflictAndCancellationOnBothStores(t *te
 			conflict.EventType = "schedule.changed_timer"
 			if _, err := store.AdmitGenericSchedule(ctx, conflict); !runtimegenericschedule.IsConflict(err) {
 				t.Fatalf("changed-content replay error = %v, want typed conflict", err)
+			}
+			modeConflict := command
+			modeConflict.ExecutionMode = executionmode.Mock
+			if _, err := store.AdmitGenericSchedule(ctx, modeConflict); !runtimegenericschedule.IsConflict(err) {
+				t.Fatalf("changed-mode replay error = %v, want typed conflict", err)
 			}
 
 			wakeup, err := created.Activation.Wakeup()
@@ -286,6 +299,122 @@ func TestGenericScheduleAdmissionReplayConflictAndCancellationOnBothStores(t *te
 			replayed, err = store.AdmitGenericSchedule(ctx, command)
 			if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.Status != runtimegenericschedule.StatusCancelled {
 				t.Fatalf("terminal exact replay = %#v, %v", replayed, err)
+			}
+		})
+	}
+}
+
+func TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db, ctx := tc.open(t)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			for _, mode := range []executionmode.Mode{executionmode.Live, executionmode.Mock} {
+				t.Run(string(mode), func(t *testing.T) {
+					command := testAgentGenericScheduleCommand(
+						t, runID, "mode-agent", "mode/instance", uuid.NewString(), "mode-"+string(mode),
+						runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
+					)
+					command.ExecutionMode = mode
+
+					created, err := store.AdmitGenericSchedule(ctx, command)
+					if err != nil || created.Outcome != runtimegenericschedule.AdmissionCreated {
+						t.Fatalf("create %s activation = %#v, %v", mode, created, err)
+					}
+					replayed, err := store.AdmitGenericSchedule(ctx, command)
+					if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.ID != created.Activation.ID {
+						t.Fatalf("exact %s replay = %#v, %v", mode, replayed, err)
+					}
+
+					var reconstructed runtimegenericschedule.Store
+					switch store.(type) {
+					case *SQLiteRuntimeStore:
+						restarted := NewSQLiteRuntimeStoreForTest(db)
+						if err := restarted.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
+							t.Fatalf("bootstrap reconstructed SQLite store: %v", err)
+						}
+						reconstructed = restarted
+					case *PostgresStore:
+						restarted := NewPostgresStoreForTest(db)
+						if err := restarted.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
+							t.Fatalf("bootstrap reconstructed PostgreSQL store: %v", err)
+						}
+						reconstructed = restarted
+					default:
+						t.Fatalf("unsupported selected store %T", store)
+					}
+					loaded, found, err := reconstructed.LoadGenericScheduleActivation(ctx, created.Activation.ID)
+					if err != nil || !found || loaded.Command.ExecutionMode != mode {
+						t.Fatalf("reconstructed %s readback = found:%v activation:%#v err:%v", mode, found, loaded, err)
+					}
+
+					changedMode := command
+					if mode == executionmode.Live {
+						changedMode.ExecutionMode = executionmode.Mock
+					} else {
+						changedMode.ExecutionMode = executionmode.Live
+					}
+					if _, err := reconstructed.AdmitGenericSchedule(ctx, changedMode); !runtimegenericschedule.IsConflict(err) {
+						t.Fatalf("%s-to-%s replay error = %v, want typed conflict", mode, changedMode.ExecutionMode, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestTimerExecutionModeFreshSchemaIsRequiredWithoutDefaultOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db, ctx := tc.open(t)
+			var nullable string
+			var defaultValue sql.NullString
+			switch store.(type) {
+			case *SQLiteRuntimeStore:
+				rows, err := db.QueryContext(ctx, `PRAGMA table_info(timers)`)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer rows.Close()
+				found := false
+				for rows.Next() {
+					var ordinal, notNull, primaryKey int
+					var name, dataType string
+					if err := rows.Scan(&ordinal, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+						t.Fatal(err)
+					}
+					if name == "execution_mode" {
+						found = true
+						if notNull != 1 || defaultValue.Valid {
+							t.Fatalf("SQLite execution_mode schema not_null=%d default=%q", notNull, defaultValue.String)
+						}
+					}
+				}
+				if err := rows.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if !found {
+					t.Fatal("SQLite timers.execution_mode column is missing")
+				}
+			case *PostgresStore:
+				if err := db.QueryRowContext(ctx, `
+					SELECT is_nullable, column_default
+					FROM information_schema.columns
+					WHERE table_schema = current_schema() AND table_name = 'timers' AND column_name = 'execution_mode'
+				`).Scan(&nullable, &defaultValue); err != nil {
+					t.Fatal(err)
+				}
+				if nullable != "NO" || defaultValue.Valid {
+					t.Fatalf("PostgreSQL execution_mode nullable=%q default=%q", nullable, defaultValue.String)
+				}
+			default:
+				t.Fatalf("unsupported selected store %T", store)
+			}
+
+			invalid := newWorkflowTimerDDLProofRow(runtimecorrelation.RunIDFromContext(ctx))
+			invalid.executionMode = executionmode.Mode("invalid")
+			if err := insertWorkflowTimerDDLProofRow(ctx, db, store, invalid); err == nil {
+				t.Fatal("fresh schema accepted invalid timer execution_mode")
 			}
 		})
 	}
@@ -513,6 +642,7 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 				ScheduleKey: "global-only", OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
 				EventType: "platform.global_tick", Payload: semanticvalue.EmptyObject(),
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 				Due:           runtimegenericschedule.EveryDue(time.Hour), TaskID: "global-only",
 			}
 			if admitted, err := selected.AdmitGenericSchedule(context.Background(), global); err != nil || admitted.Activation.Command.RunID != "" {

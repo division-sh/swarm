@@ -94,17 +94,6 @@ func (p scheduledProjection) fire(
 	}
 }
 
-func (s *Schedule) NormalizeExecutionMode() error {
-	if s == nil {
-		return errors.New("schedule is required")
-	}
-	s.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(s.ExecutionMode)))
-	if s.ExecutionMode.Valid() {
-		return nil
-	}
-	return fmt.Errorf("schedule execution_mode %q is invalid", s.ExecutionMode)
-}
-
 type Scheduler struct {
 	mu                  sync.Mutex
 	onWorkflowTimer     func(context.Context, WorkflowTimerWakeup)

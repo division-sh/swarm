@@ -21,6 +21,16 @@ type RunControlController interface {
 	Continue(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error)
 }
 
+type runControlRecoveryResult struct {
+	Status     runtimeruncontrol.RecoveryDisposition `json:"status"`
+	Diagnostic string                                `json:"diagnostic,omitempty"`
+}
+
+type runControlResult struct {
+	OK       bool                      `json:"ok"`
+	Recovery *runControlRecoveryResult `json:"recovery,omitempty"`
+}
+
 func OperatorRunControlHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	if opts.RunControl == nil || opts.Idempotency == nil {
 		return nil
@@ -89,7 +99,15 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, runControlError(runID, err)
 		}
-		response, err := json.Marshal(okResult{OK: true})
+		responseResult := runControlResult{OK: true}
+		if action == "stop" {
+			recovery := &runControlRecoveryResult{Status: result.Recovery.Disposition}
+			if result.Recovery.Err != nil {
+				recovery.Diagnostic = result.Recovery.Err.Error()
+			}
+			responseResult.Recovery = recovery
+		}
+		response, err := json.Marshal(responseResult)
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
@@ -98,7 +116,7 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 	if err != nil {
 		return nil, runControlError(runID, err)
 	}
-	var stored okResult
+	var stored runControlResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
 		if replay {
 			return nil, fmt.Errorf("decode %s idempotency response: %w", req.Method, err)

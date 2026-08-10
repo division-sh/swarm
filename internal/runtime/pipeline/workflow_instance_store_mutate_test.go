@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -364,7 +365,8 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		ScheduleKey: "task_timer", RunID: runtimecorrelation.RunIDFromContext(ctx), EntityID: entityID, FlowInstance: storageRef,
 		OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: runtimeWorkflowID,
 		EventType: "timer.task_timeout", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
-		Due: runtimegenericschedule.AbsoluteDue(now.Add(2 * time.Hour)), TaskID: "task_timer",
+		ExecutionMode: executionmode.Live,
+		Due:           runtimegenericschedule.AbsoluteDue(now.Add(2 * time.Hour)), TaskID: "task_timer",
 	})
 
 	if err := store.mutate(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef), func(instance *WorkflowInstance) {

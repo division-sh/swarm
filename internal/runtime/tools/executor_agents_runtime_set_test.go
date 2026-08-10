@@ -82,7 +82,7 @@ func TestExecAgentHireResolvesMockBeforeNativeToolAdmissionWithProductionRuntime
 		},
 	})
 	provider := runtimeauthority.NewSourceProvider(source)
-	executor = runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	executor = runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: provider,
 		WorkflowSource:    source,

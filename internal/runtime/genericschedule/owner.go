@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 const wakeupCallbackTimeout = 10 * time.Second
@@ -412,7 +411,7 @@ func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byt
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: occurrenceProducerID},
 		TaskID:   activation.Command.TaskID, Payload: json.RawMessage(append([]byte(nil), payload...)),
 		Envelope:      events.EventEnvelope{EntityID: activation.Command.EntityID, FlowInstance: activation.Command.FlowInstance},
-		RoutingSource: activation.Command.RoutingSource, CreatedAt: occurrence.DueAt, ExecutionMode: executionmode.Live,
+		RoutingSource: activation.Command.RoutingSource, CreatedAt: occurrence.DueAt, ExecutionMode: activation.Command.ExecutionMode,
 	}
 	if activation.Command.RunID == "" {
 		return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: facts})
@@ -420,22 +419,31 @@ func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byt
 	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: activation.Command.RunID})
 }
 
-func (l *Lifecycle) startRecovery(activationID string) {
+// ReconcileWakeupWithRecovery attempts the exact process projection once and,
+// on failure, enters the lifecycle's existing coalesced recovery loop.
+func (l *Lifecycle) ReconcileWakeupWithRecovery(ctx context.Context, activationID string) (bool, error) {
+	if err := l.ReconcileWakeup(ctx, activationID); err != nil {
+		return l.startRecovery(activationID), err
+	}
+	return false, nil
+}
+
+func (l *Lifecycle) startRecovery(activationID string) bool {
 	if l == nil {
-		return
+		return false
 	}
 	activationID = stringsTrim(activationID)
 	if activationID == "" {
-		return
+		return false
 	}
 	l.mu.Lock()
 	if l.stop {
 		l.mu.Unlock()
-		return
+		return false
 	}
 	if _, exists := l.retry[activationID]; exists {
 		l.mu.Unlock()
-		return
+		return true
 	}
 	l.retry[activationID] = struct{}{}
 	l.wg.Add(1)
@@ -464,6 +472,7 @@ func (l *Lifecycle) startRecovery(activationID string) {
 			}
 		}
 	}()
+	return true
 }
 
 func (l *Lifecycle) retireExactWakeup(ctx context.Context, wakeup Wakeup) error {

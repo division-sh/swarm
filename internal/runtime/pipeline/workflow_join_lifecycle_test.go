@@ -116,9 +116,11 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:      &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
-				Persistence: workflowPersistenceForTest(store),
+				Module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence:      workflowPersistenceForTest(store),
+				GenericSchedules: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
@@ -150,7 +152,7 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 				t.Fatalf("commit mock workflow transition: %v", err)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
-			if len(upserts) != 1 || upserts[0].ExecutionMode != executionmode.Mock {
+			if len(upserts) != 1 || upserts[0].Command.ExecutionMode != executionmode.Mock {
 				t.Fatalf("mock join schedules = %#v, want one mock timeout", upserts)
 			}
 		})
@@ -182,7 +184,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			entityID := FlowInstanceEntityID("orders/order-1")
 			runID := uuid.NewString()
 			ensurePipelineTestRun(t, store, runID)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "order-1", StorageRef: "orders/order-1", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members},
@@ -238,7 +240,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 			store := newPostgresWorkflowInstanceStoreForTest(db)
 			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(workflowJoinLifecycleBundle())}, workflowStore: store, genericSchedules: schedules}
@@ -350,7 +352,7 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 	entityID := FlowInstanceEntityID("orders/order-typed")
 	runID := uuid.NewString()
 	ensurePipelineTestRun(t, store, runID)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "order-typed", StorageRef: "orders/order-typed", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
@@ -495,7 +497,7 @@ func newSQLiteWorkflowJoinStore(t *testing.T) (*workflowInstanceStore, context.C
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
 	runID := uuid.NewString()
 	ensurePipelineTestRun(t, store, runID)
-	return store, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+	return store, runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 }
 
 func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.T) {
@@ -511,7 +513,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 		}},
 	}
 	for _, tc := range tests {
@@ -614,7 +616,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 		}},
 	}
 	for _, tc := range tests {
@@ -697,7 +699,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 		}},
 	}
 	for _, tc := range tests {
@@ -793,7 +795,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 		}},
 	}
 	for _, tc := range tests {
@@ -882,7 +884,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			return newPostgresWorkflowInstanceStoreForTest(db), runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			return newPostgresWorkflowInstanceStoreForTest(db), runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), executionmode.Live)
 		}},
 	}
 	for _, tc := range tests {

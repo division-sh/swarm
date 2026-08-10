@@ -16,16 +16,16 @@ import (
 	"github.com/google/uuid"
 )
 
-type committedStopRecoveryProbe struct{ stopCalls int }
+type committedStopRecoveryProbe struct {
+	stopCalls int
+	recovery  runtimeruncontrol.PostCommitRecovery
+}
 
 func (p *committedStopRecoveryProbe) Stop(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
 	p.stopCalls++
 	return runtimeruncontrol.TransitionResult{
 		RunID: req.RunID, Status: runtimeruncontrol.StatusCancelled,
-		Recovery: runtimeruncontrol.PostCommitRecovery{
-			Disposition: runtimeruncontrol.RecoveryFailed,
-			Err:         errors.New("post-commit timer retirement failed"),
-		},
+		Recovery: p.recovery,
 	}, nil
 }
 
@@ -38,30 +38,48 @@ func (*committedStopRecoveryProbe) Continue(context.Context, runtimeruncontrol.T
 }
 
 func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailure(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	controller := &committedStopRecoveryProbe{}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Idempotency: pg,
-			RunControl:  controller,
-		}),
-	})
-	runID := uuid.NewString()
-	body := runControlBody("run.stop", runID, "committed-stop-recovery")
-	for attempt := 0; attempt < 2; attempt++ {
-		response := rpcCall(t, handler, body)
-		if response.Error != nil {
-			t.Fatalf("run.stop attempt %d error = %#v", attempt+1, response.Error)
-		}
-		if result := asMap(t, response.Result); result["ok"] != true {
-			t.Fatalf("run.stop attempt %d result = %#v", attempt+1, result)
-		}
-	}
-	if controller.stopCalls != 1 {
-		t.Fatalf("committed run.stop executions = %d, want one", controller.stopCalls)
+	for _, tc := range []struct {
+		name        string
+		disposition runtimeruncontrol.RecoveryDisposition
+		diagnostic  string
+	}{
+		{name: "pending", disposition: runtimeruncontrol.RecoveryPending, diagnostic: "post-commit timer retirement queued"},
+		{name: "failed", disposition: runtimeruncontrol.RecoveryFailed, diagnostic: "post-commit timer retirement failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			controller := &committedStopRecoveryProbe{recovery: runtimeruncontrol.PostCommitRecovery{
+				Disposition: tc.disposition, Err: errors.New(tc.diagnostic),
+			}}
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: OperatorReadHandlers(OperatorReadOptions{
+					Idempotency: pg,
+					RunControl:  controller,
+				}),
+			})
+			runID := uuid.NewString()
+			body := runControlBody("run.stop", runID, "committed-stop-recovery")
+			for attempt := 0; attempt < 2; attempt++ {
+				response := rpcCall(t, handler, body)
+				if response.Error != nil {
+					t.Fatalf("run.stop attempt %d error = %#v", attempt+1, response.Error)
+				}
+				result := asMap(t, response.Result)
+				if result["ok"] != true {
+					t.Fatalf("run.stop attempt %d result = %#v", attempt+1, result)
+				}
+				recovery := asMap(t, result["recovery"])
+				if recovery["status"] != string(tc.disposition) || recovery["diagnostic"] != tc.diagnostic {
+					t.Fatalf("run.stop attempt %d recovery = %#v", attempt+1, recovery)
+				}
+			}
+			if controller.stopCalls != 1 {
+				t.Fatalf("committed run.stop executions = %d, want one", controller.stopCalls)
+			}
+		})
 	}
 }
 
@@ -144,11 +162,17 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	if stopped.Error != nil {
 		t.Fatalf("run.stop error = %#v", stopped.Error)
 	}
+	if recovery := asMap(t, asMap(t, stopped.Result)["recovery"]); recovery["status"] != string(runtimeruncontrol.RecoveryComplete) {
+		t.Fatalf("run.stop recovery = %#v, want complete", recovery)
+	}
 	assertRunControlState(t, db, runID, "cancelled", "stopped")
 
 	stopReplay := rpcCall(t, handler, stopBody)
 	if stopReplay.Error != nil {
 		t.Fatalf("run.stop replay error = %#v", stopReplay.Error)
+	}
+	if recovery := asMap(t, asMap(t, stopReplay.Result)["recovery"]); recovery["status"] != string(runtimeruncontrol.RecoveryComplete) {
+		t.Fatalf("run.stop replay recovery = %#v, want complete", recovery)
 	}
 	terminalPause := rpcCall(t, handler, runControlBody("run.pause", runID, ""))
 	if terminalPause.Error == nil {

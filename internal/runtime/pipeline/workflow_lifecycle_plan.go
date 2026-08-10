@@ -300,7 +300,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
+		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}
@@ -472,7 +472,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
+		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}
@@ -538,7 +538,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 		}
-		command, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind)
+		command, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}
@@ -660,7 +660,7 @@ func (pc *PipelineCoordinator) finalizeWorkflowLifecycleMutation(ctx context.Con
 		return fmt.Errorf("committed generic schedule evidence requires the lifecycle owner")
 	}
 	for _, activation := range append(append([]runtimegenericschedule.Activation(nil), committed.GenericScheduleCancellations...), committed.GenericScheduleActivations...) {
-		if err := pc.genericSchedules.ReconcileWakeup(ctx, activation.ID); err != nil {
+		if _, err := pc.genericSchedules.ReconcileWakeupWithRecovery(ctx, activation.ID); err != nil {
 			return err
 		}
 	}

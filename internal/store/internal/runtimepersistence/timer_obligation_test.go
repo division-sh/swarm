@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -198,7 +199,8 @@ func timerObligationProofCommand(t *testing.T, runID, family string, fireAt time
 		return runtimegenericschedule.AdmissionCommand{
 			ScheduleKey: key, OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
 			EventType: "platform.timer_obligation_proof", Payload: semanticvalue.EmptyObject(),
-			RoutingSource: events.NewPlatformControlRoutingSource(), Due: runtimegenericschedule.EveryDue(time.Hour), TaskID: key,
+			RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
+			Due: runtimegenericschedule.EveryDue(time.Hour), TaskID: key,
 		}
 	default:
 		t.Fatalf("unsupported timer obligation proof family %q", family)

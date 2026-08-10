@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
@@ -633,7 +634,7 @@ CAST(timer_id AS TEXT), schedule_key, immutable_hash, COALESCE(CAST(run_id AS TE
 COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), owner_kind, owner_agent,
 COALESCE(agent_name_owner, ''), COALESCE(agent_name_source, ''), COALESCE(agent_route_presence, ''),
 COALESCE(agent_flow_scope_key, ''), COALESCE(agent_flow_instance_id, ''), fire_event, fire_payload,
-routing_source, COALESCE(reply_context_id, ''), due_basis_kind, due_basis_absolute,
+routing_source, execution_mode, COALESCE(reply_context_id, ''), due_basis_kind, due_basis_absolute,
 COALESCE(due_basis_duration, ''), COALESCE(due_basis_cron, ''), COALESCE(task_id, ''),
 immutable_hash, created_at, initial_fire_at, fire_at, COALESCE(CAST(occurrence_event_id AS TEXT), ''),
 occurrence_admitted_at, status, COALESCE(cancel_cause, ''), cancelled_at, fired_at, accepted_at,
@@ -660,20 +661,20 @@ func scanActivation(row rowScanner, d dialect) (runtimegenericschedule.Activatio
 
 func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activation, error) {
 	var (
-		activation                                                                runtimegenericschedule.Activation
-		scheduleKey, runID, entityID, flowInstance, ownerKind, ownerID            string
-		nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID        string
-		eventType, replyContext, dueKind, dueDuration, dueCron, taskID            string
-		immutableHash, immutableHashDuplicate, occurrenceEventID, status          string
-		payloadRaw, routingRaw                                                    any
-		dueAbsoluteRaw, createdRaw, initialRaw, currentRaw, occurrenceAdmittedRaw any
-		cancelCause, failureCode, failureMessage                                  string
-		cancelledRaw, firedRaw, acceptedRaw, failedRaw                            any
+		activation                                                                    runtimegenericschedule.Activation
+		scheduleKey, runID, entityID, flowInstance, ownerKind, ownerID                string
+		nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID            string
+		eventType, executionMode, replyContext, dueKind, dueDuration, dueCron, taskID string
+		immutableHash, immutableHashDuplicate, occurrenceEventID, status              string
+		payloadRaw, routingRaw                                                        any
+		dueAbsoluteRaw, createdRaw, initialRaw, currentRaw, occurrenceAdmittedRaw     any
+		cancelCause, failureCode, failureMessage                                      string
+		cancelledRaw, firedRaw, acceptedRaw, failedRaw                                any
 	)
 	err := row.Scan(
 		&activation.ID, &scheduleKey, &immutableHash, &runID, &entityID, &flowInstance, &ownerKind, &ownerID,
 		&nameOwner, &nameSource, &routePresence, &flowScopeKey, &flowInstanceID, &eventType, &payloadRaw,
-		&routingRaw, &replyContext, &dueKind, &dueAbsoluteRaw, &dueDuration, &dueCron, &taskID,
+		&routingRaw, &executionMode, &replyContext, &dueKind, &dueAbsoluteRaw, &dueDuration, &dueCron, &taskID,
 		&immutableHashDuplicate, &createdRaw, &initialRaw, &currentRaw, &occurrenceEventID,
 		&occurrenceAdmittedRaw, &status, &cancelCause, &cancelledRaw, &firedRaw, &acceptedRaw,
 		&failedRaw, &failureCode, &failureMessage,
@@ -712,7 +713,8 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 	activation.Command = runtimegenericschedule.AdmissionCommand{
 		ScheduleKey: scheduleKey, RunID: runID, EntityID: entityID, FlowInstance: flowInstance,
 		OwnerKind: runtimegenericschedule.OwnerKind(ownerKind), OwnerID: ownerID, AgentIdentity: identity,
-		EventType: eventType, Payload: payload, RoutingSource: routing, ReplyContext: replyContext, Due: due, TaskID: taskID,
+		EventType: eventType, Payload: payload, RoutingSource: routing, ExecutionMode: executionmode.Mode(executionMode),
+		ReplyContext: replyContext, Due: due, TaskID: taskID,
 	}
 	activation.ImmutableHash = immutableHash
 	activation.CurrentEventID = occurrenceEventID
@@ -770,17 +772,18 @@ func insertActivationTx(ctx context.Context, tx *sql.Tx, d dialect, scope string
 	taskType := genericTaskType(activation.Command)
 	query := `INSERT INTO timers (
 		timer_id, timer_name, schedule_scope, schedule_key, immutable_hash, run_id, entity_id, flow_instance,
-		fire_event, fire_payload, routing_source, fire_at, initial_fire_at, recurring,
+		fire_event, fire_payload, routing_source, execution_mode, fire_at, initial_fire_at, recurring,
 		owner_agent, owner_kind, agent_name_owner, agent_name_source,
 		agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, reply_context_id, task_id,
 		due_basis_kind, due_basis_absolute, due_basis_duration, due_basis_cron, task_type, status, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''),
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''),
 		NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, NULLIF(?,''), NULLIF(?,''), ?, 'active', ?)
 	ON CONFLICT(schedule_scope, schedule_key) DO NOTHING`
 	args := []any{
 		activation.ID, activation.Command.ScheduleKey, scope, activation.Command.ScheduleKey, activation.ImmutableHash,
 		nullString(activation.Command.RunID), nullString(activation.Command.EntityID), nullString(activation.Command.FlowInstance),
-		activation.Command.EventType, string(payload), string(routing), activation.CurrentDueAt, activation.InitialDueAt,
+		activation.Command.EventType, string(payload), string(routing), activation.Command.ExecutionMode,
+		activation.CurrentDueAt, activation.InitialDueAt,
 		activation.Command.Due.Recurring(),
 		activation.Command.OwnerID, activation.Command.OwnerKind, identity.NameOwner, identity.NameSource, identity.RoutePresence,
 		identity.FlowScopeKey, identity.FlowInstanceID, activation.Command.ReplyContext, activation.Command.TaskID,
@@ -789,18 +792,18 @@ func insertActivationTx(ctx context.Context, tx *sql.Tx, d dialect, scope string
 	if d == postgresDialect {
 		query = `INSERT INTO timers (
 			timer_id, timer_name, schedule_scope, schedule_key, immutable_hash, run_id, entity_id, flow_instance,
-			fire_event, fire_payload, routing_source, fire_at, initial_fire_at, recurring,
+			fire_event, fire_payload, routing_source, execution_mode, fire_at, initial_fire_at, recurring,
 			owner_agent, owner_kind, agent_name_owner, agent_name_source,
 			agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, reply_context_id, task_id,
 			due_basis_kind, due_basis_absolute, due_basis_duration, due_basis_cron, task_type, status, created_at
 		) VALUES ($1::uuid, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid, NULLIF($8,''),
-			$9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16,
-			NULLIF($17,''), NULLIF($18,''), NULLIF($19,''), NULLIF($20,''), NULLIF($21,''), NULLIF($22,''),
-			NULLIF($23,''), $24, $25, NULLIF($26,''), NULLIF($27,''), $28, 'active', $29)
+			$9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17,
+			NULLIF($18,''), NULLIF($19,''), NULLIF($20,''), NULLIF($21,''), NULLIF($22,''), NULLIF($23,''),
+			NULLIF($24,''), $25, $26, NULLIF($27,''), NULLIF($28,''), $29, 'active', $30)
 		ON CONFLICT(schedule_scope, schedule_key) DO NOTHING`
 		args[5] = activation.Command.RunID
 		args[6] = activation.Command.EntityID
-		args[21] = activation.Command.ReplyContext
+		args[22] = activation.Command.ReplyContext
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {

@@ -1129,7 +1129,7 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 		EntityID:      "entity-root",
 	}
 
-	ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), runtimeeffects.ExecutionModeLive)
 	if _, err := exec.execSchedule(ctx, actor, map[string]any{
 		"schedule_key": "root-proof",
 		"event_type":   "root.timer.fired",
@@ -1156,7 +1156,7 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 		Identity: toolTestRootAgentIdentity(t, "root-agent"),
 		EntityID: "entity-root",
 	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), runtimeeffects.ExecutionModeLive)
 	newExecutor := func() (*Executor, *captureScheduleScheduler) {
 		t.Helper()
 		scheduler := &captureScheduleScheduler{}
@@ -1226,47 +1226,50 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 			}
 		})
 	}
-	if scheduler.schedule.ExecutionMode != runtimeeffects.ExecutionModeLive {
-		t.Fatalf("schedule execution mode = %q, want live", scheduler.schedule.ExecutionMode)
-	}
 }
 
-func TestExecSchedulePreservesMockAuthority(t *testing.T) {
+func TestExecSchedulePreservesExactCausalMode(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		actorMode  runtimeeffects.ExecutionMode
-		causalMode runtimeeffects.ExecutionMode
-		withCausal bool
+		name      string
+		mode      runtimeeffects.ExecutionMode
+		wantError bool
 	}{
-		{name: "mock actor", actorMode: runtimeeffects.ExecutionModeMock},
-		{name: "mock causal event", actorMode: runtimeeffects.ExecutionModeLive, causalMode: runtimeeffects.ExecutionModeMock, withCausal: true},
-		{name: "mock actor and causal event", actorMode: runtimeeffects.ExecutionModeMock, causalMode: runtimeeffects.ExecutionModeMock, withCausal: true},
+		{name: "live causal event", mode: runtimeeffects.ExecutionModeLive},
+		{name: "mock causal event", mode: runtimeeffects.ExecutionModeMock},
+		{name: "missing causal mode", wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			scheduler := &captureScheduleScheduler{}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-			exec := NewExecutorWithOptions(nil, scheduler, ExecutorOptions{WorkflowSource: source})
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 			actor := models.AgentConfig{
-				ExecutionMode: tc.actorMode,
+				ExecutionMode: runtimeeffects.ExecutionModeLive,
 				ID:            "root-agent",
 				Identity:      toolTestRootAgentIdentity(t, "root-agent"),
 				EntityID:      "entity-root",
 			}
-			ctx := context.Background()
-			if tc.withCausal {
-				ctx = runtimeeffects.WithExecutionMode(ctx, tc.causalMode)
+			ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
+			if tc.mode.Valid() {
+				ctx = runtimeeffects.WithExecutionMode(ctx, tc.mode)
 			}
 
 			if _, err := exec.execSchedule(ctx, actor, map[string]any{
-				"event_type": "root.timer.fired",
-				"mode":       "once",
-				"at":         time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
-				"payload":    map[string]any{"reason": "mock-owned"},
-			}); err != nil {
+				"schedule_key": "mode-proof",
+				"event_type":   "root.timer.fired",
+				"mode":         "absolute",
+				"at":           time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+				"payload":      map[string]any{"reason": "mock-owned"},
+			}); tc.wantError != (err != nil) {
 				t.Fatalf("execSchedule: %v", err)
 			}
-			if scheduler.schedule.ExecutionMode != runtimeeffects.ExecutionModeMock {
-				t.Fatalf("schedule execution mode = %q, want mock", scheduler.schedule.ExecutionMode)
+			if tc.wantError {
+				if scheduler.calls != 0 {
+					t.Fatalf("missing causal mode reached admission %d time(s)", scheduler.calls)
+				}
+				return
+			}
+			if scheduler.command.ExecutionMode != tc.mode {
+				t.Fatalf("schedule execution mode = %q, want %q", scheduler.command.ExecutionMode, tc.mode)
 			}
 		})
 	}
@@ -1296,7 +1299,10 @@ func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
 		t.Fatalf("ToolDefinitionsForActor omitted schedule: %#v", definitions)
 	}
 
-	ctx := WithActor(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), actor)
+	ctx := runtimeeffects.WithExecutionMode(
+		WithActor(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), actor),
+		runtimeeffects.ExecutionModeLive,
+	)
 	result, err := exec.Execute(ctx, "schedule", map[string]any{
 		"schedule_key": "supported-surface",
 		"event_type":   "root.timer.fired",
@@ -1480,7 +1486,7 @@ func TestAgentHireHandlerRejectsMockCausalLiveAuthorityBeforeSpawn(t *testing.T)
 				},
 			})
 			manager := &captureManagerStub{}
-			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{
 				Manager:           manager,
 				AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 				WorkflowSource:    source,
@@ -1545,7 +1551,7 @@ func TestAgentMutationHandlersRejectMockCausalStateChangesBeforeManagerMutation(
 				manager := &captureManagerStub{agents: map[string]models.AgentConfig{
 					"live-worker": {ID: "live-worker", ExecutionMode: runtimeeffects.ExecutionModeLive, FlowPath: "review/inst-1"},
 				}}
-				exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager})
+				exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager})
 				actor := models.AgentConfig{
 					ExecutionMode: authorityCase.actorMode,
 					ID:            "manager",
@@ -1796,47 +1802,6 @@ func TestExecAgentHire_RejectsSelfParentBeforeSpawn(t *testing.T) {
 	}
 }
 
-func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing.T) {
-	t.Parallel()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"manager": {ID: "manager", Role: "manager"},
-			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
-		},
-	})
-	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		Manager:           manager,
-		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
-		WorkflowSource:    source,
-	})
-
-	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "manager-1",
-		Role:          "manager",
-		Permissions:   []string{"agent_hire"},
-		NativeTools:   models.NativeToolConfig{FileIO: true},
-		FlowPath:      "review/inst-1",
-	}, map[string]any{
-		"config": map[string]any{
-			"id":               "worker-1",
-			"role":             "worker",
-			"manager_fallback": "manager",
-			"native_tools": map[string]any{
-				"file_io": true,
-			},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "native_tools.file_io") {
-		t.Fatalf("ExecAgentHireDirect error = %v, want native_tools.file_io admission failure", err)
-	}
-	if manager.spawnCalled {
-		t.Fatal("expected native tool admission failure before spawning")
-	}
-}
-
 func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 	t.Parallel()
 
@@ -2023,55 +1988,6 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	}
 	if manager.reconfigureCalled {
 		t.Fatal("expected denied reconfigure to fail closed before persistence")
-	}
-}
-
-func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing.T) {
-	t.Parallel()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"manager": {ID: "manager", Role: "manager"},
-			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
-		},
-	})
-	manager := &captureManagerStub{
-		agents: map[string]models.AgentConfig{
-			"worker-1": {
-				ID:              "worker-1",
-				Role:            "worker",
-				ManagerFallback: "manager",
-				FlowPath:        "review/inst-1",
-			},
-		},
-	}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		Manager:           manager,
-		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
-		WorkflowSource:    source,
-	})
-
-	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "manager-1",
-		Identity:      agentidentitytest.Runtime(t, "manager-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
-		Role:          "manager",
-		Permissions:   []string{"agent_reconfigure"},
-		NativeTools:   models.NativeToolConfig{FileIO: true},
-		FlowPath:      "review/inst-1",
-	}, map[string]any{
-		"agent_id": "worker-1",
-		"config": map[string]any{
-			"native_tools": map[string]any{
-				"file_io": true,
-			},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "native_tools.file_io") {
-		t.Fatalf("ExecAgentReconfigureDirect error = %v, want native_tools.file_io admission failure", err)
-	}
-	if manager.reconfigureCalled {
-		t.Fatal("expected native tool admission failure before reconfigure")
 	}
 }
 

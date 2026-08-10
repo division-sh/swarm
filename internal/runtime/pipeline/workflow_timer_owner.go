@@ -849,6 +849,15 @@ func (l *WorkflowTimerLifecycle) ReconcileWakeup(ctx context.Context, ref timeri
 	return l.registerWakeup(ctx, wakeup)
 }
 
+// ReconcileWakeupWithRecovery attempts the exact process projection once and,
+// on failure, enters the lifecycle's existing coalesced recovery loop.
+func (l *WorkflowTimerLifecycle) ReconcileWakeupWithRecovery(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) (bool, error) {
+	if err := l.ReconcileWakeup(ctx, ref); err != nil {
+		return l.startWakeupRecovery(ref), err
+	}
+	return false, nil
+}
+
 func (l *WorkflowTimerLifecycle) reconcileWakeupImmediately(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) error {
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {

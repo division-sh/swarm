@@ -17,6 +17,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -149,87 +150,100 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 				t.Fatalf("Start runtime: %v", err)
 			}
 
-			dueAt := time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond)
 			routingSource, err := events.NewRootRoutingSource(entityID)
 			if err != nil {
 				t.Fatalf("build generic schedule routing source: %v", err)
 			}
-			command := runtimegenericschedule.AdmissionCommand{
-				ScheduleKey:   "generic-occurrence-proof",
+			baseCommand := runtimegenericschedule.AdmissionCommand{
 				RunID:         runID,
 				OwnerID:       "runtime",
 				OwnerKind:     runtimegenericschedule.OwnerAgent,
 				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "generic-occurrence-proof"),
 				EventType:     "generic.tick",
 				EntityID:      entityID,
-				TaskID:        "generic-occurrence-proof",
 				Payload:       semanticvalue.EmptyObject(),
 				RoutingSource: routingSource,
-				Due:           runtimegenericschedule.AbsoluteDue(dueAt),
 			}
-			admitted, err := rt.GenericSchedules.Admit(ctx, command)
-			if err != nil {
-				t.Fatalf("admit generic occurrence-shaped schedule: %v", err)
-			}
-
-			deadline := time.Now().Add(5 * time.Second)
-			for {
-				var eventCount int
-				query := `SELECT COUNT(*) FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
-				args := []any{command.TaskID, runtimegenericschedule.OccurrenceProducerID()}
-				if postgres {
-					query = `SELECT COUNT(*) FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
-				}
-				if err := db.QueryRowContext(ctx, query, args...).Scan(&eventCount); err != nil {
-					t.Fatalf("read generic scheduled event: %v", err)
-				}
-				activation, found, err := selected.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
+			proveOneShot := func(mode executionmode.Mode) {
+				t.Helper()
+				command := baseCommand
+				command.ScheduleKey = "generic-occurrence-proof-" + string(mode)
+				command.TaskID = command.ScheduleKey
+				command.ExecutionMode = mode
+				command.Due = runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond))
+				admitted, err := rt.GenericSchedules.Admit(ctx, command)
 				if err != nil {
-					t.Fatalf("load generic schedule activation: %v", err)
+					t.Fatalf("admit %s generic occurrence-shaped schedule: %v", mode, err)
 				}
-				if eventCount == 1 && found && activation.Status == runtimegenericschedule.StatusFired {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("generic occurrence-shaped fire did not publish and settle: events=%d activation=%#v found=%v", eventCount, activation, found)
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
 
-			recurringCommand := command
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					var eventCount int
+					var minMode, maxMode string
+					query := `SELECT COUNT(*), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
+					args := []any{command.TaskID, runtimegenericschedule.OccurrenceProducerID()}
+					if postgres {
+						query = `SELECT COUNT(*), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
+					}
+					if err := db.QueryRowContext(ctx, query, args...).Scan(&eventCount, &minMode, &maxMode); err != nil {
+						t.Fatalf("read %s generic scheduled event: %v", mode, err)
+					}
+					activation, found, err := selected.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
+					if err != nil {
+						t.Fatalf("load %s generic schedule activation: %v", mode, err)
+					}
+					if eventCount == 1 && minMode == string(mode) && maxMode == string(mode) &&
+						found && activation.Status == runtimegenericschedule.StatusFired && activation.Command.ExecutionMode == mode {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("%s generic occurrence-shaped fire did not publish and settle: events=%d modes=%q/%q activation=%#v found=%v", mode, eventCount, minMode, maxMode, activation, found)
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+			}
+			proveOneShot(executionmode.Live)
+			proveOneShot(executionmode.Mock)
+
+			recurringCommand := baseCommand
 			recurringCommand.ScheduleKey = "generic-recurring-proof"
 			recurringCommand.TaskID = recurringCommand.ScheduleKey
+			recurringCommand.ExecutionMode = executionmode.Mock
 			recurringCommand.Due = runtimegenericschedule.EveryDue(40 * time.Millisecond)
 			recurring, err := rt.GenericSchedules.Admit(ctx, recurringCommand)
 			if err != nil {
 				t.Fatalf("admit recurring generic schedule: %v", err)
 			}
 
-			countEvents := func() int {
+			countEvents := func() (int, string, string) {
 				t.Helper()
-				query := `SELECT COUNT(DISTINCT event_id) FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
+				query := `SELECT COUNT(DISTINCT event_id), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
 				args := []any{recurringCommand.TaskID, runtimegenericschedule.OccurrenceProducerID()}
 				if postgres {
-					query = `SELECT COUNT(DISTINCT event_id) FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
+					query = `SELECT COUNT(DISTINCT event_id), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
 				}
 				var count int
-				if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+				var minMode, maxMode string
+				if err := db.QueryRowContext(ctx, query, args...).Scan(&count, &minMode, &maxMode); err != nil {
 					t.Fatalf("read recurring generic schedule events: %v", err)
 				}
-				return count
+				return count, minMode, maxMode
 			}
 
-			deadline = time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(5 * time.Second)
 			for {
 				activation, found, err := selected.LoadGenericScheduleActivation(ctx, recurring.Activation.ID)
 				if err != nil {
 					t.Fatalf("load recurring generic schedule activation: %v", err)
 				}
-				if countEvents() >= 2 && found && activation.Status == runtimegenericschedule.StatusActive && activation.CurrentDueAt.After(activation.InitialDueAt) {
+				count, minMode, maxMode := countEvents()
+				if count >= 2 && minMode == string(executionmode.Mock) && maxMode == string(executionmode.Mock) && found &&
+					activation.Status == runtimegenericschedule.StatusActive && activation.Command.ExecutionMode == executionmode.Mock &&
+					activation.CurrentDueAt.After(activation.InitialDueAt) {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("recurring generic schedule did not advance through exact occurrences: activation=%#v found=%v", activation, found)
+					t.Fatalf("recurring generic schedule did not advance through exact mock occurrences: count=%d modes=%q/%q activation=%#v found=%v", count, minMode, maxMode, activation, found)
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
@@ -242,9 +256,9 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			if err != nil || cancelled.Outcome != runtimegenericschedule.CancelChanged {
 				t.Fatalf("cancel recurring generic schedule: result=%#v err=%v", cancelled, err)
 			}
-			settledCount := countEvents()
+			settledCount, _, _ := countEvents()
 			time.Sleep(120 * time.Millisecond)
-			if after := countEvents(); after != settledCount {
+			if after, _, _ := countEvents(); after != settledCount {
 				t.Fatalf("recurring generic schedule published after cancellation: before=%d after=%d", settledCount, after)
 			}
 		})

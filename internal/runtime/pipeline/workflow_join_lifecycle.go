@@ -1,16 +1,21 @@
 package pipeline
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -49,7 +54,11 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, rou
 	}
 	expectedState, expectedRevision := strings.TrimSpace(instance.CurrentState), instance.Revision
 	plan := WorkflowLifecycleMutationPlan{}
-	if err := pc.planWorkflowJoinEffect(ctx, &instance, entityID, currentStage, nextStage, now, &plan); err != nil {
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok || !mode.Valid() {
+		return fmt.Errorf("workflow join lifecycle requires exact causal execution mode")
+	}
+	if err := pc.planWorkflowJoinEffect(ctx, &instance, entityID, currentStage, nextStage, mode, now, &plan); err != nil {
 		return err
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
@@ -87,6 +96,10 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 	if runID == "" {
 		return fmt.Errorf("join schedule reconciliation requires run identity")
 	}
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok || !mode.Valid() {
+		return fmt.Errorf("join schedule reconciliation requires exact causal execution mode")
+	}
 	changed := false
 	plan := WorkflowLifecycleMutationPlan{}
 	cancelledAt := time.Now().UTC()
@@ -101,7 +114,7 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, instance, activation, kind)
+		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, instance, activation, kind, mode)
 		if err != nil {
 			return err
 		}
@@ -203,7 +216,10 @@ func joinTopLevelField(path, root string) string {
 	return field
 }
 
-func joinSchedule(source semanticview.Source, flowID, entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind) (runtimegenericschedule.AdmissionCommand, error) {
+func joinSchedule(source semanticview.Source, flowID, entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind, mode executionmode.Mode) (runtimegenericschedule.AdmissionCommand, error) {
+	if !mode.Valid() {
+		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule requires exact causal execution mode")
+	}
 	ref := timeridentity.NewJoinRefForGeneration(flowID, activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window, activation.Generation)
 	var handle timeridentity.TimerHandle
 	var eventType string
@@ -260,6 +276,7 @@ func joinSchedule(source semanticview.Source, flowID, entityID string, instance 
 		TaskID:        handle.TaskID(),
 		Payload:       semanticPayload,
 		RoutingSource: routingSource,
+		ExecutionMode: mode,
 		Due:           runtimegenericschedule.AbsoluteDue(activation.FireAt),
 	}, nil
 }

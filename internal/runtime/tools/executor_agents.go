@@ -291,6 +291,10 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	default:
 		return nil, fmt.Errorf("unsupported schedule mode %q; use absolute, delay, cron, or every", in.Mode)
 	}
+	executionMode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok || !executionMode.Valid() {
+		return nil, errors.New("schedule requires exact causal execution mode")
+	}
 	command := runtimegenericschedule.AdmissionCommand{
 		ScheduleKey:   in.ScheduleKey,
 		RunID:         runtimecorrelation.RunIDFromContext(ctx),
@@ -303,6 +307,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		TaskID:        in.TaskID,
 		Payload:       payload,
 		RoutingSource: routingSource,
+		ExecutionMode: executionMode,
 		Due:           due,
 	}
 	result, err := e.genericSchedules.Admit(ctx, command)
