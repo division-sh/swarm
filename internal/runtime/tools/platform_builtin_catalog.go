@@ -57,6 +57,7 @@ func admitBuiltinExecutionTool(name string, entry builtinToolDraft) (ExecutionTo
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]builtinToolDraft {
 	if actor != nil {
 		out := flowDataToolSchemaEntriesForActor(source, *actor)
+		out["schedule"] = scheduleContractSchema()
 		if contract, ok := resolveEntityToolContract(source, actor); ok {
 			for name, entry := range roleScopedEntityToolSchemaEntriesForActor(source, *actor, contract) {
 				out[name] = entry
@@ -68,6 +69,7 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 	readTargetSchema := entityReadTargetInputSchemaForContracts(readContracts)
 	out := genericEntityRuntimeContractSchemas(readTargetSchema)
 	out["human_task_request"] = humanTaskRequestContractSchema()
+	out["schedule"] = scheduleContractSchema()
 	if contract, ok := resolveEntityToolContract(source, actor); ok {
 		if len(readContracts) == 0 {
 			readContracts = []entityruntime.Contract{contract}
@@ -77,6 +79,40 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 		}
 	}
 	return out
+}
+
+func scheduleContractSchema() builtinToolDraft {
+	return builtinToolDraft{
+		Category:        "platform",
+		Description:     "Create or replay one durable generic schedule activation for the current actor.",
+		GeneratedSchema: true,
+		InputSchema: ObjectSchema(map[string]any{
+			"schedule_key": map[string]any{"type": "string", "minLength": 1},
+			"event_type":   map[string]any{"type": "string", "minLength": 1},
+			"mode": map[string]any{
+				"type": "string",
+				"enum": []any{"absolute", "delay", "cron", "every"},
+			},
+			"at":        map[string]any{"type": "string", "format": "date-time"},
+			"delay":     map[string]any{"type": "string", "minLength": 1},
+			"cron":      map[string]any{"type": "string", "minLength": 1},
+			"every":     map[string]any{"type": "string", "minLength": 1},
+			"agent_id":  map[string]any{"type": "string", "minLength": 1},
+			"entity_id": map[string]any{"type": "string", "format": "uuid"},
+			"task_id":   map[string]any{"type": "string", "minLength": 1},
+			"payload": map[string]any{
+				"type":                 "object",
+				"additionalProperties": true,
+			},
+		}, "schedule_key", "event_type", "mode"),
+		OutputSchema: ObjectSchema(map[string]any{
+			"status":        map[string]any{"type": "string", "enum": []any{"active", "fired", "cancelled", "failed"}},
+			"outcome":       map[string]any{"type": "string", "enum": []any{"created", "exact_replay"}},
+			"activation_id": map[string]any{"type": "string", "format": "uuid"},
+			"schedule_key":  map[string]any{"type": "string", "minLength": 1},
+			"due_at":        map[string]any{"type": "string", "format": "date-time"},
+		}, "status", "outcome", "activation_id", "schedule_key", "due_at"),
+	}
 }
 
 func humanTaskRequestContractSchema() builtinToolDraft {

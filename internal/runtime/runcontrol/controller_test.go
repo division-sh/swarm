@@ -4,9 +4,48 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
+
+func TestControllerStopReconcilesExactTimerCancellationsAfterCommit(t *testing.T) {
+	refs := []runtimetimercancellation.Ref{{
+		Family: runtimetimercancellation.FamilyGenericSchedule, ActivationID: "activation-1", DueAt: time.Now(),
+	}}
+	store := &fakeRunControlStore{stopState: State{RunID: "run-1", TimerCancellations: refs}}
+	reconciler := &fakeTimerCancellationReconciler{}
+	controller := NewController(store, nil, Options{TimerCancellations: reconciler})
+
+	result, err := controller.Stop(context.Background(), TransitionRequest{RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	if !store.stopped || len(reconciler.refs) != 1 || reconciler.refs[0].ActivationID != "activation-1" {
+		t.Fatalf("post-commit reconciliation store=%v refs=%#v", store.stopped, reconciler.refs)
+	}
+	if result.Recovery.Disposition != RecoveryComplete || result.Recovery.Err != nil {
+		t.Fatalf("Stop() recovery = %#v", result.Recovery)
+	}
+}
+
+func TestControllerStopReportsPostCommitReconciliationFailureWithoutReplayingStop(t *testing.T) {
+	reconcileErr := errors.New("retire wakeup failed")
+	store := &fakeRunControlStore{stopState: State{RunID: "run-1", TimerCancellations: []runtimetimercancellation.Ref{{
+		Family: runtimetimercancellation.FamilyGenericSchedule, ActivationID: "activation-1", DueAt: time.Now(),
+	}}}}
+	reconciler := &fakeTimerCancellationReconciler{err: reconcileErr}
+	controller := NewController(store, nil, Options{TimerCancellations: reconciler})
+
+	result, err := controller.Stop(context.Background(), TransitionRequest{RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want committed transition with recovery evidence", err)
+	}
+	if store.stopCalls != 1 || result.Status != StatusCancelled || result.Recovery.Disposition != RecoveryFailed || !errors.Is(result.Recovery.Err, reconcileErr) {
+		t.Fatalf("Stop() result=%#v stop_calls=%d", result, store.stopCalls)
+	}
+}
 
 func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t *testing.T) {
 	releaseErr := errors.New("release failed after commit")
@@ -58,10 +97,33 @@ func TestControllerContinueDrainsUntilExplicitExhaustion(t *testing.T) {
 
 type fakeRunControlStore struct {
 	continued bool
+	stopped   bool
+	stopCalls int
+	stopState State
+	stopErr   error
 }
 
-func (s *fakeRunControlStore) StopRunControl(context.Context, TransitionRequest) (State, error) {
-	return State{}, errors.New("not implemented")
+func (s *fakeRunControlStore) StopRunControl(_ context.Context, req TransitionRequest) (State, error) {
+	s.stopped = true
+	s.stopCalls++
+	if s.stopErr != nil {
+		return State{}, s.stopErr
+	}
+	state := s.stopState
+	if state.RunID == "" {
+		state.RunID = req.RunID
+	}
+	return state, nil
+}
+
+type fakeTimerCancellationReconciler struct {
+	refs []runtimetimercancellation.Ref
+	err  error
+}
+
+func (r *fakeTimerCancellationReconciler) Reconcile(_ context.Context, refs []runtimetimercancellation.Ref) error {
+	r.refs = append([]runtimetimercancellation.Ref(nil), refs...)
+	return r.err
 }
 
 func (s *fakeRunControlStore) PauseRunControl(context.Context, TransitionRequest) (State, error) {

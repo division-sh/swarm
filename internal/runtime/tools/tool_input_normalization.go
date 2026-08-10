@@ -2,7 +2,6 @@ package tools
 
 import (
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 )
@@ -49,41 +48,6 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			}
 			if strings.TrimSpace(asString(payload["message"])) == "" {
 				payload["message"] = "runtime_tool"
-			}
-		}
-	case "schedule":
-		if strings.TrimSpace(asString(payload["action"])) == "" {
-			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
-				payload["action"] = eventType
-			}
-		}
-		if strings.TrimSpace(asString(payload["event_type"])) == "" {
-			if action := strings.TrimSpace(asString(payload["action"])); action != "" {
-				payload["event_type"] = action
-			}
-		}
-		if asInt(payload["delay_seconds"]) <= 0 {
-			if at := strings.TrimSpace(asString(payload["at"])); at != "" {
-				if parsed, err := time.Parse(time.RFC3339, at); err == nil {
-					delay := int(time.Until(parsed).Seconds())
-					if delay < 0 {
-						delay = 0
-					}
-					payload["delay_seconds"] = delay
-				}
-			}
-		}
-		if payload["payload"] == nil && payload["context"] != nil {
-			payload["payload"] = payload["context"]
-		}
-		if strings.TrimSpace(asString(payload["at"])) == "" {
-			if rawDelay, ok := payload["delay_seconds"]; ok {
-				delaySeconds := asInt(rawDelay)
-				if delaySeconds < 0 {
-					delaySeconds = 0
-				}
-				payload["mode"] = "once"
-				payload["at"] = time.Now().Add(time.Duration(delaySeconds) * time.Second).UTC().Format(time.RFC3339)
 			}
 		}
 	case "agent_hire":

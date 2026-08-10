@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"testing"
@@ -14,6 +15,55 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type committedStopRecoveryProbe struct{ stopCalls int }
+
+func (p *committedStopRecoveryProbe) Stop(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	p.stopCalls++
+	return runtimeruncontrol.TransitionResult{
+		RunID: req.RunID, Status: runtimeruncontrol.StatusCancelled,
+		Recovery: runtimeruncontrol.PostCommitRecovery{
+			Disposition: runtimeruncontrol.RecoveryFailed,
+			Err:         errors.New("post-commit timer retirement failed"),
+		},
+	}, nil
+}
+
+func (*committedStopRecoveryProbe) Pause(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	return runtimeruncontrol.TransitionResult{}, errors.New("unexpected pause")
+}
+
+func (*committedStopRecoveryProbe) Continue(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.TransitionResult, error) {
+	return runtimeruncontrol.TransitionResult{}, errors.New("unexpected continue")
+}
+
+func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailure(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	controller := &committedStopRecoveryProbe{}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Idempotency: pg,
+			RunControl:  controller,
+		}),
+	})
+	runID := uuid.NewString()
+	body := runControlBody("run.stop", runID, "committed-stop-recovery")
+	for attempt := 0; attempt < 2; attempt++ {
+		response := rpcCall(t, handler, body)
+		if response.Error != nil {
+			t.Fatalf("run.stop attempt %d error = %#v", attempt+1, response.Error)
+		}
+		if result := asMap(t, response.Result); result["ok"] != true {
+			t.Fatalf("run.stop attempt %d result = %#v", attempt+1, result)
+		}
+	}
+	if controller.stopCalls != 1 {
+		t.Fatalf("committed run.stop executions = %d, want one", controller.stopCalls)
+	}
+}
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)

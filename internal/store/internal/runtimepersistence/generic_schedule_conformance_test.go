@@ -3,6 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -11,12 +13,208 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type selectedStoreLifecycleScheduler struct {
+	callback   func(context.Context, runtimegenericschedule.Wakeup)
+	registered []runtimegenericschedule.Wakeup
+	retired    []runtimegenericschedule.Wakeup
+}
+
+func (s *selectedStoreLifecycleScheduler) BindGenericScheduleLifecycle(callback func(context.Context, runtimegenericschedule.Wakeup)) error {
+	if callback == nil || s.callback != nil {
+		return errors.New("selected-store lifecycle scheduler requires one callback")
+	}
+	s.callback = callback
+	return nil
+}
+
+func (s *selectedStoreLifecycleScheduler) RegisterGenericScheduleWakeup(_ context.Context, wakeup runtimegenericschedule.Wakeup) error {
+	s.registered = append(s.registered, wakeup)
+	return nil
+}
+
+func (s *selectedStoreLifecycleScheduler) RetireGenericScheduleWakeup(wakeup runtimegenericschedule.Wakeup) error {
+	s.retired = append(s.retired, wakeup)
+	return nil
+}
+
+func (*selectedStoreLifecycleScheduler) StopGenericScheduleWakeups(context.Context) error { return nil }
+
+type terminalSchedulePlannerProbe struct{ prepareCalls int }
+
+func (p *terminalSchedulePlannerProbe) PrepareEnginePublications(context.Context, []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	p.prepareCalls++
+	return nil, errors.New("terminal generic schedule reached event publication")
+}
+
+func (*terminalSchedulePlannerProbe) ReleaseEnginePublications(context.Context, []runtimeengine.DurablePublicationPlan) error {
+	return nil
+}
+
+func (*terminalSchedulePlannerProbe) FinalizeEnginePublications(context.Context, []runtimeengine.CommittedDurablePublication) error {
+	return nil
+}
+
+type terminalScheduleDispatcherProbe struct{ calls int }
+
+func (d *terminalScheduleDispatcherProbe) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
+	d.calls++
+	return nil
+}
+
+func TestPostgresGenericScheduleEmptyTerminalPreparationTransfersExactClaim(t *testing.T) {
+	for _, terminalCase := range []string{"missing", "malformed"} {
+		t.Run(terminalCase, func(t *testing.T) {
+			dsn, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			selected := admitTestPostgresStore(t, db)
+			t.Cleanup(func() { _ = selected.ReleaseGenericScheduleClaims(context.Background()) })
+			runID := uuid.NewString()
+			ctx := selectedScheduleTestContext(t, runID)
+			requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
+
+			scheduler := &selectedStoreLifecycleScheduler{}
+			planner := &terminalSchedulePlannerProbe{}
+			dispatcher := &terminalScheduleDispatcherProbe{}
+			lifecycle, err := runtimegenericschedule.NewLifecycle(selected, scheduler, planner, dispatcher, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := lifecycle.Stop(stopCtx); err != nil {
+					t.Errorf("stop generic schedule lifecycle: %v", err)
+				}
+			})
+
+			command := testAgentGenericScheduleCommand(
+				t, runID, "claim-agent", "claim/instance", uuid.NewString(), "terminal-"+terminalCase,
+				runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
+			)
+			admitted, err := lifecycle.Admit(ctx, command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(scheduler.registered) != 1 {
+				t.Fatalf("registered wakeups = %#v", scheduler.registered)
+			}
+			wakeup := scheduler.registered[0]
+			lockKey := "swarm:generic_schedule:" + admitted.Activation.ID
+
+			switch terminalCase {
+			case "missing":
+				if _, err := db.ExecContext(ctx, `DELETE FROM timers WHERE timer_id = $1::uuid`, admitted.Activation.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "malformed":
+				if _, err := db.ExecContext(ctx, `UPDATE timers SET immutable_hash = 'corrupt' WHERE timer_id = $1::uuid`, admitted.Activation.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if scheduler.callback == nil {
+				t.Fatal("generic schedule lifecycle callback was not bound")
+			}
+			scheduler.callback(ctx, wakeup)
+			if len(scheduler.retired) != 1 || scheduler.retired[0] != wakeup {
+				t.Fatalf("terminal wakeup retirement = %#v, want %#v", scheduler.retired, wakeup)
+			}
+			if planner.prepareCalls != 0 || dispatcher.calls != 0 {
+				t.Fatalf("terminal preparation emitted event: prepare=%d dispatch=%d", planner.prepareCalls, dispatcher.calls)
+			}
+			if terminalCase == "malformed" {
+				var status, code string
+				if err := db.QueryRowContext(ctx, `SELECT status, failure_code FROM timers WHERE timer_id = $1::uuid`, admitted.Activation.ID).Scan(&status, &code); err != nil {
+					t.Fatal(err)
+				}
+				if status != "failed" || code != "malformed_persisted_activation" {
+					t.Fatalf("malformed terminal fact = status:%q code:%q", status, code)
+				}
+			}
+			assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
+		})
+	}
+}
+
+func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommit(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	selected := newTestPostgresStore(t, db)
+	runID := uuid.NewString()
+	ctx := selectedScheduleTestContext(t, runID)
+	requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
+	selected.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time {
+		return time.Now().UTC().Add(24 * time.Hour)
+	})
+
+	var databaseNow time.Time
+	if err := db.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&databaseNow); err != nil {
+		t.Fatal(err)
+	}
+	entityID := uuid.NewString()
+	command := testRootGenericScheduleCommand(
+		t, runID, entityID, "postgres-clock-domain", runtimegenericschedule.AbsoluteDue(databaseNow.UTC()),
+	)
+	command.EventType = "test.node_emitted"
+	admitted, err := selected.AdmitGenericSchedule(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeup, err := admitted.Activation.Wakeup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := selected.PrepareGenericScheduleOccurrence(ctx, wakeup)
+	if err != nil || prepared.Outcome != runtimegenericschedule.PrepareReady {
+		t.Fatalf("prepare skewed occurrence = %#v, %v", prepared, err)
+	}
+	if !prepared.Occurrence.AdmittedAt.Before(admitted.Activation.AdmittedAt) {
+		t.Fatalf("occurrence admission %s used process clock %s", prepared.Occurrence.AdmittedAt, admitted.Activation.AdmittedAt)
+	}
+	payload, err := json.Marshal(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.RuntimeControlWithRoutingSource(
+		prepared.Occurrence.EventID,
+		events.EventType(command.EventType),
+		runtimegenericschedule.OccurrenceProducerID(),
+		command.TaskID,
+		payload,
+		0,
+		runID,
+		"",
+		events.EventEnvelope{EntityID: entityID},
+		command.RoutingSource,
+		prepared.Occurrence.DueAt,
+	)
+	bus, err := newStoreTestEventBus(t, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := bus.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{{Event: event}})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("prepare occurrence publication plans=%d err=%v", len(plans), err)
+	}
+	committed, err := selected.CommitGenericScheduleOccurrence(ctx, runtimegenericschedule.CommitCommand{
+		Activation: prepared.Activation, Occurrence: prepared.Occurrence, Publication: plans[0],
+	})
+	if err != nil || committed.Outcome != runtimegenericschedule.CommitCommitted || committed.Next.Status != runtimegenericschedule.StatusFired {
+		t.Fatalf("commit skewed occurrence = %#v, %v", committed, err)
+	}
+	if committed.Next.AcceptedAt.Before(prepared.Occurrence.AdmittedAt) {
+		t.Fatalf("accepted_at %s precedes database occurrence admission %s", committed.Next.AcceptedAt, prepared.Occurrence.AdmittedAt)
+	}
+}
 
 func setGenericScheduleClock(t *testing.T, store runtimegenericschedule.Store, now func() time.Time) {
 	t.Helper()
@@ -436,6 +634,151 @@ func TestMalformedGenericScheduleTerminalizesLoudlyOnBothStores(t *testing.T) {
 			}
 			if status != "failed" || code != "malformed_persisted_activation" || message == "" {
 				t.Fatalf("terminal malformed fact = status:%q code:%q message:%q", status, code, message)
+			}
+		})
+	}
+}
+
+func TestGenericScheduleFreshSchemaRejectsIllegalStateEvidenceOnBothStores(t *testing.T) {
+	type mutation struct {
+		name        string
+		sqliteSQL   string
+		postgresSQL string
+		args        func(string, time.Time) []any
+		recurring   bool
+	}
+	mutations := []mutation{
+		{
+			name:        "occurrence identity without admission",
+			sqliteSQL:   `UPDATE timers SET occurrence_event_id = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET occurrence_event_id = $1::uuid WHERE timer_id = $2::uuid`,
+			args:        func(id string, _ time.Time) []any { return []any{uuid.NewString(), id} },
+		},
+		{
+			name:        "occurrence admission without identity",
+			sqliteSQL:   `UPDATE timers SET occurrence_admitted_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET occurrence_admitted_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+		},
+		{
+			name:        "fired without accepted",
+			sqliteSQL:   `UPDATE timers SET fired_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET fired_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+		},
+		{
+			name:        "accepted without fired",
+			sqliteSQL:   `UPDATE timers SET accepted_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET accepted_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+		},
+		{
+			name:        "accepted before fired",
+			sqliteSQL:   `UPDATE timers SET fired_at = ?, accepted_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET fired_at = $1, accepted_at = $2 WHERE timer_id = $3::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, now.Add(-time.Second), id} },
+		},
+		{
+			name:        "one shot active accepted history",
+			sqliteSQL:   `UPDATE timers SET fired_at = ?, accepted_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET fired_at = $1, accepted_at = $2 WHERE timer_id = $3::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, now, id} },
+		},
+		{
+			name:        "recurring active half accepted history",
+			sqliteSQL:   `UPDATE timers SET fired_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET fired_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+			recurring:   true,
+		},
+		{
+			name:        "cancel cause without time",
+			sqliteSQL:   `UPDATE timers SET status = 'cancelled', cancel_cause = 'run_stopped' WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'cancelled', cancel_cause = 'run_stopped' WHERE timer_id = $1::uuid`,
+			args:        func(id string, _ time.Time) []any { return []any{id} },
+		},
+		{
+			name:        "cancel time without cause",
+			sqliteSQL:   `UPDATE timers SET status = 'cancelled', cancelled_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'cancelled', cancelled_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+		},
+		{
+			name:        "failure code without time",
+			sqliteSQL:   `UPDATE timers SET status = 'failed', failure_code = 'broken' WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'failed', failure_code = 'broken' WHERE timer_id = $1::uuid`,
+			args:        func(id string, _ time.Time) []any { return []any{id} },
+		},
+		{
+			name:        "failure time without code",
+			sqliteSQL:   `UPDATE timers SET status = 'failed', failed_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'failed', failed_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+		},
+		{
+			name:        "failure message without code",
+			sqliteSQL:   `UPDATE timers SET status = 'failed', failure_message = 'broken', failed_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'failed', failure_message = 'broken', failed_at = $1 WHERE timer_id = $2::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, id} },
+		},
+		{
+			name:        "mixed cancellation and failure facts",
+			sqliteSQL:   `UPDATE timers SET status = 'cancelled', cancel_cause = 'run_stopped', cancelled_at = ?, failure_code = 'broken', failed_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'cancelled', cancel_cause = 'run_stopped', cancelled_at = $1, failure_code = 'broken', failed_at = $2 WHERE timer_id = $3::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, now, id} },
+		},
+		{
+			name:        "cancelled without facts",
+			sqliteSQL:   `UPDATE timers SET status = 'cancelled' WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid`,
+			args:        func(id string, _ time.Time) []any { return []any{id} },
+		},
+		{
+			name:        "failed without facts",
+			sqliteSQL:   `UPDATE timers SET status = 'failed' WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'failed' WHERE timer_id = $1::uuid`,
+			args:        func(id string, _ time.Time) []any { return []any{id} },
+		},
+		{
+			name:        "fired with cancellation facts",
+			sqliteSQL:   `UPDATE timers SET status = 'fired', fired_at = ?, accepted_at = ?, cancel_cause = 'run_stopped', cancelled_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'fired', fired_at = $1, accepted_at = $2, cancel_cause = 'run_stopped', cancelled_at = $3 WHERE timer_id = $4::uuid`,
+			args:        func(id string, now time.Time) []any { return []any{now, now, now, id} },
+		},
+		{
+			name:        "fired acceptance before occurrence admission",
+			sqliteSQL:   `UPDATE timers SET status = 'fired', occurrence_event_id = ?, occurrence_admitted_at = ?, fired_at = ?, accepted_at = ? WHERE timer_id = ?`,
+			postgresSQL: `UPDATE timers SET status = 'fired', occurrence_event_id = $1::uuid, occurrence_admitted_at = $2, fired_at = $3, accepted_at = $4 WHERE timer_id = $5::uuid`,
+			args: func(id string, now time.Time) []any {
+				return []any{uuid.NewString(), now.Add(time.Hour), now, now, id}
+			},
+		},
+	}
+	for _, selectedCase := range selectedScheduleStoreCases() {
+		t.Run(selectedCase.name, func(t *testing.T) {
+			selected, db, ctx := selectedCase.open(t)
+			for _, mutation := range mutations {
+				t.Run(mutation.name, func(t *testing.T) {
+					now := time.Now().UTC().Truncate(time.Microsecond)
+					due := runtimegenericschedule.AbsoluteDue(now.Add(time.Hour))
+					if mutation.recurring {
+						due = runtimegenericschedule.EveryDue(time.Hour)
+					}
+					activation := admitGenericScheduleFixture(t, ctx, selected, testAgentGenericScheduleCommand(
+						t, runtimecorrelation.RunIDFromContext(ctx), "matrix-agent", "matrix/instance", uuid.NewString(), uuid.NewString(), due,
+					))
+					query := mutation.sqliteSQL
+					if _, ok := selected.(*PostgresStore); ok {
+						query = mutation.postgresSQL
+					}
+					if _, err := db.ExecContext(ctx, query, mutation.args(activation.ID, now.Add(2*time.Hour))...); err == nil {
+						t.Fatal("fresh selected-store schema admitted illegal generic schedule state")
+					}
+					loaded, found, err := selected.LoadGenericScheduleActivation(ctx, activation.ID)
+					if err != nil || !found || loaded.Status != runtimegenericschedule.StatusActive {
+						t.Fatalf("rejected corruption changed readback: found=%v activation=%#v err=%v", found, loaded, err)
+					}
+				})
 			}
 		})
 	}

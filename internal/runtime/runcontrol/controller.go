@@ -78,6 +78,7 @@ type TransitionResult struct {
 type RecoveryDisposition string
 
 const (
+	RecoveryComplete      RecoveryDisposition = "complete"
 	RecoveryNotConfigured RecoveryDisposition = "not_configured"
 	RecoveryExhausted     RecoveryDisposition = "exhausted"
 	RecoveryBlocked       RecoveryDisposition = "blocked"
@@ -85,9 +86,9 @@ const (
 	RecoveryCancelled     RecoveryDisposition = "cancelled"
 )
 
-// PostCommitRecovery reports the immediate durable-recovery attempt after a
-// successful continue. Its error is diagnostic: the run transition is already
-// committed and must not be replayed.
+// PostCommitRecovery reports recovery work after a committed run transition.
+// Its error is diagnostic: the transition is already committed and must not be
+// replayed.
 type PostCommitRecovery struct {
 	Disposition RecoveryDisposition
 	Sweep       runtimepipelineobligation.SweepResult
@@ -105,16 +106,22 @@ type QueueReleaser interface {
 	ReleaseRunQueue(context.Context, string, int) (runtimepipelineobligation.SweepResult, error)
 }
 
+type TimerCancellationReconciler interface {
+	Reconcile(context.Context, []runtimetimercancellation.Ref) error
+}
+
 type Options struct {
-	Now          func() time.Time
-	ReleaseLimit int
+	Now                func() time.Time
+	ReleaseLimit       int
+	TimerCancellations TimerCancellationReconciler
 }
 
 type Controller struct {
-	store        Store
-	queue        QueueReleaser
-	now          func() time.Time
-	releaseLimit int
+	store              Store
+	queue              QueueReleaser
+	now                func() time.Time
+	releaseLimit       int
+	timerCancellations TimerCancellationReconciler
 }
 
 func NewController(store Store, queue QueueReleaser, opts Options) *Controller {
@@ -130,10 +137,11 @@ func NewController(store Store, queue QueueReleaser, opts Options) *Controller {
 		limit = 200
 	}
 	return &Controller{
-		store:        store,
-		queue:        queue,
-		now:          now,
-		releaseLimit: limit,
+		store:              store,
+		queue:              queue,
+		now:                now,
+		releaseLimit:       limit,
+		timerCancellations: opts.TimerCancellations,
 	}
 }
 
@@ -146,11 +154,26 @@ func (c *Controller) Stop(ctx context.Context, req TransitionRequest) (Transitio
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	return TransitionResult{
+	result := TransitionResult{
 		RunID:               state.RunID,
 		Status:              StatusCancelled,
 		AbandonedDeliveries: state.AbandonedDeliveries,
-	}, nil
+		Recovery:            PostCommitRecovery{Disposition: RecoveryComplete},
+	}
+	if len(state.TimerCancellations) == 0 {
+		return result, nil
+	}
+	if c.timerCancellations == nil {
+		result.Recovery = PostCommitRecovery{
+			Disposition: RecoveryFailed,
+			Err:         errors.New("timer cancellation reconciler is required after committed run stop"),
+		}
+		return result, nil
+	}
+	if err := c.timerCancellations.Reconcile(context.WithoutCancel(ctx), state.TimerCancellations); err != nil {
+		result.Recovery = PostCommitRecovery{Disposition: RecoveryFailed, Err: err}
+	}
+	return result, nil
 }
 
 func (c *Controller) Pause(ctx context.Context, req TransitionRequest) (TransitionResult, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +37,68 @@ func testGlobalActivation(t *testing.T, due DueBasis, admittedAt, currentDue tim
 		t.Fatal(err)
 	}
 	return activation
+}
+
+func TestActivationValidateClosesGenericScheduleStateEvidenceMatrix(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	base := testGlobalActivation(t, AbsoluteDue(now.Add(time.Hour)), now, now.Add(time.Hour))
+	occurrenceID := OccurrenceEventID(base.ID, base.CurrentDueAt)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Activation)
+	}{
+		{name: "occurrence identity without admission", mutate: func(a *Activation) { a.CurrentEventID = occurrenceID }},
+		{name: "occurrence admission without identity", mutate: func(a *Activation) { a.CurrentEventAdmittedAt = now.Add(2 * time.Hour) }},
+		{name: "fired without accepted", mutate: func(a *Activation) { a.FiredAt = now.Add(2 * time.Hour) }},
+		{name: "accepted without fired", mutate: func(a *Activation) { a.AcceptedAt = now.Add(2 * time.Hour) }},
+		{name: "accepted before fired", mutate: func(a *Activation) {
+			a.FiredAt = now.Add(3 * time.Hour)
+			a.AcceptedAt = now.Add(2 * time.Hour)
+		}},
+		{name: "one shot active with accepted history", mutate: func(a *Activation) {
+			a.FiredAt = now.Add(2 * time.Hour)
+			a.AcceptedAt = now.Add(2 * time.Hour)
+		}},
+		{name: "cancel cause without time", mutate: func(a *Activation) { a.CancelCause = "run_stopped" }},
+		{name: "cancel time without cause", mutate: func(a *Activation) { a.CancelledAt = now }},
+		{name: "failure code without time", mutate: func(a *Activation) { a.Failure.Code = "broken" }},
+		{name: "failure time without code", mutate: func(a *Activation) { a.FailedAt = now }},
+		{name: "failure message without code", mutate: func(a *Activation) { a.Failure.Message = "broken" }},
+		{name: "mixed terminal families", mutate: func(a *Activation) {
+			a.Status = StatusCancelled
+			a.CancelCause, a.CancelledAt = "run_stopped", now
+			a.Failure, a.FailedAt = Failure{Code: "broken"}, now
+		}},
+		{name: "cancelled without cancellation facts", mutate: func(a *Activation) { a.Status = StatusCancelled }},
+		{name: "failed without failure facts", mutate: func(a *Activation) { a.Status = StatusFailed }},
+		{name: "fired with cancellation facts", mutate: func(a *Activation) {
+			a.Status = StatusFired
+			a.FiredAt, a.AcceptedAt = now.Add(2*time.Hour), now.Add(2*time.Hour)
+			a.CancelCause, a.CancelledAt = "run_stopped", now.Add(3*time.Hour)
+		}},
+		{name: "fired acceptance before occurrence admission", mutate: func(a *Activation) {
+			a.Status = StatusFired
+			a.CurrentEventID = occurrenceID
+			a.CurrentEventAdmittedAt = now.Add(3 * time.Hour)
+			a.FiredAt, a.AcceptedAt = now.Add(2*time.Hour), now.Add(2*time.Hour)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := base
+			tc.mutate(&candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatalf("illegal activation was accepted: %#v", candidate)
+			}
+		})
+	}
+
+	recurring := testGlobalActivation(t, EveryDue(time.Hour), now, now.Add(time.Hour))
+	recurring.FiredAt = now.Add(2 * time.Hour)
+	recurring.AcceptedAt = recurring.FiredAt
+	recurring.CurrentDueAt = now.Add(2 * time.Hour)
+	if err := recurring.Validate(); err != nil {
+		t.Fatalf("recurring active activation rejected complete prior history: %v", err)
+	}
 }
 
 func TestOccurrenceEventUsesPersistedDueCoordinateAsSemanticTime(t *testing.T) {
@@ -189,10 +252,14 @@ func (p lifecycleProofCommit) ValidateCommittedDurablePublication() error {
 
 type lifecycleProofStore struct {
 	activation  Activation
+	missing     bool
 	prepared    PreparedOccurrence
 	commit      func(CommitCommand) (CommitResult, error)
 	commitCalls int
 	released    []Wakeup
+	releaseErrs []error
+	releaseSeen chan error
+	releaseMu   sync.Mutex
 	order       *[]string
 }
 
@@ -206,7 +273,7 @@ func (s *lifecycleProofStore) LoadGenericScheduleActivation(context.Context, str
 	if s.order != nil {
 		*s.order = append(*s.order, "load")
 	}
-	return s.activation, true, nil
+	return s.activation, !s.missing, nil
 }
 func (s *lifecycleProofStore) ListActiveGenericScheduleActivations(context.Context) ([]Activation, error) {
 	return []Activation{s.activation}, nil
@@ -231,11 +298,24 @@ func (s *lifecycleProofStore) ClaimGenericScheduleWakeup(context.Context, Wakeup
 	return true, nil
 }
 func (s *lifecycleProofStore) ReleaseGenericScheduleWakeup(_ context.Context, wakeup Wakeup) error {
-	s.released = append(s.released, wakeup)
+	s.releaseMu.Lock()
+	var result error
+	if len(s.releaseErrs) > 0 {
+		result = s.releaseErrs[0]
+		s.releaseErrs = s.releaseErrs[1:]
+	}
+	if result == nil {
+		s.released = append(s.released, wakeup)
+	}
 	if s.order != nil {
 		*s.order = append(*s.order, "release")
 	}
-	return nil
+	seen := s.releaseSeen
+	s.releaseMu.Unlock()
+	if seen != nil {
+		seen <- result
+	}
+	return result
 }
 func (*lifecycleProofStore) ReleaseGenericScheduleClaims(context.Context) error { return nil }
 
@@ -441,6 +521,71 @@ func TestLifecycleRetirementFailureRetainsClaim(t *testing.T) {
 	}
 	if len(store.released) != 0 {
 		t.Fatalf("failed retirement released claim: %#v", store.released)
+	}
+}
+
+func TestLifecycleEmptyTerminalPreparationRetiresOriginalExactWakeup(t *testing.T) {
+	_, _, wakeup := lifecyclePreparedOccurrence(t)
+	for _, name := range []string{"missing", "malformed_terminalized"} {
+		t.Run(name, func(t *testing.T) {
+			order := []string{}
+			store := &lifecycleProofStore{
+				missing: true, prepared: PreparedOccurrence{Outcome: PrepareTerminal}, order: &order,
+			}
+			scheduler := &lifecycleProofScheduler{order: &order}
+			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stopLifecycleProof(t, lifecycle)
+
+			lifecycle.handleWakeup(context.Background(), wakeup)
+			if len(scheduler.retired) != 1 || scheduler.retired[0] != wakeup || len(store.released) != 1 || store.released[0] != wakeup {
+				t.Fatalf("empty terminal exact retirement retired=%#v released=%#v", scheduler.retired, store.released)
+			}
+			if got := strings.Join(order, ","); got != "retire,release" {
+				t.Fatalf("empty terminal retirement order = %q", got)
+			}
+		})
+	}
+}
+
+func TestLifecycleEmptyTerminalReleaseFailureRecoversExactWakeup(t *testing.T) {
+	_, _, wakeup := lifecyclePreparedOccurrence(t)
+	releaseErr := errors.New("claim release failed")
+	store := &lifecycleProofStore{
+		missing: true, prepared: PreparedOccurrence{Outcome: PrepareTerminal},
+		releaseErrs: []error{releaseErr}, releaseSeen: make(chan error, 2),
+	}
+	scheduler := &lifecycleProofScheduler{}
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopLifecycleProof(t, lifecycle)
+
+	lifecycle.handleWakeup(context.Background(), wakeup)
+	select {
+	case err := <-store.releaseSeen:
+		if !errors.Is(err, releaseErr) {
+			t.Fatalf("first release error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("terminal release failure was not observed")
+	}
+	select {
+	case err := <-store.releaseSeen:
+		if err != nil {
+			t.Fatalf("recovery release error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("terminal release recovery did not retry")
+	}
+	store.releaseMu.Lock()
+	released := append([]Wakeup(nil), store.released...)
+	store.releaseMu.Unlock()
+	if len(released) != 1 || released[0] != wakeup {
+		t.Fatalf("terminal release recovery = %#v", released)
 	}
 }
 

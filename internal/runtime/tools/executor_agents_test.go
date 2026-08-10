@@ -1133,7 +1133,7 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	if _, err := exec.execSchedule(ctx, actor, map[string]any{
 		"schedule_key": "root-proof",
 		"event_type":   "root.timer.fired",
-		"mode":         "once",
+		"mode":         "absolute",
 		"at":           time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 		"payload":      map[string]any{"reason": "root-owned"},
 	}); err != nil {
@@ -1174,11 +1174,11 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 		}},
 		{name: "different agent", input: map[string]any{
 			"schedule_key": "foreign-agent", "agent_id": "other", "event_type": "root.timer.fired",
-			"mode": "once", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+			"mode": "absolute", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 		}},
 		{name: "different entity", input: map[string]any{
 			"schedule_key": "foreign-entity", "entity_id": "entity-other", "event_type": "root.timer.fired",
-			"mode": "once", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+			"mode": "absolute", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1198,14 +1198,17 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 		wantKind runtimegenericschedule.DueBasisKind
 	}{
 		{name: "absolute", wantKind: runtimegenericschedule.DueAbsolute, input: map[string]any{
-			"schedule_key": "absolute", "event_type": "root.timer.fired", "mode": "once",
+			"schedule_key": "absolute", "event_type": "root.timer.fired", "mode": "absolute",
 			"at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		}},
+		{name: "delay", wantKind: runtimegenericschedule.DueDelay, input: map[string]any{
+			"schedule_key": "delay", "event_type": "root.timer.fired", "mode": "delay", "delay": "45m",
 		}},
 		{name: "cron", wantKind: runtimegenericschedule.DueCron, input: map[string]any{
 			"schedule_key": "cron", "event_type": "root.timer.fired", "mode": "cron", "cron": "17 * * * *",
 		}},
 		{name: "every", wantKind: runtimegenericschedule.DueEvery, input: map[string]any{
-			"schedule_key": "every", "event_type": "root.timer.fired", "mode": "cron", "cron": "@every 15m",
+			"schedule_key": "every", "event_type": "root.timer.fired", "mode": "every", "every": "15m",
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1266,6 +1269,61 @@ func TestExecSchedulePreservesMockAuthority(t *testing.T) {
 				t.Fatalf("schedule execution mode = %q, want mock", scheduler.schedule.ExecutionMode)
 			}
 		})
+	}
+}
+
+func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
+	scheduler := &captureScheduleScheduler{}
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		WorkflowSource:   semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		GenericSchedules: scheduler,
+	})
+	actor := models.AgentConfig{
+		ID:          "root-agent",
+		Identity:    toolTestRootAgentIdentity(t, "root-agent"),
+		EntityID:    "00000000-0000-4000-8000-000000002164",
+		Permissions: []string{"schedule"},
+	}
+	definitions := exec.ToolDefinitionsForActor(actor)
+	var scheduleDefinitionFound bool
+	for _, definition := range definitions {
+		if definition.Name == "schedule" {
+			scheduleDefinitionFound = true
+			break
+		}
+	}
+	if !scheduleDefinitionFound {
+		t.Fatalf("ToolDefinitionsForActor omitted schedule: %#v", definitions)
+	}
+
+	ctx := WithActor(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163"), actor)
+	result, err := exec.Execute(ctx, "schedule", map[string]any{
+		"schedule_key": "supported-surface",
+		"event_type":   "root.timer.fired",
+		"mode":         "delay",
+		"delay":        "10m",
+		"payload":      map[string]any{"source": "supported"},
+	})
+	if err != nil {
+		t.Fatalf("Execute(schedule): %v", err)
+	}
+	projection, ok := result.(map[string]any)
+	if !ok || projection["schedule_key"] != "supported-surface" || scheduler.calls != 1 || scheduler.command.Due.Kind != runtimegenericschedule.DueDelay {
+		t.Fatalf("supported schedule result=%#v command=%#v calls=%d", result, scheduler.command, scheduler.calls)
+	}
+
+	for _, legacy := range []map[string]any{
+		{"schedule_key": "legacy-action", "action": "root.timer.fired", "mode": "delay", "delay": "10m"},
+		{"schedule_key": "legacy-context", "event_type": "root.timer.fired", "mode": "delay", "delay": "10m", "context": map[string]any{}},
+		{"schedule_key": "legacy-seconds", "event_type": "root.timer.fired", "mode": "delay", "delay": "10m", "delay_seconds": 600},
+		{"schedule_key": "legacy-once", "event_type": "root.timer.fired", "mode": "once", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)},
+	} {
+		if _, err := exec.Execute(ctx, "schedule", legacy); err == nil {
+			t.Fatalf("legacy schedule spelling was admitted: %#v", legacy)
+		}
+	}
+	if scheduler.calls != 1 {
+		t.Fatalf("rejected legacy requests reached admission: calls=%d", scheduler.calls)
 	}
 }
 

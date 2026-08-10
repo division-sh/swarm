@@ -402,28 +402,60 @@ func (a Activation) Validate() error {
 	if a.Command.Due.Kind == DueEvery && a.CurrentDueAt.Sub(a.InitialDueAt)%a.Command.Due.Every != 0 {
 		return errors.New("every generic schedule current due coordinate is off cadence")
 	}
+	hasOccurrenceID := a.CurrentEventID != ""
+	hasOccurrenceAdmission := !a.CurrentEventAdmittedAt.IsZero()
+	if hasOccurrenceID != hasOccurrenceAdmission {
+		return errors.New("generic schedule occurrence identity and admission time must be stamped together")
+	}
+	hasFired := !a.FiredAt.IsZero()
+	hasAccepted := !a.AcceptedAt.IsZero()
+	if hasFired != hasAccepted {
+		return errors.New("generic schedule fired and accepted history must be stamped together")
+	}
+	if hasFired && a.AcceptedAt.Before(a.FiredAt) {
+		return errors.New("generic schedule fired and accepted history is not chronological")
+	}
+	if !a.Command.Due.Recurring() && a.Status != StatusFired && hasFired {
+		return errors.New("one-shot generic schedule cannot retain accepted history before terminal firing")
+	}
+	hasCancelCause := a.CancelCause != ""
+	hasCancelledAt := !a.CancelledAt.IsZero()
+	if hasCancelCause != hasCancelledAt {
+		return errors.New("generic schedule cancellation facts must be stamped together")
+	}
+	hasFailureCode := a.Failure.Code != ""
+	hasFailedAt := !a.FailedAt.IsZero()
+	if hasFailureCode != hasFailedAt || (a.Failure.Message != "" && !hasFailureCode) {
+		return errors.New("generic schedule failure facts must be stamped together")
+	}
+	if hasCancelCause && hasFailureCode {
+		return errors.New("generic schedule cancellation and failure facts are mutually exclusive")
+	}
 	switch a.Status {
 	case StatusActive:
-		if !a.CancelledAt.IsZero() || !a.FailedAt.IsZero() || a.Failure.Code != "" || a.CancelCause != "" {
+		if hasCancelCause || hasFailureCode {
 			return errors.New("active generic schedule carries terminal facts")
 		}
 	case StatusFired:
-		if a.Command.Due.Recurring() || a.FiredAt.IsZero() || a.AcceptedAt.IsZero() {
+		if a.Command.Due.Recurring() || !hasFired {
 			return errors.New("fired generic schedule requires accepted one-shot occurrence")
 		}
+		if hasCancelCause || hasFailureCode {
+			return errors.New("fired generic schedule carries another terminal family's facts")
+		}
+		if hasOccurrenceAdmission && a.AcceptedAt.Before(a.CurrentEventAdmittedAt) {
+			return errors.New("fired generic schedule acceptance precedes occurrence admission")
+		}
 	case StatusCancelled:
-		if a.CancelCause == "" || a.CancelledAt.IsZero() {
+		if !hasCancelCause || hasFailureCode {
 			return errors.New("cancelled generic schedule requires typed cause and time")
 		}
 	case StatusFailed:
-		if a.Failure.Code == "" || a.FailedAt.IsZero() {
+		if !hasFailureCode || hasCancelCause {
 			return errors.New("failed generic schedule requires typed failure and time")
 		}
 	default:
 		return fmt.Errorf("generic schedule status %q is invalid", a.Status)
-	}
-	if (a.CurrentEventID == "") != a.CurrentEventAdmittedAt.IsZero() {
-		return errors.New("generic schedule occurrence identity and admission time must be stamped together")
 	}
 	if a.CurrentEventID != "" && a.CurrentEventID != OccurrenceEventID(a.ID, a.CurrentDueAt) {
 		return errors.New("generic schedule occurrence event identity is not deterministic")

@@ -63,16 +63,6 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 			},
 		},
 		{
-			name: "schedule_event_aliases",
-			tool: "schedule",
-			input: map[string]any{
-				"action":        "scan.requested",
-				"at":            "2026-01-02T03:04:05Z",
-				"context":       map[string]any{"mode": "corpus"},
-				"delay_seconds": 0,
-			},
-		},
-		{
 			name: "agent_hire_embedded_config",
 			tool: "agent_hire",
 			input: map[string]any{

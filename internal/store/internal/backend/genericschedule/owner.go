@@ -345,8 +345,11 @@ func (o *PostgresOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wa
 	}
 	var result runtimegenericschedule.PreparedOccurrence
 	err := o.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, err = PrepareOccurrenceTx(txctx, tx, true, wakeup, o.now())
+		admittedAt, err := SelectedStoreTimeTx(txctx, tx, true, nil)
+		if err != nil {
+			return err
+		}
+		result, err = PrepareOccurrenceTx(txctx, tx, true, wakeup, admittedAt)
 		if err != nil {
 			return err
 		}
@@ -362,8 +365,11 @@ func (o *SQLiteOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wake
 	}
 	var result runtimegenericschedule.PreparedOccurrence
 	err := o.backend.RunTransaction(ctx, "sqlite generic schedule occurrence preparation", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, err = PrepareOccurrenceTx(txctx, tx, false, wakeup, o.now())
+		admittedAt, err := SelectedStoreTimeTx(txctx, tx, false, o.now)
+		if err != nil {
+			return err
+		}
+		result, err = PrepareOccurrenceTx(txctx, tx, false, wakeup, admittedAt)
 		return err
 	})
 	return result, err
