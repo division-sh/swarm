@@ -299,6 +299,18 @@ func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, fork
 	return s.runForkPostgresOwner.DeleteOperatorConversationFork(ctx, forkID, now)
 }
 
+func (s *PostgresStore) DeliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (deliverylifecycle.AgentDiagnosticCounts, error) {
+	return s.operatorAgentPostgres.DeliveryDiagnosticCountsForAgentSince(ctx, identity, since)
+}
+
+func (s *PostgresStore) DeliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query deliverylifecycle.AgentDiagnosticPageQuery) (deliverylifecycle.SnapshotPage, error) {
+	return s.operatorAgentPostgres.DeliveryDiagnosticSnapshotPageForAgent(ctx, query)
+}
+
+func (s *PostgresStore) DeliveryLifecycleSnapshotPageForAgent(ctx context.Context, query deliverylifecycle.AgentLifecyclePageQuery) (deliverylifecycle.SnapshotPage, error) {
+	return s.operatorAgentPostgres.DeliveryLifecycleSnapshotPageForAgent(ctx, query)
+}
+
 func (s *PostgresStore) DeliverySnapshotsForEvent(ctx context.Context, eventID string) ([]deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.DeliverySnapshotsForEvent(ctx, eventID)
 }
@@ -405,10 +417,6 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]bus.A
 
 func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx)
-}
-
-func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx)
 }
 
 func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
@@ -535,6 +543,10 @@ func (s *PostgresStore) ListSelectedContractRouteRecoveryRecords(ctx context.Con
 	return s.runForkPostgresOwner.ListSelectedContractRouteRecoveryRecords(ctx)
 }
 
+func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx)
+}
+
 func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
 	return s.pipelinePostgresOwner.ListStandingServiceStatuses(ctx)
 }
@@ -585,6 +597,10 @@ func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bund
 
 func (s *PostgresStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID string, eventID string, nodeID string) ([]computemodule.ReplayEnvelope, error) {
 	return s.eventPostgresOwner.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, eventID, nodeID)
+}
+
+func (s *PostgresStore) LoadConversationForkSource(ctx context.Context, sessionID string) (runfork.ConversationForkSource, error) {
+	return s.operatorConversationPostgres.LoadConversationForkSource(ctx, sessionID)
 }
 
 func (s *PostgresStore) LoadDirectiveOperation(ctx context.Context, operationID string) (agentcontrol.DirectiveOperation, bool, error) {
@@ -1343,6 +1359,18 @@ func (s *SQLiteRuntimeStore) DeleteOperatorConversationFork(ctx context.Context,
 	return s.runForkSQLiteOwner.DeleteOperatorConversationFork(ctx, forkID, now)
 }
 
+func (s *SQLiteRuntimeStore) DeliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (deliverylifecycle.AgentDiagnosticCounts, error) {
+	return s.operatorAgentSQLite.DeliveryDiagnosticCountsForAgentSince(ctx, identity, since)
+}
+
+func (s *SQLiteRuntimeStore) DeliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query deliverylifecycle.AgentDiagnosticPageQuery) (deliverylifecycle.SnapshotPage, error) {
+	return s.operatorAgentSQLite.DeliveryDiagnosticSnapshotPageForAgent(ctx, query)
+}
+
+func (s *SQLiteRuntimeStore) DeliveryLifecycleSnapshotPageForAgent(ctx context.Context, query deliverylifecycle.AgentLifecyclePageQuery) (deliverylifecycle.SnapshotPage, error) {
+	return s.operatorAgentSQLite.DeliveryLifecycleSnapshotPageForAgent(ctx, query)
+}
+
 func (s *SQLiteRuntimeStore) DeliverySnapshotsForEvent(ctx context.Context, eventID string) ([]deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.DeliverySnapshotsForEvent(ctx, eventID)
 }
@@ -1447,10 +1475,6 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx)
-}
-
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	return s.operatorAgentSQLite.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
@@ -1543,6 +1567,10 @@ func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts operatorre
 	return s.operatorRunSQLite.ListRunHeaders(ctx, opts)
 }
 
+func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx)
+}
+
 func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
 	return s.pipelineSQLiteOwner.ListStandingServiceStatuses(ctx)
 }
@@ -1585,6 +1613,10 @@ func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash s
 
 func (s *SQLiteRuntimeStore) LoadComputeModuleReplayEvidenceForExecution(ctx context.Context, runID string, eventID string, nodeID string) ([]computemodule.ReplayEnvelope, error) {
 	return s.eventSQLiteOwner.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, eventID, nodeID)
+}
+
+func (s *SQLiteRuntimeStore) LoadConversationForkSource(ctx context.Context, sessionID string) (runfork.ConversationForkSource, error) {
+	return s.operatorConversationSQLite.LoadConversationForkSource(ctx, sessionID)
 }
 
 func (s *SQLiteRuntimeStore) LoadDirectiveOperation(ctx context.Context, operationID string) (agentcontrol.DirectiveOperation, bool, error) {

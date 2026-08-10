@@ -10,12 +10,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/google/uuid"
 )
 
 type routeSettlementOperatorStore interface {
-	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
-	ListOperatorEvents(context.Context, OperatorEventListOptions) (OperatorEventListResult, error)
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
 }
 
 func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
@@ -150,10 +151,10 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			}
 
 			selected := fixture.store.(routeSettlementOperatorStore)
-			seen := map[string]OperatorEventFull{}
+			seen := map[string]operatorread.OperatorEventFull{}
 			cursor := ""
 			for {
-				page, err := selected.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1, Cursor: cursor, Order: "asc"})
+				page, err := selected.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 1, Cursor: cursor, Order: "asc"})
 				if err != nil {
 					t.Fatalf("ListOperatorEvents: %v", err)
 				}
