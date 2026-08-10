@@ -27,7 +27,11 @@ func withAPITestIntent(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactor
 		t.Fatal(err)
 	}
 	cfg.Intent = intent
-	cfg.SystemPrompt = content
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Prompt = prompt
 	return cfg
 }
 

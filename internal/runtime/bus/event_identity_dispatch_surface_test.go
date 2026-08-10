@@ -14,6 +14,7 @@ import (
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -72,6 +73,7 @@ type completeEventDispatchFixture struct {
 	event    events.Event
 	agentID  string
 	identity agentidentity.Identity
+	source   semanticview.Source
 }
 
 func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres(t *testing.T) {
@@ -105,10 +107,15 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
-			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "event-dispatch#agents."+fixture.agentID+".intent", "Prove complete event dispatch.")
+			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "flows/global/agents.yaml#agents."+fixture.agentID+".intent", "Prove complete event dispatch.")
 			if err != nil {
 				t.Fatalf("resolve complete-event agent intent: %v", err)
 			}
+			prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+			if err != nil {
+				t.Fatalf("derive complete-event agent prompt: %v", err)
+			}
+			fixture.source = completeEventAgentSource(fixture.agentID, intent)
 			if err := fixture.store.UpsertAgent(fixture.ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
 					ID:                 fixture.agentID,
@@ -121,7 +128,7 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 					ExecutionMode:      executionmode.Live,
 					Subscriptions:      []string{string(fixture.event.Type())},
 					Intent:             intent,
-					SystemPrompt:       intent.Content,
+					Prompt:             prompt,
 					Config:             []byte(`{}`),
 				},
 				Status:    "active",
@@ -573,6 +580,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
 		BundleSourceFact: authorActivityTestBundleSourceFact,
+		SemanticSource:   f.source,
 		DeliveryStore:    f.store,
 		ExecutionPosture: executionposture.Live,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -584,6 +592,22 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.store)
 	return manager, owner
+}
+
+func completeEventAgentSource(agentID string, intent runtimeagentintent.Resolved) semanticview.Source {
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "global", Flow: "global"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			agentID: {ID: agentID, Role: "complete-event-proof", ResolvedIntent: intent},
+		},
+	}
+	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
+		},
+	})
 }
 
 func (f completeEventDispatchFixture) startDeliveryContinuations(

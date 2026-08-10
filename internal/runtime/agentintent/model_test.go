@@ -3,6 +3,8 @@ package agentintent
 import (
 	"strings"
 	"testing"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 func TestResolvedIntentIdentityBindsExactCanonicalFacts(t *testing.T) {
@@ -55,5 +57,62 @@ func TestResolvedIntentRejectsTamperedArtifact(t *testing.T) {
 		if err := candidate.Validate(); err == nil {
 			t.Fatalf("tampered artifact validated: %#v", candidate)
 		}
+	}
+}
+
+func TestResolvedIntentRejectsImpossibleCanonicalFactsAtConstruction(t *testing.T) {
+	nonNFC := "flows/caf" + string([]rune{'e', '\u0301'}) + "/intent.md"
+	if norm.NFC.IsNormalString(nonNFC) {
+		t.Fatal("test coordinate unexpectedly NFC-normalized")
+	}
+	tests := []struct {
+		name       string
+		kind       SourceKind
+		coordinate string
+		provenance string
+	}{
+		{name: "inline_file_coordinate", kind: SourceInline, coordinate: "intent.md", provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_traversal", kind: SourceLocal, coordinate: "../outside.md", provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_absolute", kind: SourceLocal, coordinate: "/outside.md", provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_windows_absolute", kind: SourceLocal, coordinate: `C:\outside.md`, provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_backslash", kind: SourceLocal, coordinate: `flows\worker.md`, provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_nul", kind: SourceLocal, coordinate: "flows/worker\x00.md", provenance: "agents.yaml#agents.worker.intent"},
+		{name: "local_non_nfc", kind: SourceLocal, coordinate: nonNFC, provenance: "agents.yaml#agents.worker.intent"},
+		{name: "arbitrary_provenance", kind: SourceInline, coordinate: "inline", provenance: "operator-input"},
+		{name: "wrong_declaration_file", kind: SourceInline, coordinate: "inline", provenance: "flows/review/config.yaml#agents.worker.intent"},
+		{name: "provenance_traversal", kind: SourceInline, coordinate: "inline", provenance: "../agents.yaml#agents.worker.intent"},
+		{name: "provenance_backslash", kind: SourceInline, coordinate: "inline", provenance: `flows\review\agents.yaml#agents.worker.intent`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Resolve(tc.kind, tc.coordinate, tc.provenance, "Business intent."); err == nil {
+				t.Fatalf("Resolve accepted impossible facts kind=%q coordinate=%q provenance=%q", tc.kind, tc.coordinate, tc.provenance)
+			}
+		})
+	}
+}
+
+func TestResolvedIntentValidateRejectsImpossiblePersistedFactsBeforeHashIdentity(t *testing.T) {
+	valid, err := Resolve(SourceInline, "inline", "agents.yaml#agents.worker.intent", "Business intent.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*Resolved){
+		"inline_file_coordinate": func(value *Resolved) { value.Coordinate = "intent.md" },
+		"local_traversal": func(value *Resolved) {
+			value.Kind = SourceLocal
+			value.Coordinate = "../outside.md"
+		},
+		"arbitrary_provenance": func(value *Resolved) { value.Provenance = "operator-input" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := valid
+			mutate(&candidate)
+			candidate.ContentHash = "sha256:recomputed-by-hostile-producer"
+			candidate.Identity = "agent-intent:v1:sha256:recomputed-by-hostile-producer"
+			if err := candidate.Validate(); err == nil {
+				t.Fatalf("Validate accepted impossible persisted facts: %#v", candidate)
+			}
+		})
 	}
 }

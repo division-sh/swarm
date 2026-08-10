@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -86,6 +87,18 @@ var (
 	ErrAgentAlreadyExists = errors.New("agent already exists")
 	ErrAgentNotFound      = errors.New("agent not found")
 )
+
+type lifecycleOnlyAgent struct {
+	id        string
+	agentType string
+}
+
+func (a lifecycleOnlyAgent) ID() string                      { return a.id }
+func (a lifecycleOnlyAgent) Type() string                    { return a.agentType }
+func (lifecycleOnlyAgent) Subscriptions() []events.EventType { return nil }
+func (lifecycleOnlyAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, errors.New("lifecycle-only agent cannot execute events")
+}
 
 const (
 	poisonPanicQuarantineAt       = 3
@@ -395,6 +408,9 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	if err := am.executionPosture.Admit(rec.Config.ExecutionMode, "agent lifecycle reconstruction"); err != nil {
 		return err
 	}
+	if err := bindCanonicalAgentPrompt(source, &rec.Config); err != nil {
+		return err
+	}
 	subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &rec.Config, nil)
 	if err != nil {
 		return err
@@ -491,6 +507,9 @@ func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		return err
 	}
+	if err := bindCanonicalAgentPrompt(source, &rec.Config); err != nil {
+		return err
+	}
 	subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &rec.Config, nil)
 	if err != nil {
 		return err
@@ -503,6 +522,30 @@ func (am *AgentManager) adoptPersistedAgentForLifecycle(
 		return err
 	}
 	return am.lifecycle.registerExecution(ctx, rec, false, agent, subscriptionAdmission)
+}
+
+func (am *AgentManager) adoptPersistedAgentLifecycleOnly(ctx context.Context, rec PersistedAgent) error {
+	if err := rec.Config.ValidateIntentInputs(); err != nil {
+		return err
+	}
+	// A removed or replaced declaration has no executable prompt owner in the
+	// successor source. Register only its durable lifecycle identity so teardown
+	// or replacement can fence it; never construct a provider agent or install
+	// executable subscriptions.
+	rec.Config.Subscriptions = nil
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID:  rec.Config.ID,
+		FlowID:   rec.Config.FlowID,
+		FlowPath: rec.Config.CanonicalFlowPath(),
+	})
+	if err != nil {
+		return err
+	}
+	sentinel := lifecycleOnlyAgent{
+		id:        strings.TrimSpace(rec.Config.ID),
+		agentType: strings.TrimSpace(rec.Config.Type),
+	}
+	return am.lifecycle.registerExecution(ctx, rec, false, sentinel, admission)
 }
 
 func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
@@ -555,6 +598,42 @@ func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
 		return am.factory(cfg)
 	}
 	return newGenericAgent(cfg), nil
+}
+
+func bindCanonicalAgentPrompt(source semanticview.Source, cfg *models.AgentConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("agent config is required")
+	}
+	if err := cfg.ValidateIntentInputs(); err != nil {
+		return err
+	}
+	if !cfg.Prompt.Empty() {
+		return cfg.ValidateIntentCarrier()
+	}
+	if source == nil {
+		return fmt.Errorf("agent %s cannot reconstruct its derived prompt without a semantic source", strings.TrimSpace(cfg.ID))
+	}
+	var matched *semanticview.AgentDeclaration
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		if declaration.Entry.ResolvedIntent != cfg.Intent {
+			continue
+		}
+		if matched != nil {
+			return fmt.Errorf("agent %s resolved intent matches multiple declarations", strings.TrimSpace(cfg.ID))
+		}
+		candidate := declaration
+		matched = &candidate
+	}
+	if matched == nil {
+		return fmt.Errorf("agent %s resolved intent does not match a canonical declaration", strings.TrimSpace(cfg.ID))
+	}
+	bundle, _ := semanticview.Bundle(source)
+	prompt, err := runtimecontracts.AssembleAgentPrompt(bundle, matched.OwnerFlowID, matched.Entry, cfg.Criteria)
+	if err != nil {
+		return fmt.Errorf("agent %s reconstruct derived prompt: %w", strings.TrimSpace(cfg.ID), err)
+	}
+	cfg.Prompt = prompt
+	return cfg.ValidateIntentCarrier()
 }
 
 func (am *AgentManager) ReconfigureAgentTarget(

@@ -44,7 +44,10 @@ func materializeAgentIntents(contractsRoot string, source ContractItemSource, en
 		if err := entry.Intent.ValidateSyntax(); err != nil {
 			return nil, fmt.Errorf("%s agent %q intent: %w", source.File, key, err)
 		}
-		provenance := filepath.ToSlash(sourceRel) + "#agents." + strings.TrimSpace(key) + ".intent"
+		provenance, err := runtimeagentintent.NewDeclarationProvenance(filepath.ToSlash(sourceRel), strings.TrimSpace(key))
+		if err != nil {
+			return nil, fmt.Errorf("%s agent %q intent provenance: %w", source.File, key, err)
+		}
 		resolved, err := resolveAgentIntent(root, filepath.Dir(sourcePath), provenance, entry.Intent)
 		if err != nil {
 			return nil, fmt.Errorf("%s agent %q intent: %w", source.File, key, err)

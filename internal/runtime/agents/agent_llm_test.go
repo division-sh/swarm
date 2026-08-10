@@ -165,12 +165,16 @@ func TestNewLLMAgent_ConsumesExactResolvedIntentWithoutConfigExpansion(t *testin
 	if err != nil {
 		t.Fatalf("resolve test intent: %v", err)
 	}
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive test prompt: %v", err)
+	}
 	agent := mustBuildLLMAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "cos-entity-1",
 		Role:          "ops_lead",
 		Intent:        intent,
-		SystemPrompt:  content,
+		Prompt:        prompt,
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"team_name": "Acme Ops",
 		}),
@@ -209,15 +213,18 @@ func mustBuildLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Ru
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
 	if err := cfg.Intent.Validate(); err != nil {
-		intent, resolveErr := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "test#intent", "Perform the test agent's assigned work.")
+		intent, resolveErr := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.test.intent", "Perform the test agent's assigned work.")
 		if resolveErr != nil {
 			t.Fatalf("resolve default test intent: %v", resolveErr)
 		}
 		cfg.Intent = intent
-		cfg.SystemPrompt = intent.Content
 	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = cfg.Intent.Content
+	if cfg.Prompt.Empty() {
+		prompt, promptErr := runtimeagentintent.IntentOnlyPrompt(cfg.Intent)
+		if promptErr != nil {
+			t.Fatalf("derive default test prompt: %v", promptErr)
+		}
+		cfg.Prompt = prompt
 	}
 	agent, err := newLLMAgent(cfg, modelRuntime, toolExecutor, tools, LLMAgentOptions{})
 	if err != nil {
@@ -1008,11 +1015,15 @@ func mustAgentConfigJSON(t *testing.T, value any) json.RawMessage {
 
 func withTestResolvedIntent(t testing.TB, cfg models.AgentConfig, content string) models.AgentConfig {
 	t.Helper()
-	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "test#agents."+cfg.ID+".intent", content)
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents."+cfg.ID+".intent", content)
 	if err != nil {
 		t.Fatalf("resolve test intent: %v", err)
 	}
 	cfg.Intent = intent
-	cfg.SystemPrompt = content
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive test prompt: %v", err)
+	}
+	cfg.Prompt = prompt
 	return cfg
 }

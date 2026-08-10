@@ -72,6 +72,79 @@ func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T)
 	}
 }
 
+func TestDataDirectoryIntentSurvivesLoadHashRegistrationAndReconstruction(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	platform := DefaultPlatformSpecFile(repo)
+	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `name: data-intent
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: review
+    flow: review
+`)
+	writeBundleHashText(t, filepath.Join(root, "flows", "review", "schema.yaml"), `name: review
+mode: static
+states: [ready]
+initial_state: ready
+terminal_states: [ready]
+`)
+	writeBundleHashText(t, filepath.Join(root, "flows", "review", "agents.yaml"), `worker:
+  id: worker
+  role: worker
+  intent: data/worker.md
+  model: regular
+  subscriptions: [work.requested]
+`)
+	const intentContent = "Perform the review work exactly.\n"
+	writeBundleHashText(t, filepath.Join(root, "flows", "review", "data", "worker.md"), intentContent)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, platform)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	bundleHash, err := BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjectionWithOptions(bundle, BundleCatalogProjectionOptions{Source: "test"})
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	upload, err := BuildBundleRegistrationDirectoryUpload(repo, root, platform)
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
+	}
+	if !strings.Contains(upload.ContentYAML, "flows/review/data/worker.md") || !strings.Contains(upload.ContentYAML, "Perform the review work exactly.") {
+		t.Fatalf("registration upload omitted exact data-directory intent:\n%s", upload.ContentYAML)
+	}
+
+	source, err := LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:              bundleHash,
+		ContentYAML:             projection.ContentYAML,
+		DataBlob:                projection.DataBlob,
+		RunningPlatformSpecPath: platform,
+	})
+	if err != nil {
+		t.Fatalf("LoadBundleCatalogRuntimeSource: %v", err)
+	}
+	defer source.Cleanup()
+	reloadedHash, err := BundleHash(source.Bundle)
+	if err != nil {
+		t.Fatalf("reloaded BundleHash: %v", err)
+	}
+	if reloadedHash != bundleHash {
+		t.Fatalf("reloaded hash = %s, want %s", reloadedHash, bundleHash)
+	}
+	workerRaw, err := os.ReadFile(filepath.Join(source.ContractsRoot, "flows", "review", "data", "worker.md"))
+	if err != nil {
+		t.Fatalf("read reconstructed intent: %v", err)
+	}
+	if string(workerRaw) != intentContent {
+		t.Fatalf("reconstructed intent = %q, want exact %q", workerRaw, intentContent)
+	}
+}
+
 func TestBuildBundleRegistrationDirectoryUploadCarriesDeclaredMockModules(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writeMockedAgentContractsDir(t)

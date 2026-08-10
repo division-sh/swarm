@@ -155,8 +155,8 @@ vocabulary:
         has_prompt: false
         has_model: false
       agent:
-        description: LLM-powered. Has one canonical resolved business-intent artifact, a derived non-authorable system-prompt
-          carrier, provider-resolved model alias, and presence-aware memory plan. Subscribes to events, reasons about
+        description: LLM-powered. Has one canonical resolved business-intent artifact, a derived non-authorable runtime
+          prompt carrier, provider-resolved model alias, and presence-aware memory plan. Subscribes to events, reasons about
           them, calls tools. Can own workflow transitions where the stage change requires LLM judgment (e.g. promote/kill
           decisions, build readiness). Agents produce events that may also trigger transitions owned by system nodes.
         execution: llm
@@ -5997,8 +5997,9 @@ engine:
       response.
     session_lifecycle:
     - 1. Event arrives in agent inbox.
-    - '2. Platform creates the agent session from the already materialized immutable resolved intent artifact, appends
-      separately owned contract criteria and the generated environment postamble, and never performs source lookup.'
+    - '2. Platform creates the agent session from the already reconstructed runtime prompt carrier and appends the generated
+      environment postamble. Session construction never performs source lookup; startup/recovery must first reconstruct the
+      carrier from the selected contract''s immutable resolved intent and exact authored criteria references.'
     - 3. Platform provides tools (from tools.yaml) to the agent session.
     - '4. Agent processes event: reasons, may call tools, may emit events.'
     - 5. Each tool call is validated (schema check, permission check) before execution.
@@ -10072,13 +10073,20 @@ agent_intent_model:
     materialization: >
       Static, template, recovery, shard, and selected-contract fork paths carry the exact resolved artifact into AgentConfig.
       AgentRuntimeSet may select backend/model/execution mode from that already materialized descriptor but is not an intent
-      source owner.
+      source owner. Selected stores persist only the resolved intent artifact and authored criteria references, never rendered
+      prompt text. Recovery resolves the unique declaration bound by the persisted intent provenance/identity and
+      deterministically reconstructs criteria from the selected semantic source before any provider adapter is reached;
+      missing, ambiguous, or criteria-mismatched declarations fail closed. A persisted agent whose declaration was removed by
+      an accepted source revision, or whose declaration is being replaced by a different canonical revision, may be adopted
+      only as a non-executable lifecycle identity for immediate fenced teardown or replacement; that path constructs no
+      provider agent and installs no subscriptions.
     derived_system_prompt: >
-      `derived_system_prompt` is an internal non-authorable carrier. It begins with the exact resolved intent content,
-      followed only by separately owned contract criteria. Runtime and persistence reject an invalid artifact, a blank
-      carrier, or a carrier that does not begin with the exact intent content. The LLM runtime appends the separately owned
-      generated environment postamble exactly once when constructing the provider-visible system prompt; that step does not
-      mutate or replace the persisted carrier or the resolved intent artifact.
+      The derived system prompt is an internal, non-serializable runtime carrier constructed from the exact resolved intent
+      plus separately owned contract criteria. It is never a selected-store field or authored string. Runtime rejects a
+      missing carrier, an intent-identity mismatch, or criteria references that differ from the selected declaration. The LLM
+      runtime appends the separately owned generated environment postamble exactly once when constructing the
+      provider-visible system prompt; that step does not mutate or replace the resolved intent artifact or durable criteria
+      references. Persisted `derived_system_prompt` is unsupported and fails closed rather than being migrated or accepted.
     event_invariance: Event payload shape, payload mode, date, entity state, workspace class, shard parent, runtime backend,
       and execution mode never select or mutate authored intent content or identity.
     provider_boundary: API, CLI, OpenAI-compatible, Responses, mock, and startup-probe adapters receive the derived carrier;
@@ -10091,9 +10099,9 @@ agent_intent_model:
       closed.
   environment_postamble:
     rule: >
-      The LLM runtime appends workspace facts after the immutable persisted intent-and-criteria carrier when constructing the
+      The LLM runtime appends workspace facts after the immutable runtime intent-and-criteria carrier when constructing the
       provider-visible system prompt. The postamble is generated platform context, is not authorable, does not list tools,
-      and does not alter the persisted carrier, resolved intent artifact, or hashes.
+      and does not alter durable intent/criteria facts, the resolved intent artifact, or hashes.
     required_content:
     - 'Workspace: /workspace (read-write logical path)'
     - 'Reference data: /data (read-only logical path)'

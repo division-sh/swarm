@@ -1060,7 +1060,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 					identity.Description(),
 				)
 			}
-			if err := am.adoptPersistedAgentForLifecycle(ctx, source, stored); err != nil {
+			if err := am.adoptPersistedAgentLifecycleOnly(ctx, stored); err != nil {
 				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", identity.Description(), err)
 			}
 		}
@@ -1130,7 +1130,13 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 		return fmt.Errorf("agent %s process and durable revisions disagree", identity.Description())
 	}
 	if !live && !persistedIdentity.IsZero() {
-		if err := am.adoptPersistedAgentForLifecycle(ctx, source, persisted); err != nil {
+		adopt := am.adoptPersistedAgentForLifecycle
+		if persistedRevision != expectedRevision {
+			adopt = func(ctx context.Context, _ semanticview.Source, rec PersistedAgent) error {
+				return am.adoptPersistedAgentLifecycleOnly(ctx, rec)
+			}
+		}
+		if err := adopt(ctx, source, persisted); err != nil {
 			return fmt.Errorf("adopt persisted agent %s: %w", identity.Description(), err)
 		}
 		live = true

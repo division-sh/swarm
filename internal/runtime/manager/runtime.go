@@ -1470,6 +1470,9 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		if err := am.executionPosture.Admit(updated.ExecutionMode, "agent lifecycle replacement"); err != nil {
 			return replaceExecutionResult{}, err
 		}
+		if err := bindCanonicalAgentPrompt(source, &updated); err != nil {
+			return replaceExecutionResult{}, err
+		}
 		subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &updated, nil)
 		if err != nil {
 			return replaceExecutionResult{}, err

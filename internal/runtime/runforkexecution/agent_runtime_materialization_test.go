@@ -449,7 +449,7 @@ func selectedContractTestIntent(t testing.TB, agentID string) runtimeagentintent
 	resolved, err := runtimeagentintent.Resolve(
 		runtimeagentintent.SourceInline,
 		"inline",
-		"test#agents."+strings.TrimSpace(agentID)+".intent",
+		"agents.yaml#agents."+strings.TrimSpace(agentID)+".intent",
 		"Perform the selected-contract test agent's assigned work.",
 	)
 	if err != nil {
@@ -463,8 +463,12 @@ func selectedContractTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig
 	if cfg.Intent.Empty() {
 		cfg.Intent = selectedContractTestIntent(t, cfg.ID)
 	}
-	if strings.TrimSpace(cfg.SystemPrompt) == "" {
-		cfg.SystemPrompt = cfg.Intent.Content
+	if cfg.Prompt.Empty() {
+		prompt, err := runtimeagentintent.IntentOnlyPrompt(cfg.Intent)
+		if err != nil {
+			t.Fatalf("derive selected-contract test prompt: %v", err)
+		}
+		cfg.Prompt = prompt
 	}
 	return cfg
 }
