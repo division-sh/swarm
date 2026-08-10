@@ -175,7 +175,7 @@ func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 	}, AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return true },
 	})
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
+	if err := am.SpawnAgent(managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

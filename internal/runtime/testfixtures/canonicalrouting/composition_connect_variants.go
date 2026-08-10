@@ -504,6 +504,7 @@ producer-agent:
   id: producer-agent
   type: claude
   role: producer
+  intent: {inline: "Produce the declared deployment event."}
   emit_events: [deploy.done]
 `
 	}

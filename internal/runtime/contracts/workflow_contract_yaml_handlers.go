@@ -1544,6 +1544,9 @@ func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
 		if key == "" || key == "policy_keys" {
 			continue
 		}
+		if configFromKeyContainsSystemPrompt(key) {
+			return nil, fmt.Errorf("RETIRED: config_from key %q cannot author system_prompt; declare intent: on the managed agent", key)
+		}
 		spec.Bindings[key] = strings.TrimSpace(node.Content[i+1].Value)
 	}
 	if len(spec.PolicyKeys) == 0 && len(spec.Bindings) == 0 {
@@ -1551,6 +1554,17 @@ func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
 	}
 	spec.Entries = spec.ConfigEntries()
 	return spec, nil
+}
+
+func configFromKeyContainsSystemPrompt(key string) bool {
+	for _, segment := range strings.FieldsFunc(strings.TrimSpace(key), func(r rune) bool {
+		return r == '.' || r == '[' || r == ']'
+	}) {
+		if strings.TrimSpace(segment) == "system_prompt" {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeEventEmitterNode(node *yaml.Node) (EventEmitterRef, []string, error) {

@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "prompt_exists"
-    contains: "prompt contains TODO"
+    category: "intent_resolution"
+    contains: "TODO"

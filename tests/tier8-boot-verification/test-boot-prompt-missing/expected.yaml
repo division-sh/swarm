@@ -1,8 +1,8 @@
 conformance:
   disposition: verify-only
-  verify: warning
+  verify: reject
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "prompt_exists"
-    contains: "no prompt file"
+    category: "agent intent source is required"
+    contains: "agent intent source is required"

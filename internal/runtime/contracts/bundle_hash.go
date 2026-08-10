@@ -33,14 +33,15 @@ type bundleHashContentPolicy int
 
 const (
 	bundleHashYAML bundleHashContentPolicy = iota
-	bundleHashPrompt
+	bundleHashIntent
 	bundleHashRaw
 )
 
 type bundleHashEntry struct {
-	Label  string
-	Path   string
-	Policy bundleHashContentPolicy
+	Label         string
+	Path          string
+	Policy        bundleHashContentPolicy
+	ExpectedExact []byte
 }
 
 type canonicalJSONNumber float64
@@ -64,7 +65,7 @@ func BundleHash(bundle *WorkflowContractBundle) (string, error) {
 	}
 	var length [8]byte
 	for _, entry := range entries {
-		content, err := canonicalBundleHashContent(entry.Path, entry.Policy)
+		content, err := canonicalBundleHashEntryContent(entry)
 		if err != nil {
 			return "", fmt.Errorf("canonicalize %s: %w", entry.Label, err)
 		}
@@ -124,10 +125,6 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 			return nil, err
 		}
 	}
-	if err := builder.addRecursiveDir(paths.ProjectPromptsDir, bundleHashPrompt); err != nil {
-		return nil, err
-	}
-
 	rootPackagePath := strings.TrimSpace(paths.ProjectPackageFile)
 	for _, pkg := range paths.ProjectPackages {
 		isRootPackage := rootPackagePath != "" && sameFilePath(pkg.PackageFile, rootPackagePath)
@@ -145,9 +142,6 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 				if err := builder.addOptionalBundleFile(path, bundleHashYAML); err != nil {
 					return nil, err
 				}
-			}
-			if err := builder.addRecursiveDir(pkg.ProjectPromptsDir, bundleHashPrompt); err != nil {
-				return nil, err
 			}
 		}
 		for _, flow := range pkg.Flows {
@@ -167,6 +161,9 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 		return nil, err
 	}
 	if err := builder.addAgentMockModuleFiles(bundle); err != nil {
+		return nil, err
+	}
+	if err := builder.addAgentIntentFiles(bundle); err != nil {
 		return nil, err
 	}
 
@@ -199,10 +196,60 @@ func (b *bundleHashEntryBuilder) addFlow(flow FlowContractPaths) error {
 			return err
 		}
 	}
-	if err := b.addRecursiveDir(flow.PromptsDir, bundleHashPrompt); err != nil {
+	return b.addRecursiveDir(flow.DataDir, bundleHashRaw)
+}
+
+func (b *bundleHashEntryBuilder) addAgentIntentFiles(bundle *WorkflowContractBundle) error {
+	if bundle == nil {
+		return nil
+	}
+	for _, record := range bundleAgentRecords(bundle) {
+		scopedID := contractScopeKey(record.Source, record.LogicalID)
+		agent := record.Entry
+		if err := agent.ResolvedIntent.Validate(); err != nil {
+			return fmt.Errorf("agent %s resolved intent: %w", scopedID, err)
+		}
+		if agent.ResolvedIntent.Kind != "local" {
+			continue
+		}
+		path := filepath.Join(b.contractsRoot, filepath.FromSlash(agent.ResolvedIntent.Coordinate))
+		if err := b.addExactIntentFile(path, []byte(agent.ResolvedIntent.Content)); err != nil {
+			return fmt.Errorf("agent %s intent input: %w", scopedID, err)
+		}
+	}
+	return nil
+}
+
+func (b *bundleHashEntryBuilder) addExactIntentFile(path string, expected []byte) error {
+	abs, err := canonicalRegularFile(path, "agent intent input")
+	if err != nil {
 		return err
 	}
-	return b.addRecursiveDir(flow.DataDir, bundleHashRaw)
+	label, err := bundleHashBundleLabel(b.contractsRoot, abs)
+	if err != nil {
+		return err
+	}
+	if _, exists := b.seenPaths[abs]; exists {
+		for i := range b.entries {
+			if b.entries[i].Path != abs {
+				continue
+			}
+			if b.entries[i].Policy != bundleHashIntent {
+				return fmt.Errorf("declared intent %s overlaps canonical input %s with non-intent policy", label, b.entries[i].Label)
+			}
+			if len(b.entries[i].ExpectedExact) > 0 && !bytes.Equal(b.entries[i].ExpectedExact, expected) {
+				return fmt.Errorf("declared intent %s has conflicting exact content owners", label)
+			}
+			b.entries[i].ExpectedExact = append([]byte(nil), expected...)
+			return nil
+		}
+		return fmt.Errorf("declared intent %s has no canonical input record", label)
+	}
+	if err := b.addEntry(abs, label, bundleHashIntent); err != nil {
+		return err
+	}
+	b.entries[len(b.entries)-1].ExpectedExact = append([]byte(nil), expected...)
+	return nil
 }
 
 func (b *bundleHashEntryBuilder) addPolicyModuleFiles(bundle *WorkflowContractBundle) error {
@@ -233,7 +280,8 @@ func (b *bundleHashEntryBuilder) addAgentMockModuleFiles(bundle *WorkflowContrac
 	if bundle == nil {
 		return nil
 	}
-	for _, agent := range bundle.ScopedAgentEntries() {
+	for _, record := range bundleAgentRecords(bundle) {
+		agent := record.Entry
 		if !agent.Mock.Configured() {
 			continue
 		}
@@ -470,8 +518,11 @@ func canonicalBundleHashContent(path string, policy bundleHashContentPolicy) ([]
 	switch policy {
 	case bundleHashYAML:
 		return canonicalBundleHashYAML(raw)
-	case bundleHashPrompt:
-		return canonicalBundleHashPrompt(raw)
+	case bundleHashIntent:
+		if !utf8.Valid(raw) {
+			return nil, fmt.Errorf("agent intent text is not valid UTF-8")
+		}
+		return raw, nil
 	case bundleHashRaw:
 		return raw, nil
 	default:
@@ -479,19 +530,15 @@ func canonicalBundleHashContent(path string, policy bundleHashContentPolicy) ([]
 	}
 }
 
-func canonicalBundleHashPrompt(raw []byte) ([]byte, error) {
-	if len(raw) >= 3 && bytes.Equal(raw[:3], []byte{0xef, 0xbb, 0xbf}) {
-		raw = raw[3:]
+func canonicalBundleHashEntryContent(entry bundleHashEntry) ([]byte, error) {
+	content, err := canonicalBundleHashContent(entry.Path, entry.Policy)
+	if err != nil {
+		return nil, err
 	}
-	if !utf8.Valid(raw) {
-		return nil, fmt.Errorf("prompt text is not valid UTF-8")
+	if entry.ExpectedExact != nil && !bytes.Equal(content, entry.ExpectedExact) {
+		return nil, fmt.Errorf("canonical input changed after exact agent intent resolution")
 	}
-	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	if text != "" && !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
-	return []byte(text), nil
+	return content, nil
 }
 
 func canonicalBundleHashYAML(raw []byte) ([]byte, error) {

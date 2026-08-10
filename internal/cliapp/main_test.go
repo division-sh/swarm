@@ -4447,7 +4447,7 @@ writer:
   id: writer
   type: factory
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   model: regular
   subscriptions: []
   entity_writes:
@@ -4700,7 +4700,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 %s:
   id: %s
   role: %s
-  prompt_ref: %s
+  intent: prompts/%s.md
   model: regular
   native_tools:
     bash: true
@@ -5270,10 +5270,7 @@ func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 	source := semanticview.Wrap(requiredagentsparentconnect.LoadBundle(t))
 
 	err := VerifyBundle(context.Background(), source)
-	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
-	}
-	if strings.Contains(err.Error(), "'work.ready' emitted but nobody subscribes") {
+	if err != nil && strings.Contains(err.Error(), "'work.ready' emitted but nobody subscribes") {
 		t.Fatalf("unexpected flow-owned agent output warning: %v", err)
 	}
 }

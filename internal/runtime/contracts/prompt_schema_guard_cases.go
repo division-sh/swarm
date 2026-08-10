@@ -1,12 +1,12 @@
 package contracts
 
 import (
-	"sort"
 	"strings"
 )
 
 type PromptSchemaGuardCase struct {
-	PromptFile       string
+	IntentSource     string
+	IntentContent    string
 	EmitTool         string
 	RequiredTopLevel []string
 	ForbiddenTokens  []string
@@ -20,24 +20,15 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 	if bundle == nil {
 		return nil
 	}
-	agentIDs := make([]string, 0, len(bundle.AgentEntries()))
-	for agentID := range bundle.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		if agentID != "" {
-			agentIDs = append(agentIDs, agentID)
-		}
-	}
-	sort.Strings(agentIDs)
-
-	cases := make([]PromptSchemaGuardCase, 0, len(agentIDs))
+	records := bundleAgentRecords(bundle)
+	cases := make([]PromptSchemaGuardCase, 0, len(records))
 	seen := map[string]struct{}{}
-	for _, agentID := range agentIDs {
-		entry := bundle.AgentEntries()[agentID]
+	for _, record := range records {
+		entry := record.Entry
 		if len(entry.EmitEvents) == 0 {
 			continue
 		}
-		promptFile := resolvePromptSchemaGuardFile(bundle, agentID, entry)
-		if promptFile == "" {
+		if err := entry.ResolvedIntent.Validate(); err != nil {
 			continue
 		}
 		for _, emitEvent := range entry.EmitEvents {
@@ -53,32 +44,18 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 			if len(required) == 0 {
 				continue
 			}
-			key := promptFile + "|" + emitEvent
+			key := entry.ResolvedIntent.Identity + "|" + emitEvent
 			if _, ok := seen[key]; ok {
 				continue
 			}
 			seen[key] = struct{}{}
 			cases = append(cases, PromptSchemaGuardCase{
-				PromptFile:       promptFile,
+				IntentSource:     entry.ResolvedIntent.Coordinate,
+				IntentContent:    entry.ResolvedIntent.Content,
 				EmitTool:         "emit_" + strings.ReplaceAll(emitEvent, ".", "_"),
 				RequiredTopLevel: required,
 			})
 		}
 	}
 	return cases
-}
-
-func resolvePromptSchemaGuardFile(bundle *WorkflowContractBundle, agentID string, entry AgentRegistryEntry) string {
-	if bundle == nil {
-		return ""
-	}
-	source, ok := bundle.AgentContractSource(agentID)
-	if !ok {
-		return ""
-	}
-	resolution, ok, err := ResolvePromptFileForContractAgent(bundle, agentID, entry, source, promptFlowPromptMode(bundle, source.FlowID))
-	if err != nil || !ok {
-		return ""
-	}
-	return resolution.Path
 }

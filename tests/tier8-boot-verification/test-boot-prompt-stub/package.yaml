@@ -1,8 +1,6 @@
 name: test-boot-prompt-stub
 version: 1.0.0
 description: >
-  Boot verification: agent has a prompt file that contains a TODO
-  marker, indicating an incomplete prompt. Should produce a
-  PROMPT-STUB warning.
+  Boot verification warns when the resolved intent contains an open TODO marker.
 platform_version: ">=0.7.0 <0.8.0"
 flows: []

@@ -552,7 +552,7 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 			t.Fatalf("ignored content leaked through %s", file.Path)
 		}
 	}
-	wantPaths := []string{"flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
+	wantPaths := []string{"agents.yaml", "flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("content_yaml files = %#v, want %#v\n%s", paths, wantPaths, contentYAML)
 	}
@@ -791,7 +791,12 @@ func TestBundleReadSelectorValidationPrecedesAPIConfiguration(t *testing.T) {
 func TestBundleRegisterContractsDirectoryRejectsSymlinkBeforeRequest(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	contractsDir := writeBundleRegisterContractsFixture(t)
-	if err := os.Symlink(filepath.Join(contractsDir, "prompts", "root.md"), filepath.Join(contractsDir, "prompts", "link.md")); err != nil {
+	declared := filepath.Join(contractsDir, "prompts", "root.md")
+	target := filepath.Join(contractsDir, "prompts", "target.md")
+	if err := os.Rename(declared, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, declared); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 	var calls atomic.Int32
@@ -1053,6 +1058,7 @@ states:
   - start
   - done
 `)
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "agents.yaml"), "root:\n  id: root\n  role: root\n  intent: prompts/root.md\n  model: regular\n  subscriptions: [root.requested]\n")
 	writeBundleRegisterFixtureFile(t, filepath.Join(root, "prompts", "root.md"), "root prompt\n")
 	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "empty.bin"), nil)
 	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})

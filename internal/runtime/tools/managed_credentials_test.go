@@ -456,6 +456,7 @@ requires:
 worker-agent:
   id: worker-agent
   role: worker
+  intent: {inline: "Invoke the declared provider using its managed credential."}
   model: regular
   tools: [send_provider]
 `)

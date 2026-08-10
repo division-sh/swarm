@@ -66,7 +66,7 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 	dataEntries := make([]bundleCatalogDataEntry, 0)
 	contentFiles := make([]bundleCatalogDataEntry, 0)
 	for _, entry := range entries {
-		content, err := canonicalBundleHashContent(entry.Path, entry.Policy)
+		content, err := canonicalBundleHashEntryContent(entry)
 		if err != nil {
 			return BundleCatalogProjection{}, fmt.Errorf("canonicalize bundle catalog input %s: %w", entry.Label, err)
 		}
@@ -128,8 +128,8 @@ func bundleCatalogPolicyName(policy bundleHashContentPolicy) string {
 	switch policy {
 	case bundleHashYAML:
 		return "yaml"
-	case bundleHashPrompt:
-		return "prompt_text"
+	case bundleHashIntent:
+		return "intent_text"
 	case bundleHashRaw:
 		return "raw_data"
 	default:
@@ -260,7 +260,12 @@ func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) map[string]any {
 		addStringField(def, "model", entry.Model)
 		def["memory"] = entry.MemoryPlan.Enabled
 		addStringField(def, "memory_source", string(entry.MemoryPlan.Source))
-		addStringField(def, "prompt_path", entry.PromptRef)
+		addStringField(def, "intent_kind", string(entry.ResolvedIntent.Kind))
+		addStringField(def, "intent_source", entry.ResolvedIntent.Coordinate)
+		addStringField(def, "intent_provenance", entry.ResolvedIntent.Provenance)
+		addStringField(def, "intent_content_hash", entry.ResolvedIntent.ContentHash)
+		addStringField(def, "intent_identity", entry.ResolvedIntent.Identity)
+		def["intent_content"] = entry.ResolvedIntent.Content
 		if source, ok := bundle.AgentContractSource(agentID); ok {
 			addStringField(def, "flow_instance", source.FlowID)
 		}

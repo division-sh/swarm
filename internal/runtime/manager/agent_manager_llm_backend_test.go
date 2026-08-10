@@ -20,13 +20,13 @@ import (
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: models.AgentConfig{
+		Config: managerTestAgentConfig(models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
 			Identity:      runtimeagentidentitytest.RootRuntime(t, "agent-1", "manager-llm-backend-test"),
 			Role:          "reviewer",
 			Model:         "regular",
-		},
+		}),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -104,15 +104,15 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 			},
 		},
 	})
-	staticCfg, err := buildStaticFlowAgentConfig(source, "static-support", "static-support", "static-worker", runtimecontracts.AgentRegistryEntry{
+	staticCfg, err := buildStaticFlowAgentConfig(source, "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
 		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
-	}, nil)
+	}), nil)
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
-	instantiatedCfg, err := buildFlowAgentConfig(source, "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", runtimecontracts.AgentRegistryEntry{
+	instantiatedCfg, err := buildFlowAgentConfig(source, "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
 		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
-	}, map[string]string{"instance_id": "inst-1"}, nil, nil)
+	}), map[string]string{"instance_id": "inst-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
 	}

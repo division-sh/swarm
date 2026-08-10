@@ -1,8 +1,8 @@
 conformance:
   disposition: verify-only
-  verify: warning
+  verify: reject
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "prompt_exists"
-    contains: "prompt contains TODO"
+    category: "RETIRED"
+    contains: "agent field prompt_ref"
