@@ -702,7 +702,7 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	timerID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "revision.delete", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id,run_id,timer_name,fire_event,routing_source,fire_at,owner_agent,owner_kind,task_type,status) VALUES ($1::uuid,$2::uuid,'revision-delete','timer.fire','{"kind":"platform_control","route":{}}'::jsonb,NOW(),'agent-a','system','timer','active')`, timerID, runID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id,run_id,timer_name,fire_event,routing_source,execution_mode,fire_at,owner_agent,owner_kind,task_type,status) VALUES ($1::uuid,$2::uuid,'revision-delete','timer.fire','{"kind":"platform_control","route":{}}'::jsonb,'live',NOW(),'agent-a','system','timer','active')`, timerID, runID); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
 	firstRevision := captureRunForkTestRevision(t, db, runID)

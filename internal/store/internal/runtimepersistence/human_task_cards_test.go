@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/google/uuid"
 )
@@ -336,6 +337,7 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 			now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 
 			due, dueContinuation := newHumanTaskDecisionCardTestFixture(t, runID, "expires", now, 0, now.Add(time.Hour))
+			due.ExecutionMode = executionmode.Mock
 			pending, pendingContinuation := newHumanTaskDecisionCardTestFixture(t, runID, "run-terminal", now.Add(time.Minute), 0, now.Add(24*time.Hour))
 			for _, item := range []struct {
 				card         decisioncard.Card
@@ -368,6 +370,9 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 			expiredEvents := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryAt, 10)
 			if len(expiredEvents) != 1 || expiredEvents[0].ID() == "" || expiredEvents[0].Type() != events.EventType("mailbox.card_expired") {
 				t.Fatalf("ExpireHumanTaskCardsInMutation events = %#v", expiredEvents)
+			}
+			if expiredEvents[0].ExecutionMode() != executionmode.Mock {
+				t.Fatalf("expired event execution mode = %q, want mock", expiredEvents[0].ExecutionMode())
 			}
 			if replayed := expireHumanTaskCardsInTestMutation(t, ctx, cardStore, expiryAt, 10); len(replayed) != 0 {
 				t.Fatalf("replayed ExpireHumanTaskCardsInMutation events = %#v", replayed)

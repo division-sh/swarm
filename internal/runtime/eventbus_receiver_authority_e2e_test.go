@@ -136,7 +136,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			startedAt := time.Now().UTC().Add(-time.Second)
 			materializeCtx := worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
 			rootRoute := runID
-			if _, err := rt.Pipeline.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
+			if _, err := rt.Pipeline.MaterializeInitialEntry(testLiveExecutionContext(materializeCtx), runtimepipeline.WorkflowInstance{
 				InstanceID: rootRoute, StorageRef: rootRoute,
 				WorkflowName: bundle.WorkflowName(), WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,

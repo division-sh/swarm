@@ -27,6 +27,8 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -3247,7 +3249,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			},
 		},
 	}) {
-		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
+		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
@@ -3389,7 +3391,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 			},
 		},
 	}) {
-		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
+		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
 			t.Fatalf("seed workflow instance %s: %v", instance.InstanceID, err)
 		}
 	}
@@ -3665,7 +3667,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			},
 		},
 	}) {
-		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
+		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
@@ -3919,7 +3921,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 			"instance_id": eventBusTestRunID,
 		},
 	}})[0]
-	if _, err := workflowStore.MaterializeInitialEntry(ctx, rootFixture, rootFixture.CreatedAt); err != nil {
+	if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), rootFixture, rootFixture.CreatedAt); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
 

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -98,6 +99,7 @@ func TestScheduleEventPayloadPreservesJoinTimeoutHandle(t *testing.T) {
 
 func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	evt, err := scheduledEvent(runtimepipeline.Schedule{
+		ExecutionMode: executionmode.Live,
 		RunID:         "11111111-1111-1111-1111-111111111111",
 		AgentID:       "runtime",
 		EventType:     "review/timer.check",
@@ -134,8 +136,28 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	}
 }
 
+func TestScheduledEventPreservesMockExecutionMode(t *testing.T) {
+	evt, err := scheduledEvent(runtimepipeline.Schedule{
+		ExecutionMode: executionmode.Mock,
+		RunID:         "11111111-1111-1111-1111-111111111111",
+		AgentID:       "runtime",
+		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+		EventType:     "timer.check",
+		TaskID:        "mock-schedule",
+		Payload:       []byte(`{}`),
+		RoutingSource: events.NewPlatformControlRoutingSource(),
+	})
+	if err != nil {
+		t.Fatalf("scheduledEvent: %v", err)
+	}
+	if evt.ExecutionMode() != executionmode.Mock {
+		t.Fatalf("event execution mode = %q, want mock", evt.ExecutionMode())
+	}
+}
+
 func TestScheduledEventPreservesRootScheduleRoutingSource(t *testing.T) {
 	evt, err := scheduledEvent(runtimepipeline.Schedule{
+		ExecutionMode: executionmode.Live,
 		RunID:         "11111111-1111-1111-1111-111111111111",
 		AgentID:       "root-agent",
 		EventType:     "timer.check",
@@ -555,13 +577,14 @@ func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.
 	activeAt := time.Now().UTC().Add(-1 * time.Minute)
 	store := &recordingRuntimeScheduleStore{
 		active: []runtimepipeline.Schedule{{
-			AgentID:   "runtime",
-			OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-			EventType: "timer.boot_once",
-			Mode:      "once",
-			At:        activeAt,
-			TaskID:    "boot_once",
-			Payload:   []byte(`{"timer_id":"boot_once"}`),
+			AgentID:       "runtime",
+			OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+			EventType:     "timer.boot_once",
+			Mode:          "once",
+			At:            activeAt,
+			TaskID:        "boot_once",
+			Payload:       []byte(`{"timer_id":"boot_once"}`),
+			ExecutionMode: executionmode.Live,
 		}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -587,13 +610,14 @@ func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.
 
 func TestEnsureBootWorkflowSchedulesUsesRestoredSnapshotToAvoidRecreatingBootSchedule(t *testing.T) {
 	restored := runtimepipeline.Schedule{
-		AgentID:   "runtime",
-		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-		EventType: "timer.boot_once",
-		Mode:      "once",
-		At:        time.Now().UTC().Add(-1 * time.Minute),
-		TaskID:    "boot_once",
-		Payload:   []byte(`{"timer_id":"boot_once"}`),
+		AgentID:       "runtime",
+		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+		EventType:     "timer.boot_once",
+		Mode:          "once",
+		At:            time.Now().UTC().Add(-1 * time.Minute),
+		TaskID:        "boot_once",
+		Payload:       []byte(`{"timer_id":"boot_once"}`),
+		ExecutionMode: executionmode.Live,
 	}
 	store := &recordingRuntimeScheduleStore{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -715,6 +739,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 		TaskID:        "check_timer",
 		At:            time.Now().Add(10 * time.Millisecond),
 		RoutingSource: events.NewPlatformControlRoutingSource(),
+		ExecutionMode: executionmode.Live,
 	}
 	if err := rt.Scheduler.Register(context.Background(), sc); err != nil {
 		t.Fatalf("Register(schedule): %v", err)
@@ -755,6 +780,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 				TaskID:        "check_timer",
 				Payload:       []byte(`{"timer_id":"check_timer"}`),
 				RoutingSource: mustRuntimeFlowOwnedScheduleSource(t, "review", "review/inst-1", "ent-001"),
+				ExecutionMode: executionmode.Live,
 			},
 			{
 				AgentID:       "runtime",
@@ -768,6 +794,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 				TaskID:        "check_timer",
 				Payload:       []byte(`{"timer_id":"check_timer"}`),
 				RoutingSource: mustRuntimeFlowOwnedScheduleSource(t, "review", "review/inst-2", "ent-001"),
+				ExecutionMode: executionmode.Live,
 			},
 		},
 		fired: make(chan runtimepipeline.Schedule, 2),

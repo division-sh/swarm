@@ -287,11 +287,11 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	if _, err := sqliteStore.backend.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_payload,
-			routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
+			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES
-			(?, ?, 'due', 'quiescence.timeout', '{}', '{"kind":"platform_control","route":{}}', ?, 'timer-agent', 'system', 'timer', 'active', ?),
-			(?, ?, 'settled', 'quiescence.timeout', '{}', '{"kind":"platform_control","route":{}}', ?, 'timer-agent', 'system', 'timer', 'fired', ?)
+			(?, ?, 'due', 'quiescence.timeout', '{}', '{"kind":"platform_control","route":{}}', 'live', ?, 'timer-agent', 'system', 'timer', 'active', ?),
+			(?, ?, 'settled', 'quiescence.timeout', '{}', '{"kind":"platform_control","route":{}}', 'live', ?, 'timer-agent', 'system', 'timer', 'fired', ?)
 	`, uuid.NewString(), blockedRunID, now.Add(-time.Minute), now,
 		uuid.NewString(), readyRunID, now.Add(-time.Minute), now); err != nil {
 		t.Fatalf("seed sqlite timers: %v", err)

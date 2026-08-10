@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -407,8 +408,8 @@ func (p *servedManagerScheduleProjectionProbe) observe(ctx context.Context, _ *r
 		return fail(fmt.Errorf("Manager event execution standing projection = %p/%t, want %p", standing, ok, request.standing))
 	}
 	for _, schedule := range []runtimepipeline.Schedule{
-		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource()},
-		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource()},
+		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live},
+		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live},
 	} {
 		if err := request.scheduler.Register(ctx, schedule); err != nil {
 			return fail(fmt.Errorf("register Manager-composed served standing %s schedule: %w", schedule.Mode, err))

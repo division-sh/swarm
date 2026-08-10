@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
@@ -655,6 +656,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 func runtimeContextSystemSchedule(schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
 	schedule.OwnerKind = runtimepipeline.ScheduleOwnerSystem
 	schedule.RoutingSource = events.NewPlatformControlRoutingSource()
+	schedule.ExecutionMode = executionmode.Live
 	return schedule
 }
 

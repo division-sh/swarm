@@ -3284,6 +3284,7 @@ func TestPipelineEngineLifecycleEffectApplierSchedulesOnlyAfterNamedStoreCommit(
 		At:            time.Now().Add(time.Hour),
 		TaskID:        "timer-1",
 		RoutingSource: events.NewPlatformControlRoutingSource(),
+		ExecutionMode: executionmode.Live,
 	}
 
 	if err := pc.persistGenericSchedule(ctx, sc); err != nil {

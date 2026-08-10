@@ -58,6 +58,9 @@ func (s *ScheduleSQLiteOwner) UpsertSchedule(ctx context.Context, sc runtimepipe
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
+	if err := sc.NormalizeExecutionMode(); err != nil {
+		return err
+	}
 	sc, err = sc.AdmitEventIdentity()
 	if err != nil {
 		return err
@@ -93,15 +96,15 @@ func (s *ScheduleSQLiteOwner) UpsertSchedule(ctx context.Context, sc runtimepipe
 		}
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode,
 				fire_at, recurring, recurrence_cron, owner_agent, owner_kind, agent_name_owner,
 				agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				reply_context_id, task_type, status, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''),
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''),
 			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, 'active', ?)
 		`, uuid.NewString(), sqliteNullUUID(sc.RunID), timerName, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance),
-			sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), fireAt.UTC(), recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.OwnerKind,
+			sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), sc.ExecutionMode, fireAt.UTC(), recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.OwnerKind,
 			identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey,
 			identityFields.FlowInstanceID, sc.Context.ReplyContextID(), taskType, time.Now().UTC())
 		return err
@@ -181,7 +184,7 @@ func (s *ScheduleSQLiteOwner) LoadActiveSchedules(ctx context.Context) ([]runtim
 		       COALESCE(t.agent_route_presence, ''), COALESCE(t.agent_flow_scope_key, ''),
 		       COALESCE(t.agent_flow_instance_id, ''), t.fire_event, t.recurring,
 		       COALESCE(t.recurrence_cron, ''), COALESCE(t.recurrence_interval, ''),
-		       t.fire_at, COALESCE(t.entity_id, ''), COALESCE(t.flow_instance, ''), COALESCE(t.fire_payload, '{}'), t.routing_source, COALESCE(t.reply_context_id, '')
+		       t.fire_at, COALESCE(t.entity_id, ''), COALESCE(t.flow_instance, ''), COALESCE(t.fire_payload, '{}'), t.routing_source, t.execution_mode, COALESCE(t.reply_context_id, '')
 		FROM timers t
 		LEFT JOIN runs run ON run.run_id = t.run_id
 		WHERE t.status = 'active'
@@ -206,7 +209,7 @@ func (s *ScheduleSQLiteOwner) LoadActiveSchedules(ctx context.Context) ([]runtim
 		var replyContextID string
 		if err := rows.Scan(&sc.RunID, &sc.AgentID, &sc.OwnerKind, &nameOwner, &nameSource, &routePresence,
 			&flowScopeKey, &flowInstanceID, &sc.EventType, &recurring, &recurrenceCron, &recurrenceInterval,
-			&fireAt, &sc.EntityID, &sc.FlowInstance, &payload, &routingSourceRaw, &replyContextID); err != nil {
+			&fireAt, &sc.EntityID, &sc.FlowInstance, &payload, &routingSourceRaw, &sc.ExecutionMode, &replyContextID); err != nil {
 			return nil, fmt.Errorf("scan sqlite schedule: %w", err)
 		}
 		if at, err := timerTimeValue(fireAt); err != nil {
@@ -238,6 +241,9 @@ func (s *ScheduleSQLiteOwner) LoadActiveSchedules(ctx context.Context) ([]runtim
 		}
 		if err := sc.NormalizeOwner(); err != nil {
 			return nil, fmt.Errorf("load sqlite schedule owner: %w", err)
+		}
+		if err := sc.NormalizeExecutionMode(); err != nil {
+			return nil, fmt.Errorf("load sqlite schedule execution mode: %w", err)
 		}
 		sc, err = sc.AdmitEventIdentity()
 		if err != nil {

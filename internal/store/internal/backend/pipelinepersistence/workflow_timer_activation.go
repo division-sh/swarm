@@ -114,7 +114,7 @@ func workflowTimerSelectColumns() string {
 			CAST(t.timer_id AS TEXT), t.timer_name, COALESCE(CAST(t.run_id AS TEXT), ''),
 			COALESCE(CAST(t.entity_id AS TEXT), ''), COALESCE(t.flow_scope_key, ''),
 			COALESCE(t.flow_instance_id, ''), COALESCE(t.flow_instance, ''),
-			t.fire_event, COALESCE(t.fire_payload, '{}'), t.routing_source, t.fire_at, t.recurring,
+			t.fire_event, COALESCE(t.fire_payload, '{}'), t.routing_source, t.execution_mode, t.fire_at, t.recurring,
 			COALESCE(t.recurrence_interval, ''), COALESCE(t.owner_node, ''),
 			COALESCE(t.owner_agent, ''), t.task_type, t.status, t.fired_at, t.created_at,
 			COALESCE(CAST(t.source_timer_id AS TEXT), ''),
@@ -134,7 +134,7 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.
 	if err := scanner.Scan(
 		&record.ActivationID, &record.TaskID, &record.RunID, &record.EntityID, &record.Route.ScopeKey,
 		&record.Route.InstanceID, &record.Route.InstancePath,
-		&record.EventType, &payloadRaw, &routingSourceRaw, &fireAtRaw, &record.Recurring, &record.RecurrenceInterval,
+		&record.EventType, &payloadRaw, &routingSourceRaw, &record.ExecutionMode, &fireAtRaw, &record.Recurring, &record.RecurrenceInterval,
 		&record.OwnerNode, &record.OwnerAgent, &record.TaskType, &record.Status, &firedAtRaw, &createdAtRaw,
 		&record.SourceTimerID, &record.ForkedFromRunID, &record.ForkedFromEventID,
 		&record.ReconstructionOwner,

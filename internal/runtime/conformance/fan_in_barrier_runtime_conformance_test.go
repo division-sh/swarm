@@ -16,7 +16,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -262,7 +264,7 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline 
 	t.Helper()
 	entityID := runtimepipeline.FlowInstanceEntityID("portfolio")
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      "portfolio",
 		StorageRef:      "portfolio",
 		WorkflowName:    "portfolio",

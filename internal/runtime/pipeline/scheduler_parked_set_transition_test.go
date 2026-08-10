@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
@@ -273,7 +274,7 @@ func TestParkedSetTransitionLinearizesExactTargetIncumbents(t *testing.T) {
 
 					schedule := Schedule{
 						RunID: uuid.NewString(), AgentID: "timer-agent", EventType: "timer." + mode,
-						OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: "exact-target-" + name, RoutingSource: events.NewPlatformControlRoutingSource(),
+						OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: "exact-target-" + name, RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
 					}
 					if mode == "once" {
 						schedule.At = time.Now().Add(80 * time.Millisecond)
@@ -400,7 +401,7 @@ func TestParkedSetTransitionAdmissionFailureIsAtomicAndRetryable(t *testing.T) {
 				successor := newSchedulerTestStanding(t, runtimeOwner, fmt.Sprintf("failed-%d", i), 2)
 				schedule := Schedule{
 					RunID: uuid.NewString(), AgentID: "timer-agent", EventType: "timer.once", Mode: "once",
-					OwnerKind: ScheduleOwnerSystem, At: time.Now().Add(time.Hour), TaskID: fmt.Sprintf("service-%d", i), RoutingSource: events.NewPlatformControlRoutingSource(),
+					OwnerKind: ScheduleOwnerSystem, At: time.Now().Add(time.Hour), TaskID: fmt.Sprintf("service-%d", i), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
 				}
 				if err := source.Register(worklifetime.WithOccurrence(context.Background(), predecessor), schedule); err != nil {
 					t.Fatalf("register source %d: %v", i, err)
@@ -472,7 +473,7 @@ func TestParkedSetReservationRejectsConcurrentTargetMutation(t *testing.T) {
 	})
 	schedule := Schedule{
 		RunID: uuid.NewString(), AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron",
-		OwnerKind: ScheduleOwnerSystem, Cron: "@every 1ms", TaskID: "reserved-key", RoutingSource: events.NewPlatformControlRoutingSource(),
+		OwnerKind: ScheduleOwnerSystem, Cron: "@every 1ms", TaskID: "reserved-key", RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,
 	}
 	if err := source.Register(worklifetime.WithOccurrence(context.Background(), predecessor), schedule); err != nil {
 		t.Fatalf("register source: %v", err)

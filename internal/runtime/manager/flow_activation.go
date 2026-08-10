@@ -17,7 +17,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -263,6 +265,11 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		OccurredAt:                    occurredAt,
 		StandingGenerationReplacement: req.StandingGenerationReplacement,
 	}
+	mode, err := flowInstanceActivationExecutionMode(ctx, req)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 	plan.Instance, plan.Lifecycle, err = am.workflowInstances.PrepareInitialEntryLifecycle(ctx, plan.Instance, occurredAt)
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
@@ -275,6 +282,21 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	return req, plan, nil
+}
+
+func flowInstanceActivationExecutionMode(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (executionmode.Mode, error) {
+	triggerMode := req.TriggerEvent.ExecutionMode()
+	contextMode, hasContextMode := runtimeeffects.ExecutionModeFromContext(ctx)
+	if triggerMode.Valid() {
+		if hasContextMode && contextMode != triggerMode {
+			return "", fmt.Errorf("flow activation execution mode conflicts with trigger event")
+		}
+		return triggerMode, nil
+	}
+	if hasContextMode && contextMode.Valid() {
+		return contextMode, nil
+	}
+	return "", fmt.Errorf("flow activation requires typed execution mode authority")
 }
 
 func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (bool, error) {

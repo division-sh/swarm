@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -806,6 +807,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						Mode:          "once",
 						At:            time.Now().Add(time.Hour),
 						RoutingSource: events.NewPlatformControlRoutingSource(),
+						ExecutionMode: executionmode.Live,
 					}); err != nil {
 						t.Fatalf("register pending predecessor schedule: %v", err)
 					}
@@ -913,6 +915,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						Mode:          "once",
 						At:            time.Now().Add(time.Hour),
 						RoutingSource: events.NewPlatformControlRoutingSource(),
+						ExecutionMode: executionmode.Live,
 					}); err != nil {
 						t.Fatalf("register pending rollback schedule: %v", err)
 					}

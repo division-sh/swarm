@@ -30,6 +30,10 @@ import (
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 
+func testLiveExecutionContext(ctx context.Context) context.Context {
+	return runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
+}
+
 var authorActivityTestBundleSourceFact = mustExternalTestBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("e", 64))
 
 var externalRuntimeTestEventBusOwners sync.Map

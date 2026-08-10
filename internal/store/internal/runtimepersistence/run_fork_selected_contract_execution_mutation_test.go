@@ -732,10 +732,10 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	at := time.Unix(1700002500, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload, routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at)
+		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload, routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a', '1', 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
-		        $5, 'agent-a', 'system', 'workflow_timer', 'active', $6)
+		        'live', $5, 'agent-a', 'system', 'workflow_timer', 'active', $6)
 	`, sourceTimerID, sourceRunID, sourceRef.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}
@@ -786,12 +786,12 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, fire_at, owner_agent, owner_kind, task_type, status, fired_at, created_at
+						routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, fired_at, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-fired-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						$3, 'agent-a', 'system', 'timer', 'fired', $4, $5
+						'live', $3, 'agent-a', 'system', 'timer', 'fired', $4, $5
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(30*time.Minute), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed fired timer: %v", err)
@@ -805,12 +805,12 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
+						routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-cancelled-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						$3, 'agent-a', 'system', 'timer', 'cancelled', $4
+						'live', $3, 'agent-a', 'system', 'timer', 'cancelled', $4
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed cancelled timer: %v", err)
@@ -824,12 +824,12 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, fire_at, owner_node, owner_kind, task_type, status, created_at
+						routing_source, execution_mode, fire_at, owner_node, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-ownerless-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						$3, 'timer-node', 'system', 'timer', 'active', $4
+						'live', $3, 'timer-node', 'system', 'timer', 'active', $4
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed ownerless timer: %v", err)
@@ -843,12 +843,12 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 				if _, err := db.ExecContext(testAuthorActivityContext(), `
 					INSERT INTO timers (
 						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
+						routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, 'selected-eventless-timer', $2::uuid, 'flow-a/1', '', '{"source":true}'::jsonb,
 						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						$3, 'agent-a', 'system', 'timer', 'active', $4
+						'live', $3, 'agent-a', 'system', 'timer', 'active', $4
 					)
 				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 					t.Fatalf("seed eventless timer: %v", err)
@@ -905,12 +905,12 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
+			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'selected-vanishing-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $3::text)),
-			$4, 'agent-a', 'system', 'timer', 'active', $5
+			'live', $4, 'agent-a', 'system', 'timer', 'active', $5
 		)
 	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed timer: %v", err)
@@ -982,12 +982,12 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
+			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'post-t-source-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $3::text)),
-			$4, 'agent-a', 'system', 'timer', 'active', $5
+			'live', $4, 'agent-a', 'system', 'timer', 'active', $5
 		)
 	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T timer: %v", err)

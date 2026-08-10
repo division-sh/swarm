@@ -36,6 +36,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -1033,6 +1034,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		At:            time.Now().Add(time.Minute),
 		TaskID:        "recover-me",
 		RoutingSource: events.NewPlatformControlRoutingSource(),
+		ExecutionMode: executionmode.Live,
 	}); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -1223,6 +1225,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 				At:            time.Now().Add(time.Minute),
 				TaskID:        "replay-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 			{
 				AgentID:       "runtime",
@@ -1232,6 +1235,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 				At:            time.Now().Add(2 * time.Minute),
 				TaskID:        "skip-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 			{
 				AgentID:       "runtime",
@@ -1241,6 +1245,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 				At:            time.Now().Add(3 * time.Minute),
 				TaskID:        "drop-me",
 				RoutingSource: events.NewPlatformControlRoutingSource(),
+				ExecutionMode: executionmode.Live,
 			},
 		},
 		claims: []conformanceScheduleClaim{
@@ -1901,7 +1906,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      "mutation-flow",
 		StorageRef:      "mutation-flow",
 		WorkflowName:    "mutation-flow",

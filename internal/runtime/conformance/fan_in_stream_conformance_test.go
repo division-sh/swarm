@@ -17,7 +17,9 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -116,7 +118,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	seedFanInBarrierRun(t, ctx, backend, storetest.Database(backend), runID)
 	runtime := newFanInBarrierRuntime(t, backend, storetest.Database(backend), source)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := runtime.pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := runtime.pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
 		StorageRef:      templatefanin.ReceiverFlowInstance,
 		WorkflowName:    templatefanin.ReceiverFlowID,

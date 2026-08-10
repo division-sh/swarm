@@ -1104,9 +1104,10 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	exec := NewExecutorWithOptions(nil, scheduler, ExecutorOptions{WorkflowSource: source})
 	actor := models.AgentConfig{
-		ID:       "root-agent",
-		Identity: toolTestRootAgentIdentity(t, "root-agent"),
-		EntityID: "entity-root",
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ID:            "root-agent",
+		Identity:      toolTestRootAgentIdentity(t, "root-agent"),
+		EntityID:      "entity-root",
 	}
 
 	if _, err := exec.execSchedule(context.Background(), actor, map[string]any{
@@ -1125,6 +1126,50 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	}
 	if scheduler.schedule.FlowInstance != "" {
 		t.Fatalf("schedule flow instance = %q, want absent for root agent", scheduler.schedule.FlowInstance)
+	}
+	if scheduler.schedule.ExecutionMode != runtimeeffects.ExecutionModeLive {
+		t.Fatalf("schedule execution mode = %q, want live", scheduler.schedule.ExecutionMode)
+	}
+}
+
+func TestExecSchedulePreservesMockAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		actorMode  runtimeeffects.ExecutionMode
+		causalMode runtimeeffects.ExecutionMode
+		withCausal bool
+	}{
+		{name: "mock actor", actorMode: runtimeeffects.ExecutionModeMock},
+		{name: "mock causal event", actorMode: runtimeeffects.ExecutionModeLive, causalMode: runtimeeffects.ExecutionModeMock, withCausal: true},
+		{name: "mock actor and causal event", actorMode: runtimeeffects.ExecutionModeMock, causalMode: runtimeeffects.ExecutionModeMock, withCausal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := &captureScheduleScheduler{}
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+			exec := NewExecutorWithOptions(nil, scheduler, ExecutorOptions{WorkflowSource: source})
+			actor := models.AgentConfig{
+				ExecutionMode: tc.actorMode,
+				ID:            "root-agent",
+				Identity:      toolTestRootAgentIdentity(t, "root-agent"),
+				EntityID:      "entity-root",
+			}
+			ctx := context.Background()
+			if tc.withCausal {
+				ctx = runtimeeffects.WithExecutionMode(ctx, tc.causalMode)
+			}
+
+			if _, err := exec.execSchedule(ctx, actor, map[string]any{
+				"event_type": "root.timer.fired",
+				"mode":       "once",
+				"at":         time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+				"payload":    map[string]any{"reason": "mock-owned"},
+			}); err != nil {
+				t.Fatalf("execSchedule: %v", err)
+			}
+			if scheduler.schedule.ExecutionMode != runtimeeffects.ExecutionModeMock {
+				t.Fatalf("schedule execution mode = %q, want mock", scheduler.schedule.ExecutionMode)
+			}
+		})
 	}
 }
 

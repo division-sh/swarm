@@ -24,6 +24,8 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1148,6 +1150,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		return
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      catalogRuntimeRunID,
 		StorageRef:      catalogRuntimeRunID,
@@ -1257,6 +1260,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 		h.t.Fatalf("entity field fixture %s was already materialized before exact fixture projection", entityID)
 	}
 	materializeCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	materializeCtx = runtimeeffects.WithExecutionMode(materializeCtx, executionmode.Live)
 	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}

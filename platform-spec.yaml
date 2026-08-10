@@ -6117,8 +6117,11 @@ engine:
             dynamic_authority_rule: >
               Mock-causal execution cannot invoke agent_hire to create a runtime-authored actor. The mutation is rejected
               before input decoding, manager lookup, or spawn because a dynamic child could otherwise select a live provider
-              and mint authority outside the source-owned mock census. Live-causal agent_hire remains subject to its ordinary
-              delegation and lifecycle checks until the dynamic mutation family is retired.
+              and mint authority outside the source-owned mock census. Delayed work does not mint fresh authority: generic
+              schedules, join schedules, and authored workflow timer activations persist the exact causal execution_mode and
+              copy it unchanged into every fired event, including after selected-store restore. Initial-entry timers consume
+              the activation's exact execution mode; only true boot-owned schedules are explicitly live. Live-causal agent_hire
+              remains subject to its ordinary delegation and lifecycle checks until the dynamic mutation family is retired.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
               authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
@@ -6230,9 +6233,10 @@ engine:
             budget-cap admission.
         provenance:
           rule: >
-            execution_mode is copied from execution authority into events, external-effect operations and attempts, turns,
-            conversation forks, spend rows, decision cards, mailbox/readback summaries, and author activity. Missing mode is
-            invalid and old rows without it are unsupported; no defaults, fallback readers, or mode reconstruction are allowed.
+            execution_mode is copied from execution authority into events, durable schedules and workflow timer activations,
+            external-effect operations and attempts, turns, conversation forks, spend rows, decision cards, mailbox/readback
+            summaries, and author activity. Missing mode is invalid and old rows without it are unsupported; no defaults,
+            fallback readers, or mode reconstruction are allowed.
         supported_surface_proof: >
           A real served bundle, without LLM or unreachable outbound connector credentials, must exercise mock text, visible
           internal tool calls, emitted events, exact provider-connector response materialization, decision-card/mailbox
@@ -13842,7 +13846,8 @@ platform_tables:
         timer_id is that activation ID. routing_source carries the immutable typed control owner stamped at registration:
         root for a root entity schedule, flow_owned_control for a declared flow execution, or platform_control for a closed
         global system schedule;
-        firing and recovery copy it without deriving ownership from flow_instance or other row shape. fire_payload carries business input only; it must not carry workflow
+        firing and recovery copy it without deriving ownership from flow_instance or other row shape. execution_mode carries
+        the exact causal authority for every delayed event and is copied unchanged across restore and fire. fire_payload carries business input only; it must not carry workflow
         activation, occurrence, generation, status, or reconstruction authority. fire_at is the current persisted occurrence
         coordinate. One-shot completion changes status to fired; recurring completion keeps status active and advances fire_at
         atomically. Generic schedule readers must exclude typed workflow activation rows. reply_context_id separately carries
@@ -13870,6 +13875,7 @@ platform_tables:
             fire_event            TEXT NOT NULL,
             fire_payload          JSONB NOT NULL DEFAULT '{}',
             routing_source        JSONB NOT NULL,
+            execution_mode        TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             fire_at               TIMESTAMPTZ NOT NULL,
             recurring             BOOLEAN NOT NULL DEFAULT FALSE,
             recurrence_cron       TEXT,
