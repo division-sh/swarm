@@ -6180,8 +6180,8 @@ engine:
               agent remains exec-capable and host execution is refused with the scope-qualified unmocked agent named. Boot and
               runtime workspace-class validation consume the same census, not flattened aliases. A package/flow projection of one
               authored declaration is counted once. Native admission binds each scoped declaration through its scope-owned
-              URI only when that URI is unique across declarations; missing or collapsed owners fail closed rather than
-              receiving an invented identity.
+              URI and canonical owning-flow route/path only when that URI is unique across declarations; missing or collapsed
+              owners and missing routes fail closed rather than receiving an invented identity or root route.
             cli_preflight_rule: >
               Local CLI preflight consumes the typed workspace decision and skips provider credential resolution and
               Claude-specific command proof only when no claude_cli reason remains. Listener admission, retired gateway URL

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -319,6 +320,42 @@ func TestValidateNativeToolBootConfigRejectsCollapsedProjectOwnersAndResolvesFlo
 	}
 }
 
+func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t *testing.T) {
+	source := scopedFlowWorkspaceNativeToolFixture(t)
+	root := filepath.Join(t.TempDir(), "workspaces")
+	dataDir := t.TempDir()
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: scoped-flow-native-tool-workspace\n"), 0o644); err != nil {
+		t.Fatalf("write contracts package: %v", err)
+	}
+	workspaces := workspace.NewHostManager()
+	workspaces.SetConfigForTest(workspace.HostConfig{
+		WorkspaceRoot:       root,
+		SharedDataSource:    dataDir,
+		DataMountPoint:      "/data",
+		ContractsSource:     contractsDir,
+		ContractsMountPoint: "/opt/swarm/contracts",
+	})
+	workspaces.SetSemanticSource(source)
+
+	warnings, err := ValidateNativeToolBootConfig(
+		unmanagedToolTestContext(),
+		source,
+		nil,
+		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
+		workspaces,
+	)
+	if err != nil {
+		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+	if info, err := os.Stat(filepath.Join(root, "flows", "review")); err != nil || !info.IsDir() {
+		t.Fatalf("scoped flow workspace stat = info:%#v err:%v, want directory", info, err)
+	}
+}
+
 func TestValidateNativeToolBootConfigRejectsProjectOwnersCollapsedWithinOneFlow(t *testing.T) {
 	source := sameFlowScopedNativeToolAgentFixture(t)
 	declarations := semanticview.AgentDeclarations(source)
@@ -383,6 +420,49 @@ flows: []
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func scopedFlowWorkspaceNativeToolFixture(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: scoped-flow-native-tool-workspace
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: review
+    flow: review
+    mode: static
+`)
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-flow-native-tool-workspace\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "policy.yaml"), `
+workspace_classes:
+  shared_flow:
+    workspace_scope: per-flow-instance
+`)
+	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "tools.yaml"} {
+		writeToolFlowDataFixtureFile(t, filepath.Join(root, file), "{}\n")
+	}
+	flowDir := filepath.Join(root, "flows", "review")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nmode: static\ninitial_state: active\nstates: [active]\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
+scoped-worker:
+  id: scoped-worker
+  model: regular
+  memory: false
+  workspace_class: shared_flow
+  native_tools:
+    file_io: true
+`)
+	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml"} {
+		writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, file), "{}\n")
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
