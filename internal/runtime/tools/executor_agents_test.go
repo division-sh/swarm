@@ -1363,6 +1363,58 @@ func TestAgentHireHandlerRejectsMockCausalLiveAuthorityBeforeSpawn(t *testing.T)
 	}
 }
 
+func TestAgentMutationHandlersRejectMockCausalStateChangesBeforeManagerMutation(t *testing.T) {
+	t.Parallel()
+
+	authorityCases := []struct {
+		name          string
+		actorMode     runtimeeffects.ExecutionMode
+		causalMode    runtimeeffects.ExecutionMode
+		hasCausalMode bool
+	}{
+		{name: "selected mock actor and mock causality", actorMode: runtimeeffects.ExecutionModeMock, causalMode: runtimeeffects.ExecutionModeMock, hasCausalMode: true},
+		{name: "selected mock actor without contextual mode", actorMode: runtimeeffects.ExecutionModeMock},
+		{name: "mock causality with inconsistent live actor", actorMode: runtimeeffects.ExecutionModeLive, causalMode: runtimeeffects.ExecutionModeMock, hasCausalMode: true},
+	}
+	mutations := []struct {
+		name  string
+		input map[string]any
+	}{
+		{name: "agent_hire", input: map[string]any{"config": map[string]any{"id": "new-worker", "role": "worker"}}},
+		{name: "agent_reconfigure", input: map[string]any{"agent_id": "live-worker", "config": map[string]any{"tools": []any{"agent_message"}}}},
+		{name: "agent_fire", input: map[string]any{"agent_id": "live-worker", "reason": "test"}},
+	}
+
+	for _, authorityCase := range authorityCases {
+		for _, mutation := range mutations {
+			t.Run(authorityCase.name+"/"+mutation.name, func(t *testing.T) {
+				manager := &captureManagerStub{agents: map[string]models.AgentConfig{
+					"live-worker": {ID: "live-worker", ExecutionMode: runtimeeffects.ExecutionModeLive, FlowPath: "review/inst-1"},
+				}}
+				exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager})
+				actor := models.AgentConfig{
+					ExecutionMode: authorityCase.actorMode,
+					ID:            "manager",
+					Permissions:   []string{"agent_hire", "agent_reconfigure", "agent_fire"},
+				}
+				ctx := WithActor(context.Background(), actor)
+				if authorityCase.hasCausalMode {
+					ctx = runtimeeffects.WithExecutionMode(ctx, authorityCase.causalMode)
+				}
+
+				_, err := exec.buildToolHandlers()[mutation.name](ctx, actor, mutation.input)
+				failure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "mock_"+mutation.name+"_forbidden")
+				if want := mutation.name + ".authorize_execution_mode"; failure.Operation != want {
+					t.Fatalf("failure operation = %q, want %q", failure.Operation, want)
+				}
+				if manager.spawnCalled || manager.reconfigureCalled || manager.teardownCalled {
+					t.Fatalf("mock-causal %s reached manager mutation: spawn=%v reconfigure=%v teardown=%v", mutation.name, manager.spawnCalled, manager.reconfigureCalled, manager.teardownCalled)
+				}
+			})
+		}
+	}
+}
+
 func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 	t.Parallel()
 

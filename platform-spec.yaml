@@ -6115,13 +6115,14 @@ engine:
               invents a configured default from authored intent or an empty descriptor. Native-tool admission runs only after
               this resolution and construction uses that same resolved actor/runtime pair.
             dynamic_authority_rule: >
-              Mock-causal execution cannot invoke agent_hire to create a runtime-authored actor. The mutation is rejected
-              before input decoding, manager lookup, or spawn because a dynamic child could otherwise select a live provider
-              and mint authority outside the source-owned mock census. Delayed work does not mint fresh authority: generic
+              Mock-causal execution cannot invoke agent_hire, agent_reconfigure, or agent_fire to mutate live runtime agent
+              state. Every dynamic agent lifecycle mutation is rejected before input decoding or manager lookup because hire
+              could mint live provider authority, reconfigure could alter an actor later reached by live ingress, and fire is
+              still a destructive live-state effect. Delayed work does not mint fresh authority: generic
               schedules, join schedules, and authored workflow timer activations persist the exact causal execution_mode and
               copy it unchanged into every fired event, including after selected-store restore. Initial-entry timers consume
-              the activation's exact execution mode; only true boot-owned schedules are explicitly live. Live-causal agent_hire
-              remains subject to its ordinary delegation and lifecycle checks until the dynamic mutation family is retired.
+              the activation's exact execution mode; only true boot-owned schedules are explicitly live. Live-causal dynamic
+              agent mutations remain subject to ordinary delegation and lifecycle checks until the family is retired.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
               authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
