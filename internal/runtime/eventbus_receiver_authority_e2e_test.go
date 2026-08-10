@@ -435,11 +435,13 @@ task.finalized: {}
 `,
 		"agents.yaml": `upstream-agent:
   id: upstream-agent
+  intent: {inline: "Emit task.completed for the assigned task."}
   model: regular
   subscriptions: [task.assigned]
   emit_events: [task.completed]
 downstream-agent:
   id: downstream-agent
+  intent: {inline: "Observe the finalized task."}
   model: regular
   subscriptions: [task.finalized]
 `,
@@ -453,8 +455,6 @@ downstream-agent:
       advances_to: done
       emit: task.finalized
 `,
-		"policy.yaml":                 "{}\n",
-		"prompts/upstream-agent.md":   "Emit task.completed.\n",
-		"prompts/downstream-agent.md": "Observe task.finalized.\n",
+		"policy.yaml": "{}\n",
 	}
 }

@@ -602,6 +602,7 @@ pins:
 control-plane:
   id: control-plane
   role: control-plane
+  intent: {inline: "Coordinate contract-test evidence events."}
   subscriptions:
     - evidence.recorded
 `)
@@ -670,6 +671,7 @@ parent.started:
 parent-agent:
   id: parent-agent
   role: parent-agent
+  intent: {inline: "Coordinate the parent flow."}
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "package.yaml"), `
 name: parent
@@ -702,6 +704,7 @@ child.completed:
 child-agent:
   id: child-agent
   role: child-agent
+  intent: {inline: "Execute the child flow."}
 `)
 	writeFixtureFile(t, filepath.Join(root, "flows", "parent", "flows", "child", "policy.yaml"), `
 shared:

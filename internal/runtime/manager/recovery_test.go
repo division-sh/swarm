@@ -156,7 +156,7 @@ func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error { 
 func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(t *testing.T) {
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
-			store := &recoveryTestStore{agents: []PersistedAgent{{Config: models.AgentConfig{
+			store := &recoveryTestStore{agents: []PersistedAgent{{Config: managerTestAgentConfig(models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
 				Identity: managerScopedRuntimeAgentIdentity(
@@ -164,7 +164,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 				),
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
-			}}}}
+			})}}}
 			bus := &recoveryTestBus{}
 			am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 				return recoveryTestAgent{id: cfg.ID}, nil
@@ -266,7 +266,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	}
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
-			Config: models.AgentConfig{
+			Config: managerTestAgentConfig(models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
 				Identity: managerScopedRuntimeAgentIdentity(
@@ -277,7 +277,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 				FlowID:   "review",
 				FlowPath: "review/inst-1",
 				Config:   mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
-			},
+			}),
 			StartedAt: time.Now().UTC(),
 		}},
 	}
@@ -576,7 +576,7 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 	bus := &recoveryTestBus{}
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
-			Config: models.AgentConfig{
+			Config: managerTestAgentConfig(models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
 				Identity: managerScopedRuntimeAgentIdentity(
@@ -596,13 +596,13 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 				EntityID:        "ent-1",
 				ParentAgent:     "control-plane",
 				Config: mustRecoveryJSON(t, map[string]any{
-					"system_prompt":      "x",
+					"test_marker":        "canonical-loaded-metadata",
 					"subscriptions":      []string{"wrong.subscription"},
 					"manager_fallback":   "wrong-manager",
 					"workspace_class":    "wrong-workspace",
 					"max_turns_per_task": 99,
 				}),
-			},
+			}),
 			StartedAt: time.Now().UTC(),
 		}},
 	}

@@ -40,10 +40,10 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "agent-a", "global")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-				Config: runtimeactors.AgentConfig{
-					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
-					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{"system_prompt":"delivery evidence"}`),
-				},
+				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),
+				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {
 				t.Fatalf("upsert agent-a: %v", err)
@@ -130,10 +130,10 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "terminal-agent", "global")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-				Config: runtimeactors.AgentConfig{
-					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
-					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{"system_prompt":"terminal evidence"}`),
-				},
+				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),
+				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {
 				t.Fatalf("upsert terminal-agent: %v", err)

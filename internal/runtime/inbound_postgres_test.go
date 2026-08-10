@@ -1128,7 +1128,7 @@ func seedPostgresInboundGatewayRuntime(
 		t.Fatalf("seed entity state: %v", err)
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 			ExecutionMode:      "live",
 			ResolvedLLMBackend: "anthropic",
 			ID:                 agentID,
@@ -1141,7 +1141,7 @@ func seedPostgresInboundGatewayRuntime(
 			EntityID:           entityID,
 			Subscriptions:      []string{"inbound." + provider},
 			Config:             []byte(`{}`),
-		},
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -1235,7 +1235,7 @@ func seedSQLiteInboundGatewayRuntime(
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 			ExecutionMode:      "live",
 			ResolvedLLMBackend: "anthropic",
 			ID:                 agentID,
@@ -1248,7 +1248,7 @@ func seedSQLiteInboundGatewayRuntime(
 			EntityID:           entityID,
 			Config:             []byte(`{}`),
 			Subscriptions:      []string{"inbound." + provider},
-		},
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: now,

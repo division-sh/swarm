@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -355,10 +356,10 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: selectedContractExecutionOwnerForTest(t, selected),
 		AgentRuntime: selectedContractAgentRuntimePlan{
-			Records: []runtimemanager.PersistedAgent{{Config: runtimeactors.AgentConfig{
+			Records: []runtimemanager.PersistedAgent{{Config: selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
 				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
-			}}},
+			})}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
@@ -397,10 +398,11 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"analyzer": {
-				Type:          "generic",
-				Role:          "analyzer",
-				Subscriptions: []string{"analysis.requested"},
-				EmitEvents:    []string{"analysis.done"},
+				Type:           "generic",
+				Role:           "analyzer",
+				ResolvedIntent: selectedContractTestIntent(t, "analyzer"),
+				Subscriptions:  []string{"analysis.requested"},
+				EmitEvents:     []string{"analysis.done"},
 			},
 		},
 	}
@@ -440,4 +442,29 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 	if count < 2 {
 		t.Fatalf("records = %#v, want analyzer from static-agent and inferred flow-required-agent materialization paths", records)
 	}
+}
+
+func selectedContractTestIntent(t testing.TB, agentID string) runtimeagentintent.Resolved {
+	t.Helper()
+	resolved, err := runtimeagentintent.Resolve(
+		runtimeagentintent.SourceInline,
+		"inline",
+		"test#agents."+strings.TrimSpace(agentID)+".intent",
+		"Perform the selected-contract test agent's assigned work.",
+	)
+	if err != nil {
+		t.Fatalf("resolve selected-contract test intent: %v", err)
+	}
+	return resolved
+}
+
+func selectedContractTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
+	t.Helper()
+	if cfg.Intent.Empty() {
+		cfg.Intent = selectedContractTestIntent(t, cfg.ID)
+	}
+	if strings.TrimSpace(cfg.SystemPrompt) == "" {
+		cfg.SystemPrompt = cfg.Intent.Content
+	}
+	return cfg
 }

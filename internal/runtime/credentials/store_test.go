@@ -247,6 +247,8 @@ web_search_provider:
 worker-agent:
   id: worker-agent
   model: regular
+  intent:
+    inline: Research the requested subject using native web search.
   native_tools:
     web_search: true
 `)

@@ -16,7 +16,6 @@ import (
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -363,10 +362,6 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}
 	options := req.AgentRuntime.Options
 	source := req.LoadedSource.Source
-	promptResolver, err := selectedContractPromptResolver(source)
-	if err != nil {
-		return selectedContractAgentRuntimeFactory{}, err
-	}
 	managerOptions := options.AgentManagerOptions
 	managerOptions.ExecutionPosture = options.ExecutionPosture
 	if managerOptions.SemanticSource == nil {
@@ -375,9 +370,6 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	managerOptions.BundleSourceFact = req.LoadedSource.BundleSourceFact
 	managerOptions.WorkflowInstances = pipeline
 	managerOptions = selectedContractManagerOptions(managerOptions, bus, ports, pipeline)
-	if managerOptions.PromptResolver == nil {
-		managerOptions.PromptResolver = promptResolver
-	}
 	if managerOptions.Sessions == nil {
 		managerOptions.Sessions = options.SessionRegistry
 	}
@@ -458,9 +450,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime resolver: %w", err)
 	}
 	exec.SetModelRuntimes(runtimes)
-	factory := runtimeagents.NewLLMAgentFactory(runtimes, exec, runtimeagents.LLMAgentOptions{
-		PromptResolver: promptResolver,
-	})
+	factory := runtimeagents.NewLLMAgentFactory(runtimes, exec, runtimeagents.LLMAgentOptions{})
 	return selectedContractAgentRuntimeFactory{
 		factory: factory,
 		options: managerOptions,
@@ -538,21 +528,6 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTu
 		}
 		<-done
 	}, nil
-}
-
-func selectedContractPromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		return nil, nil
-	}
-	return runtimecontracts.NewBundlePromptResolverWithOptions(bundle, runtimecontracts.BundlePromptResolverOptions{
-		PolicyResolver: func(itemSource runtimecontracts.ContractItemSource) runtimecontracts.PolicyDocument {
-			if flowID := strings.TrimSpace(itemSource.FlowID); flowID != "" {
-				return semanticview.ResolvePolicyForFlow(source, flowID)
-			}
-			return semanticview.ResolvePolicyForFlow(source, "")
-		},
-	}), nil
 }
 
 func (r *selectedContractAgentRuntime) Shutdown() error {

@@ -489,6 +489,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 
 func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 	t.Helper()
+	catalogIntent := apiTestResolvedIntent(t, "researcher", "Research the requested market signal.")
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run-1"
 	eventID := "evt-1"
@@ -639,16 +640,22 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			agents: map[string]bundlecatalog.AgentsResult{
 				readOnlyProbeBundleHash: {
 					Agents: []bundlecatalog.AgentDefinition{{
-						AgentID:       "researcher",
-						Role:          "research",
-						Type:          "managed",
-						Model:         "cheap",
-						LLMBackend:    "claude",
-						Memory:        true,
-						MemorySource:  "authored",
-						FlowInstance:  "research/inst-1",
-						Subscriptions: []string{"scan.requested"},
-						Tools:         []string{"web_search"},
+						AgentID:           "researcher",
+						Role:              "research",
+						Type:              "managed",
+						Model:             "cheap",
+						LLMBackend:        "claude",
+						Memory:            true,
+						MemorySource:      "authored",
+						FlowInstance:      "research/inst-1",
+						IntentKind:        string(catalogIntent.Kind),
+						IntentSource:      catalogIntent.Coordinate,
+						IntentProvenance:  catalogIntent.Provenance,
+						IntentContentHash: catalogIntent.ContentHash,
+						IntentIdentity:    catalogIntent.Identity,
+						IntentContent:     catalogIntent.Content,
+						Subscriptions:     []string{"scan.requested"},
+						Tools:             []string{"web_search"},
 					}},
 				},
 			},

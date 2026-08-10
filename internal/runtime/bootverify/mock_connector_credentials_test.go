@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -307,8 +308,9 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"mock-agent": {
-				ID:    "mock-agent",
-				Model: llmselection.ModelAliasRegular,
+				ID:             "mock-agent",
+				Model:          llmselection.ModelAliasRegular,
+				ResolvedIntent: bootverifyTestResolvedIntent("mock-agent"),
 				Mock: mockperformance.Performance{
 					Kind:   "python",
 					Module: "mocks/mock-agent.py",
@@ -320,7 +322,11 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 		Tools: tools,
 	}
 	if includeUnmocked {
-		bundle.Agents["live-agent"] = runtimecontracts.AgentRegistryEntry{ID: "live-agent", Model: llmselection.ModelAliasRegular}
+		bundle.Agents["live-agent"] = runtimecontracts.AgentRegistryEntry{
+			ID:             "live-agent",
+			Model:          llmselection.ModelAliasRegular,
+			ResolvedIntent: bootverifyTestResolvedIntent("live-agent"),
+		}
 	}
 	if includeSibling {
 		bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
@@ -427,12 +433,25 @@ root-node:
 
 func writeScopedReachabilityAgentFile(t *testing.T, path, agentID, module string, live bool, extra ...string) {
 	t.Helper()
-	contents := agentID + ":\n  id: " + agentID + "\n  model: regular\n  memory: false\n"
+	contents := agentID + ":\n  id: " + agentID + "\n  model: regular\n  memory: false\n  intent:\n    inline: Inspect provider reachability for this test fixture.\n"
 	if !live {
 		contents += "  mock:\n    kind: python\n    module: " + module + "\n"
 	}
 	contents += strings.Join(extra, "")
 	writeBootverifyFixtureFile(t, path, contents)
+}
+
+func bootverifyTestResolvedIntent(agentID string) runtimeagentintent.Resolved {
+	resolved, err := runtimeagentintent.Resolve(
+		runtimeagentintent.SourceInline,
+		"inline",
+		"test#agents."+strings.TrimSpace(agentID)+".intent",
+		"Inspect provider reachability for this test fixture.",
+	)
+	if err != nil {
+		panic(err)
+	}
+	return resolved
 }
 
 func scopedReachabilityNativeTools(enabled bool) string {

@@ -27,19 +27,18 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, age
 	t.Helper()
 	identity := testAgentIdentity(t, agentID, flowPath)
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 agentID,
-			Identity:           identity,
-			Role:               agentID,
-			FlowID:             "operating",
-			Model:              "regular",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			Memory:             memory,
-			FlowPath:           flowPath,
-			EntityID:           entityID,
-			Config:             json.RawMessage(`{"system_prompt":"You are a trace test agent.","tools":[],"subscriptions":["trace.*"]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            agentID,
+			Identity:      identity,
+			Role:          agentID,
+			FlowID:        "operating",
+			Model:         "regular",
+			ExecutionMode: "live",
+			Memory:        memory,
+			FlowPath:      flowPath,
+			EntityID:      entityID,
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),

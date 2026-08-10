@@ -456,6 +456,8 @@ scoped-worker:
   id: scoped-worker
   model: regular
   memory: false
+  intent:
+    inline: Validate native-tool workspace admission for this scoped worker.
   workspace_class: shared_flow
   native_tools:
     file_io: true
@@ -521,6 +523,8 @@ shared-worker:
   id: shared-worker
   model: regular
   memory: false
+  intent:
+    inline: Validate native-tool admission for this scoped worker.
   native_tools:
     file_io: true
 `

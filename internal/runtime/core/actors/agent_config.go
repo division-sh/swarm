@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -68,6 +69,8 @@ type AgentConfig struct {
 	ExecutionMode        runtimeeffects.ExecutionMode  `json:"execution_mode,omitempty"`
 	Memory               agentmemory.Plan              `json:"memory"`
 	Mock                 mockperformance.Performance   `json:"mock,omitempty"`
+	Intent               runtimeagentintent.Resolved   `json:"intent"`
+	SystemPrompt         string                        `json:"derived_system_prompt"`
 	MaxTurnsPerTask      int                           `json:"max_turns_per_task,omitempty"`
 	Subscriptions        []string                      `json:"subscriptions,omitempty"`
 	EmitEvents           []string                      `json:"emit_events,omitempty"`
@@ -86,6 +89,56 @@ type AgentConfig struct {
 }
 
 func (cfg AgentConfig) EffectiveEntityID() string { return strings.TrimSpace(cfg.EntityID) }
+
+func (cfg AgentConfig) ValidateIntentCarrier() error {
+	if err := cfg.Intent.Validate(); err != nil {
+		return fmt.Errorf("resolved intent: %w", err)
+	}
+	if strings.TrimSpace(cfg.SystemPrompt) == "" {
+		return fmt.Errorf("derived system prompt is required")
+	}
+	if !strings.HasPrefix(cfg.SystemPrompt, cfg.Intent.Content) {
+		return fmt.Errorf("derived system prompt must begin with the exact resolved intent content")
+	}
+	return nil
+}
+
+func ValidateNoAuthoredSystemPrompt(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return fmt.Errorf("agent config must be valid JSON: %w", err)
+	}
+	if path, ok := authoredSystemPromptPath(value, "config"); ok {
+		return fmt.Errorf("RETIRED: authored %s is unsupported; declare intent: in agents.yaml", path)
+	}
+	return nil
+}
+
+func authoredSystemPromptPath(value any, path string) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			key = strings.TrimSpace(key)
+			childPath := path + "." + key
+			if key == "system_prompt" {
+				return childPath, true
+			}
+			if found, ok := authoredSystemPromptPath(child, childPath); ok {
+				return found, true
+			}
+		}
+	case []any:
+		for i, child := range typed {
+			if found, ok := authoredSystemPromptPath(child, fmt.Sprintf("%s[%d]", path, i)); ok {
+				return found, true
+			}
+		}
+	}
+	return "", false
+}
 
 func (cfg *AgentConfig) NormalizeEntityID() {
 	if cfg == nil {

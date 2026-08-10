@@ -283,11 +283,11 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
 				envelope := routeShape.envelope(entityID)
 				if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-					Config: runtimeactors.AgentConfig{
+					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
 						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
 						Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
-					},
+					}),
 					Status: "active", HiredBy: "test", StartedAt: createdAt,
 				}); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
@@ -424,12 +424,12 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			createdAt := time.Unix(1700001400, 0).UTC()
 			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
 			if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-				Config: runtimeactors.AgentConfig{
+				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID,
 					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					FlowID: "target-flow", FlowPath: identity.FlowInstance(),
 					Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
-				},
+				}),
 				Status: "active", HiredBy: "test", StartedAt: createdAt,
 			}); err != nil {
 				t.Fatalf("UpsertAgent(%s): %v", identity, err)

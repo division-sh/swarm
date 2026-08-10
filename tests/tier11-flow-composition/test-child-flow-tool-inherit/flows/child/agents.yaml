@@ -1,5 +1,6 @@
 child-agent:
   model: regular
+  intent: {inline: "Complete assigned child-flow work using the inherited tool."}
   tools:
     - lookup_data
   subscriptions:

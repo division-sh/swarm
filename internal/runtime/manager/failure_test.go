@@ -192,12 +192,12 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				DeliveryStore:      deliveryStore,
 				TestLifecycleProbe: probe.Raw(),
 			}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
 				Identity:      managerAgentIdentity(agent.ID()),
 				Subscriptions: []string{"test.intervention"},
-			}}, false); err != nil {
+			})}, false); err != nil {
 				t.Fatalf("spawn intervention agent: %v", err)
 			}
 			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
@@ -311,12 +311,12 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				DeliveryStore:      deliveryStore,
 				TestLifecycleProbe: probe.Raw(),
 			}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
 				Identity:      managerAgentIdentity(agent.ID()),
 				Subscriptions: []string{"test.intervention.settlement"},
-			}}, false); err != nil {
+			})}, false); err != nil {
 				t.Fatalf("spawn intervention settlement agent: %v", err)
 			}
 			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {

@@ -862,9 +862,6 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 	if boot.Source == nil {
 		t.Fatal("validated RuntimeDeps Source = nil")
 	}
-	if boot.PromptResolver == nil {
-		t.Fatal("validated RuntimeDeps PromptResolver = nil")
-	}
 	if boot.Credentials == nil {
 		t.Fatal("validated RuntimeDeps Credentials = nil")
 	}

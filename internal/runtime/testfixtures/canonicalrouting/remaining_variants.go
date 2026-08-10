@@ -638,7 +638,7 @@ pins:
       chat_id: "{{input.chat_id}}"
       text: "{{input.text}}"
 `, toolURL),
-		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot\n  role: phrase_bot\n  prompt_ref: phrase-bot\n  model: regular\n  memory: true\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
+		"flows/telegram-chat/agents.yaml":           "phrase-bot:\n  id: phrase-bot\n  role: phrase_bot\n  intent: prompts/phrase-bot.md\n  model: regular\n  memory: true\n  subscriptions: [inbound.telegram.text_message]\n  emit_events: [telegram.reply_requested]\n",
 		"flows/telegram-chat/prompts/phrase-bot.md": "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference.\n",
 	}
 	for name, source := range files {
@@ -673,7 +673,7 @@ pins:
 		"flows/memory-singleton/agents.yaml": `memory-bot:
   id: memory-bot
   role: memory_bot
-  prompt_ref: memory-bot
+  intent: prompts/memory-bot.md
   model: regular
   memory: true
   subscriptions: [memory.ping]
@@ -736,7 +736,7 @@ telegram-revision:
 		"flows/telegram-chat/agents.yaml": `phrase-bot:
   id: phrase-bot
   role: phrase_bot
-  prompt_ref: phrase-bot
+  intent: prompts/phrase-bot.md
   model: regular
   memory: false
   subscriptions: [inbound.telegram.text_message]
@@ -748,7 +748,7 @@ telegram-revision:
 		"flows/memory-singleton/agents.yaml": `memory-bot:
   id: memory-bot
   role: memory_bot
-  prompt_ref: memory-bot
+  intent: prompts/memory-bot.md
   model: regular
   memory: true
   subscriptions: [memory.ping]

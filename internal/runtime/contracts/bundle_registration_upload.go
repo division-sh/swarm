@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -69,13 +70,16 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 		if err != nil {
 			return BundleRegistrationUpload{}, fmt.Errorf("read %s: %w", rel, err)
 		}
+		if entry.ExpectedExact != nil && !bytes.Equal(raw, entry.ExpectedExact) {
+			return BundleRegistrationUpload{}, fmt.Errorf("read %s: canonical input changed after exact agent intent resolution", rel)
+		}
 		switch entry.Policy {
 		case bundleHashRaw:
 			dataEntries = append(dataEntries, BundleRegisterDataEntryV1{
 				Path:       rel,
 				DataBase64: base64.StdEncoding.EncodeToString(raw),
 			})
-		case bundleHashYAML, bundleHashPrompt:
+		case bundleHashYAML, bundleHashIntent:
 			if !utf8.Valid(raw) {
 				return BundleRegistrationUpload{}, fmt.Errorf("text bundle input %s is not valid UTF-8", rel)
 			}

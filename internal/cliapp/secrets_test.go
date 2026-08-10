@@ -371,7 +371,7 @@ platform_version: ">=0.7.0 <0.8.0"
 provider-agent:
   id: provider-agent
   role: provider
-  prompt_ref: provider-agent
+  intent: prompts/provider-agent.md
   model: regular
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "provider-agent.md"), "Handle provider-backed work.\n")

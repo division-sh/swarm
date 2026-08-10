@@ -5,17 +5,49 @@ import (
 	"strings"
 	"testing"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 func managerRootAgentConfig(agentID string, subscriptions ...string) runtimeactors.AgentConfig {
-	return runtimeactors.AgentConfig{
+	return managerTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      managerAgentIdentity(agentID),
 		Subscriptions: append([]string(nil), subscriptions...),
+	})
+}
+
+func managerTestResolvedIntent(agentID string) runtimeagentintent.Resolved {
+	resolved, err := runtimeagentintent.Resolve(
+		runtimeagentintent.SourceInline,
+		"inline",
+		"test#agents."+strings.TrimSpace(agentID)+".intent",
+		"Perform the manager test agent's assigned work.",
+	)
+	if err != nil {
+		panic(err)
 	}
+	return resolved
+}
+
+func managerTestAgentConfig(cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
+	if cfg.Intent.Empty() {
+		cfg.Intent = managerTestResolvedIntent(cfg.ID)
+	}
+	if strings.TrimSpace(cfg.SystemPrompt) == "" {
+		cfg.SystemPrompt = cfg.Intent.Content
+	}
+	return cfg
+}
+
+func managerTestAgentEntry(agentID string, entry runtimecontracts.AgentRegistryEntry) runtimecontracts.AgentRegistryEntry {
+	if entry.ResolvedIntent.Empty() {
+		entry.ResolvedIntent = managerTestResolvedIntent(agentID)
+	}
+	return entry
 }
 
 func managerScopedRuntimeAgentIdentity(agentID, owner, scopeKey, instanceID, instancePath string) runtimeagentidentity.Identity {

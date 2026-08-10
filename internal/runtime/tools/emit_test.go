@@ -514,6 +514,7 @@ local.done:
 flow-agent:
   id: flow-agent
   role: flow_agent
+  intent: {inline: "Emit the declared local event."}
   emit_events:
     - local.done
 `)

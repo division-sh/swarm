@@ -1,6 +1,7 @@
 audit-agent:
   id: audit-agent
   model: regular
+  intent: prompts/audit-agent.md
   subscriptions:
     - task.completed
   emit_events:

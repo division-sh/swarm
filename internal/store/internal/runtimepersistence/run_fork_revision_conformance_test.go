@@ -452,10 +452,10 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	identity := testAgentIdentity(t, agentID, runForkRevisionFlowInstance)
 	fields := testAgentIdentityStorageFields(t, identity)
 	agent := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agentID, Identity: identity, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agentID, Identity: identity, FlowID: runForkRevisionFlowInstance, FlowPath: runForkRevisionFlowInstance, Role: "worker", Type: "sonnet", Model: "regular",
 			Memory: agentmemory.Authored(true),
-			Config: []byte(`{"system_prompt":"revision proof"}`),
-		},
+			Config: []byte(`{}`),
+		}),
 		Status: "active", HiredBy: "revision-proof", StartedAt: now,
 	}
 	spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{

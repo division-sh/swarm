@@ -18,7 +18,6 @@ import (
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -1471,14 +1470,12 @@ func newNotifyAllChildrenRuntime(
 		}
 	}
 	var (
-		agentFactory   runtimemanager.AgentFactory
-		promptResolver runtimecontracts.PromptResolver
-		sessionStore   runtimesessions.Registry
-		llmBackend     string
+		agentFactory runtimemanager.AgentFactory
+		sessionStore runtimesessions.Registry
+		llmBackend   string
 	)
 	if opts.realMockAgents {
-		bundle, ok := semanticview.Bundle(source)
-		if !ok || bundle == nil {
+		if bundle, ok := semanticview.Bundle(source); !ok || bundle == nil {
 			t.Fatal("notify-all-children mock runtime requires a bundle-backed source")
 		}
 		effectStore, ok := backend.(runtimeeffects.Store)
@@ -1526,11 +1523,10 @@ func newNotifyAllChildrenRuntime(
 			AuthorityProvider: authority,
 			EmitRegistry:      emitRegistry,
 		})
-		promptResolver = runtimecontracts.NewBundlePromptResolver(bundle)
 		agentFactory = runtimeagents.NewLLMAgentFactory(
 			modelRuntimes,
 			toolExecutor,
-			runtimeagents.LLMAgentOptions{PromptResolver: promptResolver},
+			runtimeagents.LLMAgentOptions{},
 		)
 		if opts.agentGate != nil {
 			agentFactory = opts.agentGate.wrapFactory(agentFactory)
@@ -1600,7 +1596,6 @@ func newNotifyAllChildrenRuntime(
 		DeliveryStore:     backend,
 		LifecycleStore:    backend,
 		SemanticSource:    source,
-		PromptResolver:    promptResolver,
 		Sessions:          sessionStore,
 		LLMBackend:        llmBackend,
 		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),

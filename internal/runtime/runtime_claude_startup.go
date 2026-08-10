@@ -436,7 +436,7 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 		agentCtx = managedcapabilities.WithContext(agentCtx, surface)
 		agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
 		agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
-		probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, runtimemanager.ExtractSystemPromptFromConfig(agentCfg.Config), sessionTools)
+		probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, agentCfg.SystemPrompt, sessionTools)
 		if err != nil {
 			return nil, fmt.Errorf("claude cli startup probe failed for agent %s: %w", agentID, err)
 		}

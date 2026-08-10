@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -74,8 +75,12 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "test#agents.directive-reset-agent.intent", "Exercise destructive reset coordination.")
+	if err != nil {
+		t.Fatalf("resolve test agent intent: %v", err)
+	}
 	rec := runtimemanager.PersistedAgent{
-		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agent.id, Identity: identity, Role: "test", Model: "regular"},
+		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agent.id, Identity: identity, Role: "test", Model: "regular", Intent: intent, SystemPrompt: intent.Content},
 		Status:    "active",
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),

@@ -23,7 +23,7 @@ const (
   id: account-worker
   type: generic
   role: account_worker
-  prompt_ref: account-worker
+  intent: prompts/account-worker.md
   model: regular
   memory: false
   subscriptions:
@@ -170,6 +170,7 @@ auto_emit_on_create:
   id: account-reader
   type: generic
   role: reader-v1
+  intent: {inline: "Read account registration events."}
   model: regular
   subscriptions:
     - account.registered
@@ -177,6 +178,7 @@ retired:
   id: account-retired
   type: generic
   role: retired
+  intent: {inline: "Handle account notification requests."}
   model: regular
   subscriptions:
     - account.notify.requested
@@ -187,6 +189,7 @@ retired:
   id: account-reader
   type: generic
   role: reader-v2
+  intent: {inline: "Read account registration and notification events."}
   model: regular
   subscriptions:
     - account.registered
@@ -195,6 +198,7 @@ writer:
   id: account-writer
   type: generic
   role: writer
+  intent: {inline: "Write account notification results."}
   model: regular
   subscriptions:
     - account.notify.requested
@@ -205,6 +209,7 @@ writer:
   id: account-reader
   type: generic
   role: reader-v3
+  intent: {inline: "Read account registration and notification events."}
   model: regular
   subscriptions:
     - account.registered
@@ -213,6 +218,7 @@ writer:
   id: account-writer
   type: generic
   role: writer
+  intent: {inline: "Write account notification results."}
   model: regular
   subscriptions:
     - account.notify.requested
@@ -220,6 +226,7 @@ retired:
   id: account-retired
   type: generic
   role: returned
+  intent: {inline: "Handle account notification requests."}
   model: regular
   subscriptions:
     - account.notify.requested

@@ -52,6 +52,7 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 flow-agent:
   id: flow-agent
+  intent: {inline: "Exercise package-backed scope."}
   model: regular
   memory: true
   subscriptions:
@@ -127,6 +128,7 @@ flows: []
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `
 flow-agent:
   id: flow-agent
+  intent: {inline: "Exercise sole-parent scope."}
   model: regular
   memory: true
   subscriptions:
@@ -199,6 +201,7 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
   id: backend-{vertical_id}
+  intent: {inline: "Exercise package-backed memory proof."}
   model: regular
   memory: true
   subscriptions:
@@ -261,6 +264,7 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
   id: backend-{flow_id}
+  intent: {inline: "Exercise flow-scoped memory proof."}
   model: regular
   memory: true
   subscriptions:

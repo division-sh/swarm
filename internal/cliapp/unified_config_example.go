@@ -73,7 +73,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("channels.packs.external_dirs", `["./channel-packs"]`, "Project-contained channel pack directories.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.contracts_path", "./contracts", "Project-contained contract bundle root.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.platform_spec_path", "platform-spec.yaml", "Project-contained platform spec path override.", unifiedConfigExampleTierProjectContainedPath),
-		e("paths.prompts_dir", "./prompts", "Project-contained prompt directory.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Project-contained agent config map file.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.verification_gates_file", "./verification-gates.yaml", "Project-contained verification gates file.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.tooling_lock_file", "./tooling.lock", "Project-contained tooling lock file.", unifiedConfigExampleTierProjectContainedPath),

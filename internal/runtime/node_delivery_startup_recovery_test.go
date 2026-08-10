@@ -196,10 +196,10 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			module := newRuntimeTestWorkflowModule(t, source)
 
 			const agentID = "startup-order-agent"
-			agentConfig := runtimeactors.AgentConfig{
+			agentConfig := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
-				ExecutionMode: "live", Subscriptions: []string{"task.completed"}, Config: []byte(`{"system_prompt":"observe completed tasks"}`),
-			}
+				ExecutionMode: "live", Subscriptions: []string{"task.completed"},
+			})
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			entityID := eventtest.UUID("startup-order-node-entity-" + backend.name)

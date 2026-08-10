@@ -173,7 +173,6 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 			OwningFlowID: owningFlowIDForProjectView(s.bundle, view),
 			Depth:        view.Paths.Depth,
 			Manifest:     view.Manifest,
-			PromptsDir:   strings.TrimSpace(view.Paths.ProjectPromptsDir),
 			Nodes:        view.Nodes,
 			Events:       view.Events,
 			Agents:       runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),

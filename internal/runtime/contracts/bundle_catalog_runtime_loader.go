@@ -196,7 +196,7 @@ func validateBundleCatalogRuntimeInput(input bundleCatalogProjectedFile) error {
 		return err
 	}
 	switch input.Policy {
-	case "yaml", "prompt_text", "raw_data":
+	case "yaml", "intent_text", "raw_data":
 	default:
 		return fmt.Errorf("bundle catalog canonical input %q has unsupported policy %q", input.Label, input.Policy)
 	}

@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -267,7 +266,6 @@ type AgentManagerOptions struct {
 	SessionResetter                sessions.Resetter
 	PersistenceRoles               PersistenceRoles
 	SemanticSource                 semanticview.Source
-	PromptResolver                 runtimecontracts.PromptResolver
 	WorkflowInstances              flowInstancePersistence
 	RuntimeMode                    string
 	LLMBackend                     string

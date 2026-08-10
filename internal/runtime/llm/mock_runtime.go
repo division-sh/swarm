@@ -101,7 +101,7 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 			return ""
 		}()),
 		AgentID: agentID, Memory: resolved.Plan, MemoryIdentity: resolved.Identity,
-		SystemPrompt: strings.TrimSpace(systemPrompt), Tools: append([]ToolDefinition(nil), tools...),
+		SystemPrompt: systemPrompt, Tools: append([]ToolDefinition(nil), tools...),
 		Messages: append([]Message(nil), hydrated.Messages...), TurnCount: hydrated.TurnCount, Watchdog: hydrated.Watchdog,
 	}
 	if resolved.Enabled() {

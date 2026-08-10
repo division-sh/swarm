@@ -9831,6 +9831,33 @@
             "description": "Persisted flow instance/catalog path when the definition is nested under a flow.",
             "type": "string"
           },
+          "intent_content": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "intent_content_hash": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "intent_identity": {
+            "pattern": "^agent-intent:v1:sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "intent_kind": {
+            "enum": [
+              "local",
+              "inline"
+            ],
+            "type": "string"
+          },
+          "intent_provenance": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "intent_source": {
+            "minLength": 1,
+            "type": "string"
+          },
           "llm_backend": {
             "type": "string"
           },
@@ -9845,9 +9872,6 @@
             "type": "string"
           },
           "model": {
-            "type": "string"
-          },
-          "prompt_path": {
             "type": "string"
           },
           "role": {
@@ -9870,7 +9894,15 @@
           }
         },
         "required": [
-          "agent_id"
+          "agent_id",
+          "memory",
+          "memory_source",
+          "intent_kind",
+          "intent_source",
+          "intent_provenance",
+          "intent_content_hash",
+          "intent_identity",
+          "intent_content"
         ],
         "type": "object"
       },
@@ -10154,7 +10186,7 @@
             "type": "string"
           },
           "text": {
-            "description": "UTF-8 text content for YAML, prompt, policy, and other non-data bundle files.",
+            "description": "UTF-8 text content for YAML, agent intent, policy, and other non-data bundle files.",
             "type": "string"
           }
         },

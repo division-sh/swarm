@@ -403,12 +403,12 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	testInbound := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
 	rt.InboundGateway = testInbound.InboundGateway
 
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{
+	if err := am.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.id,
 		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
 		Subscriptions: []string{"test.in"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
@@ -508,12 +508,12 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	})
 	rt.Manager = am
 
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{
+	if err := am.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.id,
 		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
 		Subscriptions: []string{"test.in"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {

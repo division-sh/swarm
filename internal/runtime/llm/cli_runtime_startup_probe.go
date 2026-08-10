@@ -35,7 +35,7 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 	s := &Session{
 		ID:           ensurePlatformSessionID(""),
 		AgentID:      strings.TrimSpace(actor.ID),
-		SystemPrompt: strings.TrimSpace(systemPrompt),
+		SystemPrompt: systemPrompt,
 		Tools:        append([]ToolDefinition(nil), tools...),
 	}
 	surface, ok := managedcapabilities.FromContext(ctx)
@@ -67,8 +67,8 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
 		if includeSystemPrompt {
-			if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
-				args = append(args, "--system-prompt", sys)
+			if strings.TrimSpace(s.SystemPrompt) != "" {
+				args = append(args, "--system-prompt", s.SystemPrompt)
 			}
 		}
 		args = append(args, "--tools", toolProjection.builtinSelectionArg())

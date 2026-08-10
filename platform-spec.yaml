@@ -155,7 +155,8 @@ vocabulary:
         has_prompt: false
         has_model: false
       agent:
-        description: LLM-powered. Has a system prompt, provider-resolved model alias, and presence-aware memory plan. Subscribes to events, reasons about
+        description: LLM-powered. Has one canonical resolved business-intent artifact, a derived non-authorable system-prompt
+          carrier, provider-resolved model alias, and presence-aware memory plan. Subscribes to events, reasons about
           them, calls tools. Can own workflow transitions where the stage change requires LLM judgment (e.g. promote/kill
           decisions, build readiness). Agents produce events that may also trigger transitions owned by system nodes.
         execution: llm
@@ -288,7 +289,7 @@ contract_formats:
       retained yaml.Node pointers private, and exposes only read-only traversal,
       caller-owned node copies, copied bytes, or fresh caller-owned decoded
       values. Domain projections such as workflow bundles, API specifications,
-      bundle hashes, bundle identities, prompt variables, and source-line views
+      bundle hashes, bundle identities, resolved agent intents, and source-line views
       remain in their existing semantic owners and MUST NOT become shared
       mutable cache values.
     diagnostics: Read failures and parse/decode failures preserve the current source path and fail closed.
@@ -315,13 +316,12 @@ contract_formats:
       \                        # Root-level system nodes\n  events.yaml                        # Root-level events (flat payload\
       \ declarations)\n  entities.yaml                      # Root-level entity contracts (rare)\n  types.yaml         \
       \                # Shared named types / enums / scalar aliases\n  agents.yaml                        # Root-level agents\n\
-      \  tools.yaml                         # Shared tools\n  policy.yaml                        # Shared policy\n  prompts/\
-      \                           # Root-level agent prompts\n  runtime/                           # Merged flat files for\
+      \  tools.yaml                         # Shared tools\n  policy.yaml                        # Shared policy\n  runtime/                           # Merged flat files for\
       \ flat file loader\n    nodes.yaml\n    events.yaml\n    entities.yaml\n    types.yaml\n    agents.yaml\n    tools.yaml\n\
       \    policy.yaml\n  flows/\n    {child_flow}/                    # Child flow (same structure, recursive)\n      package.yaml\n\
       \      schema.yaml\n      nodes.yaml\n      events.yaml\n      entities.yaml                  # Flow-owned entity contract\
       (optional)\n      types.yaml                     # Flow-local types (optional)\n      agents.yaml\n      tools.yaml\
-      \                    # Optional\n      policy.yaml                   # Optional\n      prompts/\n      data/                      # Flow-scoped static reference data (optional)\n      flows/      \
+      \                    # Optional\n      policy.yaml                   # Optional\n      data/                      # Flow-scoped static reference data (optional)\n      flows/      \
       \                   # Grandchild flows (if any)\n        {grandchild}/\n          package.yaml\n          ...\n\n\
       platform/                            # Platform contracts (separate from any flow)\n  package.yaml\n  platform-spec.yaml\n"
   minimum_flow_package:
@@ -337,10 +337,9 @@ contract_formats:
     - tools.yaml
     - policy.yaml
     optional_directories:
-    - prompts/
     - flows/
-    rule: A flow with no agents needs no prompts/. A flow with no handlers needs no nodes.yaml. A flow with no events needs
-      no events.yaml.
+    rule: A flow with no handlers needs no nodes.yaml. A flow with no events needs no events.yaml. Agent intent files have
+      no reserved directory or filename; only an explicit local `intent:` path gives a file intent semantics.
   flow_schema:
     description: Canonical `schema.yaml` flow declaration surface for lifecycle stage-node and pin declarations.
     owner_file: contracts/flows/<flow>/schema.yaml
@@ -2209,7 +2208,7 @@ criteria_contracts:
                 <name>: <typed-scalar-or-policy-scalar-ref>
     rules:
     - '`criteria:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and MUST
-      NOT appear as `policy.criteria`, a prompt variable, or arbitrary policy object data.'
+      NOT appear as `policy.criteria`, agent-intent interpolation, or arbitrary policy object data.'
     - Criteria sets are flow-local in this slice. Root/project policy criteria, project-shared packs, team packs, and
       marketplace distribution are not implemented.
     - Rule IDs are stable and never reused within a set. Historical events cite the bundle/contract version active when
@@ -2232,11 +2231,11 @@ criteria_contracts:
       the resolved contract. The generated section is the only PR1 delivery path and is tested as stable so later prompt-frame
       generation (#1718) can absorb it without changing behavior.
     forbidden_bypasses:
-    - generic policy prompt variables
+    - generic policy or agent-intent interpolation
     - '`policy.criteria` expression reads'
     - flow `data/` files
     - '`read_flow_data`'
-    - prompt-local hardcoded criteria IDs as authority
+    - intent-local hardcoded criteria IDs as authority
     fail_closed: Runtime inability to deliver an otherwise valid referenced set fails closed before agent judgment proceeds.
   event_citations:
     field_metadata: |
@@ -2305,7 +2304,7 @@ policy_validation_contracts:
                   right: input.<input_name>
     rules:
     - '`validation:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and
-      MUST NOT appear as `policy.validation`, a prompt variable, or arbitrary policy object data.'
+      MUST NOT appear as `policy.validation`, agent-intent interpolation, or arbitrary policy object data.'
     - Validation sets are flow-local in this slice. Root/project policy validation, shared validation packs, team packs,
       marketplace distribution, file-backed rule sets, and external data reads are not implemented.
     - Rule IDs are stable and never reused within a set. Every set MUST declare at least one class, at least one typed input,
@@ -2429,7 +2428,7 @@ compute_module_contracts:
             output_bytes: <positive integer>
     rules:
     - '`modules:` is a closed typed policy section. It is decoded separately from generic PolicyDocument.Values and MUST NOT
-      appear as a generic policy expression object or prompt variable.'
+      appear as a generic policy expression object or agent-intent interpolation.'
     - Module declarations are flow-local in this slice. Root/project modules, shared module packs, source compilation,
       public build tooling, artifact repositories, and remote module loading are separate gates.
     - Module IDs are short stable identifiers. A row references a module by short ID, not by filesystem path.
@@ -2729,7 +2728,7 @@ bundle_build_materialization:
     - invalid Python source syntax, missing callable handle, unsupported Python capability, or embedded runtime identity drift
     - unsupported build-step requirements
     - bundle input, module byte, or source_path proof collisions with reserved generated artifact paths such as build-manifest.json, including ASCII case variants
-    - output roots or target directories inside hashed recursive inputs such as prompts/ or flow data/
+    - output roots or target directories inside hashed recursive inputs such as flow data/
     - materialized directory hash mismatch
   reproducibility:
     rule: |
@@ -4242,7 +4241,8 @@ engine:
       events.yaml: Event payload schemas. Omit if flow uses only events declared by children or root.
       tools.yaml: Flow-specific tools. Omit if flow uses only root-level or platform tools.
       policy.yaml: Flow-specific thresholds. Omit if flow uses only root-level policy.
-      prompts/: Agent prompts. Required if agents.yaml exists.
+      agent_intent_files: Any regular UTF-8 file inside the contracts root may be an agent intent source only when an
+        exact scoped agents.yaml declaration names it through a local `intent:` path. No directory or filename is implicit.
     output: 'A flat list of FlowEntry records. Each record contains: flow ID, directory path, depth, parent flow ID, package
       manifest, and paths to all contract files found. This flat list is the input to the contract merger (next step).'
     max_depth: 99
@@ -4584,38 +4584,28 @@ engine:
       tools are available only within that flow. If a child declares a tool with the same ID as a root tool, the child's version
       takes precedence within that flow.
     policy: 'Policy keys are scoped by flow. Root flow policy is inherited by all children. Child flow policy overrides root
-      for the same key within that child. Guards and prompt templates resolve policy keys by walking up the flow tree: child
-      → parent → root.'
+      for the same key within that child. Guards resolve policy keys by walking up the flow tree: child → parent → root.
+      Resolved agent intent is exact content and never reads generic policy keys.'
     output: 'A runtime registry containing: URI → Node map, URI → Agent map, URI → Event schema map, tool registry (flat,
       with flow-level overrides), policy tree (hierarchical, child overrides parent).'
   agent_sharding:
-    description: Parallelism within a flow is handled by system nodes spawning multiple agent instances. The platform provides
-      the mechanics (agent_hire, event routing, accumulation tracking). The product node decides the partitioning logic.
-    model: A system node handler receives a trigger event with a workload (e.g., 52 subcategories). The node partitions the
-      workload and spawns N agent sessions, one per partition. Each agent receives a partition-specific event. The node tracks
-      completion via the accumulate primitive. When all partitions complete, the node proceeds.
-    platform_provides:
-    - agent_hire tool — spawn an agent session with specific configuration
-    - Event routing — deliver partition-specific events to the correct agent instance
-    - Accumulation tracking — track which partitions have completed
-    - Timeout — fire on_timeout if partitions don't complete in time
-    product_provides:
-    - Partitioning logic — how to split the workload
-    - Partition event construction — what each agent instance receives
-    - Merge/reduce logic — how to combine partition results (if needed)
-    not_in_scope: Flow-level sharding (distributing flow instances across compute nodes) is not supported in v1.0.0. All flow
-      instances run on the same platform instance. Agent sharding provides within-flow parallelism. Cross-machine distribution
-      is a future concern.
-    addressing: Sharded agent instances are addressed by their agent session ID, not by a special shard path. The wildcard
-      * in paths matches dynamic flow instances, not agent shards. Agent shards are ephemeral — they exist for the duration
-      of the partition work and are not addressable after completion.
+    status: dynamic_agent_sharding_retired
+    description: Dynamic runtime creation of agent sessions is not a supported parallelism primitive.
+    supported_model: >
+      Authors express independently addressable parallel work as child/template flow instances with statically declared
+      managed agents, typed event routing, and accumulation/join ownership. Contained fan-out may use declarative handler
+      primitives when no independently addressable agent lifecycle is required.
+    retired_model: System nodes or agents spawning arbitrary agents at runtime through `agent_hire`.
+    not_in_scope: Cross-machine distribution remains unsupported.
+    addressing: Parallel child/template work is addressed by normal typed flow-instance identity and routing. There is no
+      ephemeral dynamic-agent shard address space.
   dynamic_instance_lifecycle:
     description: 'Flow instances can be created at runtime by system nodes calling create_flow_instance. The flow template
       must be declared as mode: template in the parent package.yaml.'
     creation:
       trigger: A system node handler declares action create_flow_instance (handler action, not an agent-callable tool). The node
-        decides when to create instances based on its product logic. Same pattern as agent sharding — nodes orchestrate instance
-        creation.
+        decides when to create instances based on its product logic; managed agents inside the created flow remain statically
+        declared by that flow's agents.yaml.
       instance_id: Supplied by the node (from event payload or generated). Must be unique within the template scope. If already
         exists with different semantic facts, creation fails before mutating flow_instances, entity_state, routes, agents,
         timers, or auto_emit_on_create. Exact replay consumes the existing durable readiness plan idempotently so an
@@ -6007,7 +5997,8 @@ engine:
       response.
     session_lifecycle:
     - 1. Event arrives in agent inbox.
-    - '2. Platform creates agent session: load prompt from prompts/, substitute {{variables}} from policy.'
+    - '2. Platform creates the agent session from the already materialized immutable resolved intent artifact, appends
+      separately owned contract criteria and the generated environment postamble, and never performs source lookup.'
     - 3. Platform provides tools (from tools.yaml) to the agent session.
     - '4. Agent processes event: reasons, may call tools, may emit events.'
     - 5. Each tool call is validated (schema check, permission check) before execution.
@@ -6023,7 +6014,7 @@ engine:
     turn_budget: Each agent session has a max_turns_per_task (from agents.yaml). If the agent exceeds this budget, the session
       is terminated. The platform may emit a timeout or budget_exceeded event.
     agent_invocation: 'Agents are invoked via claude -p (CLI) or an equivalent LLM API call. The platform constructs each
-      short-lived invocation from the system prompt, event context, and tool schemas. With memory false, every invocation
+      short-lived invocation from the canonical derived system-prompt carrier, event context, and tool schemas. With memory false, every invocation
       starts with fresh provider/in-process conversation state. With memory true, prior turns are hydrated only through the
       exact run, agent, and flow-instance identity. Event payload and entity state remain separate application context.'
     llm_provider_adapter_contract:
@@ -6067,8 +6058,9 @@ engine:
             execution target supports the required native command and file capabilities.
           - For non-strict fallback runtimes, web_search native_tools are admitted only when policy.web_search_provider resolves
             to a supported provider and every provider-required credential resolves to a non-empty deployment credential.
-          - Static boot, dynamic agent_hire, and dynamic agent_reconfigure must fail closed before the affected agent's first
-            turn when provider-native support or the required fallback owner proof is missing.
+          - Static boot, recovery, and selected-contract materialization must fail closed before the affected agent's first
+            turn when provider-native support or the required fallback owner proof is missing. Retired dynamic mutation
+            surfaces never reach this admission point.
           - Persisted turn visible-tool facts must reflect callable truth for the adapter's turn.
         persistence:
           rules:
@@ -6313,22 +6305,20 @@ engine:
             lifecycle_consumers:
               - static agent materialization
               - template instance materialization
-              - dynamic reconfiguration and clone
               - persistence and recovery
               - selected-contract ephemeral materialization
               - conversation fork-chat source snapshot
             lifecycle_rule: >
-              Static spawn, agent_hire, reconfigure, clone, persisted recovery/restart, selected-contract reconstruction, and
-              fork-chat reconstruction re-run canonical selection from authored intent plus the current configured default.
+              Static spawn, persisted recovery/restart, selected-contract reconstruction, and fork-chat reconstruction re-run
+              canonical selection from authored runtime selection plus the current configured default.
               Persisted derived fields are observations, not cross-boot authority, and stale derived fields are replaced
               before admission or construction. The persistence projection accepts only an already-resolved backend and never
               invents a configured default from authored intent or an empty descriptor. Native-tool admission runs only after
               this resolution and construction uses that same resolved actor/runtime pair.
             dynamic_authority_rule: >
-              Mock-causal execution cannot invoke agent_hire, agent_reconfigure, or agent_fire to mutate live runtime agent
-              state. Every dynamic agent lifecycle mutation is rejected before input decoding or manager lookup because hire
-              could mint live provider authority, reconfigure could alter an actor later reached by live ingress, and fire is
-              still a destructive live-state effect. Delayed work does not mint fresh authority: generic
+              `agent_hire` and `agent_reconfigure` are retired for every execution mode and fail before input decoding or
+              manager lookup. Mock-causal execution also cannot invoke the distinct supported `agent_fire` action to mutate
+              live runtime agent state. Delayed work does not mint fresh authority: generic
               schedules, join schedules, and authored workflow timer activations persist the exact causal execution_mode and
               copy it unchanged into every fired event, including after selected-store restore. Initial-entry timers consume
               the activation's exact execution mode. Dynamic-flow readiness persists that mode as immutable activation
@@ -6438,7 +6428,7 @@ engine:
           rule: >
             The central external-effect authorization owner rejects mock-mode attempts before launch. A mock performance may
             request visible internal tools and emit events, but it cannot call providers, HTTP tools, MCP, native commands,
-            workspace writes, relays, live LLM adapters, create a runtime-authored agent through agent_hire, or commit
+            workspace writes, relays, live LLM adapters, create a runtime-authored agent, or commit
             action-owned artifacts. The sole pipeline activity exception is a statically admitted exact provider_connector
             response that uses the normal non-idempotent attempt journal; it performs no credential lookup or transport.
             The immutable process posture is admitted before every external-effect authorization and activity-attempt claim.
@@ -6731,6 +6721,7 @@ engine:
           default: absent/empty
           rationale: No workspace class is invented by the platform. Named classes remain explicit product policy.
       no_default_fields:
+        intent: Required authored source under agent_intent_model; no generated prose, filename, directory, role, or runtime fallback exists.
         model: Cost/provider-bearing. It remains explicit in Layer 1 and missing model aliases fail validation.
         manager_fallback: No platform default in Layer 1; explicit value only.
       generated_view:
@@ -6741,7 +6732,7 @@ engine:
           accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
       exclusions:
       - No defaults for logical identity, runtime/display id templates, subscriptions, emit_events, required_agents,
-        pins, events, entities, public interfaces, policy, criteria, credentials, permissions, permissions_bundle, tools,
+        pins, events, entities, public interfaces, policy, intent, criteria, credentials, permissions, permissions_bundle, tools,
         native_tools, or flow_data_access.
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
@@ -6833,8 +6824,8 @@ engine:
         lookup: Exact equality on all fields plus explicit active/suspended status predicates.
         forbidden_selectors: [entity_id, task_id, provider_session_id, latest_row, empty_run_fallback]
       mutation:
-        agent_hire: Omitted memory is platform-default false.
-        agent_reconfigure: Omitted memory retains the current plan; explicit false or true is authored.
+        rule: Dynamic agent hire and reconfigure are retired and cannot author or mutate memory. Static contract
+          materialization and recovery consume the canonical memory plan.
         caller_identity: Run, flow instance, scope, scope key, and authority are runtime-owned and rejected in public payloads.
       verification:
       - Root memory true fails with a teaching error because no flow-instance owner exists.
@@ -6896,7 +6887,7 @@ engine:
         refs: Each item must be a short non-empty set name resolving to the declaring flow's policy.criteria section.
           Dotted paths and filesystem-like paths are invalid.
         generated_delivery: Referenced sets are rendered through criteria_contracts.delivery; criteria are not granted by
-          tools, flow_data_access, prompt variables, or generic policy reads.
+          tools, flow_data_access, agent-intent interpolation, or generic policy reads.
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
@@ -7939,13 +7930,14 @@ engine:
       trigger: A generated platform-owned emit/entity tool schema is not provider-closed, omits declared required properties,
         requires undeclared properties, declares an empty enum, or cannot be lowered to the provider JSON Schema contract.
       when: boot-only
-    - id: prompt_exists
-      severity: warning
+    - id: agent_intent_resolved
+      severity: hard_invalidity
       scope: per-agent
       trigger: >-
-        An agent has no prompt file resolved by the canonical runtime prompt resolver. Resolution checks the agent's
-        prompt_ref, logical agent id, registry entry id, mode-specific variants, workspace-class/role fallback, shard-parent
-        runtime lookup, and bundle prompt-directory fallback before reporting the prompt missing.
+        A managed model-agent declaration has no exact `intent:` source, its closed source shape is invalid, a local source
+        cannot be resolved safely relative to the exact declaring agents.yaml, an import source is used before the separately
+        gated pack owner exists, or the immutable resolved artifact fails canonical identity validation. This check is fail
+        closed; no logical-id, role, mode, shard-parent, directory, environment, or generated-prose fallback exists.
       when: boot-only
     - id: produces_drift
       severity: warning
@@ -8334,8 +8326,6 @@ permissions_model:
     permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.'
   permissions:
   - agent_fire
-  - agent_hire
-  - agent_reconfigure
   - approve_spend
   - configure_routing
   - create_flow_instance
@@ -8360,7 +8350,7 @@ permissions_model:
       cross_flow: Not supported. agent_message delivery is rejected if target is in a different flow instance. Cross-flow communication
         uses events (emit + subscribe).
     management:
-      description: agent_hire, agent_fire, agent_reconfigure target constraints.
+      description: agent_fire target constraints. Dynamic hire and reconfigure are retired before permission evaluation.
       scope: Same flow instance, target below caller in manager_fallback chain.
       rules:
       - Caller and target must be in the same flow instance.
@@ -8426,8 +8416,12 @@ tool_model:
     tools:
       agent_message: Send a message to another agent. Auto-granted to all agents (universal tool).
       agent_fire: Terminate an agent session. Requires agent_fire permission.
-      agent_hire: Spawn a new agent session. Requires agent_hire permission.
-      agent_reconfigure: Modify an agent's prompt, tools, or subscriptions. Requires agent_reconfigure permission.
+      agent_hire: >-
+        RETIRED rejection-only internal entry retained pending physical family deletion under issue 2110. It is not
+        provider-visible and fails before decoding, permission evaluation, manager lookup, runtime selection, or mutation.
+      agent_reconfigure: >-
+        RETIRED rejection-only internal entry retained pending physical family deletion under issue 2110. It is not
+        provider-visible and fails before decoding, permission evaluation, manager lookup, runtime selection, or mutation.
       create_entity: Create a new entity row in entity_state. Legacy trusted runtime-internal compatibility surface; not
         provider-visible or callable for normal agents.
       get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
@@ -10000,70 +9994,137 @@ tool_model:
     not_accepted:
       endpoint: NOT a valid field. Use http.url instead.
       type: NOT a valid field. Use handler_type instead.
-prompt_templating:
-  description: Agent prompts are markdown files selected by the canonical runtime prompt resolver. They may contain {{variable}}
-    placeholders that the platform substitutes from policy.yaml at agent session creation time. The substitution is simple
-    string replacement — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward
-    compatibility).
-  convention:
-    prompt_path: >-
-      canonical resolver candidates: prompt_ref, logical agent id, registry entry id, optional {ref}.{mode}.md variant,
-      workspace_class-role fallback, shard-parent runtime lookup, and bundle prompt-directory fallback
-    variable_syntax: '{{variable_name}}'
-    variable_source: policy.yaml scalar values, excluding typed sections such as criteria
-  variable_resolution:
-    description: Prompt variables ({{token}}) are resolved from multiple sources in priority order. All sources must be scanned
-      by compliance tests.
-    resolution_order:
-    - source: instance_variables (schema.yaml)
-      description: Variables declared in the flow schema. Populated at flow instance creation via config_from.
-      example: customer_name, order_type, region
-    - source: policy (policy.yaml)
-      description: Scalar policy values from flow and root policy files. Typed sections such as criteria are not prompt
-        variables; criteria are delivered only through criteria_contracts.delivery.
-      example: max_retries, sla_hours, approval_threshold
-    - source: entity_state fields
-      description: Entity fields written by data_accumulation. Available at render time from entity context.
-      example: total_amount, resolution_summary
-    - source: runtime tokens
-      description: Platform-injected tokens not declared in contracts. Hardcoded allowlist.
-      example: current_date, agent_id, flow_instance_path
-    compliance_test_sources: 'TestPromptVariablesComplete must scan ALL of these for each prompt directory: schema.yaml (instance_variables.variables),
-      policy.yaml scalar keys excluding typed sections such as criteria, agents.yaml (prompt_inputs), and the runtime-token
-      allowlist. A variable is valid if it appears in ANY of these sources.'
-  prompt_postamble:
-    description: The platform appends a short environment postamble to every agent system prompt at session creation time.
-      The postamble tells the agent where it is working — workspace paths and access levels. It does NOT list available tools
-      or capabilities — the LLM sees those via tool definitions in the API call, same as MCP tools and platform builtins.
-      The product prompt (from the canonical resolved prompt file, with variables resolved) comes first. The postamble follows.
-    construction:
-      order:
-      - 1. Product prompt (canonical resolved prompt file with {{variable}} substitution)
-      - 2. Platform postamble (auto-generated from workspace_class)
-      rules:
-      - Always included. Every agent gets workspace context.
-      - Does NOT list tools or native capabilities — those are conveyed via tool definitions, not prompt text.
-      - Generated at session creation time from the agent's workspace_class. Not editable by the product author.
-    template: |
-      ## Environment
-
-      Workspace: /workspace (read-write logical path)
-      Reference data: /data (read-only logical path)
-      Contracts: /opt/swarm/contracts (read-only logical path)
-      Docker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions.
-    normative_content: >
-      The three logical workspace paths (/workspace, /data, /opt/swarm/contracts with their access levels) are required. The
-      postamble MUST distinguish logical platform paths from host native bash process paths: Docker-backed command execution
-      exposes the logical paths as OS mount paths, while trusted host bash is full host-user shell execution from the workspace
-      backing directory, does not synthesize absolute /workspace, /data, or /opt/swarm/contracts OS paths, and must not be
-      described as a reduced or platform-file-only command surface. The exact wording is not normative — the content
-      requirements are.
-    native_tools_in_postamble: No. Native tools are NOT described in the postamble. They are conveyed via tool definitions
-      in the LLM API call, same as all other tools. The platform must not hide a fallback/native distinction by advertising
-      native tools the current turn cannot actually call.
-    note: The logical workspace paths are the same for all workspace classes — only the /workspace scope differs (per-agent vs
-      per-flow-instance). The postamble does not vary by scope — it tells the agent the logical paths, the platform enforces
-      scoping, and host native bash must not be represented as Docker-equivalent mount isolation.
+agent_intent_model:
+  status: canonical_local_inline_owner
+  promoted_by: '#1788'
+  canonical_owner: platform-spec.yaml#agent_intent_model
+  implementation_owners:
+    source_and_artifact: internal/runtime/agentintent
+    scoped_resolution: internal/runtime/contracts
+    runtime_carrier: internal/runtime/core/actors.AgentConfig
+  authority_rule: >
+    Every managed model agent has exactly one authored business-intent source declared by `intent:` in its exact scoped
+    agents.yaml entry. Contract loading resolves that declaration once into one immutable artifact. Verification, bundle
+    identity/build/register, catalog/readback, static and template materialization, persistence/recovery, shard and
+    selected-contract fork construction, structural checks, and provider transports consume that artifact or a separately
+    derived carrier; none may rediscover source text by name, role, mode, directory, environment, event payload, or fallback.
+  authored_source_union:
+    field: intent
+    required_for: every managed model-agent declaration
+    grammar:
+      local:
+        yaml: 'intent: relative/path/to/intent.md'
+        rule: A scalar is always a local path relative to the exact declaring agents.yaml. It is never inline prose.
+      inline:
+        yaml: 'intent: {inline: "Exact business intent."}'
+        rule: The mapping contains exactly `inline`; content must be non-blank valid UTF-8 and its exact bytes are preserved.
+      import:
+        yaml: 'intent: {import: support-drafter@1}'
+        rule: The closed syntax requires a non-blank explicitly versioned reference, but resolution always teaching-rejects
+          until #1685/#1770 promotes the separate agent-pack source owner.
+      import_override:
+        yaml: 'intent: {import: support-drafter@1, override: local.md}'
+        rule: The closed syntax is recognized but always teaching-rejects with import. No replacement, merge, or local
+          fallback is executed before the pack owner lands.
+    strictness: >
+      Unknown keys, duplicate keys, non-text values, empty sources, inline/import mixtures, override without import,
+      unversioned imports, and every source shape outside this union fail closed.
+  local_resolution:
+    coordinate: Canonical slash-normalized path relative to the contracts root.
+    provenance: Canonical declaring agents.yaml path plus `#agents.<exact-map-key>.intent`.
+    rules:
+    - The authored path uses forward separators and contains no empty, `.`, `..`, NUL, absolute, drive-qualified, or
+      backslash segment.
+    - The fully resolved path remains inside the contracts root.
+    - Every traversed component is checked without following symlinks; the target is a readable regular file.
+    - Content is non-blank valid UTF-8 and exact file bytes are preserved without trimming, templating, or normalization.
+    - Duplicate canonical coordinates owned by different scoped agent declarations and ASCII case-colliding coordinates fail
+      closed.
+  resolved_artifact:
+    type: ResolvedAgentIntent
+    immutable_fields:
+    - kind
+    - coordinate
+    - provenance
+    - content
+    - content_hash
+    - identity
+    content_hash: '`sha256:<64 lowercase hex>` over exact UTF-8 content bytes.'
+    identity: >
+      `agent-intent:v1:sha256:<64 lowercase hex>` over the deterministic compact JSON object containing domain
+      `division-sh.swarm.agent-intent`, version 1, kind, coordinate, provenance, and content_hash in that order. Validation
+      recomputes both hashes and rejects missing, non-canonical, or tampered facts.
+  bundle_and_catalog:
+    bundle_hash: >
+      Every local intent file is one exact canonical bundle input under its contract-root-relative label regardless of
+      directory name. Inline content is already covered by agents.yaml. Unreferenced files have no intent semantics and are
+      not recursively included merely because of their directory or filename.
+    readback_fields:
+    - intent_kind
+    - intent_source
+    - intent_provenance
+    - intent_content
+    - intent_content_hash
+    - intent_identity
+    parity: Bundle build/register/reconstruction and catalog/API/CLI readback preserve these exact facts and scoped duplicate
+      logical agent declarations without recomputation from ambient files.
+  runtime_consumption:
+    materialization: >
+      Static, template, recovery, shard, and selected-contract fork paths carry the exact resolved artifact into AgentConfig.
+      AgentRuntimeSet may select backend/model/execution mode from that already materialized descriptor but is not an intent
+      source owner.
+    derived_system_prompt: >
+      `derived_system_prompt` is an internal non-authorable carrier. It begins with the exact resolved intent content,
+      followed only by separately owned contract criteria. Runtime and persistence reject an invalid artifact, a blank
+      carrier, or a carrier that does not begin with the exact intent content. The LLM runtime appends the separately owned
+      generated environment postamble exactly once when constructing the provider-visible system prompt; that step does not
+      mutate or replace the persisted carrier or the resolved intent artifact.
+    event_invariance: Event payload shape, payload mode, date, entity state, workspace class, shard parent, runtime backend,
+      and execution mode never select or mutate authored intent content or identity.
+    provider_boundary: API, CLI, OpenAI-compatible, Responses, mock, and startup-probe adapters receive the derived carrier;
+      provider adapters never resolve agent intent.
+  contract_criteria_assembly:
+    owner: criteria_contracts.delivery
+    rule: >
+      Authored criteria references remain outside intent identity. Materialization may append the exact contract-owned
+      criteria section only when runtime references, if supplied, equal the authored set; runtime-only or mismatched refs fail
+      closed.
+  environment_postamble:
+    rule: >
+      The LLM runtime appends workspace facts after the immutable persisted intent-and-criteria carrier when constructing the
+      provider-visible system prompt. The postamble is generated platform context, is not authorable, does not list tools,
+      and does not alter the persisted carrier, resolved intent artifact, or hashes.
+    required_content:
+    - 'Workspace: /workspace (read-write logical path)'
+    - 'Reference data: /data (read-only logical path)'
+    - 'Contracts: /opt/swarm/contracts (read-only logical path)'
+    - Docker-backed command execution exposes those logical paths as OS paths; trusted host bash uses the workspace backing
+      directory and host namespace/permissions.
+  retired_surfaces:
+    authored_fields:
+    - prompt_ref
+    - prompt_inputs
+    catalog_fields:
+    - prompt_path
+    config_fields:
+    - paths.prompts_dir
+    environment:
+    - SWARM_PROMPTS_DIR
+    interpreters:
+    - implicit logical-id, registry-id, role, workspace, shard-parent, root/global, and mode-specific filename lookup
+    - reserved prompt-directory discovery
+    - event/payload-mode source switching
+    - policy, instance, entity, date, or runtime-token text substitution
+    - generated business-intent fallback prose
+    rule: All retired authored/config forms teaching-reject or are absent. No compatibility, migration, fallback, or second
+      source owner exists; old persisted stores are unsupported.
+  dynamic_mutation_boundary:
+    rule: >
+      `agent_hire` and `agent_reconfigure` reject unconditionally before decoding, normalization, authorization, lookup,
+      persistence, runtime selection, or mutation. They do not accept raw system_prompt or the canonical intent union.
+      Physical deletion of the broader dynamic family remains #2110. `agent_fire` is a distinct supported lifecycle action.
+  operator_forkchat_boundary: Operator selected-fork conversation chat is an explicit sandbox and never becomes a managed
+    agent intent declaration, artifact, or persistence source.
 flow_model:
   description: A Flow is the universal building block. Every level of the system is a flow — from the root flow down to the
     smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate
@@ -10793,7 +10854,8 @@ flow_model:
       nodes.yaml: System nodes with handlers (optional)
       tools.yaml: Flow-specific tools (optional — inherits root)
       policy.yaml: Flow-specific config (optional — inherits root)
-      prompts/: Agent prompt files (optional)
+      agent_intent_files: Optional regular UTF-8 files explicitly named by scoped agents.yaml `intent:` declarations;
+        no reserved directory or filename exists.
       flows/: Child flows (optional)
     manifest_self_facts:
       owner: package.yaml top-level fields decoded by ProjectPackageDocument
@@ -11920,10 +11982,10 @@ flow_model:
       \ processing, ...]\n  nodes.yaml                     # dashboard-node\n  events.yaml                    # cross-flow events\
       \  \n  agents.yaml                    # root-level agents\n  schema.yaml                   # root flow pins\n  flows/\n\
       \    intake/                      # child flow\n      package.yaml               # name: intake, flows: [] (leaf)\n\
-      \      nodes.yaml\n      events.yaml\n      schema.yaml\n      agents.yaml\n      prompts/\n    processing/        \
+      \      nodes.yaml\n      events.yaml\n      schema.yaml\n      agents.yaml\n      intent/reviewer.md          # only semantic when agents.yaml names this exact path\n    processing/        \
       \          # child flow with sub-flows\n      package.yaml               # name: processing, flows: [review, fulfillment,\
       \ ...]\n      nodes.yaml                 # gate orchestrator\n      schema.yaml\n      flows/\n        review/   \
-      \                # grandchild flow\n          package.yaml\n          nodes.yaml\n          agents.yaml\n          prompts/\n\
+      \                # grandchild flow\n          package.yaml\n          nodes.yaml\n          agents.yaml\n          intent/reviewer.md          # explicitly referenced local intent\n\
       \        fulfillment/\n          ...\n"
   pins:
     description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
@@ -12093,7 +12155,7 @@ versioning:
     scheme: semver (major.minor.patch)
     major: Flow restructuring, agent hierarchy changes, breaking event schema changes
     minor: New agents, new events, new tools, threshold adjustments
-    patch: Prompt improvements, policy tuning, bug fixes
+    patch: Agent-intent content improvements, policy tuning, bug fixes
   compatibility:
     declaration: Products declare platform_version in package.yaml using Masterminds semver/v3 constraint syntax
       (for example, ">=0.7.0 <0.8.0", ">=0.7.0", "^0.7.0", or exact "0.7.0").
@@ -14561,7 +14623,7 @@ platform_tables:
     entity_state_for_dedup: 'When an agent checks for duplicates, the entity''s current_state provides context for the
       decision: active or in-pipeline entities are strong duplicates (skip). Recently killed entities are likely duplicates
       (skip unless evidence changed). Entities killed long ago may warrant re-evaluation if market conditions shifted.
-      The platform does not enforce these rules — products encode them in agent prompts and guard conditions.'
+      The platform does not enforce these rules — products encode them in canonical agent intent and guard conditions.'
     cleanup: 'Entity data is never auto-deleted. Retention policy and archival are operational concerns. The platform may
       provide a future archive/purge API, but entity_state rows persist indefinitely by default.'
   entity_metrics_convention:
@@ -15120,8 +15182,8 @@ run_model:
       runtime.run_fork.selected_contract_execution.fork_local_agent_runtime_materializer_executor. It consumes
       runtime.run_fork.selected_contract_recipient_planning as the only selected-fork recipient truth, factors ordinary
       static contract-agent materialization semantics for ID rendering, subscriptions, emit events, permissions, native
-      tools, flow path, role/model/memory plan, prompt resolution, and runtime descriptor normalization, and constructs
-      ephemeral fork-local handlers through the normal AgentManager/buildAgent/applyContractPrompt/factory execution
+      tools, flow path, role/model/memory plan, immutable resolved intent, and runtime descriptor normalization, and constructs
+      ephemeral fork-local handlers through the normal AgentManager/static materialization/factory execution
       path before selected fork publish. It may register only fork-local in-memory handler channels and runtime-active
       descriptors for the selected-fork EventBus; it MUST NOT persist those handlers into ordinary current-runtime
       agents, read source event_deliveries or source outcomes as executable truth, synthesize delivered/processed
@@ -15733,25 +15795,7 @@ agent_identity_model:
       A queued fire authorized from a replaced or temporarily applied mapping cannot terminate the target, and a successful
       fire cannot leave a live managed-parent edge for the terminated child. Post-persistence authority cleanup, pre-read-only
       authorization, and mutation without compensation are forbidden.
-    reconfigure: >
-      agent_reconfigure derives one complete candidate with the same canonical partial-patch merge used by AgentManager,
-      including parent_agent_id precedence over manager_fallback. Before manager mutation, the candidate child and effective
-      parent must be valid complete concrete identities on the same exact route and must not be equal. Unresolved, malformed,
-      cross-route, and self-parent candidates fail with both manager configuration and management-authority state unchanged.
-      During the serialized manager mutation, the authority graph derives and applies its typed child/parent plan from the
-      exact complete candidate before lifecycle persistence and successor publication; a no-parent candidate removes any
-      managed-parent edge. If authority handoff, lifecycle persistence, or subordinate session persistence rejects the
-      transition, the prior exact typed authority plan is restored before the operation returns. Only after authority and
-      persistence both accept may the successor configuration projection, route, or execution loop become visible. The
-      handoff, persistence, and successor publication remain under the same reconfiguration serialization, so no caller can
-      resolve the successor while the prior authority mapping remains live. A concrete managed-parent mapping is authoritative:
-      declaration fallback cannot grant a superseded parent authority. Concurrent reconfigurations therefore publish
-      authority in manager commit order. Actor management authority is revalidated against the exact serialized predecessor
-      immediately before authority handoff, so a queued request authorized from a pre-read mapping cannot mutate after that
-      mapping is replaced or restored. Concrete parent updates reject direct and indirect cycles atomically and leave the prior
-      graph unchanged. Compensation restores the exact pre-handoff graph snapshot and must not reconstruct declaration fallback
-      as a concrete mutable edge. A pre-read actor decision, candidate, or authority plan cannot authorize a later manager commit.
-      Mutation-first validation, cyclic management authority, and a second parent-merge interpreter are forbidden.
+    reconfigure: Dynamic agent reconfiguration is retired and never reaches management-authority planning or mutation.
   uuid_internal_migration_target:
     tracker: '#977'
     status: staged_parent_only_not_current_runtime_behavior
@@ -15887,15 +15931,17 @@ multi_bundle_persistence:
           - agents.yaml
           - tools.yaml
           - policy.yaml
-        root_prompts: every non-ignored regular file under root prompts/
         project_packages: >
           For each non-root discovered project package, include the package manifest plus nodes.yaml, events.yaml,
-          agents.yaml, tools.yaml, policy.yaml when present, and every non-ignored regular file under that package's
-          prompts/ directory.
+          agents.yaml, tools.yaml, and policy.yaml when present.
         flow_yaml: >
           For each discovered flow, include schema.yaml, types.yaml, entities.yaml, nodes.yaml, events.yaml,
           agents.yaml, tools.yaml, and policy.yaml when present.
-        flow_prompts: every non-ignored regular file under each flow prompts/
+        agent_intents: >
+          For every local ResolvedAgentIntent, include the exact declared file bytes under the canonical
+          contract-root-relative label with intent policy. Inline content is covered by agents.yaml. No directory is scanned
+          for implicit or unreferenced intent files. The file bytes must still equal the already resolved artifact content;
+          mutation between resolution and hashing fails closed.
         flow_data: every non-ignored regular file under each flow data/ as raw bytes
         flow_policy_modules: >
           For each flow policy.yaml modules declaration, include the referenced module bytes as raw bytes under their
@@ -16012,7 +16058,8 @@ multi_bundle_persistence:
       parsed_json: >
         Definition-only JSON projection with projection_version, workflow name/version, canonical input labels/policies,
         and agent definitions. Agent definitions may include agent_id, flow_instance, role, type, model,
-        memory, memory_source, prompt_path, subscriptions, and tools. Runtime-owned fields such as status,
+        memory, memory_source, intent_kind, intent_source, intent_provenance, intent_content, intent_content_hash,
+        intent_identity, subscriptions, and tools. Runtime-owned fields such as status,
         runtime_state, queues, active task, watchdog, last_tool_outcome, pending deliveries, and delivery lifecycle are
         forbidden.
       metadata: >
@@ -16042,7 +16089,7 @@ multi_bundle_persistence:
         - One or more canonical bundle_hash values may be pinned at process boot by repeating --bundle-hash. Values must be canonical, non-empty, duplicate-free, and mutually exclusive with --contracts and --dev.
         - The mode is Postgres-only and all-or-nothing before API readiness. SQLite, no-store, missing store, missing bundle row, malformed archive, missing bytes, hash mismatch, duplicate hash, and noncanonical hash fail closed before any runtime context is served.
         - The runtime loader consumes stored bundles.content_yaml and raw bundles.data_blob bytes only; parsed_json is inspection output and is never a runtime source.
-        - The loader reconstructs platform spec, contract definition files, prompts, and flow data/ raw bytes into a process-owned temporary source, then recomputes BundleHash and requires it to equal the requested bundle_hash before runtime construction.
+        - The loader reconstructs platform spec, contract definition files, explicitly declared local intent files, and flow data/ raw bytes into a process-owned temporary source, then recomputes BundleHash and requires it to equal the requested bundle_hash before runtime construction.
         - Each pinned bundle is registered as a BundleContext under RuntimeContextManager. The BundleContext owns its source, BundleSourceFact, EventBus, route table, pipeline/coordinator, agent manager, subscriptions, source-bound runtime components, and manager-owned lifecycle state.
         - Every durable EventBus is constructed with one valid immutable BundleSourceFact. Every durable operation admits that fact before work-occurrence admission or local/store mutation, including publish/outbox starts, delivery-session binding, flow-instance route persistence/removal, and run convergence. Prepared publications, pending outbox work, publication claims, retained pipeline scans, internal subscriptions, and agent/internal route generations remain bound to that exact fact for their full capability lifetime; caller and stored contexts are validated independently, and background or no-context cleanup derives the bus-owned fact before retained-state change or durable handoff. Only the explicit non-durable ephemeral EventBus constructor may be ownerless.
         - Under agent_identity_model.current_supported_posture, RuntimeContextManager admission rejects duplicate authored agent_id slugs across registered loaded BundleContexts before API readiness; the unsupported shape must name the duplicate slug and conflicting bundle hashes/source labels rather than prefix, alias, remap, or otherwise disambiguate the slug.
@@ -17633,10 +17680,6 @@ environment_source_authority:
       category: seeded_legacy
       owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
       migration: '#1600 monitor config'
-    - name: SWARM_PROMPTS_DIR
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 prompt helper config'
     - name: SWARM_AGENT_CONFIG_MAP_FILE
       category: seeded_legacy
       owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
@@ -17714,7 +17757,7 @@ environment_source_authority:
       Merge-bearing classification authority for the #1640 workspace/monitor/artifact/debug inventory. #1843 retired the
       workspace Docker/host environment sources, local workspace image/bootstrap knobs, and legacy internal
       scaffold/system/entity lifecycle rows from parent-process env authority. Runtime-private artifact and monitor roots,
-      prompt/spec helper path overrides, and debug/test environment toggles remain classified here until later children.
+      auxiliary spec helper path overrides, and debug/test environment toggles remain classified here until later children.
       This owner records current source-authority disposition and public-doc quarantine for those envs; repo-wide
       guard/doctor enforcement remains owned by #1731.
     classification_rule: >
@@ -17779,16 +17822,15 @@ environment_source_authority:
           storage, but public docs MUST NOT teach repo `.env` or ambient shell exports as normal setup. `SWARM_MONITOR_DIR`
           remains an observability/debug monitor log root until a later config/state-dir owner is promoted. Neither path may be
           agent-visible workspace data.
-      internal_prompt_and_spec_helpers:
+      internal_spec_helpers:
         disposition: keep_env_first_slice_internal_developer_helper
-        owner: prompt/spec helper path resolvers
+        owner: auxiliary spec helper path resolvers
         env_vars:
-        - SWARM_PROMPTS_DIR
         - SWARM_AGENT_CONFIG_MAP_FILE
         - SWARM_VERIFICATION_GATES_FILE
         - SWARM_TOOLING_LOCK_FILE
         rule: >
-          These envs are internal developer/helper path overrides for prompt and auxiliary spec files. Installed-binary runtime
+          These envs are internal developer/helper path overrides for auxiliary spec files. Installed-binary runtime
           behavior MUST NOT depend on old source-checkout helper paths becoming public configuration. Public docs/templates
           MUST NOT advertise them as normal setup.
       debug_and_test_quarantine:
@@ -18046,13 +18088,13 @@ configuration_source_authority:
             swarm_dir: elevated
             contracts_path: project_contained_path_or_elevated
             platform_spec_path: project_contained_path_or_elevated
-            prompts_dir: project_contained_path_or_elevated
+            prompts_dir: split_unsupported_retired
             artifact_root: elevated
             monitor_dir: elevated
             agent_config_map_file: project_contained_path_or_elevated
             verification_gates_file: project_contained_path_or_elevated
             tooling_lock_file: project_contained_path_or_elevated
-          owner: contract/platform path owners, runtime_storage.artifact_root, and #1600 helper-path drains
+          owner: contract/platform path owners, runtime_storage.artifact_root, agent_intent_model, and #1600 helper-path drains
     merge_semantics:
       rule: >
         Layers deep-merge key-by-key by section. Implementations MUST track presence separately from zero values so
@@ -18122,7 +18164,6 @@ configuration_source_authority:
         SWARM_WORKSPACE_NETWORK: workspace.network
         SWARM_ARTIFACT_ROOT: paths.artifact_root
         SWARM_MONITOR_DIR: paths.monitor_dir
-        SWARM_PROMPTS_DIR: paths.prompts_dir
         SWARM_AGENT_CONFIG_MAP_FILE: paths.agent_config_map_file
         SWARM_VERIFICATION_GATES_FILE: paths.verification_gates_file
         SWARM_CREDENTIALS_FILE: secrets file owner, not inline config secret
@@ -18603,18 +18644,19 @@ workspace_model:
     - Broad Docker enumeration such as raw `docker ps | docker stop` is not a production reset owner. Label-filtered inventory
       may be used only as a consumer of this typed identity model.
 agent_prompt_lint:
-  description: Prompt/schema lint for authored agent prompts on the verify surface.
+  description: Structural schema/tool lint over canonical ResolvedAgentIntent content on the verify surface. This consumer
+    never opens files, scans directories, or resolves authored sources independently.
   authority_distribution:
     structural:
       authority: hard_invalidity
-      scope: Parseable structural references only. Deterministic drift fails boot.
+      scope: Parseable structural references in the immutable resolved intent only. Deterministic drift fails boot.
       examples:
       - fenced code blocks showing tool arguments
       - quoted/backticked field references in direct instructions
-      - YAML or JSON prompt fragments that name declared contract fields
+      - YAML or JSON fragments in resolved intent that name declared contract fields
     lower_confidence_follow_ons:
       authority: tracked separately
-      scope: Directive, audit, and lint-confidence prompt findings are not widened into this authoritative first slice unless
+      scope: Directive, audit, and lint-confidence resolved-intent findings are not widened into this authoritative first slice unless
         separately promoted.
 static_analyzer:
   description: Accepted static analyzer slices promoted from review drafts into the authoritative platform contract spec.
@@ -18682,7 +18724,7 @@ static_analyzer:
       - guard on_fail: escalate
       excludes:
       - cross-handler reaching-definitions
-      - prompt lint / provenance / handoff audit work
+      - resolved-intent lint / provenance / handoff audit work
       - lower-authority heuristic checks
       - agent write proof via save_entity_field
     proof_carriers:
@@ -18844,7 +18886,7 @@ static_analyzer:
       - flow-scoped agent emit_events with a parent connect output route verifies successfully
       - flow-scoped agent emit_events without a typed consumer, parent connect, structural route, static child delivery-entity route, or accepted external consumer fails with target_required_missing
       - node/system pin_target_resolution behavior remains unchanged
-      - fixture contracts that intentionally test prompt/tool/agent delivery behavior do not declare stale output pins unless they also provide route authority
+      - fixture contracts that intentionally test intent/tool/agent delivery behavior do not declare stale output pins unless they also provide route authority
       does_not_close:
       - broad #1466 composition-first parent closure
       - #1474 runtime generated-agent EventBus RoutePlan admission, already closed separately
@@ -19206,7 +19248,7 @@ static_analyzer:
       - query/filter expressions on entity paths
       excludes:
       - runtime tool execution
-      - prompt heuristics
+      - resolved-intent heuristics
     proof_carriers:
       declared_field:
         rule: Declared top-level entity field is valid.
@@ -19306,14 +19348,14 @@ static_analyzer:
     - agent_prompt_lint
     - rule.consequences.bidirectional_verification
     scope:
-      description: Deterministic prompt-schema guard over parseable structural prompt references only.
+      description: Deterministic schema guard over parseable structural references in canonical resolved intent only.
       applies_to:
-      - prompt schema guard structural findings
+      - resolved-intent schema guard structural findings
       excludes:
-      - directive-form prompt heuristics
+      - directive-form resolved-intent heuristics
       - audit/lint confidence bands
       - delivery/session-primer derivation
-    rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.
+    rule: Emit hard invalidity when a parseable structural resolved-intent reference drifts from the declared event or entity contract.
 
 test_specification:
   description: Public Swarm-authored test and conformance surfaces.
@@ -19590,7 +19632,7 @@ test_specification:
       retry lineage, native-tool capability truth, or spend/budget accounting.
     - The runner must not execute arbitrary inline Python, JavaScript, shell, subprocesses, network calls, filesystem reads,
       imports, or mutable global code from scenario files.
-    - Static grep/prompt/schema residue checks such as `forbid_text` are not scenario-runtime assertions; they belong to
+    - Static grep/intent/schema residue checks such as `forbid_text` are not scenario-runtime assertions; they belong to
       static_analyzer or a future verify/lint owner.
     - Documentation/README cleanup consumes this owner but does not define it.
     scenario_document:
@@ -26036,6 +26078,14 @@ api_specification:
         additionalProperties: false
         required:
         - agent_id
+        - memory
+        - memory_source
+        - intent_kind
+        - intent_source
+        - intent_provenance
+        - intent_content_hash
+        - intent_identity
+        - intent_content
         properties:
           agent_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -26057,8 +26107,26 @@ api_specification:
             enum:
             - authored
             - platform_default
-          prompt_path:
+          intent_kind:
             type: string
+            enum:
+            - local
+            - inline
+          intent_source:
+            type: string
+            minLength: 1
+          intent_provenance:
+            type: string
+            minLength: 1
+          intent_content_hash:
+            type: string
+            pattern: '^sha256:[0-9a-f]{64}$'
+          intent_identity:
+            type: string
+            pattern: '^agent-intent:v1:sha256:[0-9a-f]{64}$'
+          intent_content:
+            type: string
+            minLength: 1
           subscriptions:
             type: array
             items:
@@ -26107,7 +26175,7 @@ api_specification:
             description: Slash-separated path relative to the bundle root. Empty, dot, dot-dot, absolute, backslash, NUL, non-NFC, duplicate, and ASCII case-colliding paths are invalid.
           text:
             type: string
-            description: UTF-8 text content for YAML, prompt, policy, and other non-data bundle files.
+            description: UTF-8 text content for YAML, agent intent, policy, and other non-data bundle files.
       BundleRegisterDataBlobV1:
         type: object
         additionalProperties: false

@@ -124,7 +124,6 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 	for _, forbidden := range []string{
 		"SWARM_ARTIFACT_ROOT",
 		"SWARM_MONITOR_DIR",
-		"SWARM_PROMPTS_DIR",
 		"SWARM_SQL_DEBUG",
 		"SWARM_BOOT_WARNINGS_FATAL",
 		"SWARM_EMIT_SCHEMA_STRICT",
@@ -227,7 +226,7 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 		"production_bootstrap_or_deployment_plumbing": "retired_by_1843_to_workspace_config_or_internal_defaults",
 		"internal_workspace_lifecycle_names":          "retired_by_1843_internal_generated_defaults",
 		"runtime_private_storage_and_observability":   "keep_env_first_slice_runtime_private_storage_or_observability",
-		"internal_prompt_and_spec_helpers":            "keep_env_first_slice_internal_developer_helper",
+		"internal_spec_helpers":                       "keep_env_first_slice_internal_developer_helper",
 		"debug_and_test_quarantine":                   "keep_env_first_slice_debug_or_test_quarantine",
 		"governed_outside_1640":                       "governed_by_existing_owner_or_split",
 	} {
@@ -272,7 +271,6 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 		"SWARM_ENTITY_WORKDIR",
 		"SWARM_ARTIFACT_ROOT",
 		"SWARM_MONITOR_DIR",
-		"SWARM_PROMPTS_DIR",
 		"SWARM_AGENT_CONFIG_MAP_FILE",
 		"SWARM_VERIFICATION_GATES_FILE",
 		"SWARM_TOOLING_LOCK_FILE",

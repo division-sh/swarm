@@ -14,11 +14,11 @@ import (
 
 func TestPersistedAgentProjectionRejectsLiveDescriptorWithMockArtifact(t *testing.T) {
 	identity := testAgentIdentity(t, "live-agent-with-inactive-artifact", "")
-	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
+	_, err := projectPersistedAgentConfig(withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 		ID: "live-agent-with-inactive-artifact", Identity: identity, Role: "reviewer", Model: "regular", LLMBackend: "anthropic",
 		ResolvedLLMBackend: "anthropic", ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
 		Mock: mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/reviewer.py", Source: []byte("def handle(input): return {'text': 'mock'}\n"), Digest: "sha256:test"},
-	}, "")
+	}), "")
 	if err == nil || !strings.Contains(err.Error(), "live runtime descriptor cannot carry a mock performance artifact") {
 		t.Fatalf("projectPersistedAgentConfig error = %v, want live/mock artifact conflict", err)
 	}

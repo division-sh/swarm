@@ -155,6 +155,8 @@ pins:
 	writeClosedVariantFile(t, root, "agents.yaml", `root-agent:
   id: root-agent
   model: regular
+  intent:
+    inline: Consume connected root work events.
   subscriptions: [work.ready]
 `)
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
@@ -504,6 +506,7 @@ producer-agent:
   id: producer-agent
   type: claude
   role: producer
+  intent: {inline: "Produce the declared deployment event."}
   emit_events: [deploy.done]
 `
 	}

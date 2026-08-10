@@ -849,12 +849,12 @@ rows:
   path: tests/tier8-boot-verification/test-boot-prompt-ref-stub/nodes.yaml
   event: task.completed
   disposition: external
-  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B169
+  proof: TestProducerRoutingRetiredIntentFixturesFailClosed/B169
 - id: B170
   path: tests/tier8-boot-verification/test-boot-prompt-ref/nodes.yaml
   event: task.completed
   disposition: external
-  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B170
+  proof: TestProducerRoutingRetiredIntentFixturesFailClosed/B170
 - id: B171
   path: tests/tier8-boot-verification/test-boot-prompt-stub/nodes.yaml
   event: task.completed

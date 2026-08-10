@@ -999,6 +999,13 @@ func buildFlowAgentConfig(
 	if err != nil {
 		return models.AgentConfig{}, err
 	}
+	if err := models.ValidateNoAuthoredSystemPrompt(rawConfig); err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s config: %w", key, err)
+	}
+	systemPrompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
+	}
 	permissions, err := runtimetools.ResolveAgentPermissions(source, templateID, entry)
 	if err != nil {
 		return models.AgentConfig{}, fmt.Errorf("flow agent %s permissions: %w", key, err)
@@ -1014,6 +1021,8 @@ func buildFlowAgentConfig(
 		LLMBackend:      "",
 		Memory:          entry.MemoryPlan,
 		Mock:            entry.Mock,
+		Intent:          entry.ResolvedIntent,
+		SystemPrompt:    systemPrompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
 		EmitEvents:      normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID),
@@ -1186,24 +1195,13 @@ func buildStaticFlowAgentConfig(
 	}
 	rendered = dedupeStrings(rendered)
 
-	cfgPayload := map[string]any{}
-	if _, ok := cfgPayload["system_prompt"]; !ok {
-		role := strings.TrimSpace(entry.Role)
-		if role == "" {
-			role = strings.TrimSpace(logicalID)
-		}
-		if role == "" {
-			role = "agent"
-		}
-		if flowID != "" {
-			cfgPayload["system_prompt"] = fmt.Sprintf("Handle %s events for static flow %s.", role, flowID)
-		} else {
-			cfgPayload["system_prompt"] = fmt.Sprintf("Handle %s events.", role)
-		}
-	}
-	rawConfig, err := json.Marshal(cfgPayload)
+	rawConfig, err := json.Marshal(map[string]any{})
 	if err != nil {
 		return models.AgentConfig{}, err
+	}
+	systemPrompt, err := assembleResolvedAgentPrompt(source, flowID, entry)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s intent: %w", logicalID, err)
 	}
 	permissions, err := runtimetools.ResolveAgentPermissions(source, flowID, entry)
 	if err != nil {
@@ -1223,6 +1221,8 @@ func buildStaticFlowAgentConfig(
 		LLMBackend:      "",
 		Memory:          entry.MemoryPlan,
 		Mock:            entry.Mock,
+		Intent:          entry.ResolvedIntent,
+		SystemPrompt:    systemPrompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
 		EmitEvents:      normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath),
@@ -1243,6 +1243,11 @@ func buildStaticFlowAgentConfig(
 		return models.AgentConfig{}, fmt.Errorf("static flow agent %s: %w", logicalID, err)
 	}
 	return cfg, nil
+}
+
+func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entry runtimecontracts.AgentRegistryEntry) (string, error) {
+	bundle, _ := semanticview.Bundle(source)
+	return runtimecontracts.AssembleAgentSystemPrompt(bundle, flowID, entry, nil)
 }
 
 func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath, templateID, instanceID string) []string {

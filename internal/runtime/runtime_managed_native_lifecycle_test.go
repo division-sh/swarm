@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"sync/atomic"
@@ -399,7 +398,7 @@ func managedNativeLifecycleDeps(
 func managedNativeLifecycleAgent(t testing.TB, agentID string) runtimemanager.PersistedAgent {
 	t.Helper()
 	return runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID:            agentID,
 			Identity:      agentidentitytest.RootRuntime(t, agentID, "runtime-test/managed-native-lifecycle"),
 			Role:          "researcher",
@@ -407,9 +406,8 @@ func managedNativeLifecycleAgent(t testing.TB, agentID string) runtimemanager.Pe
 			Type:          "stub",
 			Model:         "regular",
 			ExecutionMode: "live",
-			Config:        json.RawMessage(`{"system_prompt":"Research current facts."}`),
 			NativeTools:   runtimeactors.NativeToolConfig{WebSearch: true},
-		},
+		}),
 		Status:    "active",
 		HiredBy:   "managed-native-lifecycle-test",
 		StartedAt: time.Now().UTC(),

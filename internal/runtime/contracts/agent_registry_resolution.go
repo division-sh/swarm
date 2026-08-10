@@ -1,9 +1,9 @@
 package contracts
 
 import (
+	"path/filepath"
+	"sort"
 	"strings"
-
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 type bundleAgentRecord struct {
@@ -12,96 +12,62 @@ type bundleAgentRecord struct {
 	Source    ContractItemSource
 }
 
-// ResolveAgentRegistryEntry matches a runtime agent config back to the Swarm
-// contract registry entry that defined it when possible.
-func ResolveAgentRegistryEntry(bundle *WorkflowContractBundle, cfg models.AgentConfig) (string, AgentRegistryEntry, bool) {
-	if bundle == nil {
-		return "", AgentRegistryEntry{}, false
-	}
-	if matched := resolveAgentRegistryByID(bundle, strings.TrimSpace(cfg.ID)); matched != "" {
-		for _, record := range bundleAgentRecords(bundle) {
-			if strings.TrimSpace(record.LogicalID) == matched {
-				return matched, record.Entry, true
-			}
-		}
-		return "", AgentRegistryEntry{}, false
-	}
-
-	role := canonicalPromptLookupValue(cfg.Role)
-	if role == "" {
-		return "", AgentRegistryEntry{}, false
-	}
-	mode := canonicalPromptLookupValue(cfg.FlowID)
-	for _, record := range bundleAgentRecords(bundle) {
-		if canonicalPromptLookupValue(record.Entry.Role) != role {
-			continue
-		}
-		if mode != "" {
-			if flowMode := promptFlowMode(bundle, record.Source.FlowID); flowMode != "" && flowMode != mode {
-				continue
-			}
-		}
-		return strings.TrimSpace(record.LogicalID), record.Entry, true
-	}
-	return "", AgentRegistryEntry{}, false
-}
-
-func resolveAgentRegistryByID(bundle *WorkflowContractBundle, agentID string) string {
-	agentID = strings.TrimSpace(agentID)
-	if bundle == nil || agentID == "" {
-		return ""
-	}
-	for _, record := range bundleAgentRecords(bundle) {
-		if strings.TrimSpace(record.LogicalID) == agentID || promptRegistryIDMatches(record.Entry.ID, agentID) {
-			return strings.TrimSpace(record.LogicalID)
-		}
-	}
-	return ""
-}
-
 func bundleAgentRecords(bundle *WorkflowContractBundle) []bundleAgentRecord {
 	if bundle == nil {
 		return nil
+	}
+	flowDeclarations := map[string]struct{}{}
+	flowRecords := make([]bundleAgentRecord, 0, len(bundle.FlowTree.ByID))
+	for _, view := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(view.Paths.ID)
+		agentIDs := sortedContractKeys(view.Agents)
+		for _, logicalID := range agentIDs {
+			source := ContractItemSource{
+				PackageKey: view.Paths.PackageKey,
+				FlowID:     flowID,
+				Layer:      "flow",
+				File:       view.Paths.AgentsFile,
+			}
+			if strings.TrimSpace(source.File) != "" {
+				flowDeclarations[agentDeclarationRecordKey(source.File, logicalID)] = struct{}{}
+			}
+			flowRecords = append(flowRecords, bundleAgentRecord{LogicalID: logicalID, Entry: view.Agents[logicalID], Source: source})
+		}
 	}
 	records := make([]bundleAgentRecord, 0, len(bundle.ProjectViews())+len(bundle.FlowTree.ByID))
 	for _, view := range bundle.ProjectViews() {
 		key := strings.TrimSpace(view.Paths.Key)
 		agentIDs := sortedContractKeys(view.Agents)
 		for _, logicalID := range agentIDs {
+			source := ContractItemSource{PackageKey: key, Layer: "project", File: view.Paths.ProjectAgentsFile}
+			if strings.TrimSpace(source.File) != "" {
+				if _, representedByFlow := flowDeclarations[agentDeclarationRecordKey(source.File, logicalID)]; representedByFlow {
+					continue
+				}
+			}
 			records = append(records, bundleAgentRecord{
 				LogicalID: logicalID,
 				Entry:     view.Agents[logicalID],
-				Source:    ContractItemSource{PackageKey: key, Layer: "project"},
+				Source:    source,
 			})
 		}
 	}
-	for _, view := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.ID)
-		agentIDs := sortedContractKeys(view.Agents)
-		for _, logicalID := range agentIDs {
-			records = append(records, bundleAgentRecord{
-				LogicalID: logicalID,
-				Entry:     view.Agents[logicalID],
-				Source: ContractItemSource{
-					PackageKey: view.Paths.PackageKey,
-					FlowID:     flowID,
-					Layer:      "flow",
-				},
-			})
+	records = append(records, flowRecords...)
+	sort.Slice(records, func(i, j int) bool {
+		left := contractScopeKey(records[i].Source, records[i].LogicalID)
+		right := contractScopeKey(records[j].Source, records[j].LogicalID)
+		if left == right {
+			return strings.TrimSpace(records[i].Source.File) < strings.TrimSpace(records[j].Source.File)
 		}
-	}
+		return left < right
+	})
 	return records
 }
 
-func bundleAgentRecordByLogicalID(bundle *WorkflowContractBundle, logicalID string) (bundleAgentRecord, bool) {
-	logicalID = strings.TrimSpace(logicalID)
-	if bundle == nil || logicalID == "" {
-		return bundleAgentRecord{}, false
+func agentDeclarationRecordKey(sourceFile, logicalID string) string {
+	sourceFile = strings.TrimSpace(sourceFile)
+	if sourceFile != "" {
+		sourceFile = filepath.Clean(sourceFile)
 	}
-	for _, record := range bundleAgentRecords(bundle) {
-		if strings.TrimSpace(record.LogicalID) == logicalID {
-			return record, true
-		}
-	}
-	return bundleAgentRecord{}, false
+	return sourceFile + "\x00" + strings.TrimSpace(logicalID)
 }

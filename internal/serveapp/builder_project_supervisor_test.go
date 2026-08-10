@@ -1252,21 +1252,6 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					candidateBundle := bundle
 					candidateSource := oldSource
 					newHash := oldHash
-					if changedHash {
-						writeStandingCandidateFile(t, filepath.Join(contractsRoot, "flows", "telegram-chat", "prompts", "phrase-bot.md"), "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference. Keep the response concise.\n")
-						candidateModule, candidateBundle, err = cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
-						if err != nil {
-							t.Fatalf("load changed-hash standing workflow module: %v", err)
-						}
-						candidateSource = semanticview.Wrap(candidateBundle)
-						newHash, err = runtimecontracts.BundleHash(candidateBundle)
-						if err != nil {
-							t.Fatalf("changed BundleHash: %v", err)
-						}
-						if newHash == oldHash {
-							t.Fatal("changed standing bundle retained predecessor hash")
-						}
-					}
 					credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 					if err != nil {
 						t.Fatalf("NewFileStore: %v", err)
@@ -1332,6 +1317,21 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					})
 					if err != nil {
 						t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
+					}
+					if changedHash {
+						writeStandingCandidateFile(t, filepath.Join(contractsRoot, "flows", "telegram-chat", "prompts", "phrase-bot.md"), "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference. Keep the response concise.\n")
+						candidateModule, candidateBundle, err = cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
+						if err != nil {
+							t.Fatalf("load changed-hash standing workflow module: %v", err)
+						}
+						candidateSource = semanticview.Wrap(candidateBundle)
+						newHash, err = runtimecontracts.BundleHash(candidateBundle)
+						if err != nil {
+							t.Fatalf("changed BundleHash: %v", err)
+						}
+						if newHash == oldHash {
+							t.Fatal("changed standing bundle retained predecessor hash")
+						}
 					}
 					candidate := newRuntime(newHash, candidateModule)
 					newFact := mustServeTestEphemeralBundleSourceFact(newHash)
@@ -2420,7 +2420,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 		_ = manager.Shutdown()
 		_ = bus.ResetInMemoryState()
 	})
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id}); err != nil {
+	if err := manager.SpawnAgent(serveTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

@@ -1054,7 +1054,7 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 	t.Helper()
 	identity := runtimebustest.Identity(t, agentID, "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,
 			Role:               "observer",
@@ -1064,7 +1064,7 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 			ResolvedLLMBackend: "anthropic",
 			ExecutionMode:      "live",
 			Config:             []byte(`{}`),
-		},
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -2685,10 +2685,10 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	}
 	agentIdentity := runtimebustest.Identity(t, "agent-a", "bundle-source-test")
 	if err := pg.UpsertAgent(context.Background(), runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID: "agent-a", Identity: agentIdentity, FlowID: "bundle-source-test", FlowPath: "bundle-source-test",
 			Role: "worker", Model: "regular", Type: "stub", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
-		},
+		}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("seed direct recipient: %v", err)

@@ -380,6 +380,9 @@ func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
+	if err := retiredDynamicAgentMutationError(name); err != nil {
+		return nil, err
+	}
 	actor, ok := ActorFromContext(ctx)
 	if !ok {
 		err := failures.New(failures.ClassInternalFailure, "tool_actor_context_missing", "tool-executor", "execute.context", map[string]any{"tool": strings.TrimSpace(name)})
@@ -414,10 +417,22 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 }
 
 func (e *Executor) validateRuntimeToolInput(actor models.AgentConfig, name string, input any) error {
+	if err := retiredDynamicAgentMutationError(name); err != nil {
+		return err
+	}
 	if e.validator == nil {
 		return nil
 	}
 	return e.validator.Validate(&actor, name, input)
+}
+
+func retiredDynamicAgentMutationError(name string) error {
+	switch name {
+	case "agent_hire", "agent_reconfigure":
+		return fmt.Errorf("RETIRED: %s is unsupported; managed agents and their intent must be declared in agents.yaml", name)
+	default:
+		return nil
+	}
 }
 
 func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {

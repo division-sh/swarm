@@ -4451,7 +4451,7 @@ writer:
   id: writer
   type: factory
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   model: regular
   subscriptions: []
   entity_writes:
@@ -4704,7 +4704,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 %s:
   id: %s
   role: %s
-  prompt_ref: %s
+  intent: prompts/%s.md
   model: regular
   native_tools:
     bash: true

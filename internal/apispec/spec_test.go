@@ -1086,27 +1086,8 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 	}
 	reconfigure := mappingValue(management, "reconfigure")
 	for _, fragment := range []string{
-		"same canonical partial-patch merge used by AgentManager",
-		"parent_agent_id precedence over manager_fallback",
-		"Before manager mutation",
-		"must not be equal",
-		"management-authority state unchanged",
-		"exact complete candidate before lifecycle persistence and successor publication",
-		"prior exact typed authority plan is restored",
-		"Only after authority and persistence both accept",
-		"same reconfiguration serialization",
-		"no caller can resolve the successor while the prior authority mapping remains live",
-		"concrete managed-parent mapping is authoritative",
-		"declaration fallback cannot grant a superseded parent authority",
-		"manager commit order",
-		"revalidated against the exact serialized predecessor",
-		"queued request authorized from a pre-read mapping cannot mutate",
-		"reject direct and indirect cycles atomically",
-		"exact pre-handoff graph snapshot",
-		"must not reconstruct declaration fallback",
-		"pre-read actor decision, candidate, or authority plan cannot authorize",
-		"no-parent candidate removes any managed-parent edge",
-		"Mutation-first validation",
+		"Dynamic agent reconfiguration is retired",
+		"never reaches management-authority planning or mutation",
 	} {
 		assertScalarContains(t, reconfigure, fragment)
 	}

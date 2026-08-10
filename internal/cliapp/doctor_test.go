@@ -1504,6 +1504,8 @@ func writeDoctorMockExecutionFixture(t *testing.T, options doctorMockExecutionFi
 	agentLines := []string{
 		"stub-agent:",
 		"  model: regular",
+		"  intent:",
+		"    inline: Complete the requested doctor fixture task.",
 		"  subscriptions:",
 		"    - task.requested",
 		"  emit_events:",
@@ -1530,7 +1532,8 @@ shell:
 		agentLines = append(agentLines,
 			"live-agent:",
 			"  model: regular",
-			"  prompt_ref: prompts/stub-agent.md",
+			"  intent:",
+			"    inline: Complete the requested live doctor fixture task.",
 			"  subscriptions:",
 			"    - task.requested",
 			"  emit_events:",
