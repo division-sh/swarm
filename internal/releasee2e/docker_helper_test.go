@@ -21,6 +21,7 @@ import (
 const (
 	fakeDockerHelperEnv        = "RELEASE_E2E_DOCKER_HELPER"
 	fakeDockerRootEnv          = "RELEASE_E2E_DOCKER_ROOT"
+	fakeDockerMCPEmitGateEnv   = "RELEASE_E2E_MCP_EMIT_GATE"
 	releaseE2EOAuthToken       = "release-e2e-oauth-value"
 	releaseE2ERawMCPURL        = "http://host.docker.internal:8082/mcp"
 	releaseE2EHostMCPURL       = "http://127.0.0.1:8082/mcp"
@@ -936,6 +937,9 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 	}
 
 	writeClaudeInit(invocation.sessionID, splitAllowedTools(dockerOptionValue(invocation.commandArgs, "--allowedTools")))
+	if err := waitForFakeDockerMCPEmitGate(os.Getenv(fakeDockerMCPEmitGateEnv)); err != nil {
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
+	}
 	result, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
 		"name":      toolName,
 		"arguments": map[string]any{"flow_result": "release-e2e-flow-complete"},
@@ -962,6 +966,28 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 		"result":     "release-e2e-flow-complete",
 	})
 	return 0
+}
+
+func waitForFakeDockerMCPEmitGate(gatePath string) error {
+	gatePath = strings.TrimSpace(gatePath)
+	if gatePath == "" {
+		return nil
+	}
+	if err := os.WriteFile(gatePath+".ready", []byte("ready\n"), 0o600); err != nil {
+		return fmt.Errorf("publish MCP emit gate readiness: %w", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := os.Stat(gatePath); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect MCP emit gate: %w", err)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("wait for MCP emit gate: deadline exceeded")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func writeClaudeInit(sessionID string, tools []string) {

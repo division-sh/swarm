@@ -52,7 +52,8 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	}
 	dockerScript := fmt.Sprintf("#!/bin/sh\n%s=1 exec %s -- \"$@\"\n", fakeDockerHelperEnv, shellQuote(testBinary))
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
-	env := releaseProcessEnv(fakeBin, fakeRoot, home)
+	emitGate := filepath.Join(fakeRoot, "release-mcp-emit")
+	env := append(releaseProcessEnv(fakeBin, fakeRoot, home), fakeDockerMCPEmitGateEnv+"="+emitGate)
 	verify := runReleaseCommand(t, 30*time.Second, releaseRoot, env, "", binaryPath, "verify")
 	if verify.err != nil {
 		t.Fatalf("release overflow fixture verification failed: %v\n%s", verify.err, verify.output)
@@ -88,17 +89,33 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	}
 	stdoutWriter := os.NewFile(uintptr(sockets[0]), "release-overflow-stdout-writer")
 	stdoutReader := os.NewFile(uintptr(sockets[1]), "release-overflow-stdout-reader")
+	defer stdoutWriter.Close()
 	defer stdoutReader.Close()
 	cmd.Stdout = stdoutWriter
 	stderr := newReleaseSignalBuffer("\"reason_code\":\"queue_overflow\"")
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		stdoutWriter.Close()
 		t.Fatal(err)
 	}
-	_ = stdoutWriter.Close()
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- cmd.Wait() }()
+	if err := waitForReleasePath(ctx, emitGate+".ready"); err != nil {
+		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
+		t.Fatalf("wait for managed Claude emit gate: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
+	}
+	stdoutPrefix, err := readReleaseSocketUntil(ctx, sockets[1], "agent.requested")
+	if err != nil {
+		t.Fatalf("wait for attached foreground observer: %v\nstdout:\n%s\nstderr:\n%s", err, stdoutPrefix, stderr.String())
+	}
+	if err := fillReleaseSocket(sockets[0]); err != nil {
+		t.Fatalf("saturate release foreground stdout: %v", err)
+	}
+	if err := os.WriteFile(emitGate, []byte("release\n"), 0o600); err != nil {
+		t.Fatalf("release managed Claude emit gate: %v", err)
+	}
+	if err := stdoutWriter.Close(); err != nil {
+		t.Fatalf("close parent release stdout writer: %v", err)
+	}
 	if err := waitForReleaseDockerRecordClass(ctx, fakeRoot, "mcp_emit"); err != nil {
 		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
 		t.Fatalf("wait for managed Claude completion: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
@@ -128,6 +145,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if stdoutRead.err != nil {
 		t.Fatal(stdoutRead.err)
 	}
+	stdoutRead.output = append(stdoutPrefix, stdoutRead.output...)
 	if err := <-waitDone; err != nil {
 		t.Fatalf("release foreground run failed after observer detach: %v\nstdout:\n%s\nstderr:\n%s", err, stdoutRead.output, stderr.String())
 	}
@@ -152,6 +170,92 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		t.Fatalf("release detach fact = %#v", fact)
 	}
 	assertReleaseExternalProcessesExited(t, fakeRoot)
+}
+
+func waitForReleasePath(ctx context.Context, path string) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func readReleaseSocketUntil(ctx context.Context, socket int, needle string) ([]byte, error) {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	var output bytes.Buffer
+	chunk := make([]byte, 4096)
+	for {
+		n, _, err := unix.Recvfrom(socket, chunk, unix.MSG_DONTWAIT)
+		if n > 0 {
+			_, _ = output.Write(chunk[:n])
+			if strings.Contains(output.String(), needle) {
+				return output.Bytes(), nil
+			}
+		}
+		if err != nil && !releaseSocketWouldBlock(err) {
+			return output.Bytes(), err
+		}
+		if n == 0 && err == nil {
+			return output.Bytes(), io.EOF
+		}
+		select {
+		case <-ctx.Done():
+			return output.Bytes(), ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func fillReleaseSocket(socket int) error {
+	if err := unix.SetNonblock(socket, true); err != nil {
+		return fmt.Errorf("set stdout socket nonblocking: %w", err)
+	}
+	total := 0
+	var fillErr error
+	for _, size := range []int{1024, 128, 16, 1} {
+		payload := bytes.Repeat([]byte{' '}, size)
+		for {
+			n, err := unix.Write(socket, payload)
+			if n > 0 {
+				total += n
+			}
+			if err == nil {
+				continue
+			}
+			if releaseSocketWouldBlock(err) {
+				break
+			}
+			fillErr = err
+			break
+		}
+		if fillErr != nil {
+			break
+		}
+	}
+	if err := unix.SetNonblock(socket, false); err != nil {
+		return fmt.Errorf("restore blocking stdout socket: %w", err)
+	}
+	if fillErr != nil {
+		return fillErr
+	}
+	if total == 0 {
+		return fmt.Errorf("stdout socket accepted no saturation bytes")
+	}
+	return nil
+}
+
+func releaseSocketWouldBlock(err error) bool {
+	return err == unix.EAGAIN || err == unix.EWOULDBLOCK
 }
 
 func waitForReleaseDockerRecordClass(ctx context.Context, root, class string) error {
