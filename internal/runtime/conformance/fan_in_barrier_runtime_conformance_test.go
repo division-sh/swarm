@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -37,7 +38,7 @@ type fanInBarrierConformanceStore interface {
 	runtimebus.CommitPublicationOwner
 	runtimepipeline.WorkflowPersistenceOwner
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
-	LoadOperatorEvent(context.Context, string) (store.OperatorEventFull, error)
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 
 type fanInBarrierGenericScheduleWakeups struct{}
