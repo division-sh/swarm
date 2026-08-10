@@ -1337,7 +1337,8 @@ func assertNotifyAllChildrenExactRoutes(
 	}
 	var nodeFound, agentFound bool
 	for _, route := range routes {
-		if route.Target.FlowInstance != want.FlowInstance || route.Target.EntityID != want.EntityID {
+		target := route.Target.Route()
+		if target.FlowInstance != want.FlowInstance || target.EntityID != want.EntityID {
 			t.Fatalf("persisted route = %#v, want target %s/%s", route, want.FlowInstance, want.EntityID)
 		}
 		switch {

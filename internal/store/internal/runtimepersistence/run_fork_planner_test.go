@@ -650,8 +650,8 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	at := time.Unix(1700000255, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	deadRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()}}
-	deliveredRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()}}
+	deadRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()})}
+	deliveredRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()})}
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "route_failed", nil)
 	dead := seedDeliveryStateFixture(t, ctx, pg, event, deadRoute, runtimedelivery.StateExhausted, &failure)
 	delivered := seedDeliveryStateFixture(t, ctx, pg, event, deliveredRoute, runtimedelivery.StateDelivered, nil)

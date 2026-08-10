@@ -160,11 +160,11 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     runtimeflowidentity.EntityID("consumer"),
-	},
+	}),
 	}
 	evt := eventtest.ChildWithLineage(
 		eventtest.UUID("evt-sealed-conformance-connect"),

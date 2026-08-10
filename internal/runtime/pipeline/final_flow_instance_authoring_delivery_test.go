@@ -61,7 +61,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	)
 	seedFinalFlowInstanceAuthoringEvent(t, db, ctx, evt)
 	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(finalflowinstanceauthoring.TemplateNodeID), Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(finalflowinstanceauthoring.TemplateNodeID), Target: events.MustExistingEntityTarget(target)}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {

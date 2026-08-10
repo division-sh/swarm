@@ -438,12 +438,15 @@ func CanonicalRecipientManifest(routes []events.DeliveryRoute) (json.RawMessage,
 	slices.SortFunc(routes, func(left, right events.DeliveryRoute) int {
 		left = left.Normalized()
 		right = right.Normalized()
+		leftTarget := left.Target.Route()
+		rightTarget := right.Target.Route()
 		for _, pair := range [][2]string{
 			{left.Recipient.Code(), right.Recipient.Code()},
 			{left.Recipient.ID(), right.Recipient.ID()},
-			{left.Target.FlowID, right.Target.FlowID},
-			{left.Target.FlowInstance, right.Target.FlowInstance},
-			{left.Target.EntityID, right.Target.EntityID},
+			{left.Target.Code(), right.Target.Code()},
+			{leftTarget.FlowID, rightTarget.FlowID},
+			{leftTarget.FlowInstance, rightTarget.FlowInstance},
+			{leftTarget.EntityID, rightTarget.EntityID},
 			{left.Context.ReplyContextID(), right.Context.ReplyContextID()},
 		} {
 			if compared := strings.Compare(pair[0], pair[1]); compared != 0 {

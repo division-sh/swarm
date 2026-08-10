@@ -73,7 +73,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if !preflight.UsesCanonicalRouteAuthority() {
 		t.Fatalf("preflight route authority is not canonical connect-route authority")
 	}
-	preview := preflight.DeliveryRoutes[0].Target
+	if !preflight.DeliveryRoutes[0].Target.MaterializingEntity() {
+		t.Fatalf("preflight target ownership = %q, want materializing_entity", preflight.DeliveryRoutes[0].Target.Code())
+	}
+	preview := preflight.DeliveryRoutes[0].Target.Route()
 	if preview.FlowID != finalflowinstanceauthoring.TemplateFlowID || preview.FlowInstance == "" || preview.EntityID == "" {
 		t.Fatalf("preflight target = %#v, want %s template route", preview, finalflowinstanceauthoring.TemplateFlowID)
 	}
@@ -101,11 +104,11 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.ID() != finalflowinstanceauthoring.TemplateNodeID {
 		t.Fatalf("persisted delivery routes = %#v, want one %s subscriber", persistedRoutes, finalflowinstanceauthoring.TemplateNodeID)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(persistedRoutes[0].Recipient.ID()), Target: events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(persistedRoutes[0].Recipient.ID()), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       finalflowinstanceauthoring.TemplateFlowID,
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
-	},
+	}),
 	}
 	if !deliveryRoutesContain(persistedRoutes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want lifecycle-created template route %#v", persistedRoutes, want)

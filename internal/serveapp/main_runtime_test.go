@@ -3595,11 +3595,11 @@ func servedEventDeliveryProjection(t *testing.T, db *sql.DB, backend, eventID, s
 	if err := json.Unmarshal([]byte(raw), &projection); err != nil {
 		t.Fatalf("%s decode delivery projection for %s/%s: %v", backend, eventID, subscriberID, err)
 	}
-	var target events.RouteIdentity
-	if err := json.Unmarshal([]byte(targetRaw), &target); err != nil {
+	var targetOwner events.DeliveryTargetOwnership
+	if err := json.Unmarshal([]byte(targetRaw), &targetOwner); err != nil {
 		t.Fatalf("%s decode delivery target for %s/%s: %v", backend, eventID, subscriberID, err)
 	}
-	target = target.Normalized()
+	target := targetOwner.Route()
 	return projection.Fields, target.FlowID, target.FlowInstance
 }
 

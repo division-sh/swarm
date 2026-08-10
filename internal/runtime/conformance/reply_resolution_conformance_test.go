@@ -227,7 +227,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 			t.Fatalf("publish reply %s: %v", tc.name, err)
 		}
 		routes := store.routesFor(reply.ID())
-		if len(routes) != 1 || routes[0].Target.FlowInstance != templatereply.RequesterFlowID+"/"+tc.accountID {
+		if len(routes) != 1 || routes[0].Target.Route().FlowInstance != templatereply.RequesterFlowID+"/"+tc.accountID {
 			t.Fatalf("reply %s routes = %#v", tc.name, routes)
 		}
 		if !routes[0].Context.Empty() {
@@ -364,7 +364,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 					t.Fatalf("persisted reply routes %s = %#v err=%v", req.name, routes, err)
 				}
 				wantInstance := templatereply.RequesterFlowID + "/" + req.accountID
-				if routes[0].Target.FlowInstance != wantInstance || !routes[0].Context.Empty() {
+				if routes[0].Target.Route().FlowInstance != wantInstance || !routes[0].Context.Empty() {
 					t.Fatalf("persisted reply route %s = %#v, want instance %q with consumed context", req.name, routes[0], wantInstance)
 				}
 				record, err := backend.LoadReplyContext(ctx, contexts[req.name].ReplyContextID())
@@ -596,7 +596,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 				t.Fatalf("publish terminal reply after typed human task: %v", err)
 			}
 			routes, err := backend.ListEventDeliveryRoutes(ctx, replyID)
-			if err != nil || len(routes) != 1 || routes[0].Target.FlowInstance != templatereply.RequesterFlowID+"/account-a" {
+			if err != nil || len(routes) != 1 || routes[0].Target.Route().FlowInstance != templatereply.RequesterFlowID+"/account-a" {
 				t.Fatalf("terminal typed-human-task reply routes = %#v err=%v", routes, err)
 			}
 			assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateTerminal, replyID)

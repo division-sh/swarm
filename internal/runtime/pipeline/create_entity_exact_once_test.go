@@ -271,10 +271,17 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 		store.deliveryStore = owner
 	}
 	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.RouteIdentity{
+	target := events.RouteIdentity{
 		FlowID: flowID, FlowInstance: pc.SemanticSource().FlowPath(flowID), EntityID: evt.EntityID(),
-	},
 	}
+	var targetOwner events.DeliveryTargetOwnership
+	if strings.TrimSpace(target.EntityID) == "" {
+		target.EntityID = FlowInstanceEntityID(target.FlowInstance)
+		targetOwner = events.MustMaterializingEntityTarget(target)
+	} else {
+		targetOwner = events.MustExistingEntityTarget(target)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: targetOwner}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("seed exact node delivery: %v", err)
 	}

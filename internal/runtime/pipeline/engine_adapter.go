@@ -96,6 +96,9 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		if o.store.engineMutations == nil {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("selected workflow engine mutation owner is required")
 		}
+		if target, ok := stampedDeliveryTargetOwnership(ctx); ok && target.EntitylessReceiver() {
+			return o.commitEntitylessEngineMutation(ctx, mutation, target)
+		}
 		preparedState, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State)
 		if err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
@@ -233,6 +236,75 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 	return runtimeengine.CommittedEngineMutation{
 		ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
 		EmitIntents:     append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...),
+	}, nil
+}
+
+func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation, target events.DeliveryTargetOwnership) (runtimeengine.CommittedEngineMutation, error) {
+	if mutation.Address.EntityID.String() != "" || mutation.Address.Route.InstancePath != target.Route().FlowInstance {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation disagrees with stamped receiver target")
+	}
+	if len(mutation.LifecycleEffects) > 0 || len(mutation.EmitPrerequisites.Fields) > 0 {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation cannot carry state or lifecycle prerequisites")
+	}
+	emissionIntents := append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...)
+	for _, value := range mutation.ActivityIntents {
+		intent := value.Normalized()
+		if intent.ApprovalDecision != "" {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation cannot carry approval-bound activity")
+		}
+	}
+	activityPublications, err := activityRequestEmitIntents(mutation.ActivityIntents)
+	if err != nil {
+		return runtimeengine.CommittedEngineMutation{}, err
+	}
+	emissionIntents = append(emissionIntents, activityPublications...)
+	var publications []runtimeengine.DurablePublicationPlan
+	if len(emissionIntents) > 0 {
+		if o.publication == nil {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine publication planner is required")
+		}
+		publications, err = o.publication.PrepareEnginePublications(ctx, emissionIntents)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return runtimeengine.CommittedEngineMutation{}, err
+	}
+	committed, err := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+		EntitylessTarget: target,
+		EntitylessRunID:  runID,
+		Publications:     publications,
+	})
+	if err != nil {
+		if o.publication != nil {
+			err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+		}
+		return runtimeengine.CommittedEngineMutation{}, err
+	}
+	if o.publication != nil {
+		if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+	}
+	if len(committed.Publications) < len(mutation.EmitIntents) {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents))
+	}
+	committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
+	for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
+		if publication == nil {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publication %d is required", index)
+		}
+		intent := publication.CommittedDurablePublicationIntent()
+		if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index)
+		}
+		committedIntents = append(committedIntents, intent)
+	}
+	return runtimeengine.CommittedEngineMutation{
+		ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
+		EmitIntents:     committedIntents,
 	}, nil
 }
 

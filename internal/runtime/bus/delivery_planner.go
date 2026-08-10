@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -98,6 +99,7 @@ type deliveryRecipientManifest struct {
 type deliveryRecipientPolicy struct {
 	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
+	semanticSource              semanticview.Source
 	requireTargetOwners         bool
 }
 
@@ -202,7 +204,6 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
 	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(internalDeliveryIntentsForPlan(evt, recipients, persisted, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = 0
@@ -317,7 +318,7 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 		return RoutePlan{}, &exactDirectRecipientsUnavailableError{identities: missing}
 	}
 	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerDirectPolicy)
-	routePlan.DeliveryIntents = routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerDirectPolicy)
+	routePlan.DeliveryIntents = routePlanDeliveryIntentsFromAdmittedRoutes(routes, routeIntentProducerDirectPolicy)
 	routePlan.ExtraDetail = map[string]any{
 		"direct":                true,
 		"exact_routes":          true,
@@ -397,6 +398,7 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors:  eb.activeAgentDescriptors,
 			loadActiveTargetDescriptors: eb.activeTargetDescriptors,
+			semanticSource:              eb.semanticSource,
 			requireTargetOwners:         !eb.ephemeral,
 		},
 		eb.connectRoutePlanner,
@@ -618,11 +620,13 @@ func filterDeliveryRecipientCandidates(
 	targetDescriptors []ActiveTargetDescriptor,
 ) deliveryRecipientManifest {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
+	targetFailureDescriptors := append([]ActiveTargetDescriptor(nil), targetDescriptors...)
+	targetFailureDescriptors = append(targetFailureDescriptors, activeTargetDescriptorsFromAgents(descriptors)...)
 	eventEntityID := strings.TrimSpace(evt.EntityID())
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(recipients) == 0 {
 		return deliveryRecipientManifest{
-			TargetFailure: targetDeliveryFailure(evt, targetDescriptors),
+			TargetFailure: targetDeliveryFailure(evt, targetFailureDescriptors),
 		}
 	}
 	singularTarget := evt.TargetRoute()
@@ -658,10 +662,14 @@ func filterDeliveryRecipientCandidates(
 			if !target.Empty() {
 				deliveryTargets[scoped.ID] = target
 			}
+			owner := events.DeliveryTargetOwnership{}
+			if !target.Empty() {
+				owner = events.MustExistingEntityTarget(target)
+			}
 			deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
 				Recipient:     events.MustAgentDeliveryRecipient(scoped.ID),
 				AgentIdentity: scoped.AgentIdentity,
-				Target:        target,
+				Target:        owner,
 			})
 		}
 	}
@@ -674,7 +682,7 @@ func filterDeliveryRecipientCandidates(
 		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
 	}
 	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
-		manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
+		manifest.TargetFailure = targetDeliveryFailure(evt, targetFailureDescriptors)
 	}
 	return manifest
 }
@@ -717,34 +725,18 @@ func agentDeliveryRoutesForCandidates(
 		if err := recipient.AgentIdentity.Validate(); err != nil {
 			continue
 		}
+		target := deliveryTargets[strings.TrimSpace(recipient.ID)]
+		owner := events.DeliveryTargetOwnership{}
+		if !target.Empty() {
+			owner = events.MustExistingEntityTarget(target)
+		}
 		out = append(out, events.DeliveryRoute{
 			Recipient:     events.MustAgentDeliveryRecipient(recipient.ID),
 			AgentIdentity: recipient.AgentIdentity,
-			Target:        deliveryTargets[strings.TrimSpace(recipient.ID)],
+			Target:        owner,
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
-}
-
-func internalDeliveryIntentsForPlan(evt events.Event, recipients, persisted []string, routed []Subscriber) []RoutePlanDeliveryIntent {
-	internalRecipients := filterOutAgentIDs(recipients, persisted)
-	if len(internalRecipients) == 0 {
-		return nil
-	}
-	targets := matchedInternalDeliveryTargets(evt, routed)
-	if len(targets) == 0 {
-		return nil
-	}
-	out := make([]events.DeliveryRoute, 0, len(internalRecipients)*len(targets))
-	for _, recipient := range internalRecipients {
-		for _, target := range targets {
-			out = append(out, events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient(recipient),
-				Target:    target,
-			})
-		}
-	}
-	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerInternalTargetCarrier)
 }
 
 func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
@@ -755,12 +747,12 @@ func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []
 	return routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerInternalTargetRoute)
 }
 
-func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 || len(routed) == 0 {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(targets)*len(routed))
+	out := make([]plannedDeliveryRoute, 0, len(targets)*len(routed))
 	for _, target := range targets {
 		target = target.Normalized()
 		if target.Empty() {
@@ -773,13 +765,13 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []e
 			if !routeMatchesInternalSubscriber(target, subscriber) {
 				continue
 			}
-			out = append(out, events.DeliveryRoute{
+			out = append(out, plannedDeliveryRoute{
 				Recipient: subscriber.Recipient,
 				Target:    target,
 			})
 		}
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return normalizePlannedDeliveryRoutes(out)
 }
 
 func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
@@ -818,9 +810,9 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	if !routedNodeMatched {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(internalRecipients))
+	out := make([]plannedDeliveryRoute, 0, len(internalRecipients))
 	for _, recipient := range internalRecipients {
-		out = append(out, events.DeliveryRoute{
+		out = append(out, plannedDeliveryRoute{
 			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target:    routedNodeTargetRoute(evt, flowInstance),
 		})
@@ -828,7 +820,7 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
 }
 
-func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
 	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
 	if flowInstance == "" || eventType == "" || !strings.HasPrefix(eventType, flowInstance+"/") {
@@ -847,14 +839,14 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 	if len(nodeIDs) == 0 {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
+	out := make([]plannedDeliveryRoute, 0, len(nodeIDs))
 	for _, recipient := range sortedStringKeys(nodeIDs) {
-		out = append(out, events.DeliveryRoute{
+		out = append(out, plannedDeliveryRoute{
 			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target:    routedNodeTargetRoute(evt, flowInstance),
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return normalizePlannedDeliveryRoutes(out)
 }
 
 func routedScopedNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
@@ -876,14 +868,14 @@ func routedScopedNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscrib
 			continue
 		}
 		out = append(out, RoutePlanDeliveryIntent{
-			Recipient: subscriber.Recipient, Target: routedNodeTargetRoute(evt, targetFlowInstance),
+			Recipient: subscriber.Recipient, TargetBlueprint: routedNodeTargetRoute(evt, targetFlowInstance),
 			Producer: routeIntentProducerScopedNodeRoute, Persist: true, AllowStructuralOwner: structural,
 		})
 	}
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []events.DeliveryRoute {
+func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -891,7 +883,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 	if eventType == "" {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(routed))
+	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
 		if !subscriber.Recipient.IsNode() {
 			continue
@@ -907,12 +899,12 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 		if routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
 			continue
 		}
-		out = append(out, events.DeliveryRoute{
+		out = append(out, plannedDeliveryRoute{
 			Recipient: subscriber.Recipient,
 			Target:    routedNodeTargetRoute(evt, path),
 		})
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return normalizePlannedDeliveryRoutes(out)
 }
 
 func routedScopedNoTargetNodeDeliveryFlowInstance(evt events.Event, subscriber Subscriber) (string, bool, bool) {
@@ -1002,9 +994,9 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 	if len(nodeIDs) == 0 {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
+	out := make([]plannedDeliveryRoute, 0, len(nodeIDs))
 	for _, recipient := range sortedStringKeys(nodeIDs) {
-		out = append(out, events.DeliveryRoute{
+		out = append(out, plannedDeliveryRoute{
 			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target:    routedNodeTargetRoute(evt, flowInstance),
 		})
@@ -1013,9 +1005,7 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 }
 
 func routedNodeTargetRoute(evt events.Event, targetFlowInstance string) events.RouteIdentity {
-	flowID := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(targetFlowInstance)
 	return events.RouteIdentity{
-		FlowID:       flowID,
 		FlowInstance: targetFlowInstance,
 	}.Normalized()
 }
@@ -1028,9 +1018,9 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Su
 	if len(rootNodeIDs) == 0 {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(rootNodeIDs))
+	out := make([]plannedDeliveryRoute, 0, len(rootNodeIDs))
 	for _, recipient := range sortedStringKeys(rootNodeIDs) {
-		out = append(out, events.DeliveryRoute{
+		out = append(out, plannedDeliveryRoute{
 			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target: events.RouteIdentity{
 				FlowID: strings.TrimSpace(rootFlowID), FlowInstance: strings.TrimSpace(evt.RunID()),
@@ -1065,9 +1055,9 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	for _, recipient := range sortedStringKeys(nodePaths) {
 		path := nodePaths[recipient]
 		out = append(out, RoutePlanDeliveryIntent{
-			Recipient: events.MustNodeDeliveryRecipient(recipient),
-			Target:    events.RouteIdentity{FlowID: runtimeflowidentity.SemanticScopeFromFlowInstanceRef(path), FlowInstance: path},
-			Producer:  routeIntentProducerRootInputFlowNode, Persist: true,
+			Recipient:       events.MustNodeDeliveryRecipient(recipient),
+			TargetBlueprint: events.RouteIdentity{FlowID: runtimeflowidentity.SemanticScopeFromFlowInstanceRef(path), FlowInstance: path},
+			Producer:        routeIntentProducerRootInputFlowNode, Persist: true,
 		})
 	}
 	return normalizeRoutePlanDeliveryIntents(out)

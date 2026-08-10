@@ -812,7 +812,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: target}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: events.MustExistingEntityTarget(target)}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
@@ -912,7 +912,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				eventtest.ConcreteTemplateRoutingSource(poisonTarget.FlowID, poisonTarget.FlowInstance, poisonTarget.EntityID),
 				time.Now().UTC().Add(-time.Minute),
 			)
-			poisonRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: poisonTarget}
+			poisonRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: events.MustExistingEntityTarget(poisonTarget)}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
@@ -927,7 +927,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				eventtest.ConcreteTemplateRoutingSource(healthyTarget.FlowID, healthyTarget.FlowInstance, healthyTarget.EntityID),
 				time.Now().UTC(),
 			)
-			healthyRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: healthyTarget}
+			healthyRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: events.MustExistingEntityTarget(healthyTarget)}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
@@ -1062,7 +1062,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: target}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: events.MustExistingEntityTarget(target)}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),

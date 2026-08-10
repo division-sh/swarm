@@ -257,7 +257,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
 				), "mock")
-				originalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity, Target: deliveryTarget}
+				originalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity, Target: events.MustExistingEntityTarget(deliveryTarget)}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
 					[]events.DeliveryRoute{originalRoute},
@@ -401,11 +401,11 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			}
 			routes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
-					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
+					Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()}),
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
 				},
 				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
-					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
+					Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()}),
 					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
 				},
 			}
@@ -502,7 +502,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				if !ok {
 					t.Fatalf("received route markers = %#v, missing %s", received, marker)
 				}
-				if delivery.TargetRoute() != routes[index].Target.Normalized() || delivery.DeliveryContext().ReplyContextID() != routes[index].Context.ReplyContextID() {
+				if delivery.TargetRoute() != routes[index].Target.Route().Normalized() || delivery.DeliveryContext().ReplyContextID() != routes[index].Context.ReplyContextID() {
 					t.Fatalf("received %s route target/context = %#v/%q, want %#v/%q", marker, delivery.TargetRoute(), delivery.DeliveryContext().ReplyContextID(), routes[index].Target, routes[index].Context.ReplyContextID())
 				}
 			}

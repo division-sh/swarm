@@ -931,7 +931,7 @@ contract_formats:
           negative_proof: TestProductionEventConstructionUsesPublicAPI
         runtime.event.routing_source_typed_at_construction:
           owner: internal/events RoutingSource
-          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Runtime-control publication preserves a root schedule's root source, converts declared-flow execution sources to flow-owned control, and uses platform control only for closed global system work.
+          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Static-flow and concrete-template source variants always carry exact flow and instance identity and carry entity identity exactly when the producing execution has one; an entityless receiver therefore remains an exact flow source without inventing an entity. Runtime-control publication preserves a root schedule's root source, converts declared-flow execution sources to entity-bound flow-owned control, and uses platform control only for closed global system work.
           negative_proof: TestRunScopedRuntimeControlPreservesExactRootRoutingSource
         runtime.event.admitted_persistence_boundary:
           owner: internal/events AdmittedEvent and the closed named store operations
@@ -1290,15 +1290,21 @@ contract_formats:
           target_owner_projection: |
             Compile-time plans own receiver route blueprints only and never mint run-specific entity ownership from source
             entities, route text, path hashes, leaf/suffix matching, or descriptor normalization. Before publication admission,
-            one generation-consistent selected-run projection resolves every node target and every explicitly targeted agent
-            route to exactly one persisted receiver owner. Missing, ambiguous, malformed, stale, foreign, or disagreeing owner
-            evidence fails before event, delivery, settlement, lifecycle, warning, or reply mutation. A nested static receiver
-            without a distinct selected row may consume only the already-admitted current DeliveryRoute target when compiled
-            topology proves shared structural ownership. An untargeted agent delivery instead records an explicitly empty
-            DeliveryRoute target because its required typed AgentIdentity is the complete receiver owner; root route absence is
-            represented by AgentIdentity route presence, never by a nullable or inferred identity. Duplicate, restart,
-            selected-fork, historical replay, claim/scan, settlement, and public observation preserve the originally stamped
-            target and AgentIdentity without current-owner re-resolution.
+            one generation-consistent selected-run projection classifies every node target as exactly one closed typed variant:
+            existing_entity carries the exact selected entity owner; materializing_entity carries the exact future entity ID
+            produced by the canonical handler materialization owner; entityless_receiver carries explicit entity absence only
+            when the admitted handler neither uses nor can materialize entity state. Routing and pipeline execution consume one
+            per-handler typed classifier, and pipeline consumes the persisted variant directly; source-event identity, path
+            text, descriptors, singleton fan-in, and missing-row fallback cannot repair or reinterpret it. Every explicitly
+            targeted agent route resolves to existing_entity or materializing_entity; an untargeted agent route instead records
+            an explicitly empty target because its required typed AgentIdentity is the complete receiver owner. Missing,
+            ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
+            settlement, lifecycle, warning, or reply mutation. A nested static receiver without a distinct selected row may
+            consume only the already-admitted current DeliveryRoute target when compiled topology proves shared structural
+            ownership. Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
+            identity. Duplicate, restart, selected-fork, historical replay, claim/scan, settlement, handler execution, and
+            public observation preserve the originally stamped target variant and AgentIdentity without current-owner
+            re-resolution.
           no_delivery_postcondition: |
             Every admitted persisted event settles atomically to exactly one typed arm: one or more durable DeliveryRoute
             obligations, or one closed no-delivery disposition. The six exhaustive write classes are normal EventBus

@@ -174,7 +174,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := workflowNodeStampedConnectRouteForHandlerEvent(t, pc.SemanticSource(), "task.done", "listener")
-	route.Target = events.RouteIdentity{EntityID: "ent-001"}
+	route.Target = events.MustExistingEntityTarget(evt.TargetRoute())
 	route = seedPipelineNodeDeliveryRouteAuthority(t, db, evt, route)
 	deliveryCtx := withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route)
 

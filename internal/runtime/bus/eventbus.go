@@ -58,7 +58,7 @@ type EventBus struct {
 	resetDone                   chan struct{}
 	internalChanged             chan struct{}
 	subscriptions               map[subscriberKey][]events.EventType
-	pendingInternalByID         map[string][]events.DeliveryRoute
+	pendingInternalByID         map[string]pendingInternalDelivery
 	pendingOutboxByID           map[string][]pendingOutboxOperation
 	pendingOutboxSequence       uint64
 	routeTable                  *RouteTable
@@ -244,7 +244,7 @@ type ExactDirectRouteStatus struct {
 }
 
 type PublishRecipientPlanAdmissionGuard func(context.Context, events.Event) error
-type PublishRecipientPlanMaterializer func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error)
+type PublishRecipientPlanMaterializer func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error)
 type PublishRecipientPlanGuard func(context.Context, events.Event, PublishRecipientPlan) error
 
 type RuntimeIngressDispatchGate interface {
@@ -511,7 +511,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		internalChanged:             make(chan struct{}),
 		subscriptions:               make(map[subscriberKey][]events.EventType),
 		runtimeAgentDescriptors:     make(map[agentidentity.Identity]ActiveAgentDescriptor),
-		pendingInternalByID:         make(map[string][]events.DeliveryRoute),
+		pendingInternalByID:         make(map[string]pendingInternalDelivery),
 		pendingOutboxByID:           make(map[string][]pendingOutboxOperation),
 		routeTable:                  routeTable,
 		store:                       store,
@@ -1061,7 +1061,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	eb.agentRouteHandles = make(map[agentidentity.Identity]*agentRouteHandle)
 	eb.internalHandles = make(map[string]*internalSubscriptionHandle)
 	eb.subscriptions = make(map[subscriberKey][]events.EventType)
-	eb.pendingInternalByID = make(map[string][]events.DeliveryRoute)
+	eb.pendingInternalByID = make(map[string]pendingInternalDelivery)
 	eb.retiringAgentRoutes = nil
 	eb.retiringInternalHandles = nil
 	eb.routeTable = routeTable

@@ -109,10 +109,10 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			pageIdentity := testAgentIdentity(t, pageAgent, "delivery-projection/page")
 			siblingRoutes := []events.DeliveryRoute{
 				{Recipient: events.MustAgentDeliveryRecipient(pageAgent), AgentIdentity: pageIdentity,
-					Target: events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/one", EntityID: uuid.NewString()},
+					Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/one", EntityID: uuid.NewString()}),
 				},
 				{Recipient: events.MustAgentDeliveryRecipient(pageAgent), AgentIdentity: pageIdentity,
-					Target: events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/two", EntityID: uuid.NewString()},
+					Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/two", EntityID: uuid.NewString()}),
 				},
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, siblingEvent, siblingRoutes); err != nil {

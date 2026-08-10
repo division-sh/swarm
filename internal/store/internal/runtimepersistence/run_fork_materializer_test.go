@@ -925,7 +925,7 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	agentIdentity := runtimebustest.Identity(t, "safe-agent", "flow-a/1")
 	sourceRoute := events.DeliveryRoute{
 		Recipient: events.MustAgentDeliveryRecipient(agentIdentity.AgentID()), AgentIdentity: agentIdentity,
-		Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID},
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID}),
 	}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, sourceEvent, []events.DeliveryRoute{sourceRoute}); err != nil {
 		t.Fatalf("commit historical replay source event and delivery: %v", err)
@@ -1039,7 +1039,7 @@ func TestPostgresOperatorEventReadbackProjectsRunForkReplaySettlement(t *testing
 	if delivery.SubscriberType != "agent" || delivery.SubscriberID != "safe-agent" || delivery.Status != "pending" || delivery.Terminal {
 		t.Fatalf("operator replay delivery = %#v", delivery)
 	}
-	want := fixture.sourceRoute.Target.Normalized()
+	want := fixture.sourceRoute.Target.Route().Normalized()
 	if delivery.Target.FlowID != want.FlowID || delivery.Target.FlowInstance != want.FlowInstance || delivery.Target.EntityID != want.EntityID {
 		t.Fatalf("operator replay target = %#v, want %#v", delivery.Target, want)
 	}

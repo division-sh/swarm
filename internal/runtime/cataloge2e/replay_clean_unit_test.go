@@ -131,8 +131,12 @@ func TestCatalogReplayProjectionRejectsSemanticDeliveryAndDeadLetterDivergence(t
 
 	cases := map[string]func(*operatorread.OperatorEventFull){
 		"subscriber": func(got *operatorread.OperatorEventFull) { got.Deliveries[0].SubscriberID = "other-node" },
-		"route":      func(got *operatorread.OperatorEventFull) { got.Deliveries[0].Route.Target.FlowInstance = "other-flow" },
-		"status":     func(got *operatorread.OperatorEventFull) { got.Deliveries[0].Status = "failed" },
+		"route": func(got *operatorread.OperatorEventFull) {
+			target := got.Deliveries[0].Route.Target.Route()
+			target.FlowInstance = "other-flow"
+			got.Deliveries[0].Route.Target = events.MustEntitylessReceiverTarget(target)
+		},
+		"status": func(got *operatorread.OperatorEventFull) { got.Deliveries[0].Status = "failed" },
 		"failure": func(got *operatorread.OperatorEventFull) {
 			failure := replayFailure(runtimefailures.ClassInternalFailure, "other_failure")
 			got.Deliveries[0].Failure = &failure
@@ -320,7 +324,7 @@ func replayProjectionDelivery(t testing.TB, id string) operatorread.OperatorEven
 	}
 	return operatorread.OperatorEventDelivery{
 		DeliveryID: id, SubscriberType: "node", SubscriberID: "node-1",
-		Route:  events.DeliveryRoute{Recipient: recipient, Target: events.RouteIdentity{FlowInstance: "root"}},
+		Route:  events.DeliveryRoute{Recipient: recipient, Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"})},
 		Status: "dead_letter", ReasonCode: "platform.retry_exhausted", Failure: replayFailurePointer(runtimefailures.ClassRetryExhausted, "attempts_exhausted"),
 		RetryCount: 2, Terminal: true,
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -97,6 +98,8 @@ func (r WorkflowEngineStateRecord) Validate() error {
 
 type WorkflowEngineMutationCommand struct {
 	State                   WorkflowEngineStateRecord
+	EntitylessTarget        events.DeliveryTargetOwnership
+	EntitylessRunID         string
 	GateRouteAdmissionRunID string
 	Lifecycle               WorkflowLifecycleMutationPlan
 	ProposedEffects         []WorkflowEngineProposedEffect
@@ -136,14 +139,44 @@ func (p WorkflowEngineProposedEffect) Validate() error {
 }
 
 func (c WorkflowEngineMutationCommand) Validate() error {
-	if err := c.State.Validate(); err != nil {
-		return err
+	entityless := !c.EntitylessTarget.Empty()
+	runID := strings.TrimSpace(c.State.RunID)
+	if entityless {
+		if err := c.EntitylessTarget.Validate(); err != nil {
+			return fmt.Errorf("workflow engine entityless target: %w", err)
+		}
+		if !c.EntitylessTarget.EntitylessReceiver() {
+			return fmt.Errorf("workflow engine entityless mutation requires entityless_receiver target ownership")
+		}
+		runID = strings.TrimSpace(c.EntitylessRunID)
+		if runID == "" {
+			return fmt.Errorf("workflow engine entityless mutation requires exact run identity")
+		}
+		if !workflowEngineStateRecordEmpty(c.State) {
+			return fmt.Errorf("workflow engine entityless mutation cannot carry workflow state")
+		}
+		if len(c.Lifecycle.Timers)+len(c.Lifecycle.Schedules)+len(c.Lifecycle.GateCards) > 0 || c.Lifecycle.RequestCompletionCandidate {
+			return fmt.Errorf("workflow engine entityless mutation cannot carry lifecycle effects")
+		}
+		if len(c.ProposedEffects) > 0 {
+			return fmt.Errorf("workflow engine entityless mutation cannot carry proposed effects")
+		}
+		if c.RouteRetirement != nil || c.PostCommit.FlowDeactivation != nil {
+			return fmt.Errorf("workflow engine entityless mutation cannot carry lifecycle post-commit work")
+		}
+	} else {
+		if strings.TrimSpace(c.EntitylessRunID) != "" {
+			return fmt.Errorf("workflow engine state mutation cannot carry entityless run identity")
+		}
+		if err := c.State.Validate(); err != nil {
+			return err
+		}
+		if err := c.Lifecycle.Validate(c.State.RunID, c.State.Route, c.State.EntityID); err != nil {
+			return fmt.Errorf("workflow engine lifecycle plan: %w", err)
+		}
 	}
-	if runID := strings.TrimSpace(c.GateRouteAdmissionRunID); runID != "" && runID != c.State.RunID {
-		return fmt.Errorf("workflow gate route admission run %s disagrees with engine state run %s", runID, c.State.RunID)
-	}
-	if err := c.Lifecycle.Validate(c.State.RunID, c.State.Route, c.State.EntityID); err != nil {
-		return fmt.Errorf("workflow engine lifecycle plan: %w", err)
+	if gateRunID := strings.TrimSpace(c.GateRouteAdmissionRunID); gateRunID != "" && gateRunID != runID {
+		return fmt.Errorf("workflow gate route admission run %s disagrees with engine mutation run %s", gateRunID, runID)
 	}
 	for index, effect := range c.ProposedEffects {
 		if err := effect.Validate(); err != nil {
@@ -180,6 +213,16 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 	}
 	return nil
+}
+
+func workflowEngineStateRecordEmpty(record WorkflowEngineStateRecord) bool {
+	return strings.TrimSpace(record.RunID) == "" && !record.Route.Valid() && strings.TrimSpace(record.EntityID) == "" &&
+		strings.TrimSpace(record.WorkflowName) == "" && strings.TrimSpace(record.WorkflowVersion) == "" &&
+		strings.TrimSpace(record.Mode) == "" && strings.TrimSpace(record.Status) == "" && strings.TrimSpace(record.CurrentState) == "" &&
+		strings.TrimSpace(record.EntityType) == "" && strings.TrimSpace(record.Slug) == "" && strings.TrimSpace(record.Name) == "" &&
+		len(record.Fields) == 0 && len(record.Gates) == 0 && len(record.Accumulator) == 0 && len(record.Config) == 0 && len(record.InitialFields) == 0 &&
+		record.EnteredStageAt.IsZero() && record.CreatedAt.IsZero() && record.UpdatedAt.IsZero() && record.TerminatedAt.IsZero() &&
+		strings.TrimSpace(record.ExpectedState) == "" && record.ExpectedRevision == 0 && !record.Create
 }
 
 func workflowEngineStateRecord(

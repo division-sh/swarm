@@ -144,7 +144,7 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 	view := event.Clone()
 	view.payload = clonePayload(payload)
 	view.deliveryContext = route.Context.Normalized()
-	target := route.Target.Normalized()
+	target := route.Target.Route()
 	if target.Empty() && route.Recipient.IsNode() {
 		envelope := view.NormalizedEnvelope()
 		envelope.Target = RouteIdentity{}

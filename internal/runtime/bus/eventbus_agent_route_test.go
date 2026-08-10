@@ -721,6 +721,8 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 			route := events.DeliveryRoute{Recipient: recipient}
 			if recipient.IsAgent() {
 				route.AgentIdentity = token.Identity
+			} else {
+				route.Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"})
 			}
 			evt := eventtest.RuntimeControl(
 				eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,

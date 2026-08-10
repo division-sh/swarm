@@ -166,7 +166,7 @@ func ValidatePersistentEvent(event Event) error {
 		return fmt.Errorf("event envelope: %w", err)
 	}
 	if source := event.RoutingSource(); !source.Route().Empty() {
-		if err := validateRequiredUUID("routing_source.entity_id", source.Route().EntityID); err != nil {
+		if err := validateOptionalUUID("routing_source.entity_id", source.Route().EntityID); err != nil {
 			return err
 		}
 	}

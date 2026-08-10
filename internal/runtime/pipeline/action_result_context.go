@@ -19,7 +19,7 @@ func workflowNodeProducerSource(ctx context.Context, source semanticview.Source,
 		route.EntityID = strings.TrimSpace(entityID)
 	}
 	if delivery, ok := runtimedelivery.RouteFromContext(ctx); ok {
-		route = delivery.Target.Normalized()
+		route = delivery.Target.Route()
 		route.EntityID = strings.TrimSpace(entityID)
 	}
 	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, nodeID, route)

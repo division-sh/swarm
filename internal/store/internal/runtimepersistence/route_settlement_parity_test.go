@@ -81,32 +81,45 @@ func TestRuntimeLogEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 	}
 }
 
-func TestOperatorEventReadbackProjectsConcreteTemplateDeliveryTarget(t *testing.T) {
+func TestOperatorEventReadbackProjectsTypedDeliveryTargetOwnership(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			event := eventtest.ExistingRunRootIngress(
-				uuid.NewString(), "assessment.reported", "reviewer", "", json.RawMessage(`{}`), 0,
-				runID, events.EventEnvelope{}, time.Now().UTC(),
-			)
-			want := events.RouteIdentity{FlowID: "review", FlowInstance: "review/instance-1", EntityID: eventtest.UUID("review-instance-1")}
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("review-finalize"), Target: want}
-			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {
-				t.Fatalf("commit delivered event: %v", err)
+			entityID := eventtest.UUID("review-instance-1")
+			tests := []struct {
+				name  string
+				owner events.DeliveryTargetOwnership
+			}{
+				{name: "existing_entity", owner: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/instance-1", EntityID: entityID})},
+				{name: "materializing_entity", owner: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/instance-2", EntityID: eventtest.UUID("review-instance-2")})},
+				{name: "entityless_receiver", owner: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/instance-3"})},
 			}
-			full, err := fixture.store.(routeSettlementOperatorStore).LoadOperatorEvent(ctx, event.ID())
-			if err != nil {
-				t.Fatalf("LoadOperatorEvent: %v", err)
-			}
-			if full.NoDelivery != nil || len(full.Deliveries) != 1 {
-				t.Fatalf("operator settlement = deliveries:%#v no_delivery:%#v", full.Deliveries, full.NoDelivery)
-			}
-			got := full.Deliveries[0].Target
-			if got.FlowID != want.FlowID || got.FlowInstance != want.FlowInstance || got.EntityID != want.EntityID {
-				t.Fatalf("operator target = %#v, want %#v", got, want)
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					event := eventtest.ExistingRunRootIngress(
+						uuid.NewString(), "assessment.reported", "reviewer", "", json.RawMessage(`{}`), 0,
+						runID, events.EventEnvelope{}, time.Now().UTC(),
+					)
+					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("review-finalize"), Target: test.owner}
+					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {
+						t.Fatalf("commit delivered event: %v", err)
+					}
+					full, err := fixture.store.(routeSettlementOperatorStore).LoadOperatorEvent(ctx, event.ID())
+					if err != nil {
+						t.Fatalf("LoadOperatorEvent: %v", err)
+					}
+					if full.NoDelivery != nil || len(full.Deliveries) != 1 {
+						t.Fatalf("operator settlement = deliveries:%#v no_delivery:%#v", full.Deliveries, full.NoDelivery)
+					}
+					got := full.Deliveries[0].Target
+					want := test.owner.Route()
+					if got.Kind != test.owner.Code() || got.FlowID != want.FlowID || got.FlowInstance != want.FlowInstance || got.EntityID != want.EntityID {
+						t.Fatalf("operator target = %#v, want %s %#v", got, test.owner.Code(), want)
+					}
+				})
 			}
 		})
 	}
@@ -123,9 +136,9 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			delivered := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.delivered", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base)
 			matchedEmpty := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.empty", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base.Add(time.Second))
 			deliberateEmpty := eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"proof"}`), 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Second))
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("review-finalize"), Target: events.RouteIdentity{
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("review-finalize"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 				FlowID: "review", FlowInstance: "review/instance-1", EntityID: eventtest.UUID("review-instance-1"),
-			}}
+			})}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, delivered, []events.DeliveryRoute{route}); err != nil {
 				t.Fatal(err)
 			}

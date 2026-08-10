@@ -406,7 +406,7 @@ func hasFreshCreateRecipientProjection(plan runtimebus.PublishRecipientPlan) (bo
 			continue
 		}
 		key := route.Recipient
-		path := route.Target.FlowInstance
+		path := route.Target.Route().FlowInstance
 		if key.Empty() || path == "" {
 			return false, nil
 		}
@@ -442,7 +442,7 @@ func hasFreshCreateRecipientProjection(plan runtimebus.PublishRecipientPlan) (bo
 	return true, nil
 }
 
-func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoutes(ctx context.Context, evt events.Event, actual runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -456,7 +456,7 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err != nil {
 		return nil, err
 	}
-	return selectedContractNodeDeliveryRoutes(evt, expected.Recipients), nil
+	return selectedContractNodeDeliveryRoutes(expected.Recipients), nil
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events.Event) bool {
@@ -486,11 +486,11 @@ func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(e
 	return sourceEventID, expected, nil
 }
 
-func selectedContractNodeDeliveryRoutes(evt events.Event, in []runfork.RunForkContractFrontierRecipient) []events.DeliveryRoute {
+func selectedContractNodeDeliveryRoutes(in []runfork.RunForkContractFrontierRecipient) []runtimebus.DeliveryRouteBlueprint {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]events.DeliveryRoute, 0, len(in))
+	out := make([]runtimebus.DeliveryRouteBlueprint, 0, len(in))
 	for _, recipient := range in {
 		if !recipient.Recipient.IsNode() {
 			continue
@@ -499,16 +499,15 @@ func selectedContractNodeDeliveryRoutes(evt events.Event, in []runfork.RunForkCo
 		if id == "" {
 			continue
 		}
-		route := events.DeliveryRoute{
+		route := runtimebus.DeliveryRouteBlueprint{
 			Recipient: events.MustNodeDeliveryRecipient(id),
 		}
 		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
 			route.Target.FlowInstance = path
-			route.Target.EntityID = strings.TrimSpace(evt.EntityID())
 		}
 		out = append(out, route)
 	}
-	return events.NormalizeDeliveryRoutes(out)
+	return out
 }
 
 func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []frontierRecipientKey {

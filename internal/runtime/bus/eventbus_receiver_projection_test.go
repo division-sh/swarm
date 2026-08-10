@@ -130,7 +130,11 @@ func TestDeliveryContinuationUsesClosedReceiverProjection(t *testing.T) {
 		uuid.NewString(), events.EventType("custom.continuation_receiver_projection"), "receiver-projection-test", "", []byte(`{}`), 0,
 		"", "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("workflow-node"), Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-continuation"}}}
+	route := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("workflow-node"),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Context:   events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-continuation"}},
+	}
 	if err := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route); err != nil {
 		t.Fatalf("dispatch continuation receiver: %v", err)
 	}
@@ -145,8 +149,8 @@ func TestEventBusNodeRouteReceiverProjectionRejectsPublisherState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
-	eventBus.deliveryPlanner = nodeOnlyDeliveryPlanner("workflow-node")
 	evt := receiverProjectionEvent("node-route")
+	eventBus.deliveryPlanner = nodeOnlyDeliveryPlanner(t, "workflow-node", evt.Type())
 	if err := eventBus.Publish(hostilePublisherContext(t), evt); err != nil {
 		t.Fatalf("publish through node-route receiver: %v", err)
 	}
@@ -189,7 +193,11 @@ func TestInternalSubscriptionUsesClosedReceiverProjection(t *testing.T) {
 	eventType := events.EventType("custom.internal_receiver_projection")
 	deliveries := subscribeInternalDeliveriesForTest(t, eventBus, "internal-owner", eventType)
 	evt := receiverProjectionEventForType("internal-route", eventType)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("internal-owner"), Context: evt.DeliveryContext()}
+	route := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("internal-owner"),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+		Context:   evt.DeliveryContext(),
+	}
 	if err := eventBus.deliverToRecipientsWithRoutes(hostilePublisherContext(t), evt, []string{"internal-owner"}, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("publish through internal receiver: %v", err)
 	}

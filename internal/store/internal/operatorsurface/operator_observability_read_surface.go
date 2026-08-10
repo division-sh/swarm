@@ -278,11 +278,12 @@ func (r *ObservabilityPostgres) loadOperatorEventDeliveries(ctx context.Context,
 }
 
 func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) operatorread.OperatorEventDelivery {
-	target := snapshot.Route.Target.Normalized()
+	owner := snapshot.Route.Target
+	target := owner.Route()
 	item := operatorread.OperatorEventDelivery{
 		DeliveryID: snapshot.DeliveryID, SubscriberType: string(snapshot.SubscriberClass),
 		SubscriberID: snapshot.SubscriberID, Route: snapshot.Route.Normalized(), SessionID: snapshot.ActiveSessionID,
-		Target: operatorread.OperatorDeliveryTarget{FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID},
+		Target: operatorread.OperatorDeliveryTarget{Kind: owner.Code(), FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID},
 		Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
 		Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
 		RetryScheduled: snapshot.RetryScheduled, Terminal: snapshot.Terminal(),

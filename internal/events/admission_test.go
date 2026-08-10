@@ -438,11 +438,26 @@ func TestOperatorInjectedReferenceIsProvenanceNotCausalParent(t *testing.T) {
 func TestRoutingSourceConstructorsRejectIncompleteRuntimeIdentity(t *testing.T) {
 	for _, route := range []RouteIdentity{
 		{FlowID: "flow", EntityID: "entity"},
-		{FlowID: "flow", FlowInstance: "flow/one"},
 		{FlowInstance: "flow/one", EntityID: "entity"},
 	} {
 		if _, err := NewConcreteTemplateInstanceRoutingSource(route); err == nil {
 			t.Fatalf("runtime source %#v succeeded", route)
+		}
+	}
+}
+
+func TestRoutingSourceConstructorsAdmitEntitylessFlowExecution(t *testing.T) {
+	route := RouteIdentity{FlowID: "flow", FlowInstance: "flow/one"}
+	for _, construct := range []func(RouteIdentity) (RoutingSource, error){
+		NewStaticFlowRoutingSource,
+		NewConcreteTemplateInstanceRoutingSource,
+	} {
+		source, err := construct(route)
+		if err != nil {
+			t.Fatalf("entityless flow source: %v", err)
+		}
+		if got := source.Route(); got != route {
+			t.Fatalf("entityless flow source route = %#v, want %#v", got, route)
 		}
 	}
 }

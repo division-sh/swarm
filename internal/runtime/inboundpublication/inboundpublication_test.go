@@ -108,10 +108,10 @@ func TestEvidencePayloadOwnsExactOrderedCommittedBatch(t *testing.T) {
 func TestCanonicalRecipientManifestIsOrderIndependent(t *testing.T) {
 	reply := events.ReplyContextRef{ID: "reply-1"}
 	routes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("worker"), Target: events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"},
+		{Recipient: events.MustNodeDeliveryRecipient("worker"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"}),
 			Context: events.DeliveryContext{Reply: &reply},
 		},
-		{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime"), Target: events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"}},
+		{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"})},
 	}
 
 	manifest, fingerprint, count, err := CanonicalRecipientManifest(routes)

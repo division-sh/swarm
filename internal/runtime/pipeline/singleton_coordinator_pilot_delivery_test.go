@@ -45,7 +45,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	)
 	seedSingletonCoordinatorPilotEvent(t, db, ctx, evt)
 	seedSingletonCoordinatorPilotNodeDelivery(t, db, ctx, evt.ID(), singletoncoordinatorpilot.NodeID, target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(singletoncoordinatorpilot.NodeID), Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(singletoncoordinatorpilot.NodeID), Target: events.MustExistingEntityTarget(target)}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {

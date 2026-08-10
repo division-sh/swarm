@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -493,8 +492,8 @@ func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, deliv
 	if !route.Recipient.IsNode() {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	if route.Target.Normalized() != evt.TargetRoute().Normalized() {
-		return true, nil, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.Recipient.ID(), route.Target.Normalized(), evt.TargetRoute().Normalized())
+	if route.Target.Route() != evt.TargetRoute().Normalized() {
+		return true, nil, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.Recipient.ID(), route.Target.Route(), evt.TargetRoute().Normalized())
 	}
 	ctx = runtimedelivery.WithoutClaim(ctx)
 	return pc.intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt, true)
@@ -580,6 +579,18 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	if !routeOK || !route.Recipient.IsNode() || route.Recipient.ID() != nodeID {
 		return false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", nodeID)
 	}
+	nodeFlowID := strings.TrimSpace(resolved.FlowID)
+	if nodeFlowID == "" {
+		nodeFlowID = workflowNodeFlowID(source, nodeID)
+	}
+	handlerFact, err := NewDeliveryTargetHandler(nodeFlowID, nodeID)
+	if err != nil {
+		return false, fmt.Errorf("workflow node %s target handler: %w", nodeID, err)
+	}
+	handlerFact = handlerFact.ForEvent(events.EventType(handlerEventKey))
+	if err := ValidateStampedDeliveryTargetOwnership(source, evt, route.Recipient, handlerFact, handler, route.Target); err != nil {
+		return false, fmt.Errorf("workflow node %s target ownership: %w", nodeID, err)
+	}
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
 	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != nodeID) {
 		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", nodeID, claim.SubscriberClass(), claim.SubscriberID())
@@ -618,23 +629,14 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		}
 		executionCtx := heartbeat.Context()
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
-		nodeFlowID := workflowNodeFlowID(source, nodeID)
-		instancePath := evt.FlowInstance()
-		if source != nil && strings.TrimSpace(nodeFlowID) == strings.TrimSpace(source.WorkflowName()) {
-			instancePath = evt.RunID()
-		} else if source != nil {
-			if schema, ok := source.FlowSchemaByID(nodeFlowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-				instancePath = runtimeflowidentity.ScopeKey(source, nodeFlowID)
-			} else if target := route.Target.Normalized(); !target.Empty() {
-				instancePath = target.FlowInstance
-			}
-		}
+		targetOwner := route.Target.Route()
+		instancePath := targetOwner.FlowInstance
 		stateRoute, err := workflowInstanceRouteForExecution(source, nodeFlowID, instancePath)
 		if err != nil {
 			_ = heartbeat.Stop()
 			return false, err
 		}
-		currentState, err := pc.currentWorkflowState(executionCtx, stateRoute, workflowEventEntityID(evt))
+		currentState, err := pc.currentWorkflowState(executionCtx, stateRoute, targetOwner.EntityID)
 		if err != nil {
 			_ = heartbeat.Stop()
 			return false, err

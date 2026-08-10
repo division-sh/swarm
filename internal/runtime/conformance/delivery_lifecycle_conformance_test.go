@@ -40,6 +40,8 @@ func deliveryLifecycleConformanceRoute(t testing.TB, subscriberType, subscriberI
 	if subscriberType == string(runtimedelivery.SubscriberAgent) {
 		route.Recipient = events.MustAgentDeliveryRecipient(subscriberID)
 		route.AgentIdentity = agentidentitytest.RootRuntime(t, subscriberID, "delivery-lifecycle-conformance")
+	} else {
+		route.Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "delivery-lifecycle-conformance"})
 	}
 	return route
 }
@@ -70,8 +72,8 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				event := deliveryLifecycleEvent("exact-" + backend.name)
 				agent := deliveryLifecycleConformanceRoute(t, "agent", "agent-a")
 				sibling := agent
-				sibling.Target = events.RouteIdentity{FlowID: "flow-a"}
-				node := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}
+				sibling.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:delivery-lifecycle-sibling"}}
+				node := deliveryLifecycleConformanceRoute(t, "node", "node-a")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimepipelineobligation.ScopeSubscribed)
 
 				agentProof, err := backend.store.ProveHandoff(ctx, event.ID(), agent)

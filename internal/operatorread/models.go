@@ -204,6 +204,7 @@ type OperatorEventDelivery struct {
 }
 
 type OperatorDeliveryTarget struct {
+	Kind         string `json:"kind,omitempty"`
 	FlowID       string `json:"flow_id,omitempty"`
 	FlowInstance string `json:"flow_instance,omitempty"`
 	EntityID     string `json:"entity_id,omitempty"`

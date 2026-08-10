@@ -524,13 +524,14 @@ func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanti
 		if plan.ReceiverLocalEvent() != events.EventType(eventidentity.Normalize(handlerEvent)) {
 			continue
 		}
-		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID)}
-		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, route)
+		receiver := plan.ReceiverEndpoint().Readback()
+		target := plan.ReceiverRoute(receiver.FlowPath, "receiver-entity")
+		blueprint := runtimepinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}
+		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, blueprint)
 		if err != nil {
 			t.Fatalf("build stamped connect claim: %v", err)
 		}
-		route.ConnectClaim = claim
-		return route
+		return events.DeliveryRoute{Recipient: blueprint.Recipient, Target: events.MustExistingEntityTarget(target), ConnectClaim: claim}
 	}
 	t.Fatalf("compiled graph has no receiver event %s", handlerEvent)
 	return events.DeliveryRoute{}
@@ -543,13 +544,13 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 		if receiver.FlowID != receiverFlow || receiver.Pin != receiverPin {
 			continue
 		}
-		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID)}
-		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, route)
+		target := plan.ReceiverRoute(receiver.FlowPath, "receiver-entity")
+		blueprint := runtimepinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}
+		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, blueprint)
 		if err != nil {
 			t.Fatalf("build stamped connect claim: %v", err)
 		}
-		route.ConnectClaim = claim
-		return route
+		return events.DeliveryRoute{Recipient: blueprint.Recipient, Target: events.MustExistingEntityTarget(target), ConnectClaim: claim}
 	}
 	t.Fatalf("compiled graph has no receiver %s.%s", receiverFlow, receiverPin)
 	return events.DeliveryRoute{}
@@ -669,7 +670,7 @@ func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScoped
 		FlowInstance: "account_case/ti-1",
 		EntityID:     "entity-1",
 	})
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: evt.TargetRoute()}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: events.MustExistingEntityTarget(evt.TargetRoute())}
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
 	if resolved.Matched || !strings.Contains(resolved.Failure, "stamped connect claim") {
 		t.Fatalf("target-route-only resolution = %#v, want fail-closed stamped-claim error", resolved)
@@ -694,7 +695,7 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryRequiresExactSource
 		{name: "other instance", target: events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-2", EntityID: "entity-2"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: tc.target}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: events.MustExistingEntityTarget(tc.target)}
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
 			if resolved.Matched != tc.want {
 				t.Fatalf("direct concrete resolution = %#v, want matched=%t", resolved, tc.want)
@@ -766,7 +767,7 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 	})
 
 	route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, "operating.reported", "portfolio-collector")
-	route.Target = evt.TargetRoute()
+	route.Target = events.MustExistingEntityTarget(evt.TargetRoute())
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "portfolio-collector", evt)
 	if !resolved.Matched {
 		t.Fatal("expected portfolio handler to resolve through the canonical cross-flow event")
