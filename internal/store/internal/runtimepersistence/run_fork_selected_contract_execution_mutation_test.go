@@ -247,7 +247,7 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	if err != nil {
 		t.Fatalf("begin later event story: %v", err)
 	}
-	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, tx, story, laterEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, tx, story, laterEvent, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}); err != nil {
 		t.Fatalf("seed later event and delivery: %v", err)
 	}
 	if err := story.Finalize(ctx); err != nil {
@@ -1898,7 +1898,7 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRu
 
 func seedSelectedContractExecutionStoreSourceUnpublished(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}})
+	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")})
 }
 
 func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {

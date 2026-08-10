@@ -1149,6 +1149,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
 	}}
 	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient("target-node"), Target: events.RouteIdentity{
+		FlowID:       "review",
 		FlowInstance: "review/inst-1",
 	}, Handler: runtimepipeline.MustDeliveryTargetHandler("review", "target-node").ForEvent("task.started")}
 	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustEntitylessReceiverTarget(wantBlueprint.Target)}

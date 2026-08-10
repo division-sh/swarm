@@ -52,6 +52,11 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	} {
 		runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, sqliteStore.backend.ConstructionHandle(), snapshot)
 	}
+	deliveryRoutesByEvent := map[string][]events.DeliveryRoute{
+		newerEvent:       {testAgentDeliveryRoute(t, "agent-1", "fixture/agent-1")},
+		newerMiddleEvent: {testAgentDeliveryRoute(t, "agent-failed", "fixture/agent-failed"), testEntitylessNodeDeliveryRoute("node-success")},
+		newerLatestEvent: {testEntitylessNodeDeliveryRoute("node-dead")},
+	}
 	for _, fixture := range []struct {
 		id, runID, name, entityID string
 		at                        time.Time
@@ -66,10 +71,10 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		if fixture.entityID != "" {
 			envelope = events.EnvelopeForEntityID(envelope, fixture.entityID)
 		}
-		if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
+		if err := commitSemanticEventFixtureWithRoutes(ctx, sqliteStore, eventtest.PersistedProjection(
 			fixture.id, events.EventType(fixture.name), "test", "", json.RawMessage(`{}`), 0,
 			fixture.runID, "", envelope, fixture.at,
-		)); err != nil {
+		), deliveryRoutesByEvent[fixture.id]); err != nil {
 			t.Fatalf("seed sqlite event %s: %v", fixture.name, err)
 		}
 	}
@@ -95,7 +100,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	agentFailedDeliveryID := agentFailedDelivery.DeliveryID
 
 	latestEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), newerLatestEvent)
-	deadRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-dead")}
+	deadRoute := testEntitylessNodeDeliveryRoute("node-dead")
 	if err := commitDeliveryObligationFixture(ctx, sqliteStore, latestEvent, deadRoute); err != nil {
 		t.Fatalf("commit sqlite exhausted delivery: %v", err)
 	}
@@ -126,7 +131,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.ConstructionHandle(), nodeDeadDelivery, now.Add(6*time.Second), now.Add(8*time.Second))
 	nodeDeadDeliveryID := nodeDeadDelivery.DeliveryID
 
-	successfulDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-success")}, runtimedelivery.StateDelivered, nil)
+	successfulDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, testEntitylessNodeDeliveryRoute("node-success"), runtimedelivery.StateDelivered, nil)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.ConstructionHandle(), successfulDelivery, now.Add(5*time.Second), now.Add(7*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
 	header, err := sqliteStore.LoadRunHeader(ctx, older)

@@ -291,7 +291,7 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 		0,
 		eventtest.UUID("persisted-projection-run"),
 		"",
-		events.EventEnvelope{EntityID: "ent-1"},
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}),
 		time.Now().UTC(),
 	)
 	trace := runtimeengine.ComputeModuleTrace{
@@ -513,7 +513,7 @@ func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -545,7 +545,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -582,7 +582,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 			events.EventEnvelope{EntityID: "env-ent"},
 			time.Now().UTC(),
 		),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: "env-ent", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -2109,7 +2109,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 			time.Time{},
 		),
 
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{"stage": "queued"}},
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"stage": "queued"}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -2170,7 +2170,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsSparseFieldPresenceCheck(t *
 			time.Time{},
 		),
 
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -2346,7 +2346,12 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "root-collector")
+	route := seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("root-collector"),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: source.WorkflowName(), FlowInstance: source.WorkflowName(), EntityID: rootEntityID,
+		}),
+	})
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(testWorkflowStoreRunContext(t, store), route), evt)
 	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
 		t.Fatalf("nested package-root delivery error = %v, want stamped connect claim", err)
@@ -2397,7 +2402,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 			time.Time{},
 		),
 
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err == nil {
 		t.Fatal("expected ambiguous handler-level emit config to be rejected")
@@ -2435,7 +2440,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 			time.Time{},
 		),
 
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err == nil {
 		t.Fatal("expected ambiguous handler-level emit config to be rejected")
@@ -2487,7 +2492,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -2514,7 +2519,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 		},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -2581,7 +2586,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 			time.Time{},
 		),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)

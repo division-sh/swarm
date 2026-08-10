@@ -22,11 +22,11 @@ func TestWorkflowEventEntityIDPrefersTypedDeliveryTarget(t *testing.T) {
 	}
 }
 
-func TestWorkflowEventEntityIDFallsBackToJournalEntity(t *testing.T) {
+func TestWorkflowEventEntityIDDoesNotInterpretJournalEntityAsReceiverOwner(t *testing.T) {
 	evt := eventtest.RunCreatingRootIngress("", "task.ready", "", "", nil, 0, "", "",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "source-entity"), time.Time{})
 
-	if got := workflowEventEntityID(evt); got != "source-entity" {
-		t.Fatalf("workflowEventEntityID = %q, want source-entity", got)
+	if got := workflowEventEntityID(evt); got != "" {
+		t.Fatalf("workflowEventEntityID = %q, want no receiver identity", got)
 	}
 }

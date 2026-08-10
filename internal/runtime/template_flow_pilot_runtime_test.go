@@ -255,7 +255,7 @@ func loadTemplateFlowPilotInstanceIdentity(t *testing.T, ctx context.Context, db
 
 func templateFlowPilotDeliveryTargetRouteJSON(t *testing.T, target events.RouteIdentity) string {
 	t.Helper()
-	encoded, err := json.Marshal(target.Normalized())
+	encoded, err := json.Marshal(events.MustMaterializingEntityTarget(target))
 	if err != nil {
 		t.Fatalf("marshal template-flow pilot delivery target: %v", err)
 	}

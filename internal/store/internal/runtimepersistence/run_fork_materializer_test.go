@@ -725,7 +725,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
-	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("in-progress-node")}, runtimedelivery.StateLaunching, nil)
+	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, testEntitylessNodeDeliveryRoute("in-progress-node"), runtimedelivery.StateLaunching, nil)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
@@ -916,28 +916,27 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 		events.EventLineage{
 			RunID: sourceRunID, ParentEventID: rootEventID, TaskID: "event-owned-task", ExecutionMode: executionmode.Mock,
 		},
-		events.EventEnvelope{
-			EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity,
-			Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID},
-		},
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity, Target: events.RouteIdentity{EntityID: entityID}},
 		at.Add(time.Second),
 	)
-	agentIdentity := runtimebustest.Identity(t, "safe-agent", "flow-a/1")
+	agentIdentity := runtimebustest.Identity(t, "safe-agent", "")
 	sourceRoute := events.DeliveryRoute{
 		Recipient: events.MustAgentDeliveryRecipient(agentIdentity.AgentID()), AgentIdentity: agentIdentity,
-		Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/1", EntityID: entityID}),
 	}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, store, sourceEvent, []events.DeliveryRoute{sourceRoute}); err != nil {
-		t.Fatalf("commit historical replay source event and delivery: %v", err)
+	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, sourceEvent); err != nil {
+		t.Fatalf("seed historical replay source event: %v", err)
 	}
-	var deliveryID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT delivery_id::text
-		FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'agent' AND subscriber_id = 'safe-agent'
-	`, sourceID).Scan(&deliveryID); err != nil {
-		t.Fatalf("load historical replay source delivery: %v", err)
+	sourceRow, found, err := loadPostgresEventIdentity(ctx, db, sourceID)
+	if err != nil || !found {
+		t.Fatalf("load historical replay source event: found=%v err=%v", found, err)
 	}
+	sourceAdmitted, err := decodeEventRecord(sourceRow)
+	if err != nil {
+		t.Fatalf("decode historical replay source event: %v", err)
+	}
+	sourceEvent = sourceAdmitted.Event()
+	sourceDelivery := seedDeliveryStateFixture(t, ctx, store, sourceEvent, sourceRoute, runtimedelivery.StateQueued, nil)
+	deliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceID})
 	if err != nil {
@@ -969,7 +968,7 @@ func (f runForkReplaySettlementFixture) replaySnapshot(t *testing.T) (string, st
 	t.Helper()
 	var eventID, settlement, deliveryID, target string
 	if err := f.db.QueryRowContext(f.ctx, `
-		SELECT e.event_id::text, e.route_settlement::text, d.delivery_id::text, d.target_route::text
+		SELECT e.event_id::text, e.route_settlement::text, d.delivery_id::text, d.delivery_target_route::text
 		FROM events e
 		JOIN event_deliveries d ON d.event_id = e.event_id
 		WHERE e.run_id = $1::uuid
@@ -1628,7 +1627,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	sourceEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("blocked-node")}, runtimedelivery.StateLaunching, nil)
+	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, testEntitylessNodeDeliveryRoute("blocked-node"), runtimedelivery.StateLaunching, nil)
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEventDeliveries)
 	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_deliveries_advanced_after_fork_point") {

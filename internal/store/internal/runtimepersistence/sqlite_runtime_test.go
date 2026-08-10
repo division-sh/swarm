@@ -243,7 +243,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	)
 	routes := []events.DeliveryRoute{
 		testAgentDeliveryRoute(t, "agent-pending", "fixture/agent-pending"),
-		{Recipient: events.MustNodeDeliveryRecipient("node-pending")},
+		testEntitylessNodeDeliveryRoute("node-pending"),
 	}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, routes); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)

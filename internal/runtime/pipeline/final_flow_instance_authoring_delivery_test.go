@@ -149,7 +149,7 @@ func assertNoFinalFlowInstanceAuthoringContainedRouteRows(t *testing.T, db *sql.
 	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
 		FROM event_deliveries
-		WHERE delivery_target_route->>'flow_instance' = $1
+		WHERE delivery_target_route->'route'->>'flow_instance' = $1
 	`, flowInstance).Scan(&count); err != nil {
 		t.Fatalf("count contained route delivery rows: %v", err)
 	}

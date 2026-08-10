@@ -113,9 +113,11 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		"Event event-1",
 		"event_name=scan.requested",
 		"execution_mode=live",
+		"producer_type=external",
 		"source_event_id=source-event-1",
 		"payload={\"priority\":\"high\"}",
 		"delivery_id=delivery-1",
+		"target.kind=existing_entity",
 		"target.flow_id=review",
 		"target.flow_instance=review/instance-1",
 		"target.entity_id=entity-1",
@@ -696,6 +698,19 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			wantStderr: "event_id is required",
 		},
 		{
+			name: "malformed view missing producer type exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delete(event, "producer_type")
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "producer_type is required",
+		},
+		{
 			name: "malformed view missing delivery target exits three",
 			args: []string{"event", "view", "event-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -707,6 +722,34 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "target is required",
+		},
+		{
+			name: "malformed view target missing kind exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				target := event["deliveries"].([]any)[0].(map[string]any)["target"].(map[string]any)
+				delete(target, "kind")
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "kind is required for an owned target",
+		},
+		{
+			name: "malformed view entityless target with entity exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				target := event["deliveries"].([]any)[0].(map[string]any)["target"].(map[string]any)
+				target["kind"] = "entityless_receiver"
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "entity_id is forbidden for entityless_receiver",
 		},
 		{
 			name: "malformed view dual settlement exits three",
@@ -1011,6 +1054,7 @@ func validEventObservationEvent(eventID string) map[string]any {
 		"entity_id":       "entity-1",
 		"source_event_id": "source-event-1",
 		"source":          "external",
+		"producer_type":   "external",
 		"payload": map[string]any{
 			"priority": "high",
 		},
@@ -1020,7 +1064,7 @@ func validEventObservationEvent(eventID string) map[string]any {
 				"subscriber_type": "agent",
 				"subscriber_id":   "agent-1",
 				"target": map[string]any{
-					"flow_id": "review", "flow_instance": "review/instance-1", "entity_id": "entity-1",
+					"kind": "existing_entity", "flow_id": "review", "flow_instance": "review/instance-1", "entity_id": "entity-1",
 				},
 				"status":          "dead_letter",
 				"session_id":      "session-1",

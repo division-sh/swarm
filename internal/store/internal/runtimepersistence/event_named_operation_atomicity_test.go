@@ -74,6 +74,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 					withSource := failure.name != "lineage"
 					req := newSelectedForkAtomicityRequest(t, ctx, fixture, withSource)
 					failure.mutate(&req)
+					setSelectedForkAtomicitySettlement(&req)
 					if outcome, err := commitSelectedForkEventOutcome(ctx, fixture.store.(eventRecordContractStore), req); err == nil || outcome != runtimebus.EventAppendOutcomeUnknown {
 						t.Fatalf("outcome=%v err=%v, want rollback failure", outcome, err)
 					}
@@ -87,6 +88,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				store := fixture.store.(eventRecordContractStore)
 				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
+				setSelectedForkAtomicitySettlement(&req)
 				outcome, err := commitSelectedForkEventOutcome(ctx, store, req)
 				if err != nil || outcome != runtimebus.EventAppendInserted {
 					t.Fatalf("initial outcome=%v err=%v", outcome, err)
@@ -96,6 +98,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 
 				duplicate := req
 				duplicate.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "must-not-appear", "fixture/must-not-appear")}
+				setSelectedForkAtomicitySettlement(&duplicate)
 				disposition := runtimepipelineobligation.Terminal("fixture_error", &runtimefailures.Envelope{})
 				duplicate.Commit.Disposition = &disposition
 				duplicate.Commit.DeadLetter = &runtimedeadletters.Record{OriginalEventID: uuid.NewString()}
@@ -127,6 +130,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 	store := fixture.store.(eventRecordContractStore)
 	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 	req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
+	setSelectedForkAtomicitySettlement(&req)
 
 	const attempts = 12
 	start := make(chan struct{})
@@ -235,7 +239,7 @@ func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.
 	assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{
 		event:   1,
 		lineage: 1,
-		stories: 1,
+		stories: 2,
 	})
 }
 
@@ -333,7 +337,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 	t.Cleanup(func() { _ = owner.Release(context.WithoutCancel(ctx), claim) })
 	return runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
-			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
+			Event: admitted, RouteSettlement: testRouteSettlement(admitted.Event(), nil), ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
 			DeliveryAuthority: deliveryAuthority,
 		},
 		Lineage: runfork.RunForkSelectedContractExecutionLineage{
@@ -341,6 +345,13 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 			ForkEventID: event.ID(), EventName: string(event.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: event.CreatedAt(),
 		},
 	}
+}
+
+func setSelectedForkAtomicitySettlement(req *runtimebus.CommitSelectedForkEventRequest) {
+	if req == nil {
+		return
+	}
+	req.Commit.RouteSettlement = testRouteSettlement(req.Commit.Event.Event(), req.Commit.DeliveryRoutes)
 }
 
 func selectedForkEventForRequest(t *testing.T, req runtimebus.CommitSelectedForkEventRequest, payload []byte) events.Event {

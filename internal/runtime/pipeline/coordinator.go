@@ -492,9 +492,6 @@ func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, deliv
 	if !route.Recipient.IsNode() {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	if route.Target.Route() != evt.TargetRoute().Normalized() {
-		return true, nil, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.Recipient.ID(), route.Target.Route(), evt.TargetRoute().Normalized())
-	}
 	ctx = runtimedelivery.WithoutClaim(ctx)
 	return pc.intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt, true)
 }

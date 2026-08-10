@@ -5,7 +5,7 @@ item-handler:
   produces: [item.processed]
   event_handlers:
     item.received:
-      advances_to: done
+      advances_to: processed
       emit:
         event: item.processed
         fields:
@@ -15,4 +15,5 @@ item-observer:
   execution_type: system_node
   subscribes_to: [item.processed]
   event_handlers:
-    item.processed: {}
+    item.processed:
+      advances_to: done

@@ -271,8 +271,18 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 		store.deliveryStore = owner
 	}
 	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
+	flowInstance := actionResultFlowPath(pc.SemanticSource(), flowID)
+	if concrete := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); actionResultFlowInstanceBelongsToFlow(pc.SemanticSource(), flowID, concrete) {
+		flowInstance = concrete
+	}
+	if flowInstance == "" && strings.TrimSpace(flowID) == "" {
+		flowInstance = strings.Trim(strings.TrimSpace(evt.RunID()), "/")
+	}
+	if flowInstance == "" {
+		t.Fatal("seed exact node delivery requires a concrete flow instance")
+	}
 	target := events.RouteIdentity{
-		FlowID: flowID, FlowInstance: pc.SemanticSource().FlowPath(flowID), EntityID: evt.EntityID(),
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: evt.EntityID(),
 	}
 	var targetOwner events.DeliveryTargetOwnership
 	if strings.TrimSpace(target.EntityID) == "" {

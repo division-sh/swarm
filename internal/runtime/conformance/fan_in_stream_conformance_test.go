@@ -42,7 +42,9 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	store := &fanInStreamMemoryStore{}
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
-		Durable:        bus.DurableDependencies{TargetOwners: store},
+		Durable: bus.DurableDependencies{
+			TargetOwners: store, DeliveryRouteSets: store,
+		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
 			return nil
@@ -195,7 +197,9 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	store := &fanInStreamMemoryStore{}
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
-		Durable:        bus.DurableDependencies{TargetOwners: store},
+		Durable: bus.DurableDependencies{
+			TargetOwners: store, DeliveryRouteSets: store,
+		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
 			return nil

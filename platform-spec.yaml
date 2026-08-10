@@ -1292,10 +1292,13 @@ contract_formats:
             entities, route text, path hashes, leaf/suffix matching, or descriptor normalization. Before publication admission,
             one generation-consistent selected-run projection classifies every node target as exactly one closed typed variant:
             existing_entity carries the exact selected entity owner; materializing_entity carries the exact future entity ID
-            produced by the canonical handler materialization owner; entityless_receiver carries explicit entity absence only
-            when the admitted handler neither uses nor can materialize entity state. Routing and pipeline execution consume one
-            per-handler typed classifier, and pipeline consumes the persisted variant directly; source-event identity, path
-            text, descriptors, singleton fan-in, and missing-row fallback cannot repair or reinterpret it. Every explicitly
+            produced by the canonical materialization owner; entityless_receiver carries explicit entity absence only when no
+            selected entity evidence exists and the admitted handler and input acquisition neither use nor can materialize
+            entity state. Exact selected ownership takes precedence over an otherwise entityless handler, and an admitted
+            materializing owner may satisfy a later select handler in the same plan. Handler-derived materialization MUST agree
+            with the canonical future identity. Routing and pipeline execution consume one per-handler typed classifier, and
+            pipeline consumes the persisted variant directly; source-event identity, path text, descriptors, singleton fan-in,
+            and missing-row fallback cannot repair or reinterpret it. Every explicitly
             targeted agent route resolves to existing_entity or materializing_entity; an untargeted agent route instead records
             an explicitly empty target because its required typed AgentIdentity is the complete receiver owner. Missing,
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
@@ -26664,13 +26667,16 @@ api_specification:
         type: object
         additionalProperties: false
         properties:
+          kind:
+            type: string
+            enum: [existing_entity, materializing_entity, entityless_receiver]
           flow_id:
             type: string
           flow_instance:
             type: string
           entity_id:
             type: string
-        description: One-way structured projection of the persisted DeliveryRoute target. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.
+        description: One-way structured projection of the persisted DeliveryRoute target. Delivery rows expose kind when a node target owner is present; connect-plan target evidence omits kind because it is a route candidate rather than admitted ownership. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.
       EventConnectCandidateEvidence:
         type: object
         additionalProperties: false

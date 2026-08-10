@@ -143,8 +143,8 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	select {
 	case got := <-ch:
 		defer func() { _ = got.Complete() }()
-		if got.FlowInstance() != "operating/inst-1" || got.EntityID() != "11111111-1111-4111-8111-111111111111" {
-			t.Fatalf("delivered route identity flow=%q entity=%q, want operating/inst-1 product entity", got.FlowInstance(), got.EntityID())
+		if got.FlowInstance() != "operating/inst-1" || got.EntityID() != "" {
+			t.Fatalf("delivered route identity flow=%q entity=%q, want explicit entityless operating/inst-1 receiver", got.FlowInstance(), got.EntityID())
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("workflow-runtime carrier did not receive concrete template event")

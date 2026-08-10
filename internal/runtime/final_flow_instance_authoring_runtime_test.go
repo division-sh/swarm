@@ -176,7 +176,7 @@ func loadFinalFlowInstanceAuthoringTemplateIdentity(t *testing.T, ctx context.Co
 
 func finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t *testing.T, target events.RouteIdentity) string {
 	t.Helper()
-	encoded, err := json.Marshal(target.Normalized())
+	encoded, err := json.Marshal(events.MustMaterializingEntityTarget(target))
 	if err != nil {
 		t.Fatalf("marshal final flow-instance authoring delivery target: %v", err)
 	}

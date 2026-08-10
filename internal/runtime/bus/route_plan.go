@@ -280,7 +280,8 @@ func normalizePlannedDeliveryRoutes(in []plannedDeliveryRoute) []plannedDelivery
 		}
 		key := deliveryIntentKey{
 			recipient: route.Recipient, agentIdentity: route.AgentIdentity, target: route.Target,
-			replyContextID: route.Context.ReplyContextID(), projection: route.PayloadProjection.Fingerprint(), connectClaim: route.ConnectClaim,
+			handler: route.Handler, replyContextID: route.Context.ReplyContextID(),
+			projection: route.PayloadProjection.Fingerprint(), connectClaim: route.ConnectClaim,
 		}
 		if _, ok := seen[key]; ok {
 			continue
@@ -690,13 +691,17 @@ func routePlanDeliveryIntentsFromRoutes(routes []plannedDeliveryRoute, producer 
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routePlanDeliveryIntentsFromConnectRoutes(routes []runtimepinrouting.ConnectDeliveryRoute, producer routeIntentProducer) []RoutePlanDeliveryIntent {
+func routePlanDeliveryIntentsFromConnectRoutes(routes []runtimepinrouting.ConnectDeliveryRoute, producer routeIntentProducer, receiverEvent events.EventType) []RoutePlanDeliveryIntent {
 	routes = runtimepinrouting.NormalizeConnectDeliveryRoutes(routes)
 	out := make([]RoutePlanDeliveryIntent, 0, len(routes))
 	for _, route := range routes {
+		handler := runtimepipeline.DeliveryTargetHandler{}
+		if !route.Handler.Empty() {
+			handler = runtimepipeline.MustDeliveryTargetHandler(route.Handler.FlowID(), route.Handler.NodeID()).ForEvent(receiverEvent)
+		}
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: route.Recipient, AgentIdentity: route.AgentIdentity, TargetBlueprint: route.Target,
-			Context: route.Context, PayloadProjection: route.PayloadProjection, ConnectClaim: route.ConnectClaim,
+			Handler: handler, Context: route.Context, PayloadProjection: route.PayloadProjection, ConnectClaim: route.ConnectClaim,
 			Producer: producer, Persist: true,
 		})
 	}
@@ -814,6 +819,7 @@ type deliveryIntentKey struct {
 	agentIdentity  agentidentity.Identity
 	target         events.RouteIdentity
 	targetOwner    events.DeliveryTargetOwnership
+	handler        runtimepipeline.DeliveryTargetHandler
 	replyContextID string
 	projection     string
 	connectClaim   events.ConnectExecutionClaim
@@ -847,6 +853,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			agentIdentity:  intent.AgentIdentity,
 			target:         intent.TargetBlueprint,
 			targetOwner:    intent.TargetOwnership,
+			handler:        intent.Handler,
 			replyContextID: intent.Context.ReplyContextID(),
 			projection:     intent.PayloadProjection.Fingerprint(),
 			connectClaim:   intent.ConnectClaim,

@@ -173,6 +173,15 @@ func canonicalDeliveryFixtureRouteValue(route events.DeliveryRoute) events.Deliv
 	return route
 }
 
+func testEntitylessNodeDeliveryRoute(nodeID string) events.DeliveryRoute {
+	return events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
+		}),
+	}
+}
+
 func commitAgentDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
 	return commitDeliveryObligationFixture(ctx, store, event, route)
 }

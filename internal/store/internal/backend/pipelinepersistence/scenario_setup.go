@@ -178,6 +178,10 @@ func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (ru
 		if entity.EntityID == "" {
 			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_id must be uuid", i)
 		}
+		entity.FlowInstance = strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
+		if entity.FlowInstance == "" {
+			entity.FlowInstance = req.RunID
+		}
 		if _, ok := ids[entity.EntityID]; ok {
 			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_id %q is duplicated", i, entity.EntityID)
 		}

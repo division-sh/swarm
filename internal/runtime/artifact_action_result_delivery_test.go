@@ -467,7 +467,7 @@ func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.
 }
 
 func artifactActionResultDeliveryTargetRouteJSON(flowInstance string) string {
-	return `{"flow_instance":"` + flowInstance + `","entity_id":"` + artifactActionResultEntityID + `"}`
+	return `{"kind":"existing_entity","route":{"flow_instance":"` + flowInstance + `","entity_id":"` + artifactActionResultEntityID + `"}}`
 }
 
 func asRuntimeTestString(value any) string {

@@ -761,6 +761,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	requesterIdentity := runtimebustest.Identity(t, "provider-agent", templatereply.ProviderFlowID)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{
 		Identity: requesterIdentity,
+		EntityID: runtimeflowidentity.EntityID(templatereply.ProviderFlowID),
 	})
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID: "provider-agent", FlowID: templatereply.ProviderFlowID, FlowPath: templatereply.ProviderFlowID,

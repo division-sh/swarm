@@ -125,7 +125,10 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "flow-a/work.begin",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
-		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("source-node")}})
+		[]events.DeliveryRoute{{
+			Recipient: events.MustNodeDeliveryRecipient("source-node"),
+			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "fixture", FlowInstance: "fixture/source-node"}),
+		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	repo := cliapp.RepoRoot()

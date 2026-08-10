@@ -283,7 +283,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, c.proof.ExecutionOwner)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(req.RecipientPlanning, req.LoadedSource.Source, c.proof.ExecutionOwner)
 	if err != nil {
 		return nil, err
 	}

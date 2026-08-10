@@ -547,7 +547,15 @@ func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowIn
 
 func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
-	return seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: events.MustExistingEntityTarget(evt.TargetRoute())})
+	target := evt.TargetRoute()
+	if target.Empty() {
+		t.Fatal("seed pipeline node delivery authority requires an exact event target")
+	}
+	owner, err := events.NewExistingEntityTarget(target)
+	if err != nil {
+		t.Fatalf("seed pipeline node delivery authority target: %v", err)
+	}
+	return seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: owner})
 }
 
 func seedPipelineNodeDeliveryRouteAuthority(t *testing.T, db *sql.DB, evt events.Event, route events.DeliveryRoute) events.DeliveryRoute {

@@ -384,9 +384,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 				if backend.postgres {
 					longEvent := deliveryLifecycleEvent("long-transaction-clock-" + backend.name)
-					longClaimRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("long-claim")}
-					longRetryRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("long-retry")}
-					longLeaseRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("long-lease")}
+					longClaimRoute := deliveryLifecycleConformanceRoute(t, "node", "long-claim")
+					longRetryRoute := deliveryLifecycleConformanceRoute(t, "node", "long-retry")
+					longLeaseRoute := deliveryLifecycleConformanceRoute(t, "node", "long-lease")
 					storetest.CommitSemanticEventWithInitialFacts(
 						t,
 						ctx,
@@ -538,6 +538,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					[]events.DeliveryRoute{oldRoute},
 					runtimepipelineobligation.ScopeSubscribed,
 				)
+				// SQLite stores delivery timestamps at millisecond precision. Keep
+				// the cursor-order proof from collapsing both inserts into one key.
+				time.Sleep(2 * time.Millisecond)
 				newEvent := eventtest.PersistedChildForProducer(
 					eventtest.UUID("handoff-after-cursor-"+backend.name),
 					events.EventType("delivery.conformance"),

@@ -77,11 +77,11 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			continue
 		}
 		source := contractFrontierRoutingSource(req.Plan.PendingWork, frontier[i].SourceEventID)
-		evaluation := contractFrontierRouteEvaluation(routeTable, eventName, source)
+		evaluation := contractFrontierRouteEvaluation(routeTable, connectGraph, eventName, source)
 		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || evaluation.requiresRuntimeResolution
 		frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
 		if evaluation.connectMatched {
-			frontier[i].WorkflowNodeSubscribers = evaluation.nodeIDs
+			frontier[i].WorkflowNodeSubscribers = sortedUnique(append(evaluation.nodeIDs, workflowNodeSubscribers(workflowNodes, eventName)...))
 			frontier[i].DerivedRecipients = evaluation.recipients
 		} else {
 			frontier[i].WorkflowNodeSubscribers = workflowNodeSubscribers(workflowNodes, eventName)
@@ -129,6 +129,25 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		LineageOnlyEvents:            lineageOnly,
 		UnsupportedBlockers:          blockers,
 	}, nil
+}
+
+func mergeContractFrontierRecipients(authoritative, additional []runfork.RunForkContractFrontierRecipient) []runfork.RunForkContractFrontierRecipient {
+	out := append([]runfork.RunForkContractFrontierRecipient(nil), authoritative...)
+	claimed := make(map[events.DeliveryRecipient]struct{}, len(authoritative))
+	for _, recipient := range authoritative {
+		claimed[recipient.Recipient] = struct{}{}
+	}
+	for _, recipient := range additional {
+		if _, exists := claimed[recipient.Recipient]; exists {
+			continue
+		}
+		claimed[recipient.Recipient] = struct{}{}
+		out = append(out, recipient)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return contractFrontierRecipientLess(out[i], out[j])
+	})
+	return out
 }
 
 func runForkFrontierEvents(pending []runfork.RunForkPendingWork) ([]runfork.RunForkContractFrontierEvent, []runfork.RunForkContractFrontierLineageEvent) {
@@ -339,7 +358,7 @@ type contractFrontierEvaluatedRoute struct {
 	nodeIDs                   []string
 }
 
-func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, eventName string, source events.RoutingSource) contractFrontierEvaluatedRoute {
+func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, eventName string, source events.RoutingSource) contractFrontierEvaluatedRoute {
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if routeTable == nil || eventName == "" {
 		return contractFrontierEvaluatedRoute{}
@@ -353,8 +372,7 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, eventNam
 		return contractFrontierEvaluatedRoute{}
 	}
 	out := contractFrontierEvaluatedRoute{
-		connectMatched:            true,
-		requiresRuntimeResolution: evaluation.RequiresRuntimeResolution(),
+		connectMatched: true,
 	}
 	seenNodes := map[string]struct{}{}
 	seenRecipients := map[contractFrontierRecipientIdentity]struct{}{}
@@ -381,6 +399,22 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, eventNam
 		seenRecipients[key] = struct{}{}
 		out.recipients = append(out.recipients, projected)
 	}
+	for _, plan := range connectGraph.MatchingSourceEvent(sourceEvent) {
+		receiverEvent := strings.TrimSpace(plan.ReceiverEndpoint().Readback().ResolvedEvent)
+		if receiverEvent == "" {
+			continue
+		}
+		additional := contractFrontierConnectRecipients(routeTable.Resolve(receiverEvent))
+		if plan.RequiresRuntimeResolution() && len(additional) == 0 {
+			out.requiresRuntimeResolution = true
+		}
+		for _, recipient := range additional {
+			if recipient.Recipient.IsNode() {
+				seenNodes[recipient.Recipient.ID()] = struct{}{}
+			}
+		}
+		out.recipients = mergeContractFrontierRecipients(out.recipients, additional)
+	}
 	out.nodeIDs = sortedSet(seenNodes)
 	sort.Slice(out.recipients, func(i, j int) bool {
 		return contractFrontierRecipientLess(out.recipients[i], out.recipients[j])
@@ -406,6 +440,19 @@ func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ..
 		}
 	}
 	return sortedSet(seen)
+}
+
+func contractFrontierConnectRecipients(in []runtimebus.Subscriber) []runfork.RunForkContractFrontierRecipient {
+	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(in))
+	for _, subscriber := range in {
+		recipient := runfork.NewRunForkContractFrontierRecipient(
+			subscriber.Recipient, subscriber.Path, "connect_route_plan", subscriber.AgentIdentity,
+		)
+		if !recipient.Recipient.Empty() {
+			out = append(out, recipient)
+		}
+	}
+	return out
 }
 
 func contractFrontierRecipients(in []runtimebus.Subscriber) []runfork.RunForkContractFrontierRecipient {

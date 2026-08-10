@@ -199,7 +199,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	event := loadSQLiteDeliveryFixtureEvent(t, ctx, store.backend.ConstructionHandle(), fixture.EventID)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("terminal-node")}
+	route := testEntitylessNodeDeliveryRoute("terminal-node")
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("seed sqlite active delivery: %v", err)
 	}

@@ -98,7 +98,7 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
 			outcome, err := commitSelectedForkEventOutcome(ctx, store, runtimebus.CommitSelectedForkEventRequest{
 				Commit: runtimebus.CommitPublishRequest{
-					Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
+					Event: admitted, RouteSettlement: testRouteSettlement(admitted.Event(), nil), ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
 				},
 				Lineage: runfork.RunForkSelectedContractExecutionLineage{
 					ForkRunID: forkRunID, SourceRunID: runID,
@@ -236,7 +236,10 @@ func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateIns
 		t.Fatalf("compiled connect graph has no receiver pin %q", receiverPin)
 	}
 	target := events.RouteIdentity{FlowID: "claim-flow", FlowInstance: "claim-flow"}
-	blueprint := runtimepinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("claim-node"), Target: target}
+	blueprint := runtimepinrouting.ConnectDeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("claim-node"), Target: target,
+		Handler: runtimepinrouting.MustConnectReceiverHandler("claim-flow", "claim-node"),
+	}
 	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, blueprint)
 	if err != nil {
 		t.Fatalf("mint connect execution claim: %v", err)

@@ -518,7 +518,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	at := time.Unix(1700002200, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
 		executionmode.Mock,
-		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("source-only-node")}, nil, loaded.BundleSourceFact)
+		selectedExecutionEntitylessNodeRoute("source-only-node"), nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -766,7 +766,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		Durable: bus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg,
 		},
 		InterceptorProvider: func() []bus.EventInterceptor {
@@ -1029,7 +1029,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	laterEvent := eventtest.PersistedChildForProducer(laterEventID, events.EventType("item.received"),
 		eventtest.Producer(events.EventProducerNode, "source-node"), "", payload, 0, sourceRunID, earlierEventID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), laterAt)
-	commitRunForkTestEvent(t, ctx, pg, laterEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}})
+	commitRunForkTestEvent(t, ctx, pg, laterEvent, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3805,7 +3805,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -3849,7 +3849,7 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -3910,6 +3910,15 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 }
 
 func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDeliveryRoutes(t *testing.T) {
+	node := runtimecontracts.SystemNodeContract{
+		ID: "test-node", ExecutionType: "system_node", SubscribesTo: []string{"item.received"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.received": {}},
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "selected-workflow", Version: "v1"},
+		Nodes:     map[string]runtimecontracts.SystemNodeContract{"test-node": node},
+		Events:    map[string]runtimecontracts.EventCatalogEntry{"item.received": {}},
+	})
 	planning := runfork.RunForkSelectedContractRecipientPlanning{
 		Owner:                      runfork.RunForkSelectedContractRecipientPlanningOwner,
 		FutureExecutionOwner:       runfork.RunForkSelectedContractExecutionOwner,
@@ -3926,7 +3935,7 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, source)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -3955,7 +3964,9 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	if len(routes) != 1 ||
 		!routes[0].Recipient.IsNode() ||
 		routes[0].Recipient.ID() != "test-node" ||
-		!routes[0].Target.Empty() {
+		!routes[0].Target.Empty() ||
+		routes[0].Handler.Empty() ||
+		routes[0].Handler.FlowID() != "selected-workflow" {
 		t.Fatalf("materialized routes = %#v, want target node route only", routes)
 	}
 }
@@ -3973,7 +3984,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil, runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4008,7 +4019,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 	if err != nil {
 		t.Fatalf("BuildSelectedContractRecipientPlanning: %v", err)
 	}
-	guard, err := newSelectedContractRecipientPlanPublishGuard(planning)
+	guard, err := newSelectedContractRecipientPlanPublishGuard(planning, nil)
 	if err != nil {
 		t.Fatalf("newSelectedContractRecipientPlanPublishGuard: %v", err)
 	}
@@ -4419,7 +4430,16 @@ func seedSelectedExecutionSourceRunWithRoutes(
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
 	return seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, eventName, at,
-		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}, extraRoutes, sourceFacts...)
+		selectedExecutionEntitylessNodeRoute("test-node"), extraRoutes, sourceFacts...)
+}
+
+func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
+	return events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
+		}),
+	}
 }
 
 func seedSelectedExecutionRootSourceRun(

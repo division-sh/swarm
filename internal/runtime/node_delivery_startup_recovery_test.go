@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -188,17 +190,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if runtimeSQLDB == nil {
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
-			repoRoot := filepath.Clean(filepath.Join("..", ".."))
-			fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-				repoRoot,
-				fixtureRoot,
-				runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-			)
-			if err != nil {
-				t.Fatalf("load startup-order workflow contract: %v", err)
-			}
-			bundle.Semantics.NodeHandlers["complete-task"]["task.requested"] = runtimecontracts.SystemNodeEventHandler{}
+			bundle := loadEntitylessStartupRecoveryBundle(t)
 			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
 
@@ -214,7 +206,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 			)
-			nodeRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}
+			nodeRoute := startupRecoveryNodeRoute("complete-task")
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			processOwner := worklifetime.NewProcess()
@@ -311,10 +303,10 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 		wantDenied bool
 	}{
 		{name: "pending_agent", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "pending", wantDenied: true},
-		{name: "pending_node", route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}, state: "pending", wantDenied: true},
+		{name: "pending_node", route: startupRecoveryNodeRoute("complete-task"), state: "pending", wantDenied: true},
 		{name: "future_failed", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "future_failed", wantDenied: true},
 		{name: "busy_in_progress", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "busy", wantDenied: true},
-		{name: "reclaimable_in_progress", route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}, state: "reclaimable", wantDenied: true},
+		{name: "reclaimable_in_progress", route: startupRecoveryNodeRoute("complete-task"), state: "reclaimable", wantDenied: true},
 		{name: "foreign_bundle_excluded", route: startupRecoveryAgentRoute(t, "foreign-agent"), state: "pending", foreign: true},
 		{name: "empty_control"},
 	}
@@ -512,7 +504,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("pipeline-handoff-cleanup-entity-"+backend)),
 				time.Now().UTC(),
 			)
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}
+			route := startupRecoveryNodeRoute("complete-task")
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, nil,
@@ -615,6 +607,15 @@ func startupRecoveryAgentRoute(t *testing.T, agentID string) events.DeliveryRout
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}
 }
 
+func startupRecoveryNodeRoute(nodeID string) events.DeliveryRoute {
+	return events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+			FlowID: "test-boot-success", FlowInstance: templateInstanceDeliveryRunID,
+		}),
+	}
+}
+
 func startupRecoverySourceContext(source runtimecorrelation.BundleSourceFact, runID string) context.Context {
 	ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), source)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
@@ -648,18 +649,23 @@ func seedStartupRecoverySourceRun(
 
 func loadStartupRecoveryWorkflowModule(t *testing.T) runtimepipeline.WorkflowModule {
 	t.Helper()
+	return newRuntimeTestWorkflowModule(t, semanticview.Wrap(loadEntitylessStartupRecoveryBundle(t)))
+}
+
+func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		fixtureRoot,
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("load startup recovery workflow contract: %v", err)
+	files := make(map[string]string)
+	for _, name := range []string{"package.yaml", "schema.yaml", "events.yaml", "nodes.yaml", "agents.yaml", "policy.yaml"} {
+		body, err := os.ReadFile(filepath.Join(fixtureRoot, name))
+		if err != nil {
+			t.Fatalf("read startup recovery fixture %s: %v", name, err)
+		}
+		files[name] = string(body)
 	}
-	bundle.Semantics.NodeHandlers["complete-task"]["task.requested"] = runtimecontracts.SystemNodeEventHandler{}
-	return newRuntimeTestWorkflowModule(t, semanticview.Wrap(bundle))
+	files["nodes.yaml"] = strings.ReplaceAll(files["nodes.yaml"], "\n      advances_to: done", "")
+	return loadRuntimeTempBundle(t, files)
 }
 
 func seedStartupRecoveryPersistedBundle(t *testing.T, ctx context.Context, db *sql.DB, backend, bundleHash string) {

@@ -76,18 +76,20 @@ type eventListResult struct {
 }
 
 type eventFull struct {
-	EventID       string            `json:"event_id"`
-	EventName     string            `json:"event_name"`
-	ExecutionMode string            `json:"execution_mode"`
-	CreatedAt     string            `json:"created_at"`
-	RunID         string            `json:"run_id,omitempty"`
-	EntityID      string            `json:"entity_id,omitempty"`
-	SourceEventID string            `json:"source_event_id,omitempty"`
-	Source        string            `json:"source"`
-	Payload       map[string]any    `json:"payload"`
-	Deliveries    []eventDelivery   `json:"deliveries"`
-	NoDelivery    *eventNoDelivery  `json:"no_delivery,omitempty"`
-	DeadLetters   []eventDeadLetter `json:"dead_letters"`
+	EventID                  string            `json:"event_id"`
+	EventName                string            `json:"event_name"`
+	ExecutionMode            string            `json:"execution_mode"`
+	CreatedAt                string            `json:"created_at"`
+	RunID                    string            `json:"run_id,omitempty"`
+	EntityID                 string            `json:"entity_id,omitempty"`
+	SourceEventID            string            `json:"source_event_id,omitempty"`
+	OperatorReferenceEventID string            `json:"operator_reference_event_id,omitempty"`
+	Source                   string            `json:"source"`
+	ProducerType             string            `json:"producer_type"`
+	Payload                  map[string]any    `json:"payload"`
+	Deliveries               []eventDelivery   `json:"deliveries"`
+	NoDelivery               *eventNoDelivery  `json:"no_delivery,omitempty"`
+	DeadLetters              []eventDeadLetter `json:"dead_letters"`
 }
 
 type eventDelivery struct {
@@ -109,6 +111,7 @@ type eventDelivery struct {
 }
 
 type eventDeliveryTarget struct {
+	Kind         string `json:"kind,omitempty"`
 	FlowID       string `json:"flow_id,omitempty"`
 	FlowInstance string `json:"flow_instance,omitempty"`
 	EntityID     string `json:"entity_id,omitempty"`
@@ -183,6 +186,8 @@ func (e *eventConnectCandidateEvidence) UnmarshalJSON(raw []byte) error {
 
 type eventDeadLetter struct {
 	DeadLetterID string                   `json:"dead_letter_id"`
+	DeliveryID   string                   `json:"delivery_id,omitempty"`
+	ClaimVersion int64                    `json:"claim_version,omitempty"`
 	Failure      runtimefailures.Envelope `json:"failure"`
 	RetryCount   *int                     `json:"retry_count"`
 	ChainDepth   *int                     `json:"chain_depth"`
@@ -623,6 +628,7 @@ func validateEventFull(prefix string, event eventFull) error {
 		{name: "execution_mode", value: event.ExecutionMode},
 		{name: "created_at", value: event.CreatedAt},
 		{name: "source", value: event.Source},
+		{name: "producer_type", value: event.ProducerType},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			return fmt.Errorf("malformed %s: %s is required", prefix, field.name)
@@ -633,6 +639,9 @@ func validateEventFull(prefix string, event eventFull) error {
 	}
 	if event.ExecutionMode != "live" && event.ExecutionMode != "mock" {
 		return fmt.Errorf("malformed %s: execution_mode must be live or mock", prefix)
+	}
+	if event.ProducerType != "node" && event.ProducerType != "agent" && event.ProducerType != "platform" && event.ProducerType != "external" {
+		return fmt.Errorf("malformed %s: producer_type=%q is invalid", prefix, event.ProducerType)
 	}
 	if event.Payload == nil {
 		return fmt.Errorf("malformed %s: payload is required", prefix)
@@ -690,6 +699,9 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 	if delivery.Target == nil {
 		return fmt.Errorf("malformed %s: target is required", prefix)
 	}
+	if err := validateEventDeliveryTarget(prefix+".target", delivery.SubscriberType == "node", *delivery.Target); err != nil {
+		return err
+	}
 	if delivery.RetryCount == nil {
 		return fmt.Errorf("malformed %s: retry_count is required", prefix)
 	}
@@ -721,6 +733,35 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", prefix, i), deadLetter); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateEventDeliveryTarget(prefix string, nodeRecipient bool, target eventDeliveryTarget) error {
+	kind := strings.TrimSpace(target.Kind)
+	flowID := strings.TrimSpace(target.FlowID)
+	flowInstance := strings.TrimSpace(target.FlowInstance)
+	entityID := strings.TrimSpace(target.EntityID)
+	if kind == "" {
+		if nodeRecipient || flowID != "" || flowInstance != "" || entityID != "" {
+			return fmt.Errorf("malformed %s: kind is required for an owned target", prefix)
+		}
+		return nil
+	}
+	if flowID == "" || flowInstance == "" {
+		return fmt.Errorf("malformed %s: flow_id and flow_instance are required", prefix)
+	}
+	switch kind {
+	case "existing_entity", "materializing_entity":
+		if entityID == "" {
+			return fmt.Errorf("malformed %s: entity_id is required for %s", prefix, kind)
+		}
+	case "entityless_receiver":
+		if entityID != "" {
+			return fmt.Errorf("malformed %s: entity_id is forbidden for entityless_receiver", prefix)
+		}
+	default:
+		return fmt.Errorf("malformed %s: kind=%q is invalid", prefix, kind)
 	}
 	return nil
 }
@@ -1053,9 +1094,11 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 		cliDetailField{Key: "execution_mode", Value: event.ExecutionMode},
 		cliDetailField{Key: "created_at", Value: event.CreatedAt},
 		cliDetailField{Key: "source", Value: event.Source},
+		cliDetailField{Key: "producer_type", Value: event.ProducerType},
 		cliDetailField{Key: "run_id", Value: eventObservationDash(event.RunID)},
 		cliDetailField{Key: "entity_id", Value: eventObservationDash(event.EntityID)},
 		cliDetailField{Key: "source_event_id", Value: eventObservationDash(event.SourceEventID)},
+		cliDetailField{Key: "operator_reference_event_id", Value: eventObservationDash(event.OperatorReferenceEventID)},
 	)
 	writeCLIFieldLine(out, cliDetailField{Key: "payload", Value: eventObservationCompactJSON(event.Payload)})
 	if len(event.Deliveries) == 0 {
@@ -1066,6 +1109,7 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 			writeCLIFieldLine(out,
 				cliDetailField{Key: "delivery_id", Value: delivery.DeliveryID},
 				cliDetailField{Key: "subscriber", Value: delivery.SubscriberType + "/" + delivery.SubscriberID},
+				cliDetailField{Key: "target.kind", Value: eventObservationDash(delivery.Target.Kind)},
 				cliDetailField{Key: "target.flow_id", Value: eventObservationDash(delivery.Target.FlowID)},
 				cliDetailField{Key: "target.flow_instance", Value: eventObservationDash(delivery.Target.FlowInstance)},
 				cliDetailField{Key: "target.entity_id", Value: eventObservationDash(delivery.Target.EntityID)},

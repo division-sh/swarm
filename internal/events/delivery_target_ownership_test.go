@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
 func TestDeliveryTargetOwnershipRoundTripsClosedVariants(t *testing.T) {
@@ -92,5 +94,27 @@ func TestNodeDeliveryRouteRequiresTypedTargetOwnership(t *testing.T) {
 	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("receiver")}
 	if _, err := route.Identity(); err == nil || !strings.Contains(err.Error(), "requires typed target ownership") {
 		t.Fatalf("route identity error = %v, want typed target ownership failure", err)
+	}
+}
+
+func TestTargetedAgentDeliveryAcceptsEntitylessReceiverOwnership(t *testing.T) {
+	name, err := agentidentity.DeclaredName("reviewer", "test://delivery-target/reviewer")
+	if err != nil {
+		t.Fatalf("declare agent name: %v", err)
+	}
+	route, err := agentidentity.PresentRoute("review", "one", "review/one")
+	if err != nil {
+		t.Fatalf("declare agent route: %v", err)
+	}
+	identity, err := agentidentity.New(name, route)
+	if err != nil {
+		t.Fatalf("declare agent identity: %v", err)
+	}
+	delivery := DeliveryRoute{
+		Recipient: MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
+		Target: MustEntitylessReceiverTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/one"}),
+	}
+	if _, err := delivery.Identity(); err != nil {
+		t.Fatalf("targeted entityless agent delivery identity: %v", err)
 	}
 }

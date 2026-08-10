@@ -54,8 +54,8 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
-	if passthrough {
-		t.Fatal("Intercept passthrough = true, want consumed event with skipped node execution")
+	if !passthrough {
+		t.Fatal("Intercept passthrough = false, want event-wide interception to leave unstamped node delivery untouched")
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("published events = %d, want 0 without node delivery authority", got)
@@ -179,8 +179,8 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 			if err != nil {
 				t.Fatalf("Intercept: %v", err)
 			}
-			if passthrough {
-				t.Fatal("Intercept passthrough = true, want consumed event with terminal node execution skipped")
+			if !passthrough {
+				t.Fatal("Intercept passthrough = false, want event-wide interception to leave terminal node delivery untouched")
 			}
 			if got := bus.publishedCount(); got != 0 {
 				t.Fatalf("published events = %d, want 0 for terminal node delivery", got)
@@ -254,6 +254,9 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 					},
 				},
 			}
+			node := bundle.Nodes["node-a"]
+			node.EventHandlers = bundle.Semantics.NodeHandlers["node-a"]
+			bundle.Nodes["node-a"] = node
 			module := handlerTestWorkflowModuleWithBundle(bundle, "delivery-retry", "node-a").(*previewWorkflowModule)
 			module.workflow = NewWorkflowDefinition("delivery-retry", []WorkflowStage{
 				{Name: "queued"},
@@ -402,6 +405,9 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 			},
 		},
 	}
+	node := bundle.Nodes["node-a"]
+	node.EventHandlers = bundle.Semantics.NodeHandlers["node-a"]
+	bundle.Nodes["node-a"] = node
 	module := handlerTestWorkflowModuleWithBundle(bundle, "delivery-authority", "node-a").(*previewWorkflowModule)
 	module.workflow = NewWorkflowDefinition("delivery-authority", []WorkflowStage{
 		{Name: "queued"},

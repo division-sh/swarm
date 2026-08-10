@@ -1010,7 +1010,14 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
 	eventID := emitToolResultString(t, out, "event_id")
-	if !emitDeliveryRoutesContain(store.routes[eventID], events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}) {
+	persisted := store.events[eventID]
+	wantRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("test-node"),
+		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+			FlowID: source.WorkflowName(), FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
+		}),
+	}
+	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want typed same-flow node consumer", store.routes[eventID])
 	}
 }
@@ -1109,14 +1116,14 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
 	}),
 	}
-	if got := persisted.TargetRoute().Normalized(); got != wantRoute.Target.Route().Normalized() {
-		t.Fatalf("persisted event target route = %#v, want canonical connect target %#v", got, wantRoute.Target)
+	wantEventTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer"}
+	if got := persisted.TargetRoute().Normalized(); got != wantEventTarget {
+		t.Fatalf("persisted event target route = %#v, want connect address %#v", got, wantEventTarget)
 	}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)

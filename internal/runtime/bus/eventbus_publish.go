@@ -866,22 +866,32 @@ func sameRouteIdentities(left, right []events.RouteIdentity) bool {
 func routeIdentitiesCanBeExactlyCompleted(existing, canonical []events.RouteIdentity) bool {
 	existing = uniqueRouteIdentities(existing)
 	canonical = uniqueRouteIdentities(canonical)
-	if len(existing) == 0 || len(existing) != len(canonical) {
+	if len(existing) == 0 || len(existing) > len(canonical) {
 		return false
 	}
+	canonicalRoutes := make(map[events.RouteIdentity]struct{}, len(canonical))
 	byEntity := make(map[string]events.RouteIdentity, len(canonical))
+	ambiguousEntities := make(map[string]struct{})
 	for _, route := range canonical {
 		route = route.Normalized()
 		if route.EntityID == "" || route.FlowID == "" || route.FlowInstance == "" {
 			return false
 		}
+		canonicalRoutes[route] = struct{}{}
 		if _, duplicate := byEntity[route.EntityID]; duplicate {
-			return false
+			delete(byEntity, route.EntityID)
+			ambiguousEntities[route.EntityID] = struct{}{}
+			continue
 		}
-		byEntity[route.EntityID] = route
+		if _, ambiguous := ambiguousEntities[route.EntityID]; !ambiguous {
+			byEntity[route.EntityID] = route
+		}
 	}
 	for _, route := range existing {
 		route = route.Normalized()
+		if _, exact := canonicalRoutes[route]; exact {
+			continue
+		}
 		if route.EntityID == "" || route.FlowID != "" || route.FlowInstance != "" {
 			return false
 		}

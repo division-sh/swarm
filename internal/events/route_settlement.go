@@ -415,7 +415,10 @@ func (s RouteSettlement) MarshalJSON() ([]byte, error) {
 					Path: candidate.path, AgentIdentity: candidate.agent, Outcome: candidate.outcome.Code(),
 				})
 			}
-			plans = append(plans, settlementPlanWire{PlanID: plan.planID.String(), Resolution: plan.resolution.Code(), Targets: plan.Targets(), Candidates: candidates})
+			plans = append(plans, settlementPlanWire{
+				PlanID: plan.planID.String(), Resolution: plan.resolution.Code(),
+				Targets: append([]RouteIdentity{}, plan.targets...), Candidates: candidates,
+			})
 		}
 		wire.Evaluation = &settlementLedgerWire{Plans: plans}
 	}

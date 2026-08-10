@@ -323,7 +323,7 @@ search_dimensions:
     required_paths:
       - platform-spec.yaml
       - internal/store/internal/backend/delivery/adapter.go
-      - internal/runtime/deliverylifecycle/snapshot_fact.go
+      - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
     canonical_layer: durable_delivery_authority
   - id: delivery_authority_writers
     pattern: 'CommitInitial|commitInitialDeliveryObligationsTx|CommitPublish'
@@ -398,8 +398,10 @@ seam_families:
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/outbox.go
+      - internal/runtime/bus/target_owner_projection.go
+      - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
-    search_dimensions: [route_plan, route_event_key_derivation, event_name_type, delivery_route_model, publish_plan_consumers]
+    search_dimensions: [route_plan, route_event_key_derivation, event_name_type, delivery_route_model, publish_plan_consumers, connect_route_plan, route_plan_source_reason]
     notes: >
       EventBus owns the canonical RoutePlan model, typed delivery intents, and
       materializers. Publish, preflight, transactional, deferred, and outbox
@@ -828,6 +830,7 @@ seam_families:
       - internal/runtime/bus/routing_derivation.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
+      - internal/events/route_settlement_test.go
       - internal/runtime/conformance/template_instance_semantic_ownership_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [typed_connect_recipient_evaluation, connect_route_plan]
@@ -855,6 +858,8 @@ seam_families:
       - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/target_owner_projection.go
+      - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/scalar_template_instance_store_parity_test.go
       - internal/runtime/engine/executor.go
       - internal/runtime/artifact_action_result_delivery_test.go
@@ -969,6 +974,8 @@ seam_families:
       - internal/runtime/bus/route_plan_test.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/target_owner_projection.go
+      - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/eventbus_route_generation_plan_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml

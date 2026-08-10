@@ -78,28 +78,28 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	deliveryQuery := `
 		SELECT COALESCE(status, ''),
 		       COALESCE(reason_code, ''),
-		       COALESCE(delivery_target_route->>'flow_instance', ''),
-		       COALESCE(delivery_target_route->>'entity_id', '')
+		       COALESCE(delivery_target_route->'route'->>'flow_instance', ''),
+		       COALESCE(delivery_target_route->'route'->>'entity_id', '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
-		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $3
-		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4
+		  AND COALESCE(delivery_target_route->'route'->>'flow_instance', '') = $3
+		  AND COALESCE(delivery_target_route->'route'->>'entity_id', '') = $4
 		ORDER BY created_at DESC, delivery_id DESC
 		LIMIT 1`
 	if h.backend == catalogBackendSQLite {
 		deliveryQuery = `
 			SELECT COALESCE(status, ''),
 			       COALESCE(reason_code, ''),
-			       COALESCE(json_extract(delivery_target_route, '$.flow_instance'), ''),
-			       COALESCE(json_extract(delivery_target_route, '$.entity_id'), '')
+			       COALESCE(json_extract(delivery_target_route, '$.route.flow_instance'), ''),
+			       COALESCE(json_extract(delivery_target_route, '$.route.entity_id'), '')
 			FROM event_deliveries
 			WHERE event_id = ?
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = ?
-			  AND COALESCE(json_extract(delivery_target_route, '$.flow_instance'), '') = ?
-			  AND COALESCE(json_extract(delivery_target_route, '$.entity_id'), '') = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.route.flow_instance'), '') = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.route.entity_id'), '') = ?
 			ORDER BY created_at DESC, delivery_id DESC
 			LIMIT 1`
 	}
@@ -119,8 +119,8 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
-		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $3
-		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4`
+		  AND COALESCE(delivery_target_route->'route'->>'flow_instance', '') = $3
+		  AND COALESCE(delivery_target_route->'route'->>'entity_id', '') = $4`
 	if h.backend == catalogBackendSQLite {
 		deliveryCountQuery = `
 			SELECT COUNT(*)
@@ -128,8 +128,8 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 			WHERE event_id = ?
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = ?
-			  AND COALESCE(json_extract(delivery_target_route, '$.flow_instance'), '') = ?
-			  AND COALESCE(json_extract(delivery_target_route, '$.entity_id'), '') = ?`
+			  AND COALESCE(json_extract(delivery_target_route, '$.route.flow_instance'), '') = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.route.entity_id'), '') = ?`
 	}
 	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), deliveryCountQuery, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryCount); err != nil {
 		t.Fatalf("query targeted event deliveries: %v", err)
@@ -166,8 +166,8 @@ func dumpEventDeliveries(t testing.TB, h *runtimeHarness, eventID string) string
 		       COALESCE(subscriber_id, ''),
 		       COALESCE(status, ''),
 		       COALESCE(reason_code, ''),
-		       COALESCE(delivery_target_route->>'flow_instance', ''),
-		       COALESCE(delivery_target_route->>'entity_id', '')
+		       COALESCE(delivery_target_route->'route'->>'flow_instance', ''),
+		       COALESCE(delivery_target_route->'route'->>'entity_id', '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		ORDER BY created_at ASC, delivery_id ASC`
@@ -177,8 +177,8 @@ func dumpEventDeliveries(t testing.TB, h *runtimeHarness, eventID string) string
 			       COALESCE(subscriber_id, ''),
 			       COALESCE(status, ''),
 			       COALESCE(reason_code, ''),
-			       COALESCE(json_extract(delivery_target_route, '$.flow_instance'), ''),
-			       COALESCE(json_extract(delivery_target_route, '$.entity_id'), '')
+			       COALESCE(json_extract(delivery_target_route, '$.route.flow_instance'), ''),
+			       COALESCE(json_extract(delivery_target_route, '$.route.entity_id'), '')
 			FROM event_deliveries
 			WHERE event_id = ?
 			ORDER BY created_at ASC, delivery_id ASC`

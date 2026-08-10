@@ -207,7 +207,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	failedDeliveryEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_failed", nil)
 	failedDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")}, runtimedelivery.StateExhausted, &failedDeliveryEnvelope)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, failedDelivery, now.Add(5*time.Second), now.Add(10*time.Second))
-	successfulDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-success")}, runtimedelivery.StateDelivered, nil)
+	successfulDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, testEntitylessNodeDeliveryRoute("node-success"), runtimedelivery.StateDelivered, nil)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, successfulDelivery, now.Add(15*time.Second), now.Add(20*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
 	report, err := pg.LoadRunDebugReport(ctx, targetRunID, operatorread.RunDebugQueryOptions{

@@ -168,7 +168,7 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 		if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
 			return resolved
 		}
-		if resolved := workflowNodeDirectDeliveryHandlerResolution(source, nodeID, rawEventType, evt.RoutingSource(), route.Target.Route()); resolved.Matched {
+		if resolved := workflowNodeDirectDeliveryHandlerResolution(source, nodeID, rawEventType, route.Target.Route()); resolved.Matched {
 			return resolved
 		}
 		return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("node delivery event %s has no semantic handler or stamped connect claim", rawEventType)}
@@ -179,21 +179,34 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 	return workflowNodeEventHandlerResolution{}
 }
 
-func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nodeID, eventType string, producer events.RoutingSource, target events.RouteIdentity) workflowNodeEventHandlerResolution {
-	producerRoute := producer.Route().Normalized()
+func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nodeID, eventType string, target events.RouteIdentity) workflowNodeEventHandlerResolution {
 	target = target.Normalized()
-	if producerRoute.FlowInstance == "" || producerRoute.FlowInstance != target.FlowInstance {
+	if target.FlowID == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	if target.FlowID != "" && producerRoute.FlowID != target.FlowID {
-		return workflowNodeEventHandlerResolution{}
-	}
-	prefix := eventidentity.Normalize(producerRoute.FlowInstance) + "/"
 	eventType = eventidentity.Normalize(eventType)
+	if resolved := semanticview.ResolveFlowNodeSubscriptionHandler(source, target.FlowID, nodeID, eventType); resolved.Matched {
+		return workflowNodeEventHandlerResolution{
+			Handler:         resolved.Handler,
+			HandlerEventKey: resolved.HandlerEventKey,
+			FlowID:          target.FlowID,
+			Matched:         true,
+		}
+	}
+	prefix := eventidentity.Normalize(target.FlowInstance) + "/"
 	if prefix == "/" || !strings.HasPrefix(eventType, prefix) {
 		return workflowNodeEventHandlerResolution{}
 	}
-	return workflowNodeEventHandlerResolutionForEventType(source, nodeID, strings.TrimPrefix(eventType, prefix))
+	resolved := semanticview.ResolveFlowNodeSubscriptionHandler(source, target.FlowID, nodeID, strings.TrimPrefix(eventType, prefix))
+	if !resolved.Matched {
+		return workflowNodeEventHandlerResolution{}
+	}
+	return workflowNodeEventHandlerResolution{
+		Handler:         resolved.Handler,
+		HandlerEventKey: resolved.HandlerEventKey,
+		FlowID:          target.FlowID,
+		Matched:         true,
+	}
 }
 
 func workflowNodeExactEventHandlerResolution(source semanticview.Source, nodeID, eventType string) workflowNodeEventHandlerResolution {
@@ -720,7 +733,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Cont
 		}
 		return pc.workflowNodeMatchesDeliveryTarget(nodeID, route.Target.Route())
 	}
-	return pc.workflowNodeMatchesDeliveryTarget(nodeID, eventTarget)
+	return false
 }
 
 func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, target events.RouteIdentity) bool {

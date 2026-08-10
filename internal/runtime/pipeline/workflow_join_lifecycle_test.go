@@ -1038,6 +1038,10 @@ func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 		"line_item.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_item_id": {Type: "text"}}}},
 	}
 	root.Events = eventCatalog
+	root.Children[0].Events = eventCatalog
+	root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"join-node": joinNode, "dispatcher": dispatcher,
+	}
 	return &runtimecontracts.WorkflowContractBundle{
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root,

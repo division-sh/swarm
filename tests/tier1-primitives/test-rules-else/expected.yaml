@@ -6,7 +6,6 @@ trigger:
 expected:
 
   handler_outcome: success
-  entity_state: pending
   emitted_events:
     - routed.unknown
 

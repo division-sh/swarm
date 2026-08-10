@@ -1093,8 +1093,8 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		uuid.NewString(),
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
-			{FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")},
-			{FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")},
+			{FlowID: "child-a", FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")},
+			{FlowID: "child-b", FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")},
 		}),
 		time.Now().UTC(),
 	)
@@ -1115,8 +1115,8 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 		t.Fatalf("persisted delivery routes = %#v, want 2 semantic node routes", got)
 	}
 	wantRoutes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("child-a-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")})},
-		{Recipient: events.MustNodeDeliveryRecipient("child-b-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")})},
+		{Recipient: events.MustNodeDeliveryRecipient("child-a-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "child-a", FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")})},
+		{Recipient: events.MustNodeDeliveryRecipient("child-b-listener"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "child-b", FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")})},
 	}
 	for _, wantRoute := range wantRoutes {
 		if !deliveryRoutesContain(store.routes[evt.ID()], wantRoute) {
@@ -1173,8 +1173,8 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 		"",
 		"",
 		events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{
-			{FlowInstance: "worker/w-001", EntityID: workerOneID},
-			{FlowInstance: "worker/w-002", EntityID: workerTwoID},
+			{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerOneID},
+			{FlowID: "worker", FlowInstance: "worker/w-002", EntityID: workerTwoID},
 		}),
 		time.Now().UTC(),
 	)
@@ -1184,8 +1184,8 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	}
 	assertTargetRouteDeliveries(t, ch, workerOneID, workerTwoID)
 	wantRoutes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: workerOneID})},
-		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "worker/w-002", EntityID: workerTwoID})},
+		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerOneID})},
+		{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-002", EntityID: workerTwoID})},
 	}
 	if got := len(store.routes[evt.ID()]); got != len(wantRoutes) {
 		t.Fatalf("persisted delivery routes = %#v, want %d same-node target routes", store.routes[evt.ID()], len(wantRoutes))
@@ -1229,14 +1229,14 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 		0,
 		"",
 		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: workerID}),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerID}),
 		time.Now().UTC(),
 	)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: workerID})}
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("task-handler"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: workerID})}
 	if got := store.routes[evt.ID()]; len(got) != 1 || !deliveryRoutesContain(got, wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want semantic node route %#v", got, wantRoute)
 	}
@@ -1244,7 +1244,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 
 func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")})
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")})
 	source := semanticview.Wrap(routedNodeTemplateBundle())
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1274,6 +1274,7 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 		t.Fatalf("routed recipients = %#v, want targeted lifecycle-orchestrator concrete instance route", plan.RoutedRecipients)
 	}
 	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("lifecycle-orchestrator"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID:       "operating",
 		FlowInstance: "operating/inst-1",
 		EntityID:     eventtest.UUID("ent-operating"),
 	}),
@@ -1292,7 +1293,7 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 
 func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: "worker/w-001", EntityID: runtimeflowidentity.EntityID(eventtest.UUID("worker/w-001"))})
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/w-001", EntityID: runtimeflowidentity.EntityID(eventtest.UUID("worker/w-001"))})
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-dynamic-flow-instance")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -1326,6 +1327,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", resolved)
 	}
 	target := events.RouteIdentity{
+		FlowID:       "worker",
 		FlowInstance: "worker/w-001",
 		EntityID:     runtimeflowidentity.EntityID(eventtest.UUID("worker/w-001")),
 	}
@@ -1371,7 +1373,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 
 func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")})
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("ent-operating")})
 	source := semanticview.Wrap(routedNodeTemplateBundle())
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1410,7 +1412,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "lifecycle-orchestrator" {
 		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator semantic authority", route)
 	}
-	if target := route.Target.Route(); target.FlowID != "" || target.FlowInstance != "operating/inst-1" || target.EntityID != eventtest.UUID("ent-operating") {
+	if target := route.Target.Route(); target.FlowID != "operating" || target.FlowInstance != "operating/inst-1" || target.EntityID != eventtest.UUID("ent-operating") {
 		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
 	}
 
@@ -1425,6 +1427,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		t.Fatalf("replay internal recipients = %#v, want workflow-runtime carrier", internal)
 	}
 	if !deliveryRoutesContain(replayRoutes, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("lifecycle-orchestrator"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID:       "operating",
 		FlowInstance: "operating/inst-1",
 		EntityID:     eventtest.UUID("ent-operating"),
 	}),
@@ -1496,9 +1499,10 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
-			store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: "repo-scaffold/inst-1", EntityID: eventtest.UUID("ent-repo")})
+			store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: eventtest.UUID("ent-repo")})
 			eventID := uuid.NewString()
 			want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+				FlowID:       "repo-scaffold",
 				FlowInstance: "repo-scaffold/inst-1",
 				EntityID:     eventtest.UUID("ent-repo"),
 			}),
@@ -1677,7 +1681,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 
 func TestEventBusPublish_NoTargetScopedRoutedNodePersistsSemanticRouteBeforeInternalCarrier(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: "child", EntityID: eventtest.UUID("ent-child")})
+	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "child", FlowInstance: "child", EntityID: eventtest.UUID("ent-child")})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(routedNodeStaticChildBundle()),
 	})
@@ -1699,6 +1703,7 @@ func TestEventBusPublish_NoTargetScopedRoutedNodePersistsSemanticRouteBeforeInte
 	)
 
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("child-intake"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID:       "child",
 		FlowInstance: "child",
 		EntityID:     eventtest.UUID("ent-child"),
 	}),
@@ -1790,16 +1795,18 @@ func TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCar
 
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(
-		events.RouteIdentity{FlowInstance: "repo-scaffold", EntityID: eventtest.UUID("ent-component")},
-		events.RouteIdentity{FlowInstance: "component-scaffold/component-a", EntityID: eventtest.UUID("ent-component")},
+		events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold", EntityID: eventtest.UUID("ent-component")},
+		events.RouteIdentity{FlowID: "component-scaffold", FlowInstance: "component-scaffold/component-a", EntityID: eventtest.UUID("ent-component")},
 	)
 	eventID := uuid.NewString()
 	wildcardServiceRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID:       "repo-scaffold",
 		FlowInstance: "repo-scaffold",
 		EntityID:     eventtest.UUID("ent-component"),
 	}),
 	}
 	concreteComponentRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("component-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID:       "component-scaffold",
 		FlowInstance: "component-scaffold/component-a",
 		EntityID:     eventtest.UUID("ent-component"),
 	}),

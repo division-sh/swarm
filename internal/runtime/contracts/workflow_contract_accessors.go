@@ -1178,20 +1178,32 @@ func (b *WorkflowContractBundle) nodeEventScope(nodeID string) eventidentity.Sco
 }
 
 func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
-	handler.Emit = b.externalizeEmitSpec(nodeID, handler.Emit)
-	handler.OnSuccess.Emit = b.externalizeEmitSpec(nodeID, handler.OnSuccess.Emit)
+	return b.ExternalizeNodeHandlerForFlow(b.nodeFlowID(nodeID), handler)
+}
+
+// ExternalizeNodeHandlerForFlow resolves authored emit names through one exact
+// flow owner without relying on globally unique node IDs.
+func (b *WorkflowContractBundle) ExternalizeNodeHandlerForFlow(flowID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
+	flowID = strings.TrimSpace(flowID)
+	externalize := func(spec EmitSpec) EmitSpec {
+		spec = cloneEmitSpec(spec)
+		spec.Event = b.ResolveFlowEventReference(flowID, spec.Event)
+		return spec
+	}
+	handler.Emit = externalize(handler.Emit)
+	handler.OnSuccess.Emit = externalize(handler.OnSuccess.Emit)
 	if handler.FanOut != nil {
 		clone := *handler.FanOut
-		clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+		clone.Emit = externalize(clone.Emit)
 		handler.FanOut = &clone
 	}
 	if len(handler.Rules) > 0 {
 		rules := make([]HandlerRuleEntry, 0, len(handler.Rules))
 		for _, rule := range handler.Rules {
-			rule.Emit = b.externalizeEmitSpec(nodeID, rule.Emit)
+			rule.Emit = externalize(rule.Emit)
 			if rule.FanOut != nil {
 				clone := *rule.FanOut
-				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+				clone.Emit = externalize(clone.Emit)
 				rule.FanOut = &clone
 			}
 			rules = append(rules, rule)
@@ -1201,10 +1213,10 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 	if len(handler.OnComplete) > 0 {
 		rules := make([]HandlerRuleEntry, 0, len(handler.OnComplete))
 		for _, rule := range handler.OnComplete {
-			rule.Emit = b.externalizeEmitSpec(nodeID, rule.Emit)
+			rule.Emit = externalize(rule.Emit)
 			if rule.FanOut != nil {
 				clone := *rule.FanOut
-				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+				clone.Emit = externalize(clone.Emit)
 				rule.FanOut = &clone
 			}
 			rules = append(rules, rule)

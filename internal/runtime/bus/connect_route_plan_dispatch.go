@@ -231,7 +231,8 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			if claim != nil {
 				out.ReplyClaims = append(out.ReplyClaims, *claim)
 			}
-			out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromConnectRoutes(routes, routeIntentProducerConnectRoutePlan)...)
+			receiverEvent := plan.ReceiverLocalEvent()
+			out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromConnectRoutes(routes, routeIntentProducerConnectRoutePlan, receiverEvent)...)
 			out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
 			out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
 			continue
@@ -853,7 +854,8 @@ func connectRoutePlanLiveRecipients(routes []runtimepinrouting.ConnectDeliveryRo
 }
 
 func connectRoutePlanDeliveryIntents(plan runtimepinrouting.ConnectRoutePlan, routes, liveRoutes []runtimepinrouting.ConnectDeliveryRoute, routeCreatedInPlan bool) []RoutePlanDeliveryIntent {
-	intents := routePlanDeliveryIntentsFromConnectRoutes(routes, routeIntentProducerConnectRoutePlan)
+	receiverEvent := plan.ReceiverLocalEvent()
+	intents := routePlanDeliveryIntentsFromConnectRoutes(routes, routeIntentProducerConnectRoutePlan, receiverEvent)
 	liveAgents := make(map[agentidentity.Identity]struct{}, len(liveRoutes))
 	for _, route := range runtimepinrouting.NormalizeConnectDeliveryRoutes(liveRoutes) {
 		if route.Recipient.IsAgent() {

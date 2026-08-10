@@ -175,3 +175,38 @@ func TestRouteSettlementStrictDecodeRejectsUnknownAndDualShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestRouteSettlementRoundTripsExplicitEmptyPlanTargets(t *testing.T) {
+	plan, err := NewConnectPlanEvaluation(
+		AdmitConnectPlanIdentity(sha256.Sum256([]byte("no-registration"))),
+		ConnectPlanNoRegistration,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := NewConnectEvaluationLedger([]ConnectPlanEvaluation{plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := NewNoDeliverySettlement(EventWriteNormalPublication, NoDeliveryMatchedNoRecipient, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := json.Marshal(settlement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"targets":[]`) {
+		t.Fatalf("encoded settlement does not preserve explicit empty targets: %s", raw)
+	}
+	var restored RouteSettlement
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatalf("round-trip explicit empty targets: %v", err)
+	}
+	if err := restored.Validate(nil); err != nil {
+		t.Fatalf("restored settlement: %v", err)
+	}
+}

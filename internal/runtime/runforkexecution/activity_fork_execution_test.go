@@ -104,7 +104,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			routingSource := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
 			seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 				t, db, sourceRunID, entityID, sourceRequestEventID, "platform.activity_requested", at,
-				events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}, nil,
+				selectedExecutionEntitylessNodeRoute("test-node"), nil,
 				routingSource,
 				events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), routingSource.Route()),
 			)

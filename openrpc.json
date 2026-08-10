@@ -11549,7 +11549,7 @@
       },
       "EventDeliveryTarget": {
         "additionalProperties": false,
-        "description": "One-way structured projection of the persisted DeliveryRoute target. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.",
+        "description": "One-way structured projection of the persisted DeliveryRoute target. Delivery rows expose kind when a node target owner is present; connect-plan target evidence omits kind because it is a route candidate rather than admitted ownership. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.",
         "properties": {
           "entity_id": {
             "type": "string"
@@ -11558,6 +11558,14 @@
             "type": "string"
           },
           "flow_instance": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "existing_entity",
+              "materializing_entity",
+              "entityless_receiver"
+            ],
             "type": "string"
           }
         },

@@ -47,14 +47,8 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {
 				ID: "node-a",
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"node-a": {
-					"task.completed": {
-						AdvancesTo: "done",
-					},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {AdvancesTo: "done"},
 				},
 			},
 		},

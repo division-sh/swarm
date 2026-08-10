@@ -768,6 +768,7 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []p
 			out = append(out, plannedDeliveryRoute{
 				Recipient: subscriber.Recipient,
 				Target:    target,
+				Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 			})
 		}
 	}
@@ -799,22 +800,19 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	if flowInstance == "" {
 		return nil
 	}
-	routedNodeMatched := false
-	for _, subscriber := range routed {
-		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
-			continue
-		}
-		routedNodeMatched = true
-		break
-	}
-	if !routedNodeMatched {
-		return nil
+	internalRecipientSet := make(map[string]struct{}, len(internalRecipients))
+	for _, recipient := range internalRecipients {
+		internalRecipientSet[recipient] = struct{}{}
 	}
 	out := make([]plannedDeliveryRoute, 0, len(internalRecipients))
-	for _, recipient := range internalRecipients {
+	for _, subscriber := range routed {
+		if _, ok := internalRecipientSet[subscriber.Recipient.ID()]; !ok || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+			continue
+		}
 		out = append(out, plannedDeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(recipient),
+			Recipient: subscriber.Recipient,
 			Target:    routedNodeTargetRoute(evt, flowInstance),
+			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
@@ -826,7 +824,7 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 	if flowInstance == "" || eventType == "" || !strings.HasPrefix(eventType, flowInstance+"/") {
 		return nil
 	}
-	nodeIDs := make(map[string]struct{}, len(routed))
+	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
 		if !routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
 			continue
@@ -834,16 +832,10 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		nodeIDs[subscriber.Recipient.ID()] = struct{}{}
-	}
-	if len(nodeIDs) == 0 {
-		return nil
-	}
-	out := make([]plannedDeliveryRoute, 0, len(nodeIDs))
-	for _, recipient := range sortedStringKeys(nodeIDs) {
 		out = append(out, plannedDeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(recipient),
+			Recipient: subscriber.Recipient,
 			Target:    routedNodeTargetRoute(evt, flowInstance),
+			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
 	return normalizePlannedDeliveryRoutes(out)
@@ -869,7 +861,8 @@ func routedScopedNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscrib
 		}
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: subscriber.Recipient, TargetBlueprint: routedNodeTargetRoute(evt, targetFlowInstance),
-			Producer: routeIntentProducerScopedNodeRoute, Persist: true, AllowStructuralOwner: structural,
+			Handler: routedSubscriberTargetHandler(subscriber, evt.Type()), Producer: routeIntentProducerScopedNodeRoute,
+			Persist: true, AllowStructuralOwner: structural,
 		})
 	}
 	return normalizeRoutePlanDeliveryIntents(out)
@@ -902,6 +895,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 		out = append(out, plannedDeliveryRoute{
 			Recipient: subscriber.Recipient,
 			Target:    routedNodeTargetRoute(evt, path),
+			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
 	return normalizePlannedDeliveryRoutes(out)
@@ -981,7 +975,7 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 	if flowInstance == "" {
 		return nil
 	}
-	nodeIDs := make(map[string]struct{}, len(routed))
+	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
@@ -989,16 +983,10 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		nodeIDs[subscriber.Recipient.ID()] = struct{}{}
-	}
-	if len(nodeIDs) == 0 {
-		return nil
-	}
-	out := make([]plannedDeliveryRoute, 0, len(nodeIDs))
-	for _, recipient := range sortedStringKeys(nodeIDs) {
 		out = append(out, plannedDeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(recipient),
+			Recipient: subscriber.Recipient,
 			Target:    routedNodeTargetRoute(evt, flowInstance),
+			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
@@ -1014,17 +1002,17 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Su
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	rootNodeIDs := routedRootNodeSubscriberIDsForNoTargetEvent(evt, routed)
-	if len(rootNodeIDs) == 0 {
-		return nil
-	}
-	out := make([]plannedDeliveryRoute, 0, len(rootNodeIDs))
-	for _, recipient := range sortedStringKeys(rootNodeIDs) {
+	out := make([]plannedDeliveryRoute, 0, len(routed))
+	for _, subscriber := range routed {
+		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber) {
+			continue
+		}
 		out = append(out, plannedDeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(recipient),
+			Recipient: subscriber.Recipient,
 			Target: events.RouteIdentity{
 				FlowID: strings.TrimSpace(rootFlowID), FlowInstance: strings.TrimSpace(evt.RunID()),
 			},
+			Handler: routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootNodeRoute)
@@ -1041,22 +1029,16 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	if eventType == "" || strings.Contains(eventType, "/") {
 		return nil
 	}
-	nodePaths := make(map[string]string, len(routed))
+	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
 	for _, subscriber := range routed {
 		if !routedRootInputFlowNodeMatchesNoTargetEvent(evt, subscriber) {
 			continue
 		}
-		nodePaths[subscriber.Recipient.ID()] = strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	}
-	if len(nodePaths) == 0 {
-		return nil
-	}
-	out := make([]RoutePlanDeliveryIntent, 0, len(nodePaths))
-	for _, recipient := range sortedStringKeys(nodePaths) {
-		path := nodePaths[recipient]
+		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 		out = append(out, RoutePlanDeliveryIntent{
-			Recipient:       events.MustNodeDeliveryRecipient(recipient),
+			Recipient:       subscriber.Recipient,
 			TargetBlueprint: events.RouteIdentity{FlowID: runtimeflowidentity.SemanticScopeFromFlowInstanceRef(path), FlowInstance: path},
+			Handler:         routedSubscriberTargetHandler(subscriber, evt.Type()),
 			Producer:        routeIntentProducerRootInputFlowNode, Persist: true,
 		})
 	}
@@ -1080,24 +1062,6 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 	return eventType != "" && !strings.Contains(eventType, "/")
 }
 
-func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subscriber) map[string]struct{} {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if eventType == "" {
-		return nil
-	}
-	out := make(map[string]struct{}, len(routed))
-	for _, subscriber := range routed {
-		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber) {
-			continue
-		}
-		out[subscriber.Recipient.ID()] = struct{}{}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
 	if !subscriber.Recipient.IsNode() {
 		return false
@@ -1114,6 +1078,16 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber)
 	}
 	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
 	return matchPattern != "" && !strings.Contains(matchPattern, "*") && eventType == matchPattern
+}
+
+func routedSubscriberTargetHandler(subscriber Subscriber, eventType events.EventType) runtimepipeline.DeliveryTargetHandler {
+	if subscriber.targetHandler.Empty() {
+		return runtimepipeline.DeliveryTargetHandler{}
+	}
+	if localized := strings.TrimSpace(subscriber.LocalizedEvent); localized != "" {
+		return subscriber.targetHandler.ForEvent(events.EventType(localized))
+	}
+	return subscriber.targetHandler.ForEvent(eventType)
 }
 
 func routedNodeInternalSubscriptionAliases(evt events.Event, routed []Subscriber) []string {

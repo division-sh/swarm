@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 )
 
@@ -180,5 +181,123 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 	}
 	if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].AgentIdentity != agentIdentity || !routes[0].Target.Empty() {
 		t.Fatalf("untargeted agent routes = %#v, want exact AgentIdentity with explicit target absence", routes)
+	}
+}
+
+func TestEntitylessAgentTargetConsumesExactActiveIdentity(t *testing.T) {
+	identity := agentidentitytest.Runtime(t, "reviewer", "entityless-target-proof", "review", "one", "review/one")
+	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
+		TargetBlueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}, Persist: true,
+	}}}.Normalized()
+	projection := selectedRunTargetOwnerProjection{
+		agentsAvailable: true,
+		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
+			identity: {Identity: identity},
+		},
+		required: true,
+	}
+
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("resolve entityless agent target: %v", err)
+	}
+	routes := resolved.DeliveryRoutes()
+	if len(routes) != 1 || !routes[0].Target.EntitylessReceiver() || routes[0].Target.Route().FlowInstance != "review/one" {
+		t.Fatalf("resolved routes = %#v, want exact entityless agent target", routes)
+	}
+
+	contradictory := plan
+	contradictory.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), plan.DeliveryIntents...)
+	contradictory.DeliveryIntents[0].TargetBlueprint.FlowInstance = "review/other"
+	if _, err := projection.resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "disagrees with exact agent identity") {
+		t.Fatalf("contradictory agent target error = %v, want exact identity disagreement", err)
+	}
+}
+
+func TestPendingAgentLifecycleConsumesExactMaterializingOwner(t *testing.T) {
+	identity := agentidentitytest.Runtime(t, "reviewer", "materializing-target-proof", "review", "one", "review/one")
+	target := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-future-owner"),
+	}
+	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
+		TargetBlueprint: target, PendingAgentLifecycle: true, AllowStructuralOwner: true, Persist: true,
+	}}}.Normalized()
+	projection := selectedRunTargetOwnerProjection{
+		agentsAvailable: true,
+		descriptors: []ActiveTargetDescriptor{{
+			ID: "review/one", FlowInstance: target.FlowInstance, EntityID: target.EntityID, Materializing: true,
+		}},
+		targetsAvailable: true,
+		required:         true,
+	}
+
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("resolve pending materializing agent target: %v", err)
+	}
+	routes := resolved.DeliveryRoutes()
+	if len(routes) != 1 || !routes[0].Target.MaterializingEntity() || routes[0].Target.Route() != target.Normalized() {
+		t.Fatalf("resolved routes = %#v, want exact materializing agent target %#v", routes, target.Normalized())
+	}
+
+	projection.descriptors[0].Materializing = false
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "requires materializing_entity ownership") {
+		t.Fatalf("existing owner for pending lifecycle error = %v, want materializing ownership rejection", err)
+	}
+}
+
+func TestAdmittedTypedTargetOwnerRemainsAuthoritative(t *testing.T) {
+	agentIdentity := agentidentitytest.Runtime(t, "reviewer", "admitted-target-proof", "review", "one", "review/one")
+	target := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("admitted-target-owner"),
+	}
+	owner := events.MustExistingEntityTarget(target)
+	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
+		TargetBlueprint: target, TargetOwnership: owner, Producer: routeIntentProducerDirectPolicy, Persist: true,
+	}}}.Normalized()
+
+	resolved, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("preserve admitted target owner without current descriptor: %v", err)
+	}
+	if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].Target != owner {
+		t.Fatalf("resolved routes = %#v, want admitted owner %#v", routes, owner)
+	}
+
+	contradictory := plan
+	contradictory.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), plan.DeliveryIntents...)
+	contradictory.DeliveryIntents[0].TargetBlueprint.EntityID = eventtest.UUID("different-target-owner")
+	if _, err := (selectedRunTargetOwnerProjection{required: true}).resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "blueprint and typed owner disagree") {
+		t.Fatalf("contradictory admitted owner error = %v, want exact disagreement", err)
+	}
+}
+
+func TestResolvedTargetOwnerCanonicalizesBlueprintForReplay(t *testing.T) {
+	identity := agentidentitytest.Runtime(t, "reviewer", "target-replay-proof", "review", "one", "review/one")
+	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
+		Recipient:       events.MustAgentDeliveryRecipient("reviewer"),
+		AgentIdentity:   identity,
+		TargetBlueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
+		Persist:         true,
+	}}}.Normalized()
+	projection := selectedRunTargetOwnerProjection{
+		descriptors: []ActiveTargetDescriptor{{
+			ID: "reviewer", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one"),
+		}},
+		required: true,
+	}
+
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("resolve route plan: %v", err)
+	}
+	if resolved.DeliveryIntents[0].TargetBlueprint != resolved.DeliveryIntents[0].TargetOwnership.Route() {
+		t.Fatalf("resolved blueprint = %#v, owner = %#v", resolved.DeliveryIntents[0].TargetBlueprint, resolved.DeliveryIntents[0].TargetOwnership.Route())
+	}
+	if _, err := projection.resolveRoutePlan(resolved); err != nil {
+		t.Fatalf("replay resolved route plan: %v", err)
 	}
 }
