@@ -16,13 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type conversationForkSource struct {
-	SessionID string
-	AgentID   string
-	RunID     string
-	Identity  runtimeagentidentity.Identity
-}
-
 type conversationForkCursor struct {
 	Kind      string `json:"kind"`
 	CreatedAt string `json:"created_at"`
@@ -346,65 +339,15 @@ func defaultConversationForkListOptions(opts runtimerunfork.ConversationForkList
 	return opts, nil
 }
 
-func (s conversationForkStore) loadConversationForkSource(ctx context.Context, sourceSessionID string) (conversationForkSource, error) {
+func (s conversationForkStore) loadConversationForkSource(ctx context.Context, sourceSessionID string) (runtimerunfork.ConversationForkSource, error) {
 	sessionID, err := normalizeUUIDParam(sourceSessionID, "source_session_id")
 	if err != nil {
-		return conversationForkSource{}, err
+		return runtimerunfork.ConversationForkSource{}, err
 	}
-	sources := s.conversationQuerySources()
-	if len(sources) == 0 {
-		return conversationForkSource{}, operatorread.ErrSessionNotFound
+	if s.sources == nil {
+		return runtimerunfork.ConversationForkSource{}, fmt.Errorf("conversation fork source owner is required")
 	}
-	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
-		SELECT
-			session_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, run_id
-		FROM (
-			%s
-		) conversations
-		WHERE session_id = ?
-		LIMIT 2
-	`, strings.Join(sources, "\nUNION ALL\n")), sessionID)
-	if err != nil {
-		return conversationForkSource{}, fmt.Errorf("load conversation fork source: %w", err)
-	}
-	defer rows.Close()
-	items := []conversationForkSource{}
-	for rows.Next() {
-		var item conversationForkSource
-		var identityFields runtimeagentidentity.StorageFields
-		if err := rows.Scan(
-			&item.SessionID,
-			&identityFields.AgentID,
-			&identityFields.NameOwner,
-			&identityFields.NameSource,
-			&identityFields.RoutePresence,
-			&identityFields.FlowScopeKey,
-			&identityFields.FlowInstanceID,
-			&identityFields.FlowInstancePath,
-			&item.RunID,
-		); err != nil {
-			return conversationForkSource{}, err
-		}
-		item.SessionID = strings.TrimSpace(item.SessionID)
-		item.RunID = strings.TrimSpace(item.RunID)
-		item.Identity, err = runtimeagentidentity.FromStorageFields(identityFields)
-		if err != nil {
-			return conversationForkSource{}, fmt.Errorf("load conversation fork source identity: %w", err)
-		}
-		item.AgentID = item.Identity.AgentID()
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return conversationForkSource{}, err
-	}
-	if len(items) == 0 {
-		return conversationForkSource{}, operatorread.ErrSessionNotFound
-	}
-	if len(items) > 1 {
-		return conversationForkSource{}, &operatorread.EntityReadParamError{Field: "source_session_id", Reason: "ambiguous source session"}
-	}
-	return items[0], nil
+	return s.sources.LoadConversationForkSource(ctx, sessionID)
 }
 
 func (s conversationForkStore) resolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runtimerunfork.ConversationForkPointSelector) (runtimerunfork.ConversationForkPointDescriptor, error) {

@@ -7,17 +7,17 @@ import (
 )
 
 func (s *PostgresStore) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return s.runForkPostgresOwner.ListOperatorConversationTurns(ctx, opts)
+	return s.operatorConversationPostgres.ListOperatorConversationTurns(ctx, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return s.runForkSQLiteOwner.ListOperatorConversationTurns(ctx, opts)
+	return s.operatorConversationSQLite.ListOperatorConversationTurns(ctx, opts)
 }
 
 func (s *PostgresStore) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return s.runForkPostgresOwner.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+	return s.operatorConversationPostgres.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }
 
 func (s *SQLiteRuntimeStore) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return s.runForkSQLiteOwner.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+	return s.operatorConversationSQLite.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }

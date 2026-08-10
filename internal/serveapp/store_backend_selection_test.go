@@ -205,7 +205,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || !stores.WorkflowPersistence.Valid() || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.GenericScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.StartupOwnership == nil || stores.AgentConversationReadStore == nil {
+	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || !stores.WorkflowPersistence.Valid() || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.GenericScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.StartupOwnership == nil || stores.AgentReadStore == nil || stores.ConversationReadStore == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
@@ -221,8 +221,8 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite apiCapabilities: %v", err)
 	}
-	if apiCaps.AgentConversations == nil {
-		t.Fatal("sqlite apiCapabilities missing AgentConversations pure operator-read owner")
+	if apiCaps.Agents == nil || apiCaps.Conversations == nil {
+		t.Fatal("sqlite apiCapabilities missing exact agent/conversation read owners")
 	}
 	if apiCaps.BundleCatalog == nil {
 		t.Fatal("sqlite apiCapabilities missing BundleCatalog pure operator-read owner")
@@ -381,7 +381,8 @@ func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadCo
 		{Name: "Database", Classification: "wired_both", Reason: "health.check/readiness pinger is selected on SQLite and Postgres"},
 		{Name: "Runs", Classification: "wired_both", Reason: "run.get/list/diagnose read owner is backend-neutral selected-store surface"},
 		{Name: "Entities", Classification: "wired_both", Reason: "entity.get/list/aggregate read owner is backend-neutral selected-store surface"},
-		{Name: "AgentConversations", Classification: "wired_both", Reason: "agent and conversation read owner was promoted by #1782/#1805"},
+		{Name: "Agents", Classification: "wired_both", Reason: "agent read owner was promoted by #1782/#1805"},
+		{Name: "Conversations", Classification: "wired_both", Reason: "conversation read owner was promoted by #1782/#1805"},
 		{Name: "Observability", Classification: "wired_both", Reason: "event/runtime log/run trace read owner is backend-neutral selected-store surface"},
 		{Name: "RunBundleContext", Classification: "wired_both", Reason: "served event.publish follow-up read context is required on both selected stores"},
 		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},

@@ -320,25 +320,3 @@ func dashboardTimePtr(ts time.Time) *time.Time {
 	value := ts.UTC()
 	return &value
 }
-
-func firstString(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func readInt(value any) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return 0
-	}
-}

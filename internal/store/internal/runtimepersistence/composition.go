@@ -96,26 +96,16 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorObservabilityPostgres = operatorObservability
-	operatorConversation, err := storeoperatorsurface.NewConversationPostgres(backend, store.requireCurrentSchema, store)
+	operatorConversation, err := storeoperatorsurface.NewConversationPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorConversationPostgres = operatorConversation
-	operatorRun, err := storeoperatorsurface.NewRunPostgres(backend, store.requireCurrentSchema, store, operatorObservability)
-	if err != nil {
-		return nil, err
-	}
-	store.operatorRunPostgres = operatorRun
 	operatorEntity, err := storeoperatorsurface.NewEntityPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorEntityPostgres = operatorEntity
-	operatorAgent, err := storeoperatorsurface.NewAgentPostgres(backend, store.requireCurrentSchema, store, operatorConversation, operatorObservability)
-	if err != nil {
-		return nil, err
-	}
-	store.operatorAgentPostgres = operatorAgent
 	routingRules, err := storeroutingrules.NewPostgres(backend)
 	if err != nil {
 		return nil, err
@@ -175,6 +165,11 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
+	operatorAgent, err := storeoperatorsurface.NewAgentPostgres(backend, store.requireCurrentSchema, agentOwner, operatorConversation, nil, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorAgentPostgres = operatorAgent
 	runLifecycle, err := storerunlifecycle.NewPostgres(backend, store.requireCurrentSchema, candidates)
 	if err != nil {
 		return nil, err
@@ -225,13 +220,18 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	store.eventPostgresOwner = eventOwner
 	store.decisionPostgresOwner = decisionOwner
 	store.runLifecyclePostgresOwner = runLifecycle
+	operatorRun, err := storeoperatorsurface.NewRunPostgres(backend, store.requireCurrentSchema, pipelineOwner, timerObligations, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorRunPostgres = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
 		return nil, err
 	}
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner)
+	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation)
 	if err != nil {
 		return nil, err
 	}
@@ -330,26 +330,16 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.operatorObservabilitySQLite = operatorObservability
-	operatorConversation, err := storeoperatorsurface.NewConversationSQLite(backend, store.requireCurrentSchema, store)
+	operatorConversation, err := storeoperatorsurface.NewConversationSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorConversationSQLite = operatorConversation
-	operatorRun, err := storeoperatorsurface.NewRunSQLite(backend, store.requireCurrentSchema, store.now, store, operatorObservability)
-	if err != nil {
-		return nil, err
-	}
-	store.operatorRunSQLite = operatorRun
 	operatorEntity, err := storeoperatorsurface.NewEntitySQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.operatorEntitySQLite = operatorEntity
-	operatorAgent, err := storeoperatorsurface.NewAgentSQLite(backend, store.requireCurrentSchema, store.now, store, operatorConversation, operatorObservability)
-	if err != nil {
-		return nil, err
-	}
-	store.operatorAgentSQLite = operatorAgent
 	activityJournal, err := storeactivityjournal.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -394,6 +384,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
+	operatorAgent, err := storeoperatorsurface.NewAgentSQLite(backend, store.requireCurrentSchema, store.now, agentOwner, operatorConversation, nil, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorAgentSQLite = operatorAgent
 	runLifecycle, err := storerunlifecycle.NewSQLite(backend, store.requireCurrentSchema, candidates, store.now)
 	if err != nil {
 		return nil, err
@@ -444,13 +439,18 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	store.eventSQLiteOwner = eventOwner
 	store.decisionSQLiteOwner = decisionOwner
 	store.runLifecycleSQLiteOwner = runLifecycle
+	operatorRun, err := storeoperatorsurface.NewRunSQLite(backend, store.requireCurrentSchema, store.now, pipelineOwner, timerObligations, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorRunSQLite = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
 		return nil, err
 	}
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, store.now)
+	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, store.now)
 	if err != nil {
 		return nil, err
 	}

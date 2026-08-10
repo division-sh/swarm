@@ -82,6 +82,32 @@ func TestOperatorReadOwnersAreBounded(t *testing.T) {
 	}
 }
 
+func TestOperatorReadOwnersDoNotExportGenericReadAdapters(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	walkProductionGo(t, root, "internal/store/internal/operatorsurface", func(path, source string) {
+		for _, retired := range []string{
+			"type OperatorAgentReadSurface", "type OperatorConversationReadSurface", "type OperatorObservabilityReadSurface",
+			"NewOperatorAgentReadSurface", "NewOperatorConversationReadSurface", "NewOperatorObservabilityReadSurface",
+			"func OperatorConversationQuerySources(", "func SQLiteOperatorConversationQuerySources(",
+		} {
+			if strings.Contains(source, retired) {
+				t.Errorf("generic operator read adapter %s survives in %s", retired, path)
+			}
+		}
+	})
+
+	walkProductionGo(t, root, "internal/store/internal/backend/runforkpersistence", func(path, source string) {
+		for _, foreignOwner := range []string{
+			"ListOperatorConversationTurns", "LoadOperatorPublicConversationTurn",
+			"OperatorConversationQuerySources", "SQLiteOperatorConversationQuerySources",
+		} {
+			if strings.Contains(source, foreignOwner) {
+				t.Errorf("run-fork still interprets public conversation projection %s in %s", foreignOwner, path)
+			}
+		}
+	})
+}
+
 func TestNonAPIReadConsumersUseCanonicalOperatorReadOwner(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	for _, file := range []string{
@@ -160,6 +186,12 @@ func readArchitectureFile(t *testing.T, root, path string) string {
 func walkProductionGo(t *testing.T, root, relative string, visit func(path, source string)) {
 	t.Helper()
 	base := filepath.Join(root, filepath.FromSlash(relative))
+	if _, err := os.Stat(base); err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("stat %s: %v", relative, err)
+	}
 	err := filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err

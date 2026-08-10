@@ -25,7 +25,15 @@ type AgentReader interface {
 	LoadOperatorAgent(context.Context, agentidentity.Identity) (OperatorAgentDetail, error)
 	LoadOperatorAgentDiagnosis(context.Context, agentidentity.Identity, OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error)
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error)
+}
+
+type AgentDeliveryLifecycleReader interface {
+	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
 	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error)
+}
+
+type AgentUsageReader interface {
+	ResolveOperatorAgentIdentity(context.Context, string, string) (agentidentity.Identity, error)
 	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, OperatorAgentUsageOptions) (OperatorAgentUsage, error)
 }
 

@@ -148,10 +148,10 @@ func executeAgentReplay(ctx context.Context, req Request, opts EventReplayHandle
 	if err != nil {
 		return nil, err
 	}
-	if opts.AgentConversations == nil {
+	if opts.AgentIdentities == nil {
 		return nil, errors.New("agent identity resolver is required for agent replay")
 	}
-	identity, err := resolveOperatorAgentIdentityParam(ctx, opts.AgentConversations, req.Params, agentID)
+	identity, err := resolveOperatorAgentIdentityParam(ctx, opts.AgentIdentities, req.Params, agentID)
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -39,6 +40,10 @@ type eventCommitOwner interface {
 	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 }
 
+type conversationForkSourceReader interface {
+	LoadConversationForkSource(context.Context, string) (runtimerunfork.ConversationForkSource, error)
+}
+
 type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
 type persistedAgentProjection = storeagent.PersistedAgentProjection
 
@@ -50,8 +55,6 @@ var projectOperatorConversationSummaryMetadata = storeoperatorsurface.ProjectOpe
 
 func traceTimePtr(value time.Time) *time.Time { return storeoperatorsurface.TraceTimePtr(value) }
 
-var operatorConversationQuerySources = storeoperatorsurface.OperatorConversationQuerySources
-var sqliteOperatorConversationQuerySources = storeoperatorsurface.SQLiteOperatorConversationQuerySources
 var cloneRawMessage = storeoperatorsurface.CloneRawMessage
 var cloneConversationToolCalls = storeoperatorsurface.CloneConversationToolCalls
 var cloneConversationToolResults = storeoperatorsurface.CloneConversationToolResults
@@ -67,6 +70,7 @@ type RunForkPostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent func() error
 	events         eventCommitOwner
+	conversations  conversationForkSourceReader
 }
 
 type RunForkSQLiteOwner struct {
@@ -80,6 +84,7 @@ type RunForkSQLiteOwner struct {
 	requireCurrent func() error
 	nowFn          func() time.Time
 	events         eventCommitOwner
+	conversations  conversationForkSourceReader
 }
 
 func NewPostgres(
@@ -91,8 +96,9 @@ func NewPostgres(
 	effects *storeeffect.EffectPostgresOwner,
 	pipeline *storepipeline.PipelinePostgresOwner,
 	events eventCommitOwner,
+	conversations conversationForkSourceReader,
 ) (*RunForkPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil {
 		return nil, errors.New("run-fork PostgreSQL owner dependencies are required")
 	}
 	return &RunForkPostgresOwner{
@@ -104,6 +110,7 @@ func NewPostgres(
 		backend:                   backend,
 		requireCurrent:            requireCurrent,
 		events:                    events,
+		conversations:             conversations,
 	}, nil
 }
 
@@ -116,9 +123,10 @@ func NewSQLite(
 	effects *storeeffect.EffectSQLiteOwner,
 	pipeline *storepipeline.PipelineSQLiteOwner,
 	events eventCommitOwner,
+	conversations conversationForkSourceReader,
 	now func() time.Time,
 ) (*RunForkSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil {
 		return nil, errors.New("run-fork SQLite owner dependencies are required")
 	}
 	if now == nil {
@@ -134,6 +142,7 @@ func NewSQLite(
 		requireCurrent:          requireCurrent,
 		nowFn:                   now,
 		events:                  events,
+		conversations:           conversations,
 	}, nil
 }
 

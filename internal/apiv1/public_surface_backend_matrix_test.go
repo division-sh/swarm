@@ -1131,54 +1131,42 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 				"agent.diagnose",
 				"agent.get",
 				"agent.list",
+				"conversation.get_turn",
 				"conversation.list",
+				"conversation.list_turns",
 			},
-		},
-		"TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOwner": {
-			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.delivery_diagnostics"},
 		},
 		"TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface": {
 			Backends: []string{"default_sqlite"},
 			Methods:  []string{"agent.delivery_lifecycle"},
 		},
-		"TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres": {
-			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.delivery_lifecycle"},
-		},
-		"TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners": {
-			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.diagnose"},
-		},
 		"TestAgentDiagnoseExactDeliveryPaginationParity": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"agent.diagnose"},
-		},
-		"TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs": {
-			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.get"},
-		},
-		"TestOperatorConversationProjectionBackendParity": {
-			Backends: []string{"default_sqlite", "explicit_postgres"},
-			Methods:  []string{"conversation.get_turn", "conversation.list_turns"},
-		},
-		"TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease": {
-			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.list", "conversation.list"},
 		},
 		"TestSQLiteAgentUsageOwnerBacksSupportedAPISurface": {
 			Backends: []string{"default_sqlite"},
 			Methods:  []string{"agent.usage"},
 		},
-		"TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated": {
+		"TestPostgresAgentConversationOwnerBacksSupportedAPISurface": {
 			Backends: []string{"explicit_postgres"},
-			Methods:  []string{"agent.usage"},
+			Methods: []string{
+				"agent.delivery_diagnostics",
+				"agent.delivery_lifecycle",
+				"agent.diagnose",
+				"agent.get",
+				"agent.list",
+				"agent.usage",
+				"conversation.get_turn",
+				"conversation.list",
+				"conversation.list_turns",
+			},
 		},
 		"TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface": {
 			Backends: []string{"default_sqlite"},
 			Methods:  []string{"bundle.agents", "bundle.get", "bundle.list"},
 		},
-		"TestBundleCatalogReadSurfaceListGetAgentsAndCursor": {
+		"TestPostgresBundleCatalogOwnerBacksSupportedAPISurface": {
 			Backends: []string{"explicit_postgres"},
 			Methods:  []string{"bundle.agents", "bundle.get", "bundle.list"},
 		},
@@ -1210,12 +1198,8 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"mailbox.get", "mailbox.list"},
 		},
-		"TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence": {
-			Backends: []string{"default_sqlite"},
-			Methods:  []string{"run.diagnose", "run.get", "run.list"},
-		},
-		"TestRunAPIReadSurface_LoadAndListRunHeaders": {
-			Backends: []string{"explicit_postgres"},
+		"TestSelectedStoreRunReadHandlersExecuteAcrossBackends": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"run.diagnose", "run.get", "run.list"},
 		},
 		"TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces": {

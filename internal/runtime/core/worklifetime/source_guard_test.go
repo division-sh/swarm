@@ -76,8 +76,8 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/runtime.go|Runtime.Start|1547":                                                                  {asyncSiteCanonicalOwner, "pipeline background nodes acquire runtime leases before launch and settle on exit"},
 	"go|internal/runtime/runtime.go|Runtime.startSystemNodesAndWaitForSubscriptions|1890":                                {asyncSiteCanonicalOwner, "system-node runners acquire standing/runtime ownership and publish readiness before return"},
 	"go|internal/runtime/sessions/heartbeat.go|StartLeaseHeartbeatWithErrorHandler|51":                                   {asyncSiteCanonicalOwner, "the session heartbeat exposes a stop-and-wait owner and cannot outlive it"},
-	"go|internal/serveapp/main.go|Run|1360":                                                                              {asyncSiteCanonicalOwner, "the API listener is admitted under served-process ownership and joined at shutdown"},
-	"go|internal/serveapp/main.go|Run|1364":                                                                              {asyncSiteCanonicalOwner, "the MCP listener is admitted under served-process ownership and joined at shutdown"},
+	"go|internal/serveapp/main.go|Run|1362":                                                                              {asyncSiteCanonicalOwner, "the API listener is admitted under served-process ownership and joined at shutdown"},
+	"go|internal/serveapp/main.go|Run|1366":                                                                              {asyncSiteCanonicalOwner, "the MCP listener is admitted under served-process ownership and joined at shutdown"},
 	"go|internal/serveapp/run_stalled_monitor.go|startServeRunStalledEscalation|51":                                      {asyncSiteCanonicalOwner, "the stalled-run monitor has a process lease and exact stop-and-wait completion"},
 	"go|internal/serveapp/serve_author_activity.go|newServeAuthorActivityFollower|56":                                    {asyncSiteCanonicalOwner, "the author-activity follower has a process lease and exact close/join path"},
 }

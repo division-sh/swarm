@@ -303,6 +303,20 @@ func (a *SessionAuthority) QueryContext(ctx context.Context, query string, args 
 	return conn.QueryContext(ctx, query, args...)
 }
 
+func (a *SessionAuthority) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	a.mu.Lock()
+	tx := a.activeTx
+	conn := a.conn
+	a.mu.Unlock()
+	if tx != nil {
+		return tx.ExecContext(ctx, query, args...)
+	}
+	if conn == nil {
+		return nil, errors.New("PostgreSQL session authority is closed")
+	}
+	return conn.ExecContext(ctx, query, args...)
+}
+
 func (a *SessionAuthority) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return a.queryRowContext(ctx, query, args...)
 }

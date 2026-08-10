@@ -418,10 +418,10 @@ func (s *RunPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, o
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence active deliveries: %w", err)
 	}
 	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
-	if s.runtime == nil {
+	if s.pipeline == nil || s.timers == nil {
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("run debug runtime diagnostics source is required")
 	}
-	pipelineSummary, err := s.runtime.PipelineObligations().SummarizeRun(ctx, runID)
+	pipelineSummary, err := s.pipeline.PipelineObligations().SummarizeRun(ctx, runID)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
 	}
@@ -430,7 +430,7 @@ func (s *RunPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, o
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, err
 	}
-	timerSnapshot, err := s.runtime.ReadTimerObligations(ctx, scope, observedAt)
+	timerSnapshot, err := s.timers.ReadTimerObligations(ctx, scope, observedAt)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: %w", err)
 	}

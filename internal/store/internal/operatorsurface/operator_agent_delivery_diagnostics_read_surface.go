@@ -20,11 +20,7 @@ type agentDeliveryDiagnosticsCursor struct {
 	DeliveryID string `json:"delivery_id"`
 }
 
-func (s *AgentPostgres) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
-	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
-}
-
-func (r *OperatorAgentReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
+func (r *AgentPostgres) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return operatorread.OperatorAgentDeliveryDiagnostics{}, operatorread.ErrAgentNotFound
@@ -37,13 +33,13 @@ func (r *OperatorAgentReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx cont
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, r.source, identity, opts)
+	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, r.delivery, identity, opts)
 	if err != nil {
 		return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 	}
 	return buildAgentDeliveryDiagnostics(identity.AgentID(), counts, failures, deadLetters,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
-			record, found, err := loadPostgresEventIdentity(ctx, r.db, eventID)
+			record, found, err := loadPostgresEventIdentity(ctx, r.backend, eventID)
 			if err != nil {
 				return deliveryLifecycleEventMetadata{}, err
 			}
@@ -58,7 +54,7 @@ func (r *OperatorAgentReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx cont
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
 		},
 		func(deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
-			return r.source.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+			return r.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 
@@ -80,20 +76,20 @@ func defaultOperatorAgentDeliveryDiagnosticsOptions(opts operatorread.OperatorAg
 	return opts
 }
 
-func (r *OperatorAgentReadSurface) requireAgentDeliveryDiagnosticsAccess() error {
-	if r == nil || r.db == nil {
+func (r *AgentPostgres) requireAgentDeliveryDiagnosticsAccess() error {
+	if r == nil || r.backend == nil {
 		return fmt.Errorf("operator agent delivery diagnostics read owner requires postgres store")
 	}
-	return r.source.RequireCurrentSchema()
+	return r.requireCurrentSchema()
 }
 
-func (r *OperatorAgentReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+func (r *AgentPostgres) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, identity agentidentity.Identity) error {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
 		return operatorread.ErrAgentNotFound
 	}
 	var exists bool
-	if err := r.db.QueryRowContext(ctx, `
+	if err := r.backend.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM agents
@@ -208,9 +204,14 @@ func buildAgentDeliveryDiagnostics(
 	return result, nil
 }
 
+type agentDeliveryDiagnosticReader interface {
+	DeliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
+	DeliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
+}
+
 func loadAgentDeliveryDiagnosticSnapshotPages(
 	ctx context.Context,
-	reader OperatorAgentReadSource,
+	reader agentDeliveryDiagnosticReader,
 	identity agentidentity.Identity,
 	opts operatorread.OperatorAgentDeliveryDiagnosticsOptions,
 ) (runtimedelivery.AgentDiagnosticCounts, runtimedelivery.SnapshotPage, runtimedelivery.SnapshotPage, error) {

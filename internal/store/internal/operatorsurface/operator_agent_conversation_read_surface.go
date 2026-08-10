@@ -13,59 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
 )
-
-type OperatorAgentReadSource interface {
-	ConversationRuntimeSource
-	RequireCurrentSchema() error
-	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
-	ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
-	ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error)
-	ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
-	DeliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
-	DeliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
-	DeliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
-	LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]operatorread.OperatorDeadLetterRecord, error)
-}
-
-type OperatorConversationReadSource interface {
-	RequireCurrentSchema() error
-	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
-}
-
-type operatorConversationQueryer interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-type OperatorAgentReadSurface struct {
-	db        operatorConversationQueryer
-	source    OperatorAgentReadSource
-	turnLimit int
-}
-
-func NewOperatorAgentReadSurface(db operatorConversationQueryer, source OperatorAgentReadSource, turnLimit int) *OperatorAgentReadSurface {
-	if db == nil || source == nil {
-		return nil
-	}
-	return &OperatorAgentReadSurface{db: db, source: source, turnLimit: maxStoreInt(turnLimit, 0)}
-}
-
-type OperatorConversationReadSurface struct {
-	db     operatorConversationQueryer
-	source OperatorConversationReadSource
-}
-
-func NewOperatorConversationReadSurface(db operatorConversationQueryer, source OperatorConversationReadSource) *OperatorConversationReadSurface {
-	if db == nil || source == nil {
-		return nil
-	}
-	return &OperatorConversationReadSurface{db: db, source: source}
-}
 
 func cloneRawMessage(in json.RawMessage) json.RawMessage {
 	if in == nil {
@@ -133,29 +83,13 @@ type operatorRowScanner interface {
 	Scan(dest ...any) error
 }
 
-func (s *AgentPostgres) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
-	return NewOperatorAgentReadSurface(s.backend, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
-}
-
-func (s *AgentPostgres) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
-	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgent(ctx, identity)
-}
-
-func (s *AgentPostgres) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
-	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
-}
-
-func (s *ConversationPostgres) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
-	return NewOperatorConversationReadSurface(s.backend, s).ListOperatorConversations(ctx, opts)
-}
-
-func (r *OperatorAgentReadSurface) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
+func (r *AgentPostgres) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
 	if err := r.requireAgentAccess(); err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
 	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
 	opts.Role = strings.TrimSpace(opts.Role)
-	baseRows, err := r.source.LoadAgents(ctx)
+	baseRows, err := r.runtime.LoadAgents(ctx)
 	if err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
@@ -179,7 +113,7 @@ func (r *OperatorAgentReadSurface) ListOperatorAgents(ctx context.Context, opts 
 		if !ok {
 			return operatorread.OperatorAgentListResult{}, fmt.Errorf("missing agent operator projection: %s", identity.Description())
 		}
-		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, r.turnLimit))
+		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, opts.TurnLimit))
 	}
 	if agents == nil {
 		agents = []operatorread.OperatorAgentSummary{}
@@ -187,7 +121,7 @@ func (r *OperatorAgentReadSurface) ListOperatorAgents(ctx context.Context, opts 
 	return operatorread.OperatorAgentListResult{Agents: agents}, nil
 }
 
-func (r *OperatorAgentReadSurface) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
+func (r *AgentPostgres) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
@@ -208,7 +142,7 @@ func (r *OperatorAgentReadSurface) LoadOperatorAgent(ctx context.Context, identi
 	return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
 }
 
-func (r *OperatorAgentReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
+func (r *AgentPostgres) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
 	detail, err := r.LoadOperatorAgent(ctx, identity)
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
@@ -217,7 +151,7 @@ func (r *OperatorAgentReadSurface) LoadOperatorAgentDiagnosis(ctx context.Contex
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
-	queue, err := r.source.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
+	queue, err := r.delivery.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: identity,
 		Limit:         opts.QueueLimit,
 		Cursor:        opts.QueueCursor,
@@ -232,7 +166,7 @@ func (r *OperatorAgentReadSurface) LoadOperatorAgentDiagnosis(ctx context.Contex
 	return diagnosis, nil
 }
 
-func (r *OperatorConversationReadSurface) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
+func (r *ConversationPostgres) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
 	if err := r.requireConversationAccess(); err != nil {
 		return operatorread.OperatorConversationListResult{}, err
 	}
@@ -276,7 +210,7 @@ func (r *OperatorConversationReadSurface) ListOperatorConversations(ctx context.
 		)`, nTime, nTime, nSession))
 	}
 	limitArg := add(opts.Limit + 1)
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.backend.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
 			conversations.session_id,
 			conversations.agent_id,
@@ -338,34 +272,26 @@ func (r *OperatorConversationReadSurface) ListOperatorConversations(ctx context.
 	return operatorread.OperatorConversationListResult{Conversations: conversations, NextCursor: nextCursor}, nil
 }
 
-func (r *OperatorConversationReadSurface) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
-	return r.source.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (r *OperatorConversationReadSurface) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
-	return r.source.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
-func (r *OperatorAgentReadSurface) requireAgentAccess() error {
-	if r == nil || r.db == nil || r.source == nil {
+func (r *AgentPostgres) requireAgentAccess() error {
+	if r == nil || r.backend == nil || r.runtime == nil || r.conversation == nil || r.delivery == nil || r.deadLetters == nil {
 		return fmt.Errorf("operator agent read surface requires postgres store")
 	}
-	return r.source.RequireCurrentSchema()
+	return r.requireCurrentSchema()
 }
 
-func (r *OperatorConversationReadSurface) requireConversationAccess() error {
-	if r == nil || r.db == nil || r.source == nil {
+func (r *ConversationPostgres) requireConversationAccess() error {
+	if r == nil || r.backend == nil {
 		return fmt.Errorf("operator conversation read surface requires postgres store")
 	}
-	return r.source.RequireCurrentSchema()
+	return r.requireCurrentSchema()
 }
 
-func (r *OperatorConversationReadSurface) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
-	return loadOperatorLatestConversationTurn(ctx, r.source, sessionID)
+func (r *ConversationPostgres) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	return r.projection().loadLatestPublicConversationTurn(ctx, sessionID)
 }
 
-func (r *OperatorAgentReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
-	rows, err := r.db.QueryContext(ctx, `
+func (r *AgentPostgres) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
+	rows, err := r.backend.QueryContext(ctx, `
 			SELECT
 			a.agent_id,
 			a.agent_name_owner,
@@ -453,7 +379,7 @@ func (r *OperatorAgentReadSurface) loadAgentOperatorProjections(ctx context.Cont
 			return nil, err
 		}
 		if projection.SessionID != "" {
-			turn, err := loadOperatorLatestConversationTurn(ctx, r.source, projection.SessionID)
+			turn, err := loadOperatorLatestConversationTurn(ctx, r.conversation, projection.SessionID)
 			if err != nil {
 				return nil, fmt.Errorf("load latest agent turn: %w", err)
 			}
@@ -469,11 +395,11 @@ func (r *OperatorAgentReadSurface) loadAgentOperatorProjections(ctx context.Cont
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read agent operator projection rows: %w", err)
 	}
-	factsByAgent, err := r.source.ListPendingAgentDeliveryFacts(ctx, identities, time.Time{})
+	factsByAgent, err := r.delivery.ListPendingAgentDeliveryFacts(ctx, identities, time.Time{})
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.source.ListAgentDeliveryLifecycleFacts(ctx, identities)
+	lifecycleByAgent, err := r.delivery.ListAgentDeliveryLifecycleFacts(ctx, identities)
 	if err != nil {
 		return nil, err
 	}
@@ -914,10 +840,6 @@ func operatorConversationQuerySources() []string {
 				%s
 			) task_conversations
 		`, CanonicalStatelessConversationVisibilitySourceSQL())}
-}
-
-func OperatorConversationQuerySources() []string {
-	return operatorConversationQuerySources()
 }
 
 func CloneRawMessage(in json.RawMessage) json.RawMessage {
