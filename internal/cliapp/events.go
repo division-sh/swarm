@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -85,6 +86,7 @@ type eventFull struct {
 	Source        string            `json:"source"`
 	Payload       map[string]any    `json:"payload"`
 	Deliveries    []eventDelivery   `json:"deliveries"`
+	NoDelivery    *eventNoDelivery  `json:"no_delivery,omitempty"`
 	DeadLetters   []eventDeadLetter `json:"dead_letters"`
 }
 
@@ -92,6 +94,7 @@ type eventDelivery struct {
 	DeliveryID     string                    `json:"delivery_id"`
 	SubscriberType string                    `json:"subscriber_type"`
 	SubscriberID   string                    `json:"subscriber_id"`
+	Target         *eventDeliveryTarget      `json:"target"`
 	Status         string                    `json:"status"`
 	SessionID      string                    `json:"session_id,omitempty"`
 	ReasonCode     string                    `json:"reason_code,omitempty"`
@@ -103,6 +106,79 @@ type eventDelivery struct {
 	StartedAt      string                    `json:"started_at,omitempty"`
 	FinishedAt     string                    `json:"finished_at,omitempty"`
 	DeadLetters    []eventDeadLetter         `json:"dead_letters,omitempty"`
+}
+
+type eventDeliveryTarget struct {
+	FlowID       string `json:"flow_id,omitempty"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityID     string `json:"entity_id,omitempty"`
+}
+
+type eventNoDelivery struct {
+	Reason string                       `json:"reason"`
+	Plans  []eventConnectPlanEvaluation `json:"plans"`
+}
+
+type eventConnectPlanEvaluation struct {
+	PlanSHA256 string                          `json:"plan_sha256"`
+	Resolution string                          `json:"resolution"`
+	Targets    []eventDeliveryTarget           `json:"targets"`
+	Candidates []eventConnectCandidateEvidence `json:"candidates"`
+}
+
+type eventConnectCandidateEvidence struct {
+	ReceiverSHA256 string `json:"receiver_sha256"`
+	RecipientKind  string `json:"recipient_kind"`
+	RecipientID    string `json:"recipient_id"`
+	Path           string `json:"path,omitempty"`
+	AgentIdentity  string `json:"agent_identity,omitempty"`
+	Outcome        string `json:"outcome"`
+}
+
+func strictEventJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
+func (e *eventFull) UnmarshalJSON(raw []byte) error {
+	type wire eventFull
+	return strictEventJSON(raw, (*wire)(e))
+}
+
+func (d *eventDelivery) UnmarshalJSON(raw []byte) error {
+	type wire eventDelivery
+	return strictEventJSON(raw, (*wire)(d))
+}
+
+func (t *eventDeliveryTarget) UnmarshalJSON(raw []byte) error {
+	type wire eventDeliveryTarget
+	return strictEventJSON(raw, (*wire)(t))
+}
+
+func (d *eventNoDelivery) UnmarshalJSON(raw []byte) error {
+	type wire eventNoDelivery
+	return strictEventJSON(raw, (*wire)(d))
+}
+
+func (p *eventConnectPlanEvaluation) UnmarshalJSON(raw []byte) error {
+	type wire eventConnectPlanEvaluation
+	return strictEventJSON(raw, (*wire)(p))
+}
+
+func (e *eventConnectCandidateEvidence) UnmarshalJSON(raw []byte) error {
+	type wire eventConnectCandidateEvidence
+	return strictEventJSON(raw, (*wire)(e))
 }
 
 type eventDeadLetter struct {
@@ -564,6 +640,17 @@ func validateEventFull(prefix string, event eventFull) error {
 	if event.Deliveries == nil {
 		return fmt.Errorf("malformed %s: deliveries is required", prefix)
 	}
+	if len(event.Deliveries) == 0 && event.NoDelivery == nil {
+		return fmt.Errorf("malformed %s: no_delivery is required when deliveries is empty", prefix)
+	}
+	if len(event.Deliveries) > 0 && event.NoDelivery != nil {
+		return fmt.Errorf("malformed %s: delivery and no_delivery arms are mutually exclusive", prefix)
+	}
+	if event.NoDelivery != nil {
+		if err := validateEventNoDelivery(prefix+".no_delivery", *event.NoDelivery); err != nil {
+			return err
+		}
+	}
 	if event.DeadLetters == nil {
 		return fmt.Errorf("malformed %s: dead_letters is required", prefix)
 	}
@@ -600,6 +687,9 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 	if _, ok := eventObservationValidDeliveryStatuses[strings.TrimSpace(delivery.Status)]; !ok {
 		return fmt.Errorf("malformed %s: status=%q is not a valid DeliveryStatus", prefix, delivery.Status)
 	}
+	if delivery.Target == nil {
+		return fmt.Errorf("malformed %s: target is required", prefix)
+	}
 	if delivery.RetryCount == nil {
 		return fmt.Errorf("malformed %s: retry_count is required", prefix)
 	}
@@ -633,6 +723,55 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 		}
 	}
 	return nil
+}
+
+func validateEventNoDelivery(prefix string, disposition eventNoDelivery) error {
+	validReasons := map[string]struct{}{
+		"matched_no_recipient": {}, "resolution_blocked": {}, "declared_consumer_no_plan": {}, "no_subscriber_by_design": {},
+	}
+	if _, ok := validReasons[disposition.Reason]; !ok {
+		return fmt.Errorf("malformed %s: reason=%q is invalid", prefix, disposition.Reason)
+	}
+	if disposition.Plans == nil {
+		return fmt.Errorf("malformed %s: plans is required", prefix)
+	}
+	validResolutions := map[string]struct{}{
+		"resolved": {}, "runtime_resolution_required": {}, "resolution_blocker": {}, "no_registration": {},
+	}
+	validOutcomes := map[string]struct{}{"accepted": {}, "pin_mismatch": {}, "path_mismatch": {}}
+	for index, plan := range disposition.Plans {
+		planPrefix := fmt.Sprintf("%s.plans[%d]", prefix, index)
+		if !validSHA256(plan.PlanSHA256) {
+			return fmt.Errorf("malformed %s: plan_sha256 is invalid", planPrefix)
+		}
+		if _, ok := validResolutions[plan.Resolution]; !ok {
+			return fmt.Errorf("malformed %s: resolution=%q is invalid", planPrefix, plan.Resolution)
+		}
+		if plan.Targets == nil || plan.Candidates == nil {
+			return fmt.Errorf("malformed %s: targets and candidates are required", planPrefix)
+		}
+		for candidateIndex, candidate := range plan.Candidates {
+			candidatePrefix := fmt.Sprintf("%s.candidates[%d]", planPrefix, candidateIndex)
+			if !validSHA256(candidate.ReceiverSHA256) || strings.TrimSpace(candidate.RecipientID) == "" {
+				return fmt.Errorf("malformed %s: receiver and recipient identity are required", candidatePrefix)
+			}
+			if candidate.RecipientKind != "node" && candidate.RecipientKind != "agent" {
+				return fmt.Errorf("malformed %s: recipient_kind=%q is invalid", candidatePrefix, candidate.RecipientKind)
+			}
+			if _, ok := validOutcomes[candidate.Outcome]; !ok {
+				return fmt.Errorf("malformed %s: outcome=%q is invalid", candidatePrefix, candidate.Outcome)
+			}
+		}
+	}
+	return nil
+}
+
+func validSHA256(raw string) bool {
+	if len(raw) != 64 || raw != strings.ToLower(raw) {
+		return false
+	}
+	decoded, err := hex.DecodeString(raw)
+	return err == nil && len(decoded) == 32
 }
 
 func validateEventDeadLetter(prefix string, deadLetter eventDeadLetter) error {
@@ -927,6 +1066,9 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 			writeCLIFieldLine(out,
 				cliDetailField{Key: "delivery_id", Value: delivery.DeliveryID},
 				cliDetailField{Key: "subscriber", Value: delivery.SubscriberType + "/" + delivery.SubscriberID},
+				cliDetailField{Key: "target.flow_id", Value: eventObservationDash(delivery.Target.FlowID)},
+				cliDetailField{Key: "target.flow_instance", Value: eventObservationDash(delivery.Target.FlowInstance)},
+				cliDetailField{Key: "target.entity_id", Value: eventObservationDash(delivery.Target.EntityID)},
 				cliDetailField{Key: "status", Value: formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status)},
 				cliDetailField{Key: "session_id", Value: eventObservationDash(delivery.SessionID)},
 				cliDetailField{Key: "created_at", Value: eventObservationDash(delivery.CreatedAt)},
@@ -942,6 +1084,18 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 			for _, deadLetter := range delivery.DeadLetters {
 				writeEventDeadLetterLine(out, "    delivery_dead_letter", deadLetter)
 			}
+		}
+	}
+	if event.NoDelivery != nil {
+		writeCLIFieldLine(out, cliDetailField{Key: "no_delivery.reason", Value: event.NoDelivery.Reason})
+		for index, plan := range event.NoDelivery.Plans {
+			prefix := fmt.Sprintf("no_delivery.plans[%d]", index)
+			writeCLIFieldLine(out,
+				cliDetailField{Key: prefix + ".plan_sha256", Value: plan.PlanSHA256},
+				cliDetailField{Key: prefix + ".resolution", Value: plan.Resolution},
+				cliDetailField{Key: prefix + ".targets", Value: fmt.Sprintf("%d", len(plan.Targets))},
+				cliDetailField{Key: prefix + ".candidates", Value: fmt.Sprintf("%d", len(plan.Candidates))},
+			)
 		}
 	}
 	if len(event.DeadLetters) == 0 {

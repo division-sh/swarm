@@ -30,6 +30,7 @@ type directRecipientTransactionalStore struct {
 	mu            sync.Mutex
 	descriptors   []runtimebus.ActiveAgentDescriptor
 	events        []events.Event
+	settlements   map[string]events.RouteSettlement
 	deliveries    map[string][]string
 	routes        map[string][]events.DeliveryRoute
 	deadLetterErr error
@@ -218,7 +219,7 @@ func (s *directRecipientTransactionalStore) ListEventDeliveryRoutes(_ context.Co
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
-func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, event := range s.events {
@@ -226,9 +227,17 @@ func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(_ context.C
 			continue
 		}
 		admitted, err := events.RevalidatePersistedEvent(event)
-		return admitted, err == nil, err
+		if err != nil {
+			return runtimebus.PreparedPublishEvent{}, false, err
+		}
+		routes := append([]events.DeliveryRoute(nil), s.routes[event.ID()]...)
+		settlement := s.settlements[event.ID()]
+		if err := settlement.Validate(routes); err != nil {
+			return runtimebus.PreparedPublishEvent{}, false, err
+		}
+		return runtimebus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
 	}
-	return events.AdmittedEvent{}, false, nil
+	return runtimebus.PreparedPublishEvent{}, false, nil
 }
 
 func (*directRecipientTransactionalStore) SupportsPersistedReplay() bool { return true }
@@ -254,6 +263,9 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 	if s.routes == nil {
 		s.routes = map[string][]events.DeliveryRoute{}
 	}
+	if s.settlements == nil {
+		s.settlements = map[string]events.RouteSettlement{}
+	}
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}
 	}
@@ -264,6 +276,7 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 		s.receipts = map[string]runtimepipelineobligation.DispositionKind{}
 	}
 	s.routes[eventID] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
+	s.settlements[eventID] = command.Commit.RouteSettlement
 	s.scopes[eventID] = command.Commit.ReplayScope
 	if command.Commit.Disposition != nil {
 		s.receipts[eventID] = command.Commit.Disposition.Kind()

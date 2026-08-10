@@ -18,12 +18,12 @@ import (
 
 // These forwarding methods expose raw transaction hooks only to same-package
 // atomicity fixtures. They are absent from every production method set.
-func (s *PostgresStore) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.eventPostgresOwner.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted)
+func (s *PostgresStore) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.eventPostgresOwner.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted, settlement)
 }
 
-func (s *SQLiteRuntimeStore) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.eventSQLiteOwner.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted)
+func (s *SQLiteRuntimeStore) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.eventSQLiteOwner.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted, settlement)
 }
 
 func (s *PostgresStore) RequirePipelinePublicationClaimTx(ctx context.Context, tx *sql.Tx, eventID string, claim runtimepipelineobligation.Claim) error {

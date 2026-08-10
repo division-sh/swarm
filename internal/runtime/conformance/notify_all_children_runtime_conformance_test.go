@@ -1005,7 +1005,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 	}
 }
 
-func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *testing.T) {
+func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminalizesEntity(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
@@ -1026,7 +1026,7 @@ func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *
 			},
 		},
 	} {
-		for _, cardinality := range []int{2, 3} {
+		for _, cardinality := range []int{1, 2, 3} {
 			t.Run(fmt.Sprintf("%s/n=%d", tc.name, cardinality), func(t *testing.T) {
 				ctx := testAuthorActivityContext(context.Background())
 				backend, db := tc.setup(t)
@@ -1094,6 +1094,7 @@ func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *
 					instancePath := descriptors[accountID].FlowInstance
 					waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
 					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, instancePath, "delivered")
+					assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, instancePath)
 					waitNotifyAllChildrenAgentAbsent(t, runtime.manager, instancePath)
 				}
 				assertNotifyAllChildrenCompletedTurns(t, ctx, backend, db, runID, cardinality)
@@ -1104,6 +1105,34 @@ func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *
 				}
 			})
 		}
+	}
+}
+
+func assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t testing.TB, ctx context.Context, db *sql.DB, backend, runID, flowInstance string) {
+	t.Helper()
+	query := `
+		SELECT COUNT(*)
+		FROM events e
+		JOIN event_deliveries d ON d.event_id = e.event_id
+		WHERE e.run_id = ?
+		  AND e.produced_by_type = 'agent'
+		  AND e.produced_by = 'account-worker'
+		  AND e.flow_instance = ?
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = 'account-node'
+		  AND d.status = 'delivered'
+		  AND e.route_settlement IS NOT NULL`
+	args := []any{runID, flowInstance}
+	if backend == "postgres" {
+		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
+		query = strings.Replace(query, "e.flow_instance = ?", "e.flow_instance = $2", 1)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		t.Fatalf("query template-agent same-instance delivery settlement: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("template-agent settled node deliveries for %s = %d, want exactly one", flowInstance, count)
 	}
 }
 

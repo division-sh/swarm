@@ -79,6 +79,12 @@ func (c PublicationCommand) Validate() error {
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
+	if err := c.Commit.ValidateRouteSettlement(); err != nil {
+		return err
+	}
+	if c.Commit.RouteSettlement.WriteClass() != events.EventWriteNormalPublication {
+		return fmt.Errorf("publication command requires normal publication settlement")
+	}
 	if c.HasAuthorScope {
 		if c.AuthorScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) == "" || strings.TrimSpace(c.AuthorScope.BundleHash) == "" {
 			return fmt.Errorf("publication author scope requires exact runtime and bundle identity")
@@ -158,7 +164,13 @@ type CommittedFlowInstanceActivation = runtimepipeline.CommittedFlowInstanceActi
 // exposing a query handle. It exists so duplicate planning can reuse stamped
 // route identity instead of consulting changed topology.
 type PreparedPublishEventReader interface {
-	LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error)
+	LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error)
+}
+
+type PreparedPublishEvent struct {
+	Event          events.AdmittedEvent
+	Settlement     events.RouteSettlement
+	DeliveryRoutes []events.DeliveryRoute
 }
 
 type EventAppendOutcome uint8
@@ -174,6 +186,7 @@ const (
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
 	Event             events.AdmittedEvent
+	RouteSettlement   events.RouteSettlement
 	DeliveryRoutes    []events.DeliveryRoute
 	DeliveryAuthority runtimedelivery.ExecutionAuthority
 	ReplayScope       runtimepipelineobligation.CommittedScope
@@ -182,6 +195,10 @@ type CommitPublishRequest struct {
 	DeadLetter        *runtimedeadletters.Record
 	ReplyCreations    []runtimereplycontext.Record
 	ReplyClaims       []runtimereplycontext.ClaimCommand
+}
+
+func (r CommitPublishRequest) ValidateRouteSettlement() error {
+	return r.RouteSettlement.Validate(r.DeliveryRoutes)
 }
 
 type CommitSelectedForkEventRequest struct {
@@ -316,9 +333,6 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 		instanceID = runtimeflowidentity.LogicalInstanceID(flowInstance)
 	}
 	entityID := strings.TrimSpace(d.EntityID)
-	if entityID == "" && flowInstance != "" {
-		entityID = runtimeflowidentity.EntityID(flowInstance)
-	}
 	return ActiveFlowInstanceDescriptor{
 		InstanceID:      instanceID,
 		EntityID:        entityID,
@@ -364,16 +378,20 @@ type ActiveTargetDescriptor struct {
 
 func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 	flowInstance := strings.Trim(strings.TrimSpace(d.FlowInstance), "/")
-	entityID := strings.TrimSpace(d.EntityID)
-	if entityID == "" && flowInstance != "" {
-		entityID = runtimeflowidentity.EntityID(flowInstance)
-	}
 	return ActiveTargetDescriptor{
 		ID:            strings.TrimSpace(d.ID),
-		EntityID:      entityID,
+		EntityID:      strings.TrimSpace(d.EntityID),
 		FlowInstance:  flowInstance,
 		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
 	}
+}
+
+// SelectedRunTargetOwnerLister exposes exact receiver ownership rows from the
+// selected run. It is deliberately separate from template route descriptors:
+// static and root owners come from entity_state, while template descriptors
+// additionally carry readiness and address evidence.
+type SelectedRunTargetOwnerLister interface {
+	ListSelectedRunTargetOwners(ctx context.Context) ([]ActiveTargetDescriptor, error)
 }
 
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {

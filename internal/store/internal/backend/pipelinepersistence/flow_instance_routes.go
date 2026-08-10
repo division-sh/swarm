@@ -797,6 +797,72 @@ func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Cont
 	return scanExactActiveFlowInstanceDescriptors(rows, runID, "sqlite active flow instance descriptor")
 }
 
+func (s *PipelinePostgresOwner) ListSelectedRunTargetOwners(ctx context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres store is required for selected-run target owners")
+	}
+	runID, err := activeFlowInstanceDescriptorRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT es.entity_id::text, es.flow_instance
+		FROM entity_state es
+		JOIN runs run ON run.run_id = es.run_id
+		WHERE es.run_id = $1::uuid
+		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
+		ORDER BY es.flow_instance ASC, es.entity_id ASC
+	`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list selected-run target owners: %w", err)
+	}
+	return scanSelectedRunTargetOwners(rows, "selected-run target owner")
+}
+
+func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwners(ctx context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for selected-run target owners")
+	}
+	runID, err := activeFlowInstanceDescriptorRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT es.entity_id, es.flow_instance
+		FROM entity_state es
+		JOIN runs run ON run.run_id = es.run_id
+		WHERE es.run_id = ?
+		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
+		ORDER BY es.flow_instance ASC, es.entity_id ASC
+	`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list sqlite selected-run target owners: %w", err)
+	}
+	return scanSelectedRunTargetOwners(rows, "sqlite selected-run target owner")
+}
+
+func scanSelectedRunTargetOwners(rows *sql.Rows, label string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	defer rows.Close()
+	out := []runtimebus.ActiveTargetDescriptor{}
+	for rows.Next() {
+		var entityID, flowInstance string
+		if err := rows.Scan(&entityID, &flowInstance); err != nil {
+			return nil, fmt.Errorf("scan %s: %w", label, err)
+		}
+		descriptor := (runtimebus.ActiveTargetDescriptor{
+			ID: flowInstance, EntityID: entityID, FlowInstance: flowInstance,
+		}).Normalized()
+		if descriptor.EntityID == "" || descriptor.FlowInstance == "" {
+			return nil, fmt.Errorf("%s is missing exact entity and flow-instance identity", label)
+		}
+		out = append(out, descriptor)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %ss: %w", label, err)
+	}
+	return out, nil
+}
+
 func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	defer rows.Close()
 	out := []runtimebus.ActiveFlowInstanceDescriptor{}

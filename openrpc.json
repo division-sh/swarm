@@ -11406,6 +11406,80 @@
         ],
         "type": "object"
       },
+      "EventConnectCandidateEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_identity": {
+            "description": "One-way concrete agent identity description; never parsed as authority.",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "accepted",
+              "pin_mismatch",
+              "path_mismatch"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "receiver_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "recipient_id": {
+            "type": "string"
+          },
+          "recipient_kind": {
+            "$ref": "#/components/schemas/SubscriberType"
+          }
+        },
+        "required": [
+          "receiver_sha256",
+          "recipient_kind",
+          "recipient_id",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "EventConnectPlanEvaluation": {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/EventConnectCandidateEvidence"
+            },
+            "type": "array"
+          },
+          "plan_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "resolved",
+              "runtime_resolution_required",
+              "resolution_blocker",
+              "no_registration"
+            ],
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/EventDeliveryTarget"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "plan_sha256",
+          "resolution",
+          "targets",
+          "candidates"
+        ],
+        "type": "object"
+      },
       "EventDelivery": {
         "additionalProperties": false,
         "properties": {
@@ -11453,6 +11527,10 @@
           "subscriber_type": {
             "$ref": "#/components/schemas/SubscriberType"
           },
+          "target": {
+            "$ref": "#/components/schemas/EventDeliveryTarget",
+            "description": "Exact persisted receiver route owner for node and explicitly targeted agent delivery, or an empty object for an untargeted agent whose typed agent identity is the receiver owner."
+          },
           "terminal": {
             "type": "boolean"
           }
@@ -11461,11 +11539,28 @@
           "delivery_id",
           "subscriber_type",
           "subscriber_id",
+          "target",
           "status",
           "retry_count",
           "retry_scheduled",
           "terminal"
         ],
+        "type": "object"
+      },
+      "EventDeliveryTarget": {
+        "additionalProperties": false,
+        "description": "One-way structured projection of the persisted DeliveryRoute target. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.",
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "flow_id": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "EventFull": {
@@ -11481,6 +11576,7 @@
             "type": "array"
           },
           "deliveries": {
+            "description": "The successful settlement arm. Non-empty exactly when no_delivery is absent.",
             "items": {
               "$ref": "#/components/schemas/EventDelivery"
             },
@@ -11497,6 +11593,10 @@
           },
           "execution_mode": {
             "$ref": "#/components/schemas/ExecutionMode"
+          },
+          "no_delivery": {
+            "$ref": "#/components/schemas/EventNoDelivery",
+            "description": "The no-delivery settlement arm. Present exactly when deliveries is empty."
           },
           "payload": {
             "additionalProperties": true,
@@ -11561,6 +11661,31 @@
         },
         "required": [
           "run_id"
+        ],
+        "type": "object"
+      },
+      "EventNoDelivery": {
+        "additionalProperties": false,
+        "properties": {
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/EventConnectPlanEvaluation"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "enum": [
+              "matched_no_recipient",
+              "resolution_blocked",
+              "declared_consumer_no_plan",
+              "no_subscriber_by_design"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "plans"
         ],
         "type": "object"
       },

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -139,20 +140,21 @@ func commitInboundPublicationTestEvent(t *testing.T, _ storeTestDurableEventBusS
 	return nil
 }
 
-func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
-	runInboundPublicationOperationProof(t, store.backend.ConstructionHandle(), true, store, workflowStore)
-}
-
-func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	store := admitTestPostgresStore(t, db)
-	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
-	workflowStore := newPostgresWorkflowTestCoordinator(t, db, store)
-	runInboundPublicationOperationProof(t, db, false, store, workflowStore)
+func TestInboundEvidencePersistsTypedNoSubscriberByDesign(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
+		workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
+		runInboundPublicationOperationProof(t, store.backend.ConstructionHandle(), true, store, workflowStore)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		_, db, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		store := admitTestPostgresStore(t, db)
+		store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
+		workflowStore := newPostgresWorkflowTestCoordinator(t, db, store)
+		runInboundPublicationOperationProof(t, db, false, store, workflowStore)
+	})
 }
 
 func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
@@ -245,10 +247,33 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, request.PublicationID, 2)
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE run_id = `, standing.RunID, 3)
 	assertInboundEvidenceProducedByPlatform(t, db, sqlite, request.MarkerEventID)
+	assertInboundEvidenceRouteSettlement(t, ctx, db, sqlite, request.MarkerEventID)
 
 	runInboundPublicationRawOnlyProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+}
+
+func assertInboundEvidenceRouteSettlement(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, eventID string) {
+	t.Helper()
+	query := `SELECT route_settlement FROM events WHERE event_id = $1::uuid`
+	if sqlite {
+		query = `SELECT route_settlement FROM events WHERE event_id = ?`
+	}
+	var raw []byte
+	if err := db.QueryRowContext(ctx, query, eventID).Scan(&raw); err != nil {
+		t.Fatalf("load inbound evidence route settlement: %v", err)
+	}
+	var settlement events.RouteSettlement
+	if err := json.Unmarshal(raw, &settlement); err != nil {
+		t.Fatalf("decode inbound evidence route settlement: %v", err)
+	}
+	if settlement.WriteClass() != events.EventWriteInboundEvidenceDirect || !settlement.NoDelivery() || settlement.Reason() != events.NoDeliveryNoSubscriberByDesign || settlement.Ledger().Present() {
+		t.Fatalf("inbound evidence route settlement = %#v", settlement)
+	}
+	if err := settlement.Validate(nil); err != nil {
+		t.Fatalf("validate inbound evidence route settlement: %v", err)
+	}
 }
 
 func assertInboundEvidenceProducedByPlatform(t *testing.T, db *sql.DB, sqlite bool, eventID string) {

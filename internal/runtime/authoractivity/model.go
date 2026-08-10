@@ -126,6 +126,8 @@ type Projection struct {
 	Period             string     `json:"period,omitempty"`
 	OperationalState   string     `json:"operational_state,omitempty"`
 	BlockingLayer      string     `json:"blocking_layer,omitempty"`
+	InstancePath       string     `json:"instance_path,omitempty"`
+	PlanSHA256         []string   `json:"plan_sha256,omitempty"`
 	AuthorSubjectType  string     `json:"author_subject_type,omitempty"`
 	AuthorSubjectID    string     `json:"author_subject_id,omitempty"`
 }
@@ -316,20 +318,20 @@ var kindContracts = map[Kind]kindContract{
 		Actions: map[string]string{"started": "started", "fork_prepared": "fork prepared", "paused": "paused", "resumed": "resumed", "fork_started": "fork started", "completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked"},
 	},
 	KindPlatformSignal: {
-		Transitions: set("agent_failed_retrying", "agent_failed", "event_quarantined", "dead_letters_escalated", "run_stalled", "runtime_reset", "authorization_required", "budget_warning", "budget_throttle", "budget_emergency", "budget_ok", "runtime_paused", "runtime_resumed", "recovery_failed"),
+		Transitions: set("agent_failed_retrying", "agent_failed", "event_quarantined", "event_no_delivery", "dead_letters_escalated", "run_stalled", "runtime_reset", "authorization_required", "budget_warning", "budget_throttle", "budget_emergency", "budget_ok", "runtime_paused", "runtime_resumed", "recovery_failed"),
 		SourceOwner: "events", SourceIdentityRequired: true,
-		AllowedProjectionFields:  set("subject_type", "subject_id", "event_type", "retry_count", "reason_code", "tool", "level", "spend", "cap", "percentage", "period", "source", "operational_state", "blocking_layer"),
+		AllowedProjectionFields:  set("subject_type", "subject_id", "event_type", "retry_count", "reason_code", "tool", "level", "spend", "cap", "percentage", "period", "source", "operational_state", "blocking_layer", "instance_path", "plan_sha256"),
 		RequiredProjectionFields: set("subject_type", "subject_id"), FailureTransitions: set("agent_failed_retrying", "agent_failed", "authorization_required", "recovery_failed"),
 		SubjectStrategy: subjectTypedIdentity, SubjectTypes: set("agent", "entity", "run", "event", "platform"),
 		ScopeByTransition: map[string]ScopeKind{
-			"agent_failed_retrying": ScopeBundle, "agent_failed": ScopeBundle, "event_quarantined": ScopeBundle,
+			"agent_failed_retrying": ScopeBundle, "agent_failed": ScopeBundle, "event_quarantined": ScopeBundle, "event_no_delivery": ScopeBundle,
 			"dead_letters_escalated": ScopeBundle, "run_stalled": ScopeBundle, "authorization_required": ScopeBundle,
 			"budget_warning": ScopeBundle, "budget_throttle": ScopeBundle, "budget_emergency": ScopeBundle, "budget_ok": ScopeBundle,
 			"runtime_reset": ScopeRuntime, "runtime_paused": ScopeRuntime, "runtime_resumed": ScopeRuntime, "recovery_failed": ScopeRuntime,
 		},
-		HumanVisibleTransitions: set("agent_failed_retrying", "agent_failed", "event_quarantined", "dead_letters_escalated", "run_stalled", "runtime_reset", "authorization_required", "budget_warning", "budget_throttle", "budget_emergency", "runtime_paused", "runtime_resumed", "recovery_failed"),
+		HumanVisibleTransitions: set("agent_failed_retrying", "agent_failed", "event_quarantined", "event_no_delivery", "dead_letters_escalated", "run_stalled", "runtime_reset", "authorization_required", "budget_warning", "budget_throttle", "budget_emergency", "runtime_paused", "runtime_resumed", "recovery_failed"),
 		Actions: map[string]string{
-			"agent_failed_retrying": "failed, retrying", "agent_failed": "failed", "event_quarantined": "event quarantined",
+			"agent_failed_retrying": "failed, retrying", "agent_failed": "failed", "event_quarantined": "event quarantined", "event_no_delivery": "delivery warning",
 			"dead_letters_escalated": "dead letters escalated", "run_stalled": "run stalled", "runtime_reset": "runtime reset",
 			"authorization_required": "authorization required", "budget_warning": "budget warning", "budget_throttle": "budget throttled",
 			"budget_emergency": "budget emergency", "budget_ok": "budget ok", "runtime_paused": "runtime paused",

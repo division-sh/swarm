@@ -116,6 +116,9 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		"source_event_id=source-event-1",
 		"payload={\"priority\":\"high\"}",
 		"delivery_id=delivery-1",
+		"target.flow_id=review",
+		"target.flow_instance=review/instance-1",
+		"target.entity_id=entity-1",
 		"created_at=2026-05-13T10:00:02Z",
 		"started_at=2026-05-13T10:00:03Z",
 		"finished_at=2026-05-13T10:00:05Z",
@@ -130,9 +133,6 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
-	}
-	if strings.Contains(stdout.String(), "delivery_target_route") {
-		t.Fatalf("stdout exposed internal route target:\n%s", stdout.String())
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -696,6 +696,60 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 			wantStderr: "event_id is required",
 		},
 		{
+			name: "malformed view missing delivery target exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				delete(event["deliveries"].([]any)[0].(map[string]any), "target")
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "target is required",
+		},
+		{
+			name: "malformed view dual settlement exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				event["no_delivery"] = map[string]any{"reason": "no_subscriber_by_design", "plans": []any{}}
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "mutually exclusive",
+		},
+		{
+			name: "malformed view unknown no-delivery reason exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				event["deliveries"] = []any{}
+				event["no_delivery"] = map[string]any{"reason": "silently_ignored", "plans": []any{}}
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "reason=\"silently_ignored\" is invalid",
+		},
+		{
+			name: "malformed view unknown no-delivery field exits three",
+			args: []string{"event", "view", "event-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				event := validEventObservationEvent("event-1")
+				event["deliveries"] = []any{}
+				event["no_delivery"] = map[string]any{"reason": "no_subscriber_by_design", "plans": []any{}, "fallback": true}
+				writeJSONRPCResult(t, w, req.ID, event)
+			},
+			wantCode:   3,
+			wantStderr: "unknown field",
+		},
+		{
 			name: "malformed view delivery retry count exits three",
 			args: []string{"event", "view", "event-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -965,6 +1019,9 @@ func validEventObservationEvent(eventID string) map[string]any {
 				"delivery_id":     "delivery-1",
 				"subscriber_type": "agent",
 				"subscriber_id":   "agent-1",
+				"target": map[string]any{
+					"flow_id": "review", "flow_instance": "review/instance-1", "entity_id": "entity-1",
+				},
 				"status":          "dead_letter",
 				"session_id":      "session-1",
 				"reason_code":     "retry_exhausted",

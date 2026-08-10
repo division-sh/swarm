@@ -80,6 +80,7 @@ type Record struct {
 	SourceRoute                []byte
 	TargetRoute                []byte
 	TargetSet                  []byte
+	RouteSettlement            []byte
 	OperatorReferencedEventID  string
 	SelectedForkSourceRunID    string
 	SelectedForkSourceEventID  string
@@ -87,7 +88,7 @@ type Record struct {
 	SelectedForkLineageOwners  int
 }
 
-func FromAdmitted(admitted events.AdmittedEvent) (Record, error) {
+func FromAdmitted(admitted events.AdmittedEvent, settlement events.RouteSettlement) (Record, error) {
 	event := admitted.Event()
 	if err := events.ValidatePersistentEvent(event); err != nil {
 		return Record{}, fmt.Errorf("admitted event: %w", err)
@@ -114,6 +115,7 @@ func FromAdmitted(admitted events.AdmittedEvent) (Record, error) {
 		SourceRoute:            marshalRoute(event.RoutingSource().Route()),
 		TargetRoute:            marshalRoute(envelope.Target),
 		TargetSet:              marshalRouteSet(envelope.TargetSet),
+		RouteSettlement:        marshalSettlement(settlement),
 	}
 	if provenance, ok := event.OperatorReference(); ok {
 		record.OperatorReferencedEventID = provenance.ReferencedEventID()
@@ -135,6 +137,7 @@ func (r Record) Clone() Record {
 	r.SourceRoute = bytes.Clone(r.SourceRoute)
 	r.TargetRoute = bytes.Clone(r.TargetRoute)
 	r.TargetSet = bytes.Clone(r.TargetSet)
+	r.RouteSettlement = bytes.Clone(r.RouteSettlement)
 	return r
 }
 
@@ -185,6 +188,13 @@ func (r Record) Validate() error {
 	if !json.Valid(r.Payload) {
 		return fmt.Errorf("event record payload must be valid JSON")
 	}
+	settlement, err := r.DecodeSettlement()
+	if err != nil {
+		return fmt.Errorf("event record route settlement: %w", err)
+	}
+	if err := validateSettlementEventClass(r.Class, events.EventType(r.EventName), settlement.WriteClass()); err != nil {
+		return fmt.Errorf("event record route settlement: %w", err)
+	}
 	if r.ChainDepth < 0 {
 		return fmt.Errorf("event record chain_depth must be nonnegative")
 	}
@@ -203,6 +213,30 @@ func (r Record) Validate() error {
 	}
 	if err := r.validateClassFacts(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateSettlementEventClass(class events.EventAdmissionClass, eventType events.EventType, writeClass events.EventWriteClass) error {
+	switch {
+	case class == events.EventAdmissionSelectedForkReplay:
+		if writeClass != events.EventWriteSelectedForkPublication && writeClass != events.EventWriteHistoricalRunForkReplay {
+			return fmt.Errorf("selected-fork event requires selected-fork publication or historical replay settlement")
+		}
+	case eventType == events.EventTypePlatformAgentDirective:
+		if writeClass != events.EventWriteDirectiveDirect {
+			return fmt.Errorf("directive event requires directive-direct settlement")
+		}
+	case eventType == events.EventTypePlatformRuntimeLog:
+		if writeClass != events.EventWriteRuntimeLogDirect {
+			return fmt.Errorf("runtime-log event requires runtime-log-direct settlement")
+		}
+	case eventType == events.EventTypePlatformInboundRecord:
+		if writeClass != events.EventWriteInboundEvidenceDirect {
+			return fmt.Errorf("inbound evidence event requires inbound-evidence-direct settlement")
+		}
+	case writeClass == events.EventWriteSelectedForkPublication || writeClass == events.EventWriteHistoricalRunForkReplay || writeClass == events.EventWriteDirectiveDirect || writeClass == events.EventWriteRuntimeLogDirect || writeClass == events.EventWriteInboundEvidenceDirect:
+		return fmt.Errorf("write class %q does not match event class/type", writeClass.Code())
 	}
 	return nil
 }
@@ -323,7 +357,11 @@ func (r Record) decode() (events.AdmittedEvent, error) {
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("decode event record %s: %w", strings.TrimSpace(r.EventID), err)
 	}
-	decoded, err := FromAdmitted(restored)
+	settlement, err := r.DecodeSettlement()
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	decoded, err := FromAdmitted(restored, settlement)
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("decode event record %s: reconstruct durable record: %w", strings.TrimSpace(r.EventID), err)
 	}
@@ -354,11 +392,32 @@ func (r Record) Equal(other Record) bool {
 		jsonEqual(r.SourceRoute, other.SourceRoute) &&
 		jsonEqual(r.TargetRoute, other.TargetRoute) &&
 		jsonEqual(r.TargetSet, other.TargetSet) &&
+		jsonEqual(r.RouteSettlement, other.RouteSettlement) &&
 		r.OperatorReferencedEventID == other.OperatorReferencedEventID &&
 		r.SelectedForkSourceRunID == other.SelectedForkSourceRunID &&
 		r.SelectedForkSourceEventID == other.SelectedForkSourceEventID &&
 		r.SelectedForkAuthorityStamp == other.SelectedForkAuthorityStamp &&
 		r.SelectedForkLineageOwners == other.SelectedForkLineageOwners
+}
+
+func (r Record) DecodeSettlement() (events.RouteSettlement, error) {
+	if len(bytes.TrimSpace(r.RouteSettlement)) == 0 {
+		return events.RouteSettlement{}, fmt.Errorf("route_settlement is required")
+	}
+	var settlement events.RouteSettlement
+	decoder := json.NewDecoder(bytes.NewReader(r.RouteSettlement))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&settlement); err != nil {
+		return events.RouteSettlement{}, fmt.Errorf("decode route_settlement: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return events.RouteSettlement{}, fmt.Errorf("decode route_settlement: unexpected trailing JSON value")
+		}
+		return events.RouteSettlement{}, fmt.Errorf("decode route_settlement: %w", err)
+	}
+	return settlement, nil
 }
 
 func (r Record) decodeEnvelope() (events.EventEnvelope, error) {
@@ -400,6 +459,11 @@ func marshalRouteSet(routes []events.RouteIdentity) []byte {
 		routes = []events.RouteIdentity{}
 	}
 	raw, _ := json.Marshal(routes)
+	return raw
+}
+
+func marshalSettlement(settlement events.RouteSettlement) []byte {
+	raw, _ := json.Marshal(settlement)
 	return raw
 }
 

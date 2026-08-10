@@ -192,6 +192,7 @@ const (
 // recipients that remain only projections/consumers of that authority.
 type RoutePlan struct {
 	Event                events.Event
+	ConnectEvaluation    events.ConnectEvaluationLedger
 	AuthorityState       RoutePlanAuthorityState
 	AuthorityOwner       routePlanSource
 	LiveRecipients       []RoutePlanLiveRecipient
@@ -242,10 +243,12 @@ type RoutePlanDeliveryIntent struct {
 	Producer              routeIntentProducer
 	Persist               bool
 	PendingAgentLifecycle bool
+	AllowStructuralOwner  bool
 }
 
 func newRoutePlan(evt events.Event) RoutePlan {
-	return RoutePlan{Event: evt, AuthorityState: RoutePlanAuthorityNoCanonicalMatch}
+	ledger, _ := events.NewConnectEvaluationLedger(nil)
+	return RoutePlan{Event: evt, AuthorityState: RoutePlanAuthorityNoCanonicalMatch, ConnectEvaluation: ledger}
 }
 
 func (p RoutePlan) Normalized() RoutePlan {
@@ -757,6 +760,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
 			out[idx].PendingAgentLifecycle = out[idx].PendingAgentLifecycle || intent.PendingAgentLifecycle
+			out[idx].AllowStructuralOwner = out[idx].AllowStructuralOwner || intent.AllowStructuralOwner
 			if out[idx].Producer.Empty() {
 				out[idx].Producer = intent.Producer
 			}

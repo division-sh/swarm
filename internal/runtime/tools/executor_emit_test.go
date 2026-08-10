@@ -1009,6 +1009,56 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.T) {
+	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{{
+		id:   "review",
+		mode: runtimecontracts.FlowModeTemplate,
+		inputs: []runtimecontracts.FlowInputEventPin{{
+			Name: "assessment_received", Event: "assessment.reported",
+		}},
+		outputs: []runtimecontracts.FlowOutputEventPin{{
+			Name: "assessment_reported", Event: "assessment.reported",
+		}},
+		nodes: map[string]runtimecontracts.SystemNodeContract{
+			"review-finalize": {
+				ID: "review-finalize", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"assessment.reported": {}},
+			},
+		},
+	}}, nil)
+	source := semanticview.Wrap(bundle)
+	store := newEmitRoutePlanStore()
+	eventBus := newEmitRoutePlanEventBus(t, store, source)
+	route := runtimeflowidentity.DeriveRoute("review", "instance-1")
+	if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	}
+	entityID := runtimeflowidentity.EntityID(route.InstancePath)
+	actor := models.AgentConfig{
+		ExecutionMode: "live", ID: "reviewer", Identity: toolTestAgentIdentity(t, "reviewer", "review", route.InstancePath),
+		Role: "reviewer", FlowID: "review", FlowPath: route.InstancePath, EntityID: entityID,
+		EmitEvents: []string{"assessment.reported"},
+	}
+	exec := NewExecutorWithOptions(eventBus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+	inbound := toolTestInboundEvent(
+		events.EventType(route.InstancePath+"/assessment.requested"), nil,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath),
+		executionmode.Live,
+	)
+	out, err := exec.handleEmitTool(runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound), actor, "emit_assessment_reported", map[string]any{})
+	if err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	eventID := emitToolResultString(t, out, "event_id")
+	routes := store.routes[eventID]
+	want := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("review-finalize"),
+		Target:    events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath, EntityID: entityID},
+	}
+	if !emitDeliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want same-instance template node %#v", routes, want)
+	}
+}
+
 func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From:    "producer.deploy_done",

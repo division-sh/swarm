@@ -36,6 +36,31 @@ func RecordPersistedEvent(ctx context.Context, story runtimeauthoractivity.Mutat
 	return story.Record(ctx, draft)
 }
 
+func RecordNoDeliveryWarning(ctx context.Context, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) error {
+	if story == nil {
+		return fmt.Errorf("no-delivery author activity mutation is required")
+	}
+	if !settlement.NoDelivery() || settlement.Reason() == events.NoDeliveryNoSubscriberByDesign {
+		return nil
+	}
+	evt := admitted.Event()
+	sourceRoute := evt.RoutingSource().Route().Normalized()
+	plans := settlement.Ledger().Plans()
+	planIDs := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		planIDs = append(planIDs, plan.PlanIdentity().String())
+	}
+	return story.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindPlatformSignal, Transition: "event_no_delivery",
+		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "no-delivery:" + evt.ID(),
+		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: sourceRoute.FlowID,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "event", SubjectID: evt.ID(), EventType: string(evt.Type()),
+			ReasonCode: settlement.Reason().Code(), InstancePath: evt.FlowInstance(), PlanSHA256: planIDs,
+		},
+	})
+}
+
 func PersistedEventDraft(ctx context.Context, resolver EventDescriptorResolver, admitted events.AdmittedEvent, producedBy, producedByType string) (runtimeauthoractivity.Draft, bool, error) {
 	evt := admitted.Event()
 	name := strings.TrimSpace(string(evt.Type()))

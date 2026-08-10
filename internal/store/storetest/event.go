@@ -51,7 +51,8 @@ func InsertCanonicalEventRecord(
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		t.Fatal("selected-fork replay fixture requires exact lineage persistence")
 	}
-	record, err := eventrecord.FromAdmitted(admitted)
+	settlement := canonicalFixtureSettlement(t, admitted.Event(), nil)
+	record, err := eventrecord.FromAdmitted(admitted, settlement)
 	if err != nil {
 		t.Fatalf("project canonical event record fixture: %v", err)
 	}
@@ -337,7 +338,8 @@ func commitSemanticEventWithInitialFacts(
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		t.Fatal(fmt.Errorf("selected-fork replay events require their closed named persistence operation"))
 	}
-	record, err := eventrecord.FromAdmitted(admitted)
+	settlement := canonicalFixtureSettlement(t, admitted.Event(), routes)
+	record, err := eventrecord.FromAdmitted(admitted, settlement)
 	if err != nil {
 		t.Fatalf("project admitted event fixture: %v", err)
 	}
@@ -459,6 +461,37 @@ func commitSemanticEventWithInitialFacts(
 		t.Fatalf("commit semantic event fixture: %v", err)
 	}
 	return runtimebus.EventAppendInserted
+}
+
+func canonicalFixtureSettlement(t testing.TB, event events.Event, routes []events.DeliveryRoute) events.RouteSettlement {
+	t.Helper()
+	var (
+		settlement events.RouteSettlement
+		err        error
+	)
+	switch event.Type() {
+	case events.EventTypePlatformRuntimeLog:
+		settlement, err = events.NewNoDeliverySettlement(events.EventWriteRuntimeLogDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	case events.EventTypePlatformInboundRecord:
+		settlement, err = events.NewNoDeliverySettlement(events.EventWriteInboundEvidenceDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	case events.EventTypePlatformAgentDirective:
+		settlement, err = events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	default:
+		var ledger events.ConnectEvaluationLedger
+		ledger, err = events.NewConnectEvaluationLedger(nil)
+		if err == nil && len(routes) > 0 {
+			settlement, err = events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+		} else if err == nil {
+			settlement, err = events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+		}
+	}
+	if err != nil {
+		t.Fatalf("construct canonical event fixture settlement: %v", err)
+	}
+	if err := settlement.Validate(routes); err != nil {
+		t.Fatalf("validate canonical event fixture settlement: %v", err)
+	}
+	return settlement
 }
 
 func deliveryFixtureAuthority(t testing.TB, ctx context.Context, tx *sql.Tx, runID string, adapter *deliveryadapter.Adapter) runtimedelivery.ExecutionAuthority {

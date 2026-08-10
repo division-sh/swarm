@@ -39,12 +39,12 @@ type CompletionCandidateRequester interface {
 }
 
 type EventCommitOwner interface {
-	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	CommitPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, runtimebus.PublicationCommand, *runhandoff.CandidateHandoff) (runtimebus.CommittedPublication, error)
 }
 
 type eventCommitTxStore interface {
-	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	CommitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
@@ -334,12 +334,12 @@ func (s *PipelineSQLiteOwner) workflowDecisionLifecycleOwner() workflowDecisionL
 	return s.DecisionSQLiteOwner
 }
 
-func (s *PipelinePostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.events.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted)
+func (s *PipelinePostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.events.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted, settlement)
 }
 
-func (s *PipelineSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.events.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted)
+func (s *PipelineSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.events.AppendAdmittedEventTxOutcome(ctx, tx, story, admitted, settlement)
 }
 
 func (s *PipelinePostgresOwner) commitPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, command runtimebus.PublicationCommand, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {

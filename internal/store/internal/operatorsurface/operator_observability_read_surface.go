@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -202,6 +203,9 @@ func operatorEventMatchesListFilter(event operatorread.OperatorEventFull, filter
 				return true
 			}
 		}
+		if event.NoDelivery != nil && event.NoDelivery.Reason == filter.ReasonCode {
+			return true
+		}
 		return false
 	}
 	return true
@@ -244,6 +248,13 @@ func (r *ObservabilityPostgres) LoadOperatorEvent(ctx context.Context, eventID s
 	}
 	event.Deliveries = operatorread.EnrichOperatorDeliveryFailureEvidence(deliveries, deadLetters)
 	event.DeadLetters = deadLetters
+	settlement, err := row.DecodeSettlement()
+	if err != nil {
+		return operatorread.OperatorEventFull{}, fmt.Errorf("load operator event settlement: %w", err)
+	}
+	if err := applyRouteSettlement(&event, settlement); err != nil {
+		return operatorread.OperatorEventFull{}, fmt.Errorf("load operator event settlement: %w", err)
+	}
 	if event.Deliveries == nil {
 		event.Deliveries = []operatorread.OperatorEventDelivery{}
 	}
@@ -267,9 +278,11 @@ func (r *ObservabilityPostgres) loadOperatorEventDeliveries(ctx context.Context,
 }
 
 func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) operatorread.OperatorEventDelivery {
+	target := snapshot.Route.Target.Normalized()
 	item := operatorread.OperatorEventDelivery{
 		DeliveryID: snapshot.DeliveryID, SubscriberType: string(snapshot.SubscriberClass),
 		SubscriberID: snapshot.SubscriberID, Route: snapshot.Route.Normalized(), SessionID: snapshot.ActiveSessionID,
+		Target: operatorread.OperatorDeliveryTarget{FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID},
 		Status: string(snapshot.Status), ReasonCode: snapshot.ReasonCode,
 		Failure: runtimefailures.CloneEnvelope(snapshot.Failure), RetryCount: snapshot.RetryCount,
 		RetryScheduled: snapshot.RetryScheduled, Terminal: snapshot.Terminal(),
@@ -288,6 +301,48 @@ func operatorEventDeliveryFromSnapshot(snapshot runtimedelivery.Snapshot) operat
 		item.FinishedAt = &settled
 	}
 	return item
+}
+
+func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.RouteSettlement) error {
+	if e == nil {
+		return fmt.Errorf("operator event is required")
+	}
+	routes := make([]events.DeliveryRoute, 0, len(e.Deliveries))
+	for _, delivery := range e.Deliveries {
+		routes = append(routes, delivery.Route)
+	}
+	if err := settlement.Validate(routes); err != nil {
+		return err
+	}
+	e.NoDelivery = nil
+	if settlement.Delivered() {
+		return nil
+	}
+	plans := make([]operatorread.OperatorConnectPlanEvaluation, 0, len(settlement.Ledger().Plans()))
+	for _, plan := range settlement.Ledger().Plans() {
+		targets := make([]operatorread.OperatorDeliveryTarget, 0, len(plan.Targets()))
+		for _, target := range plan.Targets() {
+			target = target.Normalized()
+			targets = append(targets, operatorread.OperatorDeliveryTarget{FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID})
+		}
+		candidates := make([]operatorread.OperatorConnectCandidateEvidence, 0, len(plan.Candidates()))
+		for _, candidate := range plan.Candidates() {
+			agent := ""
+			if !candidate.AgentIdentity().IsZero() {
+				agent = candidate.AgentIdentity().Description()
+			}
+			candidates = append(candidates, operatorread.OperatorConnectCandidateEvidence{
+				ReceiverSHA256: candidate.Receiver().String(), RecipientKind: candidate.Recipient().Code(),
+				RecipientID: candidate.Recipient().ID(), Path: candidate.Path(), AgentIdentity: agent,
+				Outcome: candidate.Outcome().Code(),
+			})
+		}
+		plans = append(plans, operatorread.OperatorConnectPlanEvaluation{
+			PlanSHA256: plan.PlanIdentity().String(), Resolution: plan.Resolution().Code(), Targets: targets, Candidates: candidates,
+		})
+	}
+	e.NoDelivery = &operatorread.OperatorNoDelivery{Reason: settlement.Reason().Code(), Plans: plans}
+	return nil
 }
 
 func nullTimePtr(value sql.NullTime) *time.Time {

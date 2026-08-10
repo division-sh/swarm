@@ -37,6 +37,18 @@ func testActiveAgentDescriptors(descriptors ...ActiveAgentDescriptor) map[agenti
 	return out
 }
 
+func testSelectedOwnerPolicy(owners ...ActiveTargetDescriptor) deliveryRecipientPolicy {
+	return deliveryRecipientPolicy{
+		loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
+		},
+		loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+			return append([]ActiveTargetDescriptor(nil), owners...), true, nil
+		},
+		requireTargetOwners: true,
+	}
+}
+
 func TestDeliveryRouteResolver_SeparatesRouteResolutionAndDiagnostics(t *testing.T) {
 	resolver := deliveryRouteResolver{
 		resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -376,6 +388,7 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 
 func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	observerIdentity := agentidentitytest.RootRuntime(t, "observer", "delivery-planner-test")
+	runID := uuid.NewString()
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -397,10 +410,15 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 					observerIdentity: {Identity: observerIdentity},
 				}, true, nil
 			},
+			loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+				return []ActiveTargetDescriptor{{ID: "root-owner", FlowInstance: runID, EntityID: eventtest.UUID("root-owner")}}, true, nil
+			},
+			requireTargetOwners: true,
 		},
 	)
+	planner.rootFlowID = "root"
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -709,11 +727,9 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "operating-owner", FlowInstance: "operating/inst-1", EntityID: "ent-operating-owner",
+		}),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
@@ -725,7 +741,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		0,
 		"",
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating-source"), "operating/inst-1"),
 		time.Time{},
 	))
 	if err != nil {
@@ -744,8 +760,8 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "lifecycle-orchestrator" {
 		t.Fatalf("delivery route = %#v, want node/lifecycle-orchestrator semantic authority", route)
 	}
-	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating" {
-		t.Fatalf("delivery target = %#v, want operating/inst-1 ent-operating", route.Target)
+	if route.Target.FlowInstance != "operating/inst-1" || route.Target.EntityID != "ent-operating-owner" {
+		t.Fatalf("delivery target = %#v, want exact selected operating owner", route.Target)
 	}
 	if !plan.TargetFailure.Empty() {
 		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
@@ -901,6 +917,7 @@ func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcr
 }
 
 func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
+	runID := uuid.NewString()
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -913,14 +930,13 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "root-owner", FlowInstance: runID, EntityID: "ent-root",
+		}),
 	)
+	planner.rootFlowID = "root"
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "opco.spinup_requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-root"), time.Time{}))
+	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "opco.spinup_requested", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -937,8 +953,8 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "portfolio-node" {
 		t.Fatalf("delivery route = %#v, want node/portfolio-node", route)
 	}
-	if !route.Target.Empty() {
-		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
+	if route.Target != (events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root"}) {
+		t.Fatalf("delivery target = %#v, want exact selected root owner", route.Target)
 	}
 	if !plan.TargetFailure.Empty() {
 		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
@@ -946,6 +962,7 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 }
 
 func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute(t *testing.T) {
+	const runID = "11111111-1111-4111-8111-111111111111"
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -961,12 +978,11 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "root-owner", FlowInstance: runID, EntityID: "ent-root",
+		}),
 	)
+	planner.rootFlowID = "root"
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
@@ -975,9 +991,9 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 		"",
 		nil,
 		0,
+		runID,
 		"",
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-root"), "11111111-1111-4111-8111-111111111111"),
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, runID),
 		time.Time{},
 	))
 	if err != nil {
@@ -996,8 +1012,8 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "test-node" {
 		t.Fatalf("delivery route = %#v, want node/test-node", route)
 	}
-	if !route.Target.Empty() {
-		t.Fatalf("delivery target = %#v, want empty root target", route.Target)
+	if route.Target != (events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root"}) {
+		t.Fatalf("delivery target = %#v, want exact selected root owner", route.Target)
 	}
 	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
@@ -1027,11 +1043,9 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "child-owner", FlowInstance: "child", EntityID: "ent-child-owner",
+		}),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), time.Time{}))
@@ -1051,8 +1065,8 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "child-intake" {
 		t.Fatalf("delivery route = %#v, want node/child-intake", route)
 	}
-	if route.Target.FlowInstance != "child" || route.Target.EntityID != "ent-child" {
-		t.Fatalf("delivery target = %#v, want child ent-child", route.Target)
+	if route.Target.FlowInstance != "child" || route.Target.EntityID != "ent-child-owner" {
+		t.Fatalf("delivery target = %#v, want exact selected child owner", route.Target)
 	}
 	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
@@ -1064,6 +1078,7 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 }
 
 func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *testing.T) {
+	runID := uuid.NewString()
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -1087,14 +1102,14 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(
+			ActiveTargetDescriptor{ID: "root-owner", FlowInstance: runID, EntityID: "ent-root-owner"},
+			ActiveTargetDescriptor{ID: "child-owner", FlowInstance: "child", EntityID: "ent-child-owner"},
+		),
 	)
+	planner.rootFlowID = "root"
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), time.Time{}))
+	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -1111,11 +1126,11 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 		}
 		routes[route.Recipient.ID()] = route.Target
 	}
-	if target, ok := routes["project-observer"]; !ok || !target.Empty() {
-		t.Fatalf("project-observer target = %#v, ok=%v; want empty root target", target, ok)
+	if target, ok := routes["project-observer"]; !ok || target != (events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root-owner"}) {
+		t.Fatalf("project-observer target = %#v, ok=%v; want exact selected root owner", target, ok)
 	}
-	if target, ok := routes["child-intake"]; !ok || target.FlowInstance != "child" || target.EntityID != "ent-child" {
-		t.Fatalf("child-intake target = %#v, ok=%v; want child ent-child", target, ok)
+	if target, ok := routes["child-intake"]; !ok || target.FlowInstance != "child" || target.EntityID != "ent-child-owner" {
+		t.Fatalf("child-intake target = %#v, ok=%v; want exact selected child owner", target, ok)
 	}
 	if got, want := len(plan.DeliveryIntents), 2; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
@@ -1141,11 +1156,9 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "flow-a-owner", FlowInstance: "flow-a", EntityID: "ent-flow-a-owner",
+		}),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
@@ -1176,8 +1189,8 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "flow-a-node" {
 		t.Fatalf("delivery route = %#v, want node/flow-a-node", route)
 	}
-	if route.Target.FlowInstance != "flow-a" || route.Target.EntityID != "ent-flow-b" {
-		t.Fatalf("delivery target = %#v, want flow-a ent-flow-b", route.Target)
+	if route.Target.FlowInstance != "flow-a" || route.Target.EntityID != "ent-flow-a-owner" {
+		t.Fatalf("delivery target = %#v, want exact selected flow-a owner", route.Target)
 	}
 	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
@@ -1207,11 +1220,9 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "repo-owner", FlowInstance: "repo-scaffold", EntityID: "ent-repo-owner",
+		}),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
@@ -1242,8 +1253,8 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "repo-scaffold-node" {
 		t.Fatalf("delivery route = %#v, want node/repo-scaffold-node", route)
 	}
-	if route.Target.FlowInstance != "repo-scaffold" || route.Target.EntityID != "ent-component" {
-		t.Fatalf("delivery target = %#v, want repo-scaffold ent-component", route.Target)
+	if route.Target.FlowInstance != "repo-scaffold" || route.Target.EntityID != "ent-repo-owner" {
+		t.Fatalf("delivery target = %#v, want exact selected repo-scaffold owner", route.Target)
 	}
 	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
@@ -1273,11 +1284,9 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "grandchild-owner", FlowInstance: "child/inst-1/grandchild", EntityID: "ent-grandchild-owner",
+		}),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
@@ -1308,8 +1317,8 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 	if !route.Recipient.IsNode() || route.Recipient.ID() != "grandchild-worker" {
 		t.Fatalf("delivery route = %#v, want node/grandchild-worker", route)
 	}
-	if route.Target.FlowInstance != "child/inst-1/grandchild" || route.Target.EntityID != "ent-child" {
-		t.Fatalf("delivery target = %#v, want child/inst-1/grandchild ent-child", route.Target)
+	if route.Target.FlowInstance != "child/inst-1/grandchild" || route.Target.EntityID != "ent-grandchild-owner" {
+		t.Fatalf("delivery target = %#v, want exact selected grandchild owner", route.Target)
 	}
 	if got, want := len(plan.DeliveryIntents), 1; got != want {
 		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
@@ -1317,6 +1326,75 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 	intent := plan.DeliveryIntents[0]
 	if intent.Producer != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	}
+}
+
+func TestNoTargetNodeRouteFamiliesUseExactPersistedTargetOwner(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{name: "concrete and no-recipient concrete", run: TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute},
+		{name: "root", run: TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute},
+		{name: "root local event", run: TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute},
+		{name: "root input flow", run: TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch},
+		{name: "scoped static", run: TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute},
+		{name: "pathless and scoped", run: TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute},
+		{name: "cross-flow static", run: TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope},
+		{name: "wildcard static", run: TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberScope},
+		{name: "descendant static", run: TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRoute},
+	}
+	for _, test := range tests {
+		t.Run(test.name, test.run)
+	}
+}
+
+func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
+	owner := events.RouteIdentity{
+		FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: eventtest.UUID("selected-operating-owner"),
+	}
+	for _, test := range []struct {
+		name     string
+		sourceID string
+	}{
+		{name: "absent source"},
+		{name: "foreign source", sourceID: eventtest.UUID("foreign-source-owner")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			planner := newDeliveryPlanner(
+				deliveryRouteResolver{
+					resolveRoutedSubscribers: func(events.Event) []Subscriber {
+						return []Subscriber{{
+							Recipient: events.MustNodeDeliveryRecipient("lifecycle-orchestrator"),
+							Path:      owner.FlowInstance,
+						}}
+					},
+					resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+					resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+						return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+					},
+					describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
+				},
+				testSelectedOwnerPolicy(ActiveTargetDescriptor{
+					ID: "operating-owner", FlowInstance: owner.FlowInstance, EntityID: owner.EntityID,
+				}),
+			)
+			envelope := events.EnvelopeForFlowInstance(events.EventEnvelope{}, owner.FlowInstance)
+			if test.sourceID != "" {
+				envelope = events.EnvelopeForEntityID(envelope, test.sourceID)
+			}
+			plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
+				"", events.EventType(owner.FlowInstance+"/opco.product_initialization_requested"),
+				"", "", nil, 0, "", "", envelope, time.Time{},
+			))
+			if err != nil {
+				t.Fatalf("plan no-target owner: %v", err)
+			}
+			routes := plan.DeliveryRoutes()
+			if len(routes) != 1 || routes[0].Target != owner {
+				t.Fatalf("delivery routes = %#v, want exact selected owner %#v", routes, owner)
+			}
+		})
 	}
 }
 

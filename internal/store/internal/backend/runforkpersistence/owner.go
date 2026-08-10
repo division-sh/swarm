@@ -37,7 +37,7 @@ type rowQueryer interface {
 }
 
 type eventCommitOwner interface {
-	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 }
 
 type conversationForkSourceReader interface {

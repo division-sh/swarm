@@ -21,6 +21,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -58,10 +59,6 @@ type connectRoutePlanDescriptorStore struct {
 	flowInstances               []ActiveFlowInstanceDescriptor
 	flowInstanceDescriptorCalls int
 	flowInstanceDescriptorErr   error
-}
-
-type connectRoutePlanFailingAgentDescriptorStore struct {
-	*targetRouteMemoryStore
 }
 
 type connectRoutePlanMutationStore struct {
@@ -221,6 +218,16 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 					source := connectReceiverPinCollisionSource(producerMode, rootReceiver, subscriberType, false)
 					store := newTargetRouteMemoryStore()
+					producerEntityID := eventtest.UUID("producer-entity")
+					receiverEntityID := eventtest.UUID("receiver-entity")
+					receiverFlowInstance := "consumer"
+					if rootReceiver {
+						receiverEntityID = eventtest.UUID("root-entity")
+						receiverFlowInstance = runID
+					}
+					store.setTargetOwners(ActiveTargetDescriptor{
+						ID: "receiver-owner", FlowInstance: receiverFlowInstance, EntityID: receiverEntityID,
+					})
 					routeTable, err := DeriveRouteTable(source)
 					if err != nil {
 						t.Fatalf("DeriveRouteTable: %v", err)
@@ -250,8 +257,6 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
-					producerEntityID := eventtest.UUID("producer-entity")
-					rootEntityID := eventtest.UUID("root-entity")
 					eventType := events.EventType("producer/work.ready")
 					sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}
 					if producerMode == "template" {
@@ -260,20 +265,18 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					}
 					envelope := events.EventEnvelope{Source: sourceRoute}
 					if rootReceiver {
-						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: rootEntityID})
+						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: receiverEntityID})
 					}
 					eventID := uuid.NewString()
 					evt := connectRoutePlanStaticProducerEvent(eventID, eventType, "", "", []byte(`{}`), 0, runID, "", envelope, time.Now().UTC())
 					if subscriberType == "agent" {
 						flowPath := "consumer"
-						entityID := evt.EntityID()
 						if rootReceiver {
 							flowPath = ""
-							entityID = rootEntityID
 						}
 						identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, map[bool]string{false: "consumer", true: ""}[rootReceiver], "receiver", flowPath)
 						admission := testAgentSubscriptionAdmissionForFlow(t, "receiver", flowPath, "work.accepted", "work.audited")
-						if ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID); ch == nil {
+						if ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, receiverEntityID); ch == nil {
 							t.Fatal("install typed root-agent subscription")
 						}
 					}
@@ -302,7 +305,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 
 func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplicateEdges(t *testing.T) {
 	source := connectReceiverPinCollisionSource("static", false, "node", true)
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -314,7 +317,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 		eb,
 		testAgentSubscriptionAdmissionForFlow(t, "legal-agent", "consumer", "work.accepted"),
 		identity,
-		evt.EntityID(),
+		connectRoutePlanStaticOwner().EntityID,
 	)
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -333,7 +336,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 		{name: "duplicate same edge", shape: "duplicate_edge", wantRoutes: 1},
 	} {
 		t.Run("public "+tc.name, func(t *testing.T) {
-			store := newTargetRouteMemoryStore()
+			store := newConnectRoutePlanStaticStore()
 			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(tc.shape)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -646,16 +649,12 @@ func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, e
 	return nil
 }
 
-func (s *connectRoutePlanFailingAgentDescriptorStore) ListActiveAgentDescriptors(context.Context) ([]ActiveAgentDescriptor, error) {
-	return nil, errors.New("legacy active-agent descriptor path should not run for static connect route plans")
-}
-
-func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber(t *testing.T) {
+func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
 	})
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -667,7 +666,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
+		EntityID:     connectRoutePlanStaticOwner().EntityID,
 	},
 	}
 
@@ -725,7 +724,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforeP
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
 	})
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -789,14 +788,14 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 		To:      "consumer.deploy_completed",
 		Adapter: "deploy_done_to_completed",
 	}}))
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	admission := testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", "consumer", events.EventType("deploy.completed")).CarrierOnly()
 	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "consumer-agent", "consumer")
-	ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, "")
+	ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, connectRoutePlanStaticOwner().EntityID)
 	if ch == nil {
 		t.Fatal("typed carrier-only agent admission returned no channel")
 	}
@@ -880,7 +879,7 @@ func connectRoutePlanLifecycleAgentRoute(
 
 func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -894,7 +893,7 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
+		EntityID:     connectRoutePlanStaticOwner().EntityID,
 	},
 	}
 
@@ -940,6 +939,10 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEvent(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
 	store := newTargetRouteMemoryStore()
+	store.setTargetOwners(
+		testSelectedRunTargetOwner("consumer-a-owner", "consumer-a", "consumer-a-owner"),
+		testSelectedRunTargetOwner("consumer-b-owner", "consumer-b", "consumer-b-owner"),
+	)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -961,7 +964,7 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 	forbidden := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
+		EntityID:     connectRoutePlanStaticOwner().EntityID,
 	},
 	}
 
@@ -992,12 +995,12 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 	}
 }
 
-func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescriptorPolicy(t *testing.T) {
+func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
 	})
-	store := &connectRoutePlanFailingAgentDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1020,7 +1023,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescrip
 		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
 	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute()) {
-		t.Fatalf("preflight delivery routes = %#v, want static connect route", plan.DeliveryRoutes)
+		t.Fatalf("preflight delivery routes = %#v, want exact selected-owner static connect route", plan.DeliveryRoutes)
 	}
 }
 
@@ -1050,6 +1053,198 @@ func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
 	}
 }
 
+func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	plans := graph.Plans()
+	if len(plans) != 1 {
+		t.Fatalf("compiled plans = %d, want 1", len(plans))
+	}
+	plan := plans[0]
+	receiver := plan.ReceiverEndpoint().Readback()
+	accepted, err := runtimepinrouting.NewConnectNodeRecipient("consumer-node-v1", "consumer/v-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated, err := runtimepinrouting.NewConnectNodeRecipient("unrelated-node-v1", "validation/v-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrations := append(
+		graph.AdmitReceiverRecipient(receiver.FlowID, events.EventType(receiver.ResolvedEvent), accepted),
+		graph.AdmitReceiverRecipient(receiver.FlowID, events.EventType(receiver.ResolvedEvent), unrelated)...,
+	)
+	evaluation := graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{{
+		FlowID: receiver.FlowID, FlowInstance: "consumer/v-1", EntityID: eventtest.UUID("consumer-v1"),
+	}}, registrations)
+	if got := evaluation.Recipients(); len(got) != 1 || got[0].ID() != "consumer-node-v1" {
+		t.Fatalf("recipients = %#v, want only consumer-node-v1", got)
+	}
+	ledger, err := evaluation.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Plans()) != 1 || len(ledger.Plans()[0].Candidates()) != 2 {
+		t.Fatalf("evaluation ledger = %#v, want both considered registrations", ledger)
+	}
+	outcomes := map[string]events.ConnectCandidateOutcome{}
+	for _, candidate := range ledger.Plans()[0].Candidates() {
+		outcomes[candidate.Recipient().ID()] = candidate.Outcome()
+	}
+	if outcomes["consumer-node-v1"] != events.ConnectCandidateAccepted || outcomes["unrelated-node-v1"] != events.ConnectCandidatePathMismatch {
+		t.Fatalf("candidate outcomes = %#v", outcomes)
+	}
+}
+
+func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{From: "producer.deploy_done", To: "consumer.deploy_completed"})
+	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-kind-matrix")}
+	staticSource, err := events.NewStaticFlowRoutingSource(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.NewString()
+	parentID := uuid.NewString()
+	at := time.Now().UTC()
+	child := func(producerType events.EventProducerType, producerID string) events.Event {
+		producer, err := events.NewProducerIdentity(producerType, producerID)
+		if err != nil {
+			t.Fatalf("construct %s producer: %v", producerType, err)
+		}
+		return eventtest.ChildForProducerWithRoutingSource(
+			uuid.NewString(), "producer/deploy.done", producer, "", json.RawMessage(`{}`), 0,
+			events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live},
+			events.EventEnvelope{}, staticSource, at,
+		)
+	}
+	control := func(producerID string) events.Event {
+		return eventtest.RuntimeControl(
+			uuid.NewString(), "producer/deploy.done", producerID, "", json.RawMessage(`{}`), 0,
+			runID, parentID, events.EventEnvelope{Source: route}, at,
+		)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		event func() events.Event
+	}{
+		{
+			name: "operator ingress",
+			event: func() events.Event {
+				return eventtest.ExistingRunRootIngressWithRoutingSource(
+					uuid.NewString(), "producer/deploy.done", "operator-api", "", json.RawMessage(`{}`), 0,
+					runID, events.EventEnvelope{}, staticSource, at,
+				)
+			},
+		},
+		{name: "agent emit", event: func() events.Event { return child(events.EventProducerAgent, "producer-agent") }},
+		{name: "node emit", event: func() events.Event { return child(events.EventProducerNode, "producer-node") }},
+		{name: "schedule", event: func() events.Event { return control("scheduler") }},
+		{name: "workflow timer", event: func() events.Event { return control("workflow-timer") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newConnectRoutePlanStaticStore()
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			event := tc.event()
+			if err := eb.Publish(context.Background(), event); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			settlement := store.settlements[event.ID()]
+			if settlement.NoDelivery() || settlement.WriteClass() != events.EventWriteNormalPublication {
+				t.Fatalf("settlement = %#v, want normal delivery", settlement)
+			}
+			plans := settlement.Ledger().Plans()
+			if len(plans) != 1 || plans[0].Resolution() != events.ConnectPlanResolved {
+				t.Fatalf("compiled plan ledger = %#v, want one resolved plan", plans)
+			}
+			if routes := store.routes[event.ID()]; !deliveryRoutesContain(routes, connectRoutePlanStaticDeliveryRoute()) {
+				t.Fatalf("persisted routes = %#v, want canonical consumer route", routes)
+			}
+		})
+	}
+}
+
+func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
+	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "done", Event: "work.done"}}},
+		{id: "consumer-a", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "completed", Event: "work.done"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-a-node": {ID: "consumer-a-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
+		}},
+		{id: "consumer-b", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "completed", Event: "work.done"}}, nodes: map[string]runtimecontracts.SystemNodeContract{
+			"consumer-b-node": {ID: "consumer-b-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
+		}},
+	}, []runtimecontracts.FlowPackageConnect{
+		{From: "producer.done", To: "consumer-a.completed"},
+		{From: "producer.done", To: "consumer-b.completed"},
+	}))
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if got := len(graph.Plans()); got != 2 {
+		t.Fatalf("compiled plans = %d, want 2; issues=%#v", got, graph.Issues())
+	}
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwners(
+		testSelectedRunTargetOwner("consumer-a-owner", "consumer-a", "consumer-a-owner"),
+		testSelectedRunTargetOwner("consumer-b-owner", "consumer-b", "consumer-b-owner"),
+	)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: newRouteTable(source)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	if got := len(graph.MatchingPlans(evt)); got != 2 {
+		t.Fatalf("matching plans = %d, want 2", got)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	settlement := store.settlements[evt.ID()]
+	if !settlement.NoDelivery() || settlement.Reason() != events.NoDeliveryMatchedNoRecipient || len(store.routes[evt.ID()]) != 0 {
+		t.Fatalf("settlement = %#v routes=%#v", settlement, store.routes[evt.ID()])
+	}
+	plans := settlement.Ledger().Plans()
+	if len(plans) != 2 {
+		t.Fatalf("plan evidence = %#v, want 2", plans)
+	}
+	for _, plan := range plans {
+		if plan.Resolution() != events.ConnectPlanNoRegistration || len(plan.Candidates()) != 0 {
+			t.Fatalf("plan evidence = %#v, want no_registration", plan)
+		}
+	}
+}
+
+func TestEventBusAuthoredDeliberateEmptyUsesOutputConsumerClassification(t *testing.T) {
+	entry := runtimecontracts.EventCatalogEntry{}
+	entry.Swarm.Consumer = []string{"external"}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "ready", Event: "root.ready"}}}}},
+		Events:     map[string]runtimecontracts.EventCatalogEntry{"root.ready": entry},
+	}
+	source := semanticview.Wrap(bundle)
+	store := newConnectRoutePlanStaticStore()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := connectRoutePlanRootProducerEvent(uuid.NewString(), "root.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	settlement := store.settlements[evt.ID()]
+	if !settlement.NoDelivery() || settlement.Reason() != events.NoDeliveryNoSubscriberByDesign {
+		t.Fatalf("settlement = %#v, want authored deliberate empty", settlement)
+	}
+
+	unregistered := *bundle
+	unregistered.Events = map[string]runtimecontracts.EventCatalogEntry{"root.ready": {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"webhook"}}}}
+	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(semanticview.Wrap(&unregistered), string(evt.Type()), evt.RoutingSource())
+	if classification.DeliberateNoSubscriber() {
+		t.Fatal("free-form webhook spelling authorized deliberate no-delivery")
+	}
+}
+
 func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t *testing.T) {
 	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
@@ -1071,7 +1266,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 	}, []runtimecontracts.FlowPackageConnect{{
 		From: "producer.deploy_done", To: "consumer.deploy_completed", Adapter: "deploy_done_to_completed",
 	}}))
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1131,7 +1326,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
 	})
-	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
+	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1163,7 +1358,7 @@ func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T)
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
 	})
-	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
+	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1203,7 +1398,7 @@ func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T)
 	}
 }
 
-func TestEnginePublication_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLookup(t *testing.T) {
+func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1234,6 +1429,11 @@ func TestEnginePublication_ExactDuplicateReusesDurableConnectRouteBeforeDescript
 	if got := store.events[eventID].TargetRoute().Normalized(); got != wantTarget.Normalized() {
 		t.Fatalf("initial persisted target = %#v, want %#v", got, wantTarget)
 	}
+	initialSettlement, err := json.Marshal(store.settlements[eventID])
+	if err != nil {
+		t.Fatalf("marshal initial route settlement: %v", err)
+	}
+	initialRoutes := append([]events.DeliveryRoute(nil), store.routes[eventID]...)
 	if err := eb.clearPendingOutboxOperation(context.Background(), eventID); err != nil {
 		t.Fatalf("clear initial pending outbox operation: %v", err)
 	}
@@ -1249,6 +1449,13 @@ func TestEnginePublication_ExactDuplicateReusesDurableConnectRouteBeforeDescript
 	}
 	if got := store.events[eventID].TargetRoute().Normalized(); got != wantTarget.Normalized() {
 		t.Fatalf("duplicate persisted target = %#v, want unchanged %#v", got, wantTarget)
+	}
+	duplicateSettlement, err := json.Marshal(store.settlements[eventID])
+	if err != nil {
+		t.Fatalf("marshal duplicate route settlement: %v", err)
+	}
+	if string(duplicateSettlement) != string(initialSettlement) || !reflect.DeepEqual(store.routes[eventID], initialRoutes) {
+		t.Fatalf("exact duplicate changed durable settlement: settlement=%s routes=%#v", duplicateSettlement, store.routes[eventID])
 	}
 	if err := eb.clearPendingOutboxOperation(context.Background(), eventID); err != nil {
 		t.Fatalf("clear duplicate pending outbox operation: %v", err)
@@ -3182,7 +3389,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t *testing.T) {
+func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberPersistsMatchedNoRecipient(t *testing.T) {
 	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
 			id:   "producer",
@@ -3211,7 +3418,7 @@ func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t
 		To:      "consumer.deploy_completed",
 		Adapter: "deploy_done_to_completed",
 	}}))
-	store := newTargetRouteMemoryStore()
+	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3224,11 +3431,11 @@ func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
-	if got, want := routePlan.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed; got != want {
-		t.Fatalf("target failure = %q, want %q", got, want)
+	if !routePlan.TargetFailure.Empty() {
+		t.Fatalf("target failure = %q, want none for typed no-delivery settlement", routePlan.TargetFailure)
 	}
 	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
 		len(routePlan.SubscribedRecipients) != 0 || len(routePlan.RecipientIDs()) != 0 ||
@@ -3242,8 +3449,8 @@ func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if got, want := plan.TargetFailure, runtimepinrouting.FailureTargetNotSubscribed.Code(); got != want {
-		t.Fatalf("target failure = %q, want %q", got, want)
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none for typed no-delivery settlement", plan.TargetFailure)
 	}
 	if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 || len(plan.RoutedRecipients) != 0 ||
 		len(plan.SubscriptionRecipients) != 0 || len(plan.DeliveryRoutes) != 0 {
@@ -3257,14 +3464,18 @@ func TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed(t
 	if routes := store.routes[eventID]; len(routes) != 0 {
 		t.Fatalf("persisted delivery routes = %#v, want none when matched connect receiver is unsubscribed", routes)
 	}
+	settlement := store.settlements[eventID]
+	if !settlement.NoDelivery() || settlement.Reason() != events.NoDeliveryMatchedNoRecipient || len(settlement.Ledger().Plans()) != 1 {
+		t.Fatalf("route settlement = %#v, want matched_no_recipient with one plan", settlement)
+	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
-	if got := store.receipts[eventID]; got != "dead_letter" {
-		t.Fatalf("pipeline receipt = %q, want dead_letter target-delivery receipt", got)
+	if got := store.receipts[eventID]; got == "dead_letter" {
+		t.Fatal("matched no-recipient settlement was also committed as a target-failure dead letter")
 	}
-	if got := store.receiptErrs[eventID]; got == nil || got.Detail.Code != "target_not_subscribed" {
-		t.Fatalf("pipeline receipt failure = %#v, want target_not_subscribed", got)
+	if got := store.receiptErrs[eventID]; got != nil {
+		t.Fatalf("pipeline receipt failure = %#v, want none", got)
 	}
 }
 
@@ -3675,9 +3886,19 @@ func connectRoutePlanStaticDeliveryRoute() events.DeliveryRoute {
 	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     runtimeflowidentity.EntityID("consumer"),
+		EntityID:     connectRoutePlanStaticOwner().EntityID,
 	},
 	}
+}
+
+func connectRoutePlanStaticOwner() ActiveTargetDescriptor {
+	return testSelectedRunTargetOwner("consumer-selected-owner", "consumer", "consumer-selected-owner")
+}
+
+func newConnectRoutePlanStaticStore() *targetRouteMemoryStore {
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwners(connectRoutePlanStaticOwner())
+	return store
 }
 
 func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowPackageConnect) *runtimecontracts.WorkflowContractBundle {

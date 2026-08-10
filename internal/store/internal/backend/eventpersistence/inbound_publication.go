@@ -72,7 +72,11 @@ func commitInboundPublicationTx(
 		return runtimeinbound.CommitResult{}, fmt.Errorf("admit inbound evidence: %w", err)
 	}
 	committer := sqlPublishCommitter{tx: tx, store: eventStore, story: runtimeAuthorActivityMutation(story)}
-	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimepipelineobligation.ScopeDirect}); err != nil {
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteInboundEvidenceDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	if err != nil {
+		return runtimeinbound.CommitResult{}, err
+	}
+	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, RouteSettlement: settlement, ReplayScope: runtimepipelineobligation.ScopeDirect}); err != nil {
 		return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound evidence: %w", err)
 	}
 	if err := storeactivityjournal.RecordInbound(ctx, story, command.Finalization.EvidenceEvent, request.Provider, command.AuthorProjection); err != nil {

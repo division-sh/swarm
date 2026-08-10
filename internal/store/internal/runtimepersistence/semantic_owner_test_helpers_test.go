@@ -183,7 +183,7 @@ func postgresRunSessionNextWakeTx(ctx context.Context, tx *sql.Tx, runID string,
 }
 
 type eventCommitTxStore interface {
-	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	CommitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
@@ -217,7 +217,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.AppendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event)
+	outcome, err := c.store.AppendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event, req.RouteSettlement)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -228,6 +228,52 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return outcome, nil
+}
+
+func testRouteSettlement(event events.Event, routes []events.DeliveryRoute) events.RouteSettlement {
+	var (
+		settlement events.RouteSettlement
+		err        error
+	)
+	switch event.Type() {
+	case events.EventTypePlatformRuntimeLog:
+		settlement, err = events.NewNoDeliverySettlement(events.EventWriteRuntimeLogDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	case events.EventTypePlatformInboundRecord:
+		settlement, err = events.NewNoDeliverySettlement(events.EventWriteInboundEvidenceDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	case events.EventTypePlatformAgentDirective:
+		settlement, err = events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
+	default:
+		ledger, ledgerErr := events.NewConnectEvaluationLedger(nil)
+		writeClass := events.EventWriteNormalPublication
+		if event.AdmissionClass() == events.EventAdmissionSelectedForkReplay {
+			writeClass = events.EventWriteSelectedForkPublication
+		}
+		if ledgerErr != nil {
+			err = ledgerErr
+		} else if len(routes) > 0 {
+			settlement, err = events.NewDeliverySettlement(writeClass, ledger)
+		} else {
+			settlement, err = events.NewNoDeliverySettlement(writeClass, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+		}
+	}
+	if err != nil {
+		panic(fmt.Sprintf("construct test route settlement: %v", err))
+	}
+	if err := settlement.Validate(routes); err != nil {
+		panic(fmt.Sprintf("validate test route settlement: %v", err))
+	}
+	return settlement
+}
+
+func testHistoricalReplaySettlement(routes []events.DeliveryRoute) events.RouteSettlement {
+	settlement, err := events.NewDeliverySettlement(events.EventWriteHistoricalRunForkReplay, events.ConnectEvaluationLedger{})
+	if err != nil {
+		panic(fmt.Sprintf("construct historical replay settlement: %v", err))
+	}
+	if err := settlement.Validate(routes); err != nil {
+		panic(fmt.Sprintf("validate historical replay settlement: %v", err))
+	}
+	return settlement
 }
 
 func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) error {

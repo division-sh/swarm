@@ -170,6 +170,21 @@ func withConnectSourceMode(endpoint ConnectRoutePlanEndpoint, mode string) Conne
 	return endpoint
 }
 
+func TestConnectRoutePlanRootToNestedStaticUsesStructuralTargetOwner(t *testing.T) {
+	plan := ConnectRoutePlan{
+		source: newConnectRoutePlanEndpoint(
+			ConnectEndpointRoleProducer, true, "", "", "root", "", "validate.requested", "validate.requested", "", nil,
+		),
+		receiver: newConnectRoutePlanEndpoint(
+			ConnectEndpointRoleConsumer, false, "child", "child", runtimecontracts.FlowModeStatic,
+			"validate", "validation.done", "child/validation.done", "", nil,
+		),
+	}
+	if !plan.StructuralTargetOwnerEligible() {
+		t.Fatal("root-to-nested-static plan must consume the admitted current-delivery owner")
+	}
+}
+
 func TestConnectSourceEndpointMatchesRejectsStaticEventWhenSourceRouteContradicts(t *testing.T) {
 	endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "producer", "producer", runtimecontracts.FlowModeStatic, "", "deploy.done", "producer/deploy.done", "", nil)
 	if connectSourceEndpointMatchesTestSource(endpoint, "producer/deploy.done", mustConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")) {
@@ -433,8 +448,8 @@ func TestCompileConnectPlansUsesFanInStreamSingularTarget(t *testing.T) {
 	if plan.targetKind != ConnectTargetKindTarget || plan.resolutionKind != ConnectResolutionStatic {
 		t.Fatalf("fan-in routing shape = target_kind:%s resolution:%s, want target/static", plan.targetKind.Code(), plan.resolutionKind.Code())
 	}
-	if plan.target.FlowID != templatefanin.ReceiverFlowID || plan.target.FlowInstance != templatefanin.ReceiverFlowInstance || plan.target.EntityID != flowidentity.EntityID(templatefanin.ReceiverFlowInstance) {
-		t.Fatalf("fan-in target = %#v, want receiver singleton %s with entity %s", plan.target, templatefanin.ReceiverFlowInstance, flowidentity.EntityID(templatefanin.ReceiverFlowInstance))
+	if plan.target.FlowID != templatefanin.ReceiverFlowID || plan.target.FlowInstance != templatefanin.ReceiverFlowInstance || plan.target.EntityID != "" {
+		t.Fatalf("fan-in target = %#v, want receiver singleton %s route blueprint without run-specific entity", plan.target, templatefanin.ReceiverFlowInstance)
 	}
 }
 
@@ -1110,11 +1125,11 @@ func TestCompileConnectPlansOneToOneStatic(t *testing.T) {
 	if plan.target.FlowInstance != "consumer" {
 		t.Fatalf("Target.FlowInstance = %q, want consumer", plan.target.FlowInstance)
 	}
-	if plan.target.EntityID != flowidentity.EntityID("consumer") {
-		t.Fatalf("Target.EntityID = %q, want static route entity id", plan.target.EntityID)
+	if plan.target.EntityID != "" {
+		t.Fatalf("Target.EntityID = %q, want route-only static blueprint", plan.target.EntityID)
 	}
 	if plan.RequiresRuntimeResolution() {
-		t.Fatal("static connect should not require runtime descriptor resolution")
+		t.Fatal("static connect blueprint does not require descriptor materialization")
 	}
 }
 
@@ -1193,8 +1208,8 @@ func TestCompileConnectPlansSupportsRootReceiverEndpoint(t *testing.T) {
 	if !plan.receiver.IsRoot() || plan.receiver.flowID.value != "" || plan.receiver.pin.value != "root_ready" {
 		t.Fatalf("Receiver = %#v, want root input root_ready", plan.receiver)
 	}
-	if plan.target.FlowInstance != "" || plan.target.EntityID != "" || plan.RequiresRuntimeResolution() {
-		t.Fatalf("root target = %#v (runtime=%t), want root-static target", plan.target, plan.RequiresRuntimeResolution())
+	if plan.target.FlowInstance != "" || plan.target.EntityID != "" || !plan.RequiresRuntimeResolution() {
+		t.Fatalf("root target = %#v (runtime=%t), want publication-time root owner resolution", plan.target, plan.RequiresRuntimeResolution())
 	}
 }
 

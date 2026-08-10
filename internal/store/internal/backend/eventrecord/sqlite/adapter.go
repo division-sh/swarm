@@ -83,14 +83,14 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			operator_reference_event_id
-		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''))
+			route_settlement, operator_reference_event_id
+		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''))
 		ON CONFLICT(event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
 		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), record.OperatorReferencedEventID)
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID)
 	if err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}
@@ -107,7 +107,7 @@ const selectRecord = `
 		COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), e.scope, e.payload, e.execution_mode,
 		e.chain_depth, e.produced_by, e.produced_by_type, COALESCE(e.source_event_id, ''), e.created_at,
 		e.routing_source_kind, COALESCE(e.routing_source_authority, ''), e.source_route, e.target_route,
-		e.target_set, COALESCE(e.operator_reference_event_id, ''),
+		e.target_set, e.route_settlement, COALESCE(e.operator_reference_event_id, ''),
 		COALESCE(sf.source_run_id, ''), COALESCE(sf.source_event_id, ''),
 		COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0)
 	FROM events e
@@ -130,7 +130,7 @@ func scanTargets(record *eventrecord.Record, createdAt *any) []any {
 		&record.EntityID, &record.FlowInstance, &record.Scope, &record.Payload, &record.ExecutionMode,
 		&record.ChainDepth, &record.ProducedBy, &record.ProducedByType, &record.SourceEventID,
 		createdAt, &record.RoutingSourceKind, &record.RoutingSourceAuthority,
-		&record.SourceRoute, &record.TargetRoute, &record.TargetSet, &record.OperatorReferencedEventID,
+		&record.SourceRoute, &record.TargetRoute, &record.TargetSet, &record.RouteSettlement, &record.OperatorReferencedEventID,
 		&record.SelectedForkSourceRunID, &record.SelectedForkSourceEventID, &record.SelectedForkAuthorityStamp,
 		&record.SelectedForkLineageOwners,
 	}

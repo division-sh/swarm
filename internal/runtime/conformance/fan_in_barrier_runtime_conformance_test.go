@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -33,8 +34,10 @@ import (
 
 type fanInBarrierConformanceStore interface {
 	conformanceDurableEventBusStore
+	runtimebus.CommitPublicationOwner
 	runtimepipeline.WorkflowPersistenceOwner
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
+	LoadOperatorEvent(context.Context, string) (store.OperatorEventFull, error)
 }
 
 type fanInBarrierGenericScheduleWakeups struct{}
@@ -107,7 +110,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			seedFanInBarrierRun(t, ctx, backend, db, runID)
 			runtime := newFanInBarrierRuntime(t, backend, db, source)
-			seedFanInBarrierPortfolioShell(t, ctx, runtime.pipeline, bundle)
+			seedFanInBarrierPortfolioShell(t, ctx, runtime.pipeline, bundle, runtimeflowidentity.EntityID("portfolio"))
 			const periodID = "2026-Q3"
 			memberA := uuid.NewString()
 			memberB := uuid.NewString()
@@ -139,7 +142,6 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("partial barrier = state:%s activation:%#v, want awaiting open 1/2", portfolio.CurrentState, activation)
 			}
-
 			// Reconstruct both EventBus and PipelineCoordinator. The second arrival
 			// must consume the persisted activation rather than in-memory state.
 			runtime = newFanInBarrierRuntime(t, backend, db, source)
@@ -157,6 +159,370 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Fatalf("barrier results = %#v, want declared membership order [11 22]", results)
 			}
 		})
+	}
+}
+
+func TestFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.T) {
+	testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t)
+}
+
+func TestEventRouteSettlementRestartPreservesExactTargetOwner(t *testing.T) {
+	testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t)
+}
+
+func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.T) {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load canonical fan-in barrier: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
+				backend := storetest.StartSQLiteRuntimeStore(t)
+				return backend, storetest.DatabaseForTest(backend)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend, db := tc.setup(t)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			selectedOwner := eventtest.UUID("fan-in-selected-owner-" + tc.name)
+			selectedTarget := events.RouteIdentity{
+				FlowID: "portfolio", FlowInstance: "portfolio", EntityID: selectedOwner,
+			}.Normalized()
+			seedRuntime := newFanInBarrierRuntime(t, backend, db, source)
+			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.pipeline, bundle, selectedOwner)
+			requireSelectedRunTargetOwner(t, ctx, backend, "portfolio", selectedOwner)
+
+			proofBus := newFanInBarrierRouteProofBus(t, backend, source)
+			eventID := uuid.NewString()
+			sourceRoute := events.RouteIdentity{
+				FlowID: "operating", FlowInstance: "operating/proof-instance",
+				EntityID: eventtest.UUID("fan-in-source-owner-" + tc.name),
+			}.Normalized()
+			eventType := events.EventType(sourceRoute.FlowInstance + "/operating.reported")
+			sink := newFanInBarrierRouteProofSink(t, ctx, proofBus, eventType)
+			routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(sourceRoute)
+			if err != nil {
+				t.Fatalf("create proof routing source: %v", err)
+			}
+			payload, err := json.Marshal(map[string]any{
+				"operating_id": "proof-instance", "period_id": "2026-Q3", "revenue": 42,
+			})
+			if err != nil {
+				t.Fatalf("marshal proof payload: %v", err)
+			}
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(
+				eventID, eventType, "operating-proof", "", payload, 0, runID,
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), routingSource, time.Now().UTC(),
+			)
+			if sourceRoute.EntityID == selectedOwner || runtimeflowidentity.EntityID("portfolio") == selectedOwner {
+				t.Fatal("proof identities must make source, path-derived, and selected owners distinguishable")
+			}
+
+			if inserted := commitFanInBarrierEnginePublication(t, ctx, backend, proofBus, event); !inserted {
+				t.Fatal("initial fan-in proof publication was not inserted")
+			}
+			initialSettlement := requireFanInBarrierRouteProof(t, ctx, backend, db, eventID, selectedTarget)
+			initialPublic := requireFanInBarrierPublicRouteProof(t, ctx, backend, eventID, selectedTarget)
+			sink.requireDelivery(t, eventID, selectedTarget)
+			if err := sink.close(true); err != nil {
+				t.Fatalf("retire first proof sink: %v", err)
+			}
+
+			removeFanInBarrierSelectedOwner(t, ctx, backend, db, runID, selectedOwner)
+			restartedBus := newFanInBarrierRouteProofBus(t, backend, source)
+			restartedSink := newFanInBarrierRouteProofSink(t, ctx, restartedBus, eventType)
+			if inserted := commitFanInBarrierEnginePublication(t, ctx, backend, restartedBus, event); inserted {
+				t.Fatal("exact duplicate fan-in proof publication was inserted again")
+			}
+			restartedSink.requireNoDelivery(t)
+			if err := restartedSink.close(false); err != nil {
+				t.Fatalf("retire restarted proof sink: %v", err)
+			}
+			if got := requireFanInBarrierRouteProof(t, ctx, backend, db, eventID, selectedTarget); got != initialSettlement {
+				t.Fatalf("duplicate route settlement changed:\ninitial=%s\nreplayed=%s", initialSettlement, got)
+			}
+			if got := requireFanInBarrierPublicRouteProof(t, ctx, backend, eventID, selectedTarget); got != initialPublic {
+				t.Fatalf("duplicate public route projection changed:\ninitial=%s\nreplayed=%s", initialPublic, got)
+			}
+		})
+	}
+}
+
+type fanInBarrierRouteProofSink struct {
+	subscription worklifetime.InternalSubscription
+}
+
+func newFanInBarrierRouteProofSink(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, eventType events.EventType) *fanInBarrierRouteProofSink {
+	t.Helper()
+	subscription, err := eventBus.SubscribeInternal(ctx, "portfolio-collector", eventType)
+	if err != nil {
+		t.Fatalf("subscribe fan-in proof sink: %v", err)
+	}
+	subscription.MarkReady()
+	return &fanInBarrierRouteProofSink{subscription: subscription}
+}
+
+func (s *fanInBarrierRouteProofSink) requireDelivery(t *testing.T, eventID string, wantTarget events.RouteIdentity) {
+	t.Helper()
+	select {
+	case delivery := <-s.subscription.Deliveries():
+		if delivery == nil {
+			t.Fatal("fan-in proof delivery is nil")
+		}
+		if got := delivery.Event().ID(); got != eventID {
+			t.Fatalf("fan-in proof event = %s, want %s", got, eventID)
+		}
+		if got := delivery.HandoffRoute().Target.Normalized(); got != wantTarget.Normalized() {
+			t.Fatalf("fan-in proof handoff target = %#v, want %#v", got, wantTarget.Normalized())
+		}
+		if got := delivery.Event().TargetRoute().Normalized(); got != wantTarget.Normalized() {
+			t.Fatalf("fan-in proof event target = %#v, want %#v", got, wantTarget.Normalized())
+		}
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete fan-in proof delivery: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for fan-in proof delivery")
+	}
+}
+
+func (s *fanInBarrierRouteProofSink) requireNoDelivery(t *testing.T) {
+	t.Helper()
+	select {
+	case delivery := <-s.subscription.Deliveries():
+		if delivery != nil {
+			_ = delivery.Complete()
+			t.Fatalf("exact duplicate dispatched fan-in proof event %s", delivery.Event().ID())
+		}
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func (s *fanInBarrierRouteProofSink) close(restart bool) error {
+	if s == nil || s.subscription == nil {
+		return nil
+	}
+	err := s.subscription.Complete(restart)
+	s.subscription = nil
+	return err
+}
+
+func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceStore, source semanticview.Source) *runtimebus.EventBus {
+	t.Helper()
+	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		WorkOwner:      conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash()),
+	}))
+	if err != nil {
+		t.Fatalf("create fan-in route proof EventBus: %v", err)
+	}
+	for _, route := range mustFanInBarrierRoutes(t, backend) {
+		if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
+			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.InstancePath, err)
+		}
+	}
+	return eventBus
+}
+
+func commitFanInBarrierEnginePublication(
+	t *testing.T,
+	ctx context.Context,
+	backend fanInBarrierConformanceStore,
+	eventBus *runtimebus.EventBus,
+	event events.Event,
+) bool {
+	t.Helper()
+	plans, err := eventBus.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{{Event: event}})
+	if err != nil {
+		t.Fatalf("prepare fan-in proof publication: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("fan-in proof publication plans = %d, want 1", len(plans))
+	}
+	plan, ok := plans[0].(runtimebus.EnginePublicationPlan)
+	if !ok {
+		t.Fatalf("fan-in proof publication plan = %T", plans[0])
+	}
+	committed, err := backend.CommitPublication(ctx, plan.PublicationCommand())
+	if err != nil {
+		_ = eventBus.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		t.Fatalf("commit fan-in proof publication: %v", err)
+	}
+	proof, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+	if err != nil {
+		_ = eventBus.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		t.Fatalf("admit committed fan-in proof publication: %v", err)
+	}
+	if err := eventBus.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{proof}); err != nil {
+		t.Fatalf("finalize fan-in proof publication: %v", err)
+	}
+	if err := eventBus.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{Event: event}}); err != nil {
+		t.Fatalf("dispatch committed fan-in proof publication: %v", err)
+	}
+	return proof.NewlyInserted()
+}
+
+func requireFanInBarrierRouteProof(
+	t *testing.T,
+	ctx context.Context,
+	backend fanInBarrierConformanceStore,
+	db *sql.DB,
+	eventID string,
+	wantTarget events.RouteIdentity,
+) string {
+	t.Helper()
+	routes, err := backend.ListEventDeliveryRoutes(ctx, eventID)
+	if err != nil {
+		t.Fatalf("load fan-in proof routes: %v", err)
+	}
+	if len(routes) != 1 || routes[0].Recipient.ID() != "portfolio-collector" || routes[0].Target.Normalized() != wantTarget.Normalized() {
+		t.Fatalf("fan-in proof routes = %#v, want portfolio-collector at %#v", routes, wantTarget.Normalized())
+	}
+	query := `SELECT route_settlement::text FROM events WHERE event_id = $1::uuid`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT route_settlement FROM events WHERE event_id = ?`
+	}
+	var raw string
+	if err := db.QueryRowContext(ctx, query, eventID).Scan(&raw); err != nil {
+		t.Fatalf("load fan-in proof settlement: %v", err)
+	}
+	var settlement events.RouteSettlement
+	if err := json.Unmarshal([]byte(raw), &settlement); err != nil {
+		t.Fatalf("decode fan-in proof settlement: %v", err)
+	}
+	if !settlement.Delivered() || settlement.NoDelivery() || settlement.WriteClass() != events.EventWriteNormalPublication {
+		t.Fatalf("fan-in proof settlement = %#v, want normal delivery arm", settlement)
+	}
+	if err := settlement.Validate(routes); err != nil {
+		t.Fatalf("validate fan-in proof settlement: %v", err)
+	}
+	matched := false
+	for _, plan := range settlement.Ledger().Plans() {
+		if plan.Resolution() != events.ConnectPlanResolved {
+			continue
+		}
+		targetMatched := false
+		for _, target := range plan.Targets() {
+			targetMatched = targetMatched || target.Normalized() == wantTarget.Normalized()
+		}
+		candidateMatched := false
+		for _, candidate := range plan.Candidates() {
+			candidateMatched = candidateMatched || (candidate.Recipient().ID() == "portfolio-collector" && candidate.Outcome() == events.ConnectCandidateAccepted)
+		}
+		matched = matched || (targetMatched && candidateMatched)
+	}
+	if !matched {
+		t.Fatalf("fan-in proof connect evaluation = %#v, want resolved exact target and accepted portfolio-collector", settlement.Ledger().Plans())
+	}
+	normalized, err := json.Marshal(settlement)
+	if err != nil {
+		t.Fatalf("normalize fan-in proof settlement: %v", err)
+	}
+	return string(normalized)
+}
+
+func requireFanInBarrierPublicRouteProof(
+	t *testing.T,
+	ctx context.Context,
+	backend fanInBarrierConformanceStore,
+	eventID string,
+	wantTarget events.RouteIdentity,
+) string {
+	t.Helper()
+	view, err := backend.LoadOperatorEvent(ctx, eventID)
+	if err != nil {
+		t.Fatalf("load public fan-in proof event: %v", err)
+	}
+	if view.NoDelivery != nil || len(view.Deliveries) != 1 {
+		t.Fatalf("public fan-in settlement = deliveries:%#v no_delivery:%#v", view.Deliveries, view.NoDelivery)
+	}
+	delivery := view.Deliveries[0]
+	if delivery.SubscriberID != "portfolio-collector" || delivery.Target.FlowID != wantTarget.FlowID ||
+		delivery.Target.FlowInstance != wantTarget.FlowInstance || delivery.Target.EntityID != wantTarget.EntityID {
+		t.Fatalf("public fan-in delivery = %#v, want exact target %#v", delivery, wantTarget.Normalized())
+	}
+	snapshot, err := view.EventSnapshot()
+	if err != nil {
+		t.Fatalf("load public fan-in event snapshot: %v", err)
+	}
+	if got := snapshot.TargetRoute().Normalized(); got != wantTarget.Normalized() {
+		t.Fatalf("public fan-in event target = %#v, want %#v", got, wantTarget.Normalized())
+	}
+	projection, err := json.Marshal(struct {
+		EventID    string               `json:"event_id"`
+		Target     events.RouteIdentity `json:"target"`
+		NoDelivery bool                 `json:"no_delivery"`
+	}{
+		EventID: view.EventID,
+		Target: events.RouteIdentity{
+			FlowID: delivery.Target.FlowID, FlowInstance: delivery.Target.FlowInstance, EntityID: delivery.Target.EntityID,
+		}.Normalized(),
+		NoDelivery: view.NoDelivery != nil,
+	})
+	if err != nil {
+		t.Fatalf("marshal public fan-in proof: %v", err)
+	}
+	return string(projection)
+}
+
+func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID, entityID string) {
+	t.Helper()
+	query := `DELETE FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = 'portfolio'`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `DELETE FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = 'portfolio'`
+	}
+	result, err := db.ExecContext(ctx, query, runID, entityID)
+	if err != nil {
+		t.Fatalf("remove fan-in selected owner: %v", err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("inspect removed fan-in selected owner: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed fan-in selected owners = %d, want 1", removed)
+	}
+}
+
+func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, flowInstance, entityID string) {
+	t.Helper()
+	owners, err := backend.ListSelectedRunTargetOwners(ctx)
+	if err != nil {
+		t.Fatalf("list selected-run target owners: %v", err)
+	}
+	matches := make([]runtimebus.ActiveTargetDescriptor, 0, 1)
+	for _, owner := range owners {
+		owner = owner.Normalized()
+		if owner.FlowInstance == flowInstance {
+			matches = append(matches, owner)
+		}
+	}
+	if len(matches) != 1 || matches[0].EntityID != entityID {
+		t.Fatalf("selected-run owner for %s = %#v, want exact entity %s", flowInstance, matches, entityID)
 	}
 }
 
@@ -265,9 +631,8 @@ func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrier
 	}
 }
 
-func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, bundle *runtimecontracts.WorkflowContractBundle) {
+func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
-	entityID := runtimepipeline.FlowInstanceEntityID("portfolio")
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      "portfolio",
@@ -286,6 +651,55 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline 
 		},
 	}, enteredAt); err != nil {
 		t.Fatalf("seed portfolio singleton identity shell: %v", err)
+	}
+}
+
+func requireFanInBarrierReportTargets(
+	t *testing.T,
+	ctx context.Context,
+	backend fanInBarrierConformanceStore,
+	db *sql.DB,
+	wantCount int,
+	wantTarget events.RouteIdentity,
+) {
+	t.Helper()
+	query := `SELECT event_id::text FROM events WHERE event_name LIKE $1 ORDER BY created_at, event_id`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT event_id FROM events WHERE event_name LIKE ? ORDER BY created_at, event_id`
+	}
+	rows, err := db.QueryContext(ctx, query, "%operating.reported")
+	if err != nil {
+		t.Fatalf("query fan-in report events: %v", err)
+	}
+	defer rows.Close()
+	var eventIDs []string
+	for rows.Next() {
+		var eventID string
+		if err := rows.Scan(&eventID); err != nil {
+			t.Fatalf("scan fan-in report event: %v", err)
+		}
+		eventIDs = append(eventIDs, eventID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate fan-in report events: %v", err)
+	}
+	if len(eventIDs) != wantCount {
+		t.Fatalf("fan-in report event count = %d, want %d", len(eventIDs), wantCount)
+	}
+	for _, eventID := range eventIDs {
+		routes, err := backend.ListEventDeliveryRoutes(ctx, eventID)
+		if err != nil {
+			t.Fatalf("load fan-in report routes for %s: %v", eventID, err)
+		}
+		matched := false
+		for _, route := range routes {
+			if route.Recipient.ID() == "portfolio-collector" && route.Target.Normalized() == wantTarget.Normalized() {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Fatalf("fan-in report routes for %s = %#v, want exact selected target %#v", eventID, routes, wantTarget.Normalized())
+		}
 	}
 }
 

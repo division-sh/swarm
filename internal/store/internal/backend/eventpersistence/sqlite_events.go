@@ -45,7 +45,7 @@ func (s *EventSQLiteOwner) validateEventPayload(ctx context.Context, eventType s
 	return nil
 }
 
-func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -53,7 +53,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 		outcome := runtimebus.EventAppendOutcomeUnknown
 		err := s.runPrivateAuthorActivityMutation(ctx, "sqlite append admitted event", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted)
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted, settlement)
 			return err
 		})
 		return outcome, err
@@ -62,7 +62,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
 	}
 	evt := admitted.Event()
-	wantIdentity, err := eventrecord.FromAdmitted(admitted)
+	wantIdentity, err := eventrecord.FromAdmitted(admitted, settlement)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -131,11 +131,14 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 	if err := storeactivityjournal.RecordPersistedEvent(ctx, story, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
+	if err := storeactivityjournal.RecordNoDeliveryWarning(ctx, story, admitted, settlement); err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
 	return runtimebus.EventAppendInserted, nil
 }
 
-func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.appendAdmittedEventTxOutcome(ctx, tx, story, admitted)
+func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.appendAdmittedEventTxOutcome(ctx, tx, story, admitted, settlement)
 }
 
 func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, triggerEventID, triggerEventType string, now time.Time) error {
