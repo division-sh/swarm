@@ -1,5 +1,6 @@
 worker:
   model: regular
+  intent: {inline: "Complete requested work and report the declared result event."}
   subscriptions:
     - task.requested
   emit_events:

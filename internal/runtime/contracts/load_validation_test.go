@@ -591,35 +591,16 @@ subscriptions: [scan.requested]
 	}
 }
 
-func TestLoadWorkflowContractBundleAllowsAgentPromptInputs(t *testing.T) {
-	repoRoot := contractRepoRoot(t)
-	root := t.TempDir()
-	writeFieldReconciliationBundle(t, root, "", "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
-worker:
-  model: regular
-  prompt_inputs: [customer_name, order_type]
-  subscriptions: [work.requested]
-`)
-
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	entry, ok := bundle.AgentEntry("worker")
-	if !ok {
-		t.Fatalf("worker agent missing: %#v", bundle.Agents)
-	}
-	if got, want := strings.Join(entry.PromptInputs, ","), "customer_name,order_type"; got != want {
-		t.Fatalf("PromptInputs = %q, want %q", got, want)
-	}
-	if !entry.AuthoredFields["prompt_inputs"] {
-		t.Fatalf("prompt_inputs authored field not recorded: %#v", entry.AuthoredFields)
+func TestLoadWorkflowContractBundleRejectsRetiredPromptInputs(t *testing.T) {
+	var entry AgentRegistryEntry
+	err := yaml.Unmarshal([]byte("prompt_inputs: [customer_name, order_type]\n"), &entry)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+		t.Fatalf("yaml.Unmarshal error = %v, want retired prompt_inputs teaching error", err)
 	}
 }
 
 func TestValidateWorkflowCriteriaContractsAllowsFlowLocalCriteriaAndCitation(t *testing.T) {
-	bundle := criteriaValidationTestBundle()
+	bundle := criteriaValidationTestBundle(t)
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err != nil {
 		t.Fatalf("validateWorkflowContractBundleLoadConstraints: %v", err)
@@ -722,7 +703,7 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := criteriaValidationTestBundle()
+			bundle := criteriaValidationTestBundle(t)
 			tc.mutate(bundle)
 			err := validateWorkflowContractBundleLoadConstraints(bundle)
 			if err == nil || !contractErrorContains(err, tc.wantError) {
@@ -767,7 +748,8 @@ cites:
 	}
 }
 
-func criteriaValidationTestBundle() *WorkflowContractBundle {
+func criteriaValidationTestBundle(t testing.TB) *WorkflowContractBundle {
+	t.Helper()
 	flow := FlowContractView{
 		Paths: FlowContractPaths{ID: "validation", Flow: "validation"},
 		Policy: PolicyDocument{
@@ -799,10 +781,11 @@ func criteriaValidationTestBundle() *WorkflowContractBundle {
 	root := &FlowContractView{Children: []FlowContractView{flow}}
 	flowPtr := &root.Children[0]
 	agent := AgentRegistryEntry{
-		Model:      "regular",
-		Role:       "cto",
-		EmitEvents: []string{"cto.spec_vetoed"},
-		Criteria:   []string{"feasibility_exclusions"},
+		Model:          "regular",
+		Role:           "cto",
+		ResolvedIntent: resolvedInlineIntentForTest(t, "flows/validation/agents.yaml#agents.cto-agent.intent", "Validate the specification."),
+		EmitEvents:     []string{"cto.spec_vetoed"},
+		Criteria:       []string{"feasibility_exclusions"},
 	}
 	return &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{

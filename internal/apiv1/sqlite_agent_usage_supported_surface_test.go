@@ -153,7 +153,7 @@ func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepk
 func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, agentID string) {
 	t.Helper()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity:           sqliteAgentUsageIdentity(t, agentID),
 			ID:                 agentID,
 			Role:               "researcher",
@@ -162,8 +162,8 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 			ResolvedLLMBackend: "anthropic",
 			ExecutionMode:      "live",
 			FlowPath:           "flow/a",
-			Config:             json.RawMessage(`{"system_prompt":"usage"}`),
-		},
+			Config:             json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {

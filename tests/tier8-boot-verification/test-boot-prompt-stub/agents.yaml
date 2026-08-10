@@ -1,5 +1,6 @@
 stub-agent:
   model: regular
+  intent: prompts/stub-agent.md
   subscriptions:
     - task.requested
   emit_events:

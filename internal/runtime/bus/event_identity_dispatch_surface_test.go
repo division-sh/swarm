@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -104,6 +105,10 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "event-dispatch#agents."+fixture.agentID+".intent", "Prove complete event dispatch.")
+			if err != nil {
+				t.Fatalf("resolve complete-event agent intent: %v", err)
+			}
 			if err := fixture.store.UpsertAgent(fixture.ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
 					ID:                 fixture.agentID,
@@ -115,7 +120,9 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 					ResolvedLLMBackend: "anthropic",
 					ExecutionMode:      executionmode.Live,
 					Subscriptions:      []string{string(fixture.event.Type())},
-					Config:             []byte(`{"system_prompt":"complete event proof"}`),
+					Intent:             intent,
+					SystemPrompt:       intent.Content,
+					Config:             []byte(`{}`),
 				},
 				Status:    "active",
 				HiredBy:   "complete-event-proof",

@@ -16,9 +16,9 @@ import (
 func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
 	revision := func(raw string) string {
 		t.Helper()
-		got, err := lifecycleConfigRevision(PersistedAgent{Config: runtimeactors.AgentConfig{
+		got, err := lifecycleConfigRevision(PersistedAgent{Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 			ID: "agent", Config: json.RawMessage(raw),
-		}})
+		})})
 		if err != nil {
 			t.Fatalf("lifecycleConfigRevision(%s): %v", raw, err)
 		}

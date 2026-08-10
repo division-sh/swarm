@@ -45,18 +45,16 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Upsert agent + load agents.
 	controlPlaneIdentity := testAgentIdentity(t, "control-plane", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 "control-plane",
-			Identity:           controlPlaneIdentity,
-			Role:               "control-plane",
-			FlowID:             "global",
-			Model:              "regular",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			EntityID:           "",
-			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
-			Config: json.RawMessage(`{"system_prompt":"You are the control plane.","tools":[],"subscriptions":["system.started"]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            "control-plane",
+			Identity:      controlPlaneIdentity,
+			Role:          "control-plane",
+			FlowID:        "global",
+			Model:         "regular",
+			ExecutionMode: "live",
+			EntityID:      "",
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -72,17 +70,16 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	ceoID := "operator-" + entityID
 	ceoIdentity := testAgentIdentity(t, ceoID, "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 ceoID,
-			Identity:           ceoIdentity,
-			Role:               "operator",
-			FlowID:             "operating",
-			Model:              "regular",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			EntityID:           entityID,
-			Config:             json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            ceoID,
+			Identity:      ceoIdentity,
+			Role:          "operator",
+			FlowID:        "operating",
+			Model:         "regular",
+			ExecutionMode: "live",
+			EntityID:      entityID,
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),

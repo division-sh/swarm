@@ -3,7 +3,6 @@ package bootverify
 import (
 	"context"
 	"fmt"
-	"os"
 	"reflect"
 	"regexp"
 	"sort"
@@ -240,7 +239,7 @@ var bootCheckRegistry = []Check{
 	{ID: "required_mcp_tool_availability", Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
 	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
 	{ID: "generated_tool_schema_closure", Severity: SeverityHardInvalidity, Run: checkGeneratedToolSchemaClosure},
-	{ID: "prompt_exists", Severity: "warning", Run: checkPromptExists},
+	{ID: "intent_resolution", Severity: SeverityHardInvalidity, Run: checkIntentResolution},
 	{ID: "produces_drift", Severity: "warning", Run: checkProducesDrift},
 	{ID: "invalid_field_detection", Severity: "error", Run: checkInvalidFieldDetection},
 	{ID: "policy_conflict_detection", Severity: "warning", Run: checkPolicyConflictDetection},
@@ -358,7 +357,7 @@ func checkNodeStateSchemaTypedCounterpart(c *checkerContext) []Finding {
 	return c.nodeStateSchemaTypedCounterpart()
 }
 func checkRequiredAgentsMatch(c *checkerContext) []Finding        { return c.requiredAgentsMatch() }
-func checkPromptExists(c *checkerContext) []Finding               { return c.promptExists() }
+func checkIntentResolution(c *checkerContext) []Finding           { return c.intentResolution() }
 func checkInvalidFieldDetection(c *checkerContext) []Finding      { return c.invalidFieldDetection() }
 func checkPolicyConflictDetection(c *checkerContext) []Finding    { return c.policyConflicts() }
 func checkDialectCompliance(c *checkerContext) []Finding          { return c.dialectCompliance() }
@@ -486,25 +485,18 @@ func (c *checkerContext) workspace() []Finding {
 	return c.workspaceFindings
 }
 
-func (c *checkerContext) promptExists() []Finding {
+func (c *checkerContext) intentResolution() []Finding {
 	if c.promptLoaded {
 		return c.promptFindings
 	}
 	c.promptLoaded = true
-	bundle, hasBundle := semanticview.Bundle(c.source)
 	for _, scope := range c.source.ProjectScopes() {
 		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		source := runtimecontracts.ContractItemSource{PackageKey: strings.TrimSpace(scope.Key), Layer: "project"}
-		c.promptFindings = append(c.promptFindings, promptFindingsForScope(bundle, hasBundle, scope.PromptsDir, scopeLabel, scope.Agents, source, "")...)
+		c.promptFindings = append(c.promptFindings, intentFindingsForScope(scopeLabel, scope.Agents)...)
 	}
 	for _, scope := range c.source.FlowScopes() {
 		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		source := runtimecontracts.ContractItemSource{
-			PackageKey: strings.TrimSpace(scope.PackageKey),
-			FlowID:     strings.TrimSpace(scope.ID),
-			Layer:      "flow",
-		}
-		c.promptFindings = append(c.promptFindings, promptFindingsForScope(bundle, hasBundle, scope.PromptsDir, scopeLabel, scope.Agents, source, scope.Mode)...)
+		c.promptFindings = append(c.promptFindings, intentFindingsForScope(scopeLabel, scope.Agents)...)
 	}
 	return c.promptFindings
 }
@@ -1230,85 +1222,28 @@ func platformProducerClaimFinding(source semanticview.Source, eventType, locatio
 	}, true
 }
 
-func promptFindingsForScope(bundle *runtimecontracts.WorkflowContractBundle, hasBundle bool, promptsDir, scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry, source runtimecontracts.ContractItemSource, mode string) []Finding {
+func intentFindingsForScope(scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry) []Finding {
 	out := make([]Finding, 0, len(agents))
-	for agentID := range agents {
+	for agentID, entry := range agents {
 		agentID = strings.TrimSpace(agentID)
 		if agentID == "" {
 			continue
 		}
 		location := scopedObjectLabel(scopeLabel, agentID)
-		if hasBundle {
-			resolution, ok, err := runtimecontracts.ResolvePromptFileForContractAgent(bundle, agentID, agents[agentID], source, mode)
-			if err != nil || !ok {
-				out = append(out, Finding{
-					CheckID:  "prompt_exists",
-					Severity: "warning",
-					Message:  fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID),
-					Location: location,
-				})
-				continue
-			}
-			text, err := promptTextForResolvedFile(resolution.Path)
-			if err != nil {
-				continue
-			}
-			if promptHasOpenTODO(text) {
-				out = append(out, Finding{
-					CheckID:  "prompt_exists",
-					Severity: "warning",
-					Message:  fmt.Sprintf("%s/%s: prompt contains TODO", strings.TrimSpace(scopeLabel), agentID),
-					Location: location,
-				})
-			}
-			continue
-		}
-
-		for _, finding := range promptFindingsForLegacyDir(promptsDir, scopeLabel, map[string]runtimecontracts.AgentRegistryEntry{agentID: agents[agentID]}) {
-			out = append(out, finding)
-		}
-	}
-	return out
-}
-
-func promptFindingsForLegacyDir(promptsDir, scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry) []Finding {
-	out := make([]Finding, 0, len(agents))
-	for agentID := range agents {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		location := scopedObjectLabel(scopeLabel, agentID)
-		if strings.TrimSpace(promptsDir) == "" {
+		if err := entry.ResolvedIntent.Validate(); err != nil {
 			out = append(out, Finding{
-				CheckID:  "prompt_exists",
-				Severity: "warning",
-				Message:  fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID),
+				CheckID:  "intent_resolution",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("%s/%s: declare one valid intent: source: %v", strings.TrimSpace(scopeLabel), agentID, err),
 				Location: location,
 			})
 			continue
 		}
-		resolution, ok, err := runtimecontracts.ResolvePromptFileForContractAgent(&runtimecontracts.WorkflowContractBundle{
-			Paths: runtimecontracts.ContractPaths{ProjectPromptsDir: strings.TrimSpace(promptsDir)},
-		}, agentID, agents[agentID], runtimecontracts.ContractItemSource{}, "")
-		if err != nil || !ok {
+		if intentHasOpenTODO(entry.ResolvedIntent.Content) {
 			out = append(out, Finding{
-				CheckID:  "prompt_exists",
+				CheckID:  "intent_resolution",
 				Severity: "warning",
-				Message:  fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID),
-				Location: location,
-			})
-			continue
-		}
-		text, err := promptTextForResolvedFile(resolution.Path)
-		if err != nil {
-			continue
-		}
-		if promptHasOpenTODO(text) {
-			out = append(out, Finding{
-				CheckID:  "prompt_exists",
-				Severity: "warning",
-				Message:  fmt.Sprintf("%s/%s: prompt contains TODO", strings.TrimSpace(scopeLabel), agentID),
+				Message:  fmt.Sprintf("%s/%s: resolved intent contains TODO", strings.TrimSpace(scopeLabel), agentID),
 				Location: location,
 			})
 		}
@@ -1316,15 +1251,7 @@ func promptFindingsForLegacyDir(promptsDir, scopeLabel string, agents map[string
 	return out
 }
 
-func promptTextForResolvedFile(path string) (string, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
-}
-
-func promptHasOpenTODO(text string) bool {
+func intentHasOpenTODO(text string) bool {
 	return strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED")
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
@@ -83,6 +84,24 @@ func seedTestAgentRow(
 	if status == "" {
 		status = "active"
 	}
+	memory := agentmemory.PlatformDefault()
+	if strings.TrimSpace(fields.FlowInstancePath) != "" {
+		memory = agentmemory.Authored(true)
+	}
+	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            fields.AgentID,
+		Identity:      identity,
+		Role:          "worker",
+		Type:          "stub",
+		Model:         "regular",
+		Memory:        memory,
+		FlowPath:      fields.FlowInstancePath,
+	})
+	projection, err := projectPersistedAgentConfig(cfg, "")
+	if err != nil {
+		t.Fatalf("project test agent row: %v", err)
+	}
 	now := time.Now().UTC()
 	query := `
 		INSERT INTO agents (
@@ -90,12 +109,12 @@ func seedTestAgentRow(
 			flow_scope_key, flow_instance_id, flow_instance,
 			role, model, llm_backend, memory_enabled, memory_source,
 			runtime_descriptor, status, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', 1, 'authored', '{"type":"stub","execution_mode":"live"}', ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?)
 	`
 	args := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		status, now,
+		memory.Enabled, string(memory.Source), projection.RuntimeDescriptor, status, now,
 	}
 	if postgres {
 		query = `
@@ -104,7 +123,7 @@ func seedTestAgentRow(
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source,
 				runtime_descriptor, status, created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', TRUE, 'authored', '{"type":"stub","execution_mode":"live"}'::jsonb, $8, $9)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12)
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

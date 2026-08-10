@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -124,15 +125,21 @@ func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	parsedJSON, err := json.Marshal(map[string]any{"agents": []map[string]any{
+		apiTestCatalogAgentDefinition(t, "bundle-agent", "Bundle agent intent."),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
-		VALUES (?, ?, '{}', NULL, '{"source":"sqlite-test"}', ?)
+		VALUES (?, ?, ?, NULL, '{"source":"sqlite-test"}', ?)
 	`, bundleHash, `agents:
   bundle-agent:
     role: worker
     model: regular
     type: managed
-`, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
+	`, string(parsedJSON), time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed sqlite bundle catalog: %v", err)
 	}
 	if _, err := sqliteStore.ListBundleCatalog(ctx, bundlecatalog.ListOptions{}); err != nil {

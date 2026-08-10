@@ -175,10 +175,10 @@ func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Cont
 	}
 	agentID := identity.AgentID()
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
-			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`),
-		},
+			ExecutionMode: "live", Config: json.RawMessage(`{}`),
+		}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)

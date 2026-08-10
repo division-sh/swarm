@@ -1,7 +1,6 @@
 name: test-boot-prompt-ref-stub
 version: 1.0.0
 description: >
-  Boot verification: TODO detection must apply to the resolved prompt_ref prompt,
-  not only prompts/{agent-id}.md.
+  Contract loading must teaching-reject retired prompt_ref before intent lint.
 platform_version: ">=0.7.0 <0.8.0"
 flows: []

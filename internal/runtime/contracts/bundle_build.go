@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -335,15 +336,19 @@ func bundleBuildInputs(entries []bundleHashEntry) ([]BundleBuildInput, error) {
 		if err := validateBundleBuildReservedArtifactPath("bundle build input", rel); err != nil {
 			return nil, err
 		}
-		info, err := os.Stat(entry.Path)
-		if err != nil {
-			return nil, fmt.Errorf("stat bundle build input %s: %w", rel, err)
+		sizeBytes := int64(len(entry.ExpectedExact))
+		if entry.ExpectedExact == nil {
+			info, err := os.Stat(entry.Path)
+			if err != nil {
+				return nil, fmt.Errorf("stat bundle build input %s: %w", rel, err)
+			}
+			sizeBytes = info.Size()
 		}
 		inputs = append(inputs, BundleBuildInput{
 			Label:     entry.Label,
 			Path:      rel,
 			Policy:    bundleCatalogPolicyName(entry.Policy),
-			SizeBytes: info.Size(),
+			SizeBytes: sizeBytes,
 		})
 	}
 	return inputs, nil
@@ -368,6 +373,9 @@ func materializeBundleInputs(entries []bundleHashEntry, outputDir string) error 
 		raw, err := os.ReadFile(entry.Path)
 		if err != nil {
 			return fmt.Errorf("read bundle build input %s: %w", rel, err)
+		}
+		if entry.ExpectedExact != nil && !bytes.Equal(raw, entry.ExpectedExact) {
+			return fmt.Errorf("read bundle build input %s: canonical input changed after exact agent intent resolution", rel)
 		}
 		if err := os.WriteFile(dst, raw, 0o644); err != nil {
 			return fmt.Errorf("write materialized input %s: %w", rel, err)
@@ -606,20 +614,15 @@ func bundleBuildRecursiveInputDirs(bundle *WorkflowContractBundle) ([]string, er
 	if bundle == nil {
 		return nil, nil
 	}
-	dirs := []string{bundle.Paths.ProjectPromptsDir}
-	rootPackagePath := strings.TrimSpace(bundle.Paths.ProjectPackageFile)
+	var dirs []string
 	for _, pkg := range bundle.Paths.ProjectPackages {
-		isRootPackage := rootPackagePath != "" && sameFilePath(pkg.PackageFile, rootPackagePath)
-		if !isRootPackage {
-			dirs = append(dirs, pkg.ProjectPromptsDir)
-		}
 		for _, flow := range pkg.Flows {
-			dirs = append(dirs, flow.PromptsDir, flow.DataDir)
+			dirs = append(dirs, flow.DataDir)
 		}
 	}
 	if len(bundle.Paths.ProjectPackages) == 0 {
 		for _, flow := range bundle.Paths.Flows {
-			dirs = append(dirs, flow.PromptsDir, flow.DataDir)
+			dirs = append(dirs, flow.DataDir)
 		}
 	}
 

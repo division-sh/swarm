@@ -261,6 +261,8 @@ story-writer:
   id: story-writer
   role: story-writer
   memory: false
+  intent:
+    inline: Write and send the requested story.
   tools: [send_story]
 `)
 	writeGatewayStoryFixture(t, filepath.Join(root, "flows", "story", "tools.yaml"), `

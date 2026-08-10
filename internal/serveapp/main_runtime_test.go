@@ -2489,6 +2489,12 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
 	identity := servedRuntimeFlowIdentityFields(t, fixture.AgentID, "fork-source", "source")
+	agentDescriptor := serveTestAgentRuntimeDescriptor(fixture.AgentID, "researcher", map[string]any{
+		"model":                  "regular",
+		"resolved_model":         "gpt-compatible",
+		"resolved_llm_provider":  "openai_compatible",
+		"resolved_llm_transport": "api",
+	})
 	actorIdentity, err := runtimeagentidentity.FromStorageFields(identity)
 	if err != nil {
 		t.Fatalf("build %s conversation fork source identity: %v", backend, err)
@@ -2543,8 +2549,8 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,'researcher','regular','openai_compatible',TRUE,'authored','{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}'::jsonb)`,
-				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath}},
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,'researcher','regular','openai_compatible',TRUE,'authored',$8::jsonb)`,
+				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor}},
 			{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -2577,8 +2583,8 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
-			) VALUES (?,?,?,?,?,?,?,'researcher','regular','openai_compatible',1,'authored','{"type":"researcher","model":"regular","resolved_model":"gpt-compatible","resolved_llm_provider":"openai_compatible","resolved_llm_transport":"api","execution_mode":"live"}')`,
-				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath}},
+			) VALUES (?,?,?,?,?,?,?,'researcher','regular','openai_compatible',1,'authored',?)`,
+				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor}},
 			{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -7424,14 +7430,15 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	ctx := context.Background()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
+	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source, runtime_descriptor
+			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default',TRUE,'authored','{"type":"default","execution_mode":"live"}'::jsonb)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(cliapp.RepoRoot(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
@@ -7537,6 +7544,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	activeSessionID := uuid.NewString()
 	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
+	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
@@ -7552,10 +7560,10 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source, runtime_descriptor
+			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
 		)
-		VALUES (?,?,?,?,?,?,?,'operator','default',TRUE,'authored','{"type":"default","execution_mode":"live"}')
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
+		VALUES (?,?,?,?,?,?,?,'operator','default','anthropic',TRUE,'authored',?)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite delivery agent: %v", err)
 	}
@@ -8902,6 +8910,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
+	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
@@ -8919,10 +8928,10 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source, runtime_descriptor
+			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default',TRUE,'authored','{"type":"default","execution_mode":"live"}'::jsonb)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor); err != nil {
 		t.Fatalf("seed active delivery agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -9396,7 +9405,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 %s:
   id: %s
   role: %s
-  prompt_ref: %s
+  intent: prompts/%s.md
   model: regular
   native_tools:
     bash: true

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -29,6 +30,9 @@ type PersistedAgentRuntimeDescriptor struct {
 	ManagerFallback      string                         `json:"manager_fallback,omitempty"`
 	ExecutionMode        runtimeeffects.ExecutionMode   `json:"execution_mode"`
 	Mock                 mockperformance.Performance    `json:"mock,omitempty"`
+	Intent               runtimeagentintent.Resolved    `json:"intent"`
+	DerivedSystemPrompt  string                         `json:"derived_system_prompt"`
+	Criteria             []string                       `json:"criteria,omitempty"`
 }
 
 type PersistedAgentProjection struct {
@@ -98,6 +102,9 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"manager_fallback":       {},
 	"execution_mode":         {},
 	"mock":                   {},
+	"intent":                 {},
+	"derived_system_prompt":  {},
+	"criteria":               {},
 }
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
@@ -172,6 +179,12 @@ func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	llmBackend, err := agentLLMBackend(cfg)
 	if err != nil {
 		return PersistedAgentProjection{}, fmt.Errorf("invalid llm_backend: %w", err)
+	}
+	if err := runtimeactors.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
+		return PersistedAgentProjection{}, err
+	}
+	if err := cfg.ValidateIntentCarrier(); err != nil {
+		return PersistedAgentProjection{}, fmt.Errorf("agent %s intent carrier: %w", strings.TrimSpace(cfg.ID), err)
 	}
 	configJSON, err := mergeAgentConfigJSON(cfg)
 	if err != nil {
@@ -261,12 +274,15 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		ResolvedLLMTransport: strings.TrimSpace(desc.ResolvedLLMTransport),
 		ExecutionMode:        desc.ExecutionMode,
 		Mock:                 desc.Mock,
+		Intent:               desc.Intent,
+		SystemPrompt:         desc.DerivedSystemPrompt,
 		Memory:               memory,
 		MaxTurnsPerTask:      desc.MaxTurnsPerTask,
 		Subscriptions:        decodeJSONStringList(row.SubscriptionsJSON),
 		EmitEvents:           decodeJSONStringList(row.EmitEventsJSON),
 		Tools:                decodeJSONStringList(row.ToolsJSON),
 		Permissions:          decodeJSONStringList(row.PermissionsJSON),
+		Criteria:             append([]string(nil), desc.Criteria...),
 		NativeTools:          desc.NativeTools,
 		WorkspaceClass:       desc.WorkspaceClass,
 		ManagerFallback:      desc.ManagerFallback,
@@ -278,6 +294,9 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
+	if err := cfg.ValidateIntentCarrier(); err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s intent carrier: %w", strings.TrimSpace(row.AgentID), err)
+	}
 	if err := agentmemory.ValidateFlowOwnership(cfg.Memory, cfg.FlowPath); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid memory plan: %w", strings.TrimSpace(row.AgentID), err)
 	}
@@ -299,6 +318,9 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		ManagerFallback:      strings.TrimSpace(cfg.ManagerFallback),
 		ExecutionMode:        cfg.ExecutionMode,
 		Mock:                 cfg.Mock,
+		Intent:               cfg.Intent,
+		DerivedSystemPrompt:  cfg.SystemPrompt,
+		Criteria:             append([]string(nil), cfg.Criteria...),
 	}
 	if !descExecutionModeMatchesBackend(llmBackend, desc.ExecutionMode) {
 		return nil, fmt.Errorf("execution_mode %q conflicts with llm_backend %q", desc.ExecutionMode, strings.TrimSpace(llmBackend))

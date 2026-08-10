@@ -329,7 +329,7 @@ func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentC
 }
 
 func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if err := authorizeAgentMutationExecutionMode(ctx, actor, "agent_hire"); err != nil {
+	if err := retiredDynamicAgentMutationError("agent_hire"); err != nil {
 		return nil, err
 	}
 	manager := e.getManager()
@@ -428,7 +428,7 @@ func (e *Executor) execAgentFire(ctx context.Context, actor models.AgentConfig, 
 }
 
 func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if err := authorizeAgentMutationExecutionMode(ctx, actor, "agent_reconfigure"); err != nil {
+	if err := retiredDynamicAgentMutationError("agent_reconfigure"); err != nil {
 		return nil, err
 	}
 	manager := e.getManager()

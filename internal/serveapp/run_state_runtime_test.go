@@ -256,12 +256,12 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{
+	if err := am.SpawnAgent(serveTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
 		Model:         "regular",
 		Subscriptions: []string{"scan.requested"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
@@ -380,12 +380,12 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
-	if err := am.SpawnAgent(runtimeactors.AgentConfig{
+	if err := am.SpawnAgent(serveTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
 		Model:         "regular",
 		Subscriptions: []string{"scan.requested"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {

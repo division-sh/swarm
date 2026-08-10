@@ -2,7 +2,7 @@ test-agent:
   id: test-agent
   role: test-agent
   model: regular
-  prompt_ref: test-agent
+  intent: prompts/test-agent.md
   native_tools:
     web_search: true
   subscriptions: [task.assigned]

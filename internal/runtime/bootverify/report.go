@@ -82,7 +82,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"policy_sheet_lookup_value_rows":          "Fix the policy sheet lookup value rows so each lookup key and target value is declared consistently.",
 	"policy_sheet_validation_value_rows":      "Fix the policy sheet validation value rows so each row matches the declared policy sheet schema.",
 	"primary_entity_validation":               "Declare a valid primary entity or remove the stateful surface that requires one.",
-	"prompt_exists":                           "Add the referenced prompt file or update the agent prompt_ref.",
+	"intent_resolution":                       "Declare exactly one valid intent: source on the agent and resolve it before boot.",
 	"redundant_in_topology_select_entity":     "Remove redundant select_entity/select_or_create_entity from an in-topology handler.",
 	"reply_lineage_missing":                   "Add the required reply lineage metadata or remove the reply-mode handler contract.",
 	"required_agents_match":                   "Update required agent declarations so subscriptions and emitted events match the contract topology.",

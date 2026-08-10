@@ -65,10 +65,6 @@ func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
 func writeVerifyMockConnectorFixture(t *testing.T, includeLive, includeActivity bool) string {
 	t.Helper()
 	root := writeDoctorMockExecutionFixture(t, doctorMockExecutionFixtureOptions{IncludeUnmocked: includeLive})
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "stub-agent.md"), "You are a deterministic verification agent.\n")
-	if includeLive {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "live-agent.md"), "You are a live verification agent.\n")
-	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 provider.send:
   category: provider_connector

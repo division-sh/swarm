@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
@@ -76,10 +75,10 @@ func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverInvariant(t 
 		ExecutionPosture:  executionposture.Live,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live", ID: "recovered-agent", Role: "recovered",
-		Model: "regular", Config: json.RawMessage(`{"system_prompt":"Recovered agent"}`),
-	}); err != nil {
+		Model: "regular",
+	})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

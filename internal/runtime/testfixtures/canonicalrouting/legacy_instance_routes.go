@@ -121,7 +121,7 @@ pins:
 		if opts.Consumer == TemplateInstanceAgentConsumer {
 			consumerNodes = "{}\n"
 		}
-		consumerAgents = "consumer-agent:\n  id: consumer-agent\n  model: regular\n  subscriptions: [" + subscriptions + "]\n"
+		consumerAgents = "consumer-agent:\n  id: consumer-agent\n  model: regular\n  intent:\n    inline: Consume connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
 	} else if opts.Consumer != TemplateInstanceNodeConsumer {
 		t.Fatalf("unsupported template instance consumer %d", opts.Consumer)
 	}

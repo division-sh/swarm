@@ -682,7 +682,7 @@ func claudeAttemptProofAgentConfig(surfaces ...claudeAttemptProofSurface) runtim
 		LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", Memory: agentmemory.Authored(surface.memory), FlowPath: "proof/inst-1",
 		Identity: claudeAttemptProofAgentIdentity(),
 	}
-	return cfg
+	return serveTestAgentConfig(cfg)
 }
 
 func claudeAttemptProofAgentIdentity() agentidentity.Identity {

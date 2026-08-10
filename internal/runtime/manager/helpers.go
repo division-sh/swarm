@@ -125,67 +125,6 @@ func FirstNonEmptyString(vals ...string) string {
 	return ""
 }
 
-func ExtractSystemPromptFromConfig(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
-	}
-	v, _ := obj["system_prompt"].(string)
-	return strings.TrimSpace(v)
-}
-
-func WithSystemPrompt(raw json.RawMessage, prompt string) (json.RawMessage, error) {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return raw, nil
-	}
-	obj := map[string]any{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &obj); err != nil {
-			return nil, fmt.Errorf("with system prompt: invalid agent config json: %w", err)
-		}
-	}
-	obj["system_prompt"] = prompt
-	b, err := json.Marshal(obj)
-	if err != nil || len(b) == 0 {
-		if err != nil {
-			return nil, fmt.Errorf("with system prompt: marshal updated config: %w", err)
-		}
-		return json.RawMessage([]byte("{}")), nil
-	}
-	return json.RawMessage(b), nil
-}
-
-func ExpandConfigPromptTemplate(prompt string, raw json.RawMessage) string {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" || len(raw) == 0 {
-		return prompt
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
-		return prompt
-	}
-	replacer := make([]string, 0, len(obj)*2)
-	for key, value := range obj {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		rendered := stringifyPromptTemplateValue(value)
-		replacer = append(replacer,
-			"{{"+key+"}}", rendered,
-			"{"+key+"}", rendered,
-		)
-	}
-	if len(replacer) == 0 {
-		return prompt
-	}
-	return strings.NewReplacer(replacer...).Replace(prompt)
-}
-
 func stringifyPromptTemplateValue(value any) string {
 	switch typed := value.(type) {
 	case nil:

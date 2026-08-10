@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -41,7 +40,6 @@ type AgentManager struct {
 	sessionResetter                 sessions.Resetter
 	semanticSource                  semanticview.Source
 	semanticReadinessSource         dynamicFlowRuntimeReadinessSource
-	promptResolver                  runtimecontracts.PromptResolver
 	budget                          BudgetGuard
 	resetRuntimeOwnedState          func()
 	runtimeShutdownAdmissionClosed  func() bool
@@ -160,7 +158,6 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		semanticReadinessSource: dynamicFlowRuntimeReadinessSource{
 			fact: opts.BundleSourceFact, source: opts.SemanticSource,
 		},
-		promptResolver:                  opts.PromptResolver,
 		workflowInstances:               opts.WorkflowInstances,
 		workOwner:                       opts.WorkOwner,
 		receiverExecution:               opts.ReceiverExecution,
@@ -548,43 +545,16 @@ func (am *AgentManager) validateNativeToolAdmission(ctx context.Context, cfg mod
 }
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
-	var err error
-	cfg, err = am.applyContractPrompt(cfg)
-	if err != nil {
+	if err := models.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
+		return nil, err
+	}
+	if err := cfg.ValidateIntentCarrier(); err != nil {
 		return nil, err
 	}
 	if am.factory != nil {
 		return am.factory(cfg)
 	}
 	return newGenericAgent(cfg), nil
-}
-
-func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.AgentConfig, error) {
-	if am.promptResolver == nil {
-		return cfg, nil
-	}
-	prompt, found, err := am.promptResolver.LoadPromptForAgent(cfg, "")
-	if err != nil {
-		return cfg, fmt.Errorf(
-			"contract prompt load failed agent_id=%s role=%s: %w",
-			strings.TrimSpace(cfg.ID),
-			strings.TrimSpace(cfg.Role),
-			err,
-		)
-	}
-	if !found {
-		return cfg, nil
-	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return cfg, nil
-	}
-	updated, err := withSystemPrompt(cfg.Config, prompt)
-	if err != nil {
-		return cfg, err
-	}
-	cfg.Config = updated
-	return cfg, nil
 }
 
 func (am *AgentManager) ReconfigureAgentTarget(

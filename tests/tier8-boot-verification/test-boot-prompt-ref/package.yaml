@@ -1,7 +1,6 @@
 name: test-boot-prompt-ref
 version: 1.0.0
 description: >
-  Boot verification: agent prompt_ref resolves to an existing prompt, so prompt_exists
-  must not warn just because prompts/{agent-id}.md is absent.
+  Contract loading must teaching-reject the retired prompt_ref field before boot.
 platform_version: ">=0.7.0 <0.8.0"
 flows: []

@@ -63,13 +63,12 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 	tokens := make([]runtimeeffects.LifecycleToken, 0, len(identities))
 	for index, fixture := range identities {
 		rec := runtimemanager.PersistedAgent{
-			Config: runtimeactors.AgentConfig{
+			Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 				ID: "sibling-worker", Identity: fixture.identity, Type: "sonnet", Role: "worker",
 				FlowID: "review", FlowPath: fixture.identity.FlowInstance(), Model: "regular",
-				ExecutionMode:      runtimeeffects.ExecutionModeLive,
-				ResolvedLLMBackend: "anthropic",
-				Config:             []byte(`{"system_prompt":"x"}`),
-			},
+				ExecutionMode: runtimeeffects.ExecutionModeLive,
+				Config:        []byte(`{}`),
+			}),
 			Status: "active", HiredBy: "test", StartedAt: now,
 		}
 		spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
@@ -156,13 +155,12 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	identity := testAgentIdentity(t, "lifecycle-agent", "global")
 	rec := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: "lifecycle-agent", Identity: identity, Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
-			ExecutionMode:      runtimeeffects.ExecutionModeLive,
-			ResolvedLLMBackend: "anthropic",
-			FlowPath:           identity.FlowInstance(),
-			Config:             []byte(`{"system_prompt":"x"}`),
-		},
+			ExecutionMode: runtimeeffects.ExecutionModeLive,
+			FlowPath:      identity.FlowInstance(),
+			Config:        []byte(`{}`),
+		}),
 		Status: "active", HiredBy: "test", StartedAt: now,
 	}
 	spawn := runtimemanager.AgentLifecycleTransition{

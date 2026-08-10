@@ -73,11 +73,11 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 			agentID := "diagnose-agent"
 			identity := agentidentitytest.Runtime(t, agentID, "diagnose-pagination-test", "diagnose", "one", "diagnose/one")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-				Config: runtimeactors.AgentConfig{
+				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					FlowID: "diagnose", FlowPath: identity.FlowInstance(),
-					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{"system_prompt":"diagnose"}`),
-				},
+					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),
+				}),
 				Status: "active", StartedAt: now,
 			}); err != nil {
 				t.Fatalf("upsert diagnosis agent: %v", err)

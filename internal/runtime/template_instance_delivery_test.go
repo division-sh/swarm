@@ -868,6 +868,7 @@ auto_emit_on_create:
   id: ceo-{product_id}
   type: generic
   role: ceo
+  intent: {inline: "Initialize the product for this operating instance."}
   model: regular
   subscriptions: [opco.product_initialization_requested]
 `,

@@ -644,7 +644,6 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		seeded("SWARM_MANAGED_CREDENTIALS_FILE", "platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set", "#1600 managed credentials file config"),
 		seeded("SWARM_ARTIFACT_ROOT", "platform-spec.yaml#runtime_storage.artifact_root", "#1600 runtime.artifact_root"),
 		seeded("SWARM_MONITOR_DIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 monitor config"),
-		seeded("SWARM_PROMPTS_DIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 prompt helper config"),
 		seeded("SWARM_AGENT_CONFIG_MAP_FILE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 spec helper config"),
 		seeded("SWARM_VERIFICATION_GATES_FILE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 spec helper config"),
 		seeded("SWARM_TOOLING_LOCK_FILE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 spec helper config"),

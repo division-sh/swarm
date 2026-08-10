@@ -1,12 +1,14 @@
 package runtimepersistence
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -20,6 +22,29 @@ func TestBundleCatalogReadSurfaceListGetAgentsAndCursor(t *testing.T) {
 	olderHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	newerHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	now := time.Unix(1700000000, 0).UTC()
+	olderAgent := bundleCatalogIntentDefinition(t, "researcher", "", "agents.yaml#agents.researcher.intent", "older intent")
+	olderAgent["role"] = "research"
+	olderAgent["type"] = "managed"
+	olderParsedJSON, err := json.Marshal(map[string]any{"agents": []map[string]any{olderAgent}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootAgent := bundleCatalogIntentDefinition(t, "researcher", "", "agents.yaml#agents.researcher.intent", "  root intent\n")
+	rootAgent["role"] = "research"
+	rootAgent["type"] = "managed"
+	rootAgent["model"] = "cheap"
+	rootAgent["llm_backend"] = "claude"
+	rootAgent["memory"] = false
+	rootAgent["subscriptions"] = []string{"scan.requested"}
+	rootAgent["tools"] = []string{"web_search"}
+	flowAgent := bundleCatalogIntentDefinition(t, "researcher", "review/primary", "flows/review/agents.yaml#agents.researcher.intent", "flow intent")
+	flowAgent["role"] = "review"
+	flowAgent["type"] = "managed"
+	flowAgent["memory"] = false
+	newerParsedJSON, err := json.Marshal(map[string]any{"agents": []map[string]any{rootAgent, flowAgent}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
 		VALUES
@@ -30,31 +55,8 @@ agents:
   researcher:
     role: research
     type: managed
-`, `{}`, `{"source":"older"}`, now.Add(-time.Hour),
-		newerHash, `name: newer`, `{
-			"agents": {
-				"researcher": {
-					"role": "research",
-					"type": "managed",
-					"model": "cheap",
-					"llm_backend": "claude",
-					"memory": false,
-					"prompt_path": "prompts/researcher.md",
-					"subscriptions": ["scan.requested"],
-					"tools": ["web_search"]
-				}
-			},
-			"flows": {
-				"review/primary": {
-					"agents": {
-						"reviewer": {
-							"role": "review",
-							"type": "managed"
-						}
-					}
-				}
-			}
-		}`, []byte("blob"), `{"source":"newer"}`, now); err != nil {
+`, string(olderParsedJSON), `{"source":"older"}`, now.Add(-time.Hour),
+		newerHash, `name: newer`, string(newerParsedJSON), []byte("blob"), `{"source":"newer"}`, now); err != nil {
 		t.Fatalf("seed bundles: %v", err)
 	}
 
@@ -101,8 +103,11 @@ agents:
 	if agents.Agents[0].AgentID != "researcher" || agents.Agents[0].FlowInstance != "" || agents.Agents[0].Model != "cheap" {
 		t.Fatalf("root agent = %#v", agents.Agents[0])
 	}
-	if agents.Agents[1].AgentID != "reviewer" || agents.Agents[1].FlowInstance != "review/primary" {
+	if agents.Agents[1].AgentID != "researcher" || agents.Agents[1].FlowInstance != "review/primary" {
 		t.Fatalf("flow agent = %#v", agents.Agents[1])
+	}
+	if agents.Agents[0].IntentContent != "  root intent\n" || agents.Agents[0].IntentContentHash == "" || agents.Agents[0].IntentIdentity == "" {
+		t.Fatalf("root intent readback = %#v, want exact content and canonical identity", agents.Agents[0])
 	}
 
 	runtimeRecord, err := pg.LoadBundleCatalogRuntimeRecord(ctx, newerHash)
@@ -119,6 +124,25 @@ agents:
 	}
 	if olderRuntimeRecord.BundleHash != olderHash || olderRuntimeRecord.DataBlob != nil {
 		t.Fatalf("older runtime record = %#v, want nil data blob", olderRuntimeRecord)
+	}
+}
+
+func bundleCatalogIntentDefinition(t testing.TB, agentID, flowInstance, provenance, content string) map[string]any {
+	t.Helper()
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", provenance, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{
+		"agent_id":            agentID,
+		"flow_instance":       flowInstance,
+		"memory_source":       "authored",
+		"intent_kind":         string(intent.Kind),
+		"intent_source":       intent.Coordinate,
+		"intent_provenance":   intent.Provenance,
+		"intent_content_hash": intent.ContentHash,
+		"intent_identity":     intent.Identity,
+		"intent_content":      intent.Content,
 	}
 }
 
@@ -156,17 +180,13 @@ func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	bundleHash := "bundle-v1:sha256:5555555555555555555555555555555555555555555555555555555555555555"
+	agent := bundleCatalogIntentDefinition(t, "researcher", "", "agents.yaml#agents.researcher.intent", "Research the requested subject.")
+	agent["role"] = "research"
 	req := bundlecatalog.Upsert{
 		BundleHash:  bundleHash,
 		ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\n",
-		ParsedJSON: map[string]any{
-			"agents": map[string]any{
-				"researcher": map[string]any{
-					"role": "research",
-				},
-			},
-		},
-		DataBlob: []byte(`{"projection_version":"swarm.bundle.catalog.v1","entries":[]}`),
+		ParsedJSON:  map[string]any{"agents": []map[string]any{agent}},
+		DataBlob:    []byte(`{"projection_version":"swarm.bundle.catalog.v1","entries":[]}`),
 		Metadata: map[string]any{
 			"source": "test",
 		},

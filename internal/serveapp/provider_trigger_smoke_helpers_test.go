@@ -214,7 +214,7 @@ func seedProviderTriggerSmokeRuntime(
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: serveTestAgentConfig(runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           servedRuntimeRootIdentity(t, agentID),
 			Role:               "observer",
@@ -225,7 +225,7 @@ func seedProviderTriggerSmokeRuntime(
 			ExecutionMode:      "live",
 			Config:             []byte(`{}`),
 			Subscriptions:      []string{"inbound." + provider},
-		},
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: now,

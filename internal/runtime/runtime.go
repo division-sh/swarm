@@ -148,7 +148,6 @@ type validatedRuntimeDeps struct {
 	Config                     *config.Config
 	Options                    RuntimeOptions
 	Source                     semanticview.Source
-	PromptResolver             runtimecontracts.PromptResolver
 	Credentials                runtimecredentials.Store
 	ManagedCredentials         runtimemanagedcredentials.Store
 	MockConnectorResponses     *providerconnectors.MockResponsePlan
@@ -271,7 +270,6 @@ type Runtime struct {
 	MCPTurns           *runtimemcp.TurnContextRegistry
 	Authority          runtimeauthority.Provider
 	EmitRegistry       *runtimetools.EmitRegistry
-	PromptResolver     runtimecontracts.PromptResolver
 }
 
 func (rt *Runtime) emitBootProgress(step int, name, status, detail string) {
@@ -667,24 +665,6 @@ func providerCredentialResolverForRuntimeOptions(opts RuntimeOptions) llm.Provid
 	return llm.NewProviderCredentialResolver(opts.ProviderCredentials)
 }
 
-func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
-	if source == nil {
-		return nil, fmt.Errorf("semantic source is required")
-	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		return nil, fmt.Errorf("bundle-backed semantic source is required for contract prompt resolution")
-	}
-	return runtimecontracts.NewBundlePromptResolverWithOptions(bundle, runtimecontracts.BundlePromptResolverOptions{
-		PolicyResolver: func(itemSource runtimecontracts.ContractItemSource) runtimecontracts.PolicyDocument {
-			if flowID := strings.TrimSpace(itemSource.FlowID); flowID != "" {
-				return semanticview.ResolvePolicyForFlow(source, flowID)
-			}
-			return semanticview.ResolvePolicyForFlow(source, "")
-		},
-	}), nil
-}
-
 // Validate checks the NewRuntime boot dependency graph without constructing a runtime.
 func (deps RuntimeDeps) Validate() error {
 	_, err := deps.validated()
@@ -769,10 +749,6 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err := validateClaudeStartupConfig(context.Background(), cfg, opts, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
-	promptResolver, err := newRuntimePromptResolver(source)
-	if err != nil {
-		return validatedRuntimeDeps{}, fmt.Errorf("build prompt resolver: %w", err)
-	}
 	authorityProvider := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authorityProvider)
 	credentials := opts.Credentials
@@ -786,7 +762,6 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		Config:                     cfg,
 		Options:                    opts,
 		Source:                     source,
-		PromptResolver:             promptResolver,
 		Credentials:                credentials,
 		ManagedCredentials:         opts.ManagedCredentials,
 		MockConnectorResponses:     mockConnectorResponses,
@@ -1026,7 +1001,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		mailboxStore:              runtimeDeps.MailboxStore,
 		effectsStore:              runtimeDeps.EffectsStore,
 		managedCapabilitiesStore:  runtimeDeps.ManagedCapabilitiesStore,
-		PromptResolver:            boot.PromptResolver,
 		Credentials:               boot.Credentials,
 		ManagedCredentials:        boot.ManagedCredentials,
 		workOccurrence:            workOccurrence,
@@ -1301,9 +1275,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			slog.Warn("managed credential requirement warning", "key", item.Key, "status", item.Status, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
-	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{
-		PromptResolver: rt.PromptResolver,
-	})
+	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{})
 	lifecycleStore := runtimeDeps.ManagerLifecycleStore
 	if runtimeDeps.WorkflowPersistence.Configured() && lifecycleStore == nil {
 		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
@@ -1332,7 +1304,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return roles
 		}(),
 		SemanticSource:         source,
-		PromptResolver:         rt.PromptResolver,
 		LLMBackend:             backendProfile.ID,
 		ModelAliases:           cfg.LLM.Models,
 		RequireModelResolution: true,

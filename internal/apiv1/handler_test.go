@@ -763,17 +763,22 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 		agents: map[string]bundlecatalog.AgentsResult{
 			bundleHash: {
 				Agents: []bundlecatalog.AgentDefinition{{
-					AgentID:       "researcher",
-					Role:          "research",
-					Type:          "managed",
-					Model:         "cheap",
-					LLMBackend:    "claude",
-					Memory:        true,
-					MemorySource:  "authored",
-					FlowInstance:  "research/inst-1",
-					PromptPath:    "prompts/researcher.md",
-					Subscriptions: []string{"scan.requested"},
-					Tools:         []string{"web_search"},
+					AgentID:           "researcher",
+					Role:              "research",
+					Type:              "managed",
+					Model:             "cheap",
+					LLMBackend:        "claude",
+					Memory:            true,
+					MemorySource:      "authored",
+					FlowInstance:      "research/inst-1",
+					IntentKind:        "local",
+					IntentSource:      "prompts/researcher.md",
+					IntentProvenance:  "flows/research/agents.yaml#agents.researcher.intent",
+					IntentContentHash: "sha256:test",
+					IntentIdentity:    "agent-intent:v1:sha256:test",
+					IntentContent:     "Research the requested market.",
+					Subscriptions:     []string{"scan.requested"},
+					Tools:             []string{"web_search"},
 				}},
 			},
 		},
@@ -921,8 +926,11 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if pkg["license"] != "MIT" || pkg["repository"] != "https://github.com/division-sh/swarm" {
 		t.Fatalf("bundle.register package projection = %#v", pkg)
 	}
-	agents := asMap(t, upsert.ParsedJSON["agents"])
-	researcher := asMap(t, agents["researcher"])
+	agents, ok := upsert.ParsedJSON["agents"].([]any)
+	if !ok || len(agents) != 1 {
+		t.Fatalf("bundle.register agents projection = %#v, want one ordered definition", upsert.ParsedJSON["agents"])
+	}
+	researcher := asMap(t, agents[0])
 	if researcher["model"] != "regular" || researcher["memory"] != false || researcher["memory_source"] != "platform_default" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
@@ -1106,6 +1114,7 @@ files:
       researcher:
         id: researcher
         role: research
+        intent: {inline: "Research the requested subject."}
         model: regular
         subscriptions:
           - scan.requested

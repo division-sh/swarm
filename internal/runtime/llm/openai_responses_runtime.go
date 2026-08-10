@@ -155,7 +155,7 @@ func (r *OpenAIResponsesRuntime) StartSession(ctx context.Context, agentID, syst
 			}
 			return ""
 		}(),
-		SystemPrompt: strings.TrimSpace(systemPrompt),
+		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -426,7 +426,7 @@ func (r *OpenAIResponsesRuntime) buildRequest(ctx context.Context, s *Session, i
 	}
 	return openAIResponsesRequest{
 		Model:        resolvedModel.ConcreteModel,
-		Instructions: strings.TrimSpace(s.SystemPrompt),
+		Instructions: s.SystemPrompt,
 		Input:        items,
 		Tools:        tools,
 	}, nil

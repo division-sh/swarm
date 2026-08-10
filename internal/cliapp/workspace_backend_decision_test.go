@@ -352,7 +352,7 @@ flows:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	rootAgents := "{}\n"
 	if includeRootAgent {
-		rootAgents = "root-mock:\n  id: root-mock\n  model: regular\n  memory: false\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"
+		rootAgents = "root-mock:\n  id: root-mock\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise root workspace backend selection.\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
@@ -361,7 +361,7 @@ flows:
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise project-scoped workspace backend selection.\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
@@ -369,7 +369,7 @@ flows:
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "events.yaml"), "{}\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "policy.yaml"), "{}\n")
-		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise flow-scoped workspace backend selection.\n")
 		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 

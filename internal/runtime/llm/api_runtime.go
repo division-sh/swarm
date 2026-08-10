@@ -152,7 +152,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			}
 			return ""
 		}(),
-		SystemPrompt: strings.TrimSpace(systemPrompt),
+		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -397,7 +397,7 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 	return anthropicRequest{
 		Model:     resolvedModel.ConcreteModel,
 		MaxTokens: 1024,
-		System:    strings.TrimSpace(s.SystemPrompt),
+		System:    s.SystemPrompt,
 		Messages:  msgs,
 		Tools:     tools,
 	}, nil

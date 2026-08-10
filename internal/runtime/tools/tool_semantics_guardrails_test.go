@@ -63,29 +63,10 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 			},
 		},
 		{
-			name: "agent_hire_embedded_config",
-			tool: "agent_hire",
-			input: map[string]any{
-				"config": map[string]any{
-					"id":   "worker-1",
-					"role": "analysis",
-				},
-			},
-		},
-		{
 			name: "agent_fire_default_reason",
 			tool: "agent_fire",
 			input: map[string]any{
 				"agent_id": "worker-1",
-			},
-		},
-		{
-			name: "agent_reconfigure_config_projection",
-			tool: "agent_reconfigure",
-			input: map[string]any{
-				"model":              "fast",
-				"system_prompt":      "be concise",
-				"max_turns_per_task": 5,
 			},
 		},
 		{

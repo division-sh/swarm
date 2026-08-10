@@ -281,7 +281,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 			t.Errorf("shutdown directive integration manager: %v", err)
 		}
 	})
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
+	if err := manager.SpawnAgent(withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	handler := testHandler(t, Options{
@@ -351,7 +351,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 			t.Errorf("shutdown canonical source manager: %v", err)
 		}
 	})
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"}); err != nil {
+	if err := manager.SpawnAgent(withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	handler := testHandler(t, Options{

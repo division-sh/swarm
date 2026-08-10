@@ -67,18 +67,17 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 "agent-1",
-			Identity:           testAgentIdentity(t, "agent-1", ""),
-			Role:               "operator",
-			FlowID:             "global",
-			Model:              "regular",
-			LLMBackend:         "anthropic",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			Memory:             agentmemory.PlatformDefault(),
-			Config:             json.RawMessage(`{"system_prompt":"You are an operator.","tools":[]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            "agent-1",
+			Identity:      testAgentIdentity(t, "agent-1", ""),
+			Role:          "operator",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -357,18 +356,17 @@ func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testi
 	now := time.Now().UTC()
 	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 "agent-in-pipeline-tx",
-			Identity:           testAgentIdentity(t, "agent-in-pipeline-tx", ""),
-			Role:               "worker",
-			FlowID:             "global",
-			Model:              "regular",
-			LLMBackend:         "anthropic",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			Memory:             agentmemory.PlatformDefault(),
-			Config:             json.RawMessage(`{"system_prompt":"tx-owned agent","tools":[]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            "agent-in-pipeline-tx",
+			Identity:      testAgentIdentity(t, "agent-in-pipeline-tx", ""),
+			Role:          "worker",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.PlatformDefault(),
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		StartedAt: now,
 	}); err != nil {
@@ -780,6 +778,9 @@ func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
 				Role:          "reviewer",
 				Model:         "regular",
 				Subscriptions: []string{"task.started"},
+				ResolvedIntent: runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
+					ID: "reviewer",
+				}).Intent,
 			},
 		},
 	}
@@ -1303,19 +1304,18 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 "agent-1",
-			Identity:           testAgentIdentity(t, "agent-1", "global"),
-			Role:               "operator",
-			FlowID:             "global",
-			Model:              "regular",
-			LLMBackend:         "anthropic",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			Memory:             agentmemory.Authored(true),
-			FlowPath:           "global",
-			Config:             json.RawMessage(`{"system_prompt":"test","tools":[]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            "agent-1",
+			Identity:      testAgentIdentity(t, "agent-1", "global"),
+			Role:          "operator",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "global",
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		StartedAt: now,
 	}); err != nil {
@@ -1621,19 +1621,18 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 "agent-cleanup-1",
-			Identity:           testAgentIdentity(t, "agent-cleanup-1", "global"),
-			Role:               "operator",
-			FlowID:             "global",
-			Model:              "regular",
-			LLMBackend:         "anthropic",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			Memory:             agentmemory.Authored(true),
-			FlowPath:           "global",
-			Config:             json.RawMessage(`{"system_prompt":"test","tools":[]}`),
-		},
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ID:            "agent-cleanup-1",
+			Identity:      testAgentIdentity(t, "agent-cleanup-1", "global"),
+			Role:          "operator",
+			FlowID:        "global",
+			Model:         "regular",
+			LLMBackend:    "anthropic",
+			ExecutionMode: "live",
+			Memory:        agentmemory.Authored(true),
+			FlowPath:      "global",
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		StartedAt: now,
 	}); err != nil {

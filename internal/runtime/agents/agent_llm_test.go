@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -27,7 +26,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -161,37 +159,29 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 	}
 }
 
-func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	bundleRoot := writeAgentPromptTestBundle(t, repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		bundleRoot,
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
+func TestNewLLMAgent_ConsumesExactResolvedIntentWithoutConfigExpansion(t *testing.T) {
+	content := "You are the operations lead for {{team_name}}.\n"
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.ops-lead.intent", content)
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+		t.Fatalf("resolve test intent: %v", err)
 	}
-	agent := &LLMAgent{
-		cfg: models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "cos-entity-1",
-			Role:          "ops_lead",
-			Config: mustAgentConfigJSON(t, map[string]any{
-				"team_name": "Acme Ops",
-			}),
-		},
-		conversation:   llm.NewConversation("cos-entity-1", "", "", nil, agentmemory.Authored(true), 10, nil),
-		promptCache:    map[string]string{},
-		promptResolver: runtimecontracts.NewBundlePromptResolver(bundle),
-	}
+	agent := mustBuildLLMAgent(t, models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "cos-entity-1",
+		Role:          "ops_lead",
+		Intent:        intent,
+		SystemPrompt:  content,
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"team_name": "Acme Ops",
+		}),
+	}, nil, actorScopedFactoryToolExec{}, nil)
 
-	got := agent.resolvePromptForMode("")
-	if !strings.Contains(got, "Acme Ops") {
-		t.Fatalf("expected resolved prompt to include config-expanded team name, got %q", got)
+	got := agent.conversation.SystemPrompt
+	if !strings.HasPrefix(got, content) {
+		t.Fatalf("derived prompt does not preserve exact intent prefix: %q", got)
 	}
-	if strings.Contains(got, "{{team_name}}") {
-		t.Fatalf("expected resolved prompt to expand team_name token, got %q", got)
+	if !strings.Contains(got, "{{team_name}}") || strings.Contains(got, "Acme Ops") {
+		t.Fatalf("resolved intent was interpreted through config variables: %q", got)
 	}
 	if !strings.Contains(got, "Workspace: /workspace (read-write logical path)") {
 		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
@@ -213,73 +203,21 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	}
 }
 
-func writeAgentPromptTestBundle(t *testing.T, repoRoot string) string {
-	t.Helper()
-	srcRoot := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
-	dstRoot := filepath.Join(t.TempDir(), "agent-prompt-test-bundle")
-	copyBundleTree(t, srcRoot, dstRoot)
-
-	agentsPath := filepath.Join(dstRoot, "agents.yaml")
-	agentsRaw, err := os.ReadFile(agentsPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", agentsPath, err)
-	}
-	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
-ops-lead:
-  id: ops-lead
-  role: ops_lead
-  manager_fallback: control-plane
-  emit_events:
-    - item.created
-`, "\n"))...)
-	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
-		t.Fatalf("write %s: %v", agentsPath, err)
-	}
-
-	promptsDir := filepath.Join(dstRoot, "prompts")
-	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", promptsDir, err)
-	}
-	prompt := strings.TrimSpace(`
-You are the operations lead for {{team_name}}.
-`)
-	if err := os.WriteFile(filepath.Join(promptsDir, "ops-lead.md"), []byte(prompt+"\n"), 0o644); err != nil {
-		t.Fatalf("write prompt fixture: %v", err)
-	}
-	return dstRoot
-}
-
-func copyBundleTree(t *testing.T, srcRoot, dstRoot string) {
-	t.Helper()
-	if err := filepath.Walk(srcRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(srcRoot, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dstRoot, rel)
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, info.Mode())
-	}); err != nil {
-		t.Fatalf("copy %s -> %s: %v", srcRoot, dstRoot, err)
-	}
-}
-
 func mustBuildLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
 	t.Helper()
 	if !cfg.ExecutionMode.Valid() {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
+	}
+	if err := cfg.Intent.Validate(); err != nil {
+		intent, resolveErr := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "test#intent", "Perform the test agent's assigned work.")
+		if resolveErr != nil {
+			t.Fatalf("resolve default test intent: %v", resolveErr)
+		}
+		cfg.Intent = intent
+		cfg.SystemPrompt = intent.Content
+	}
+	if strings.TrimSpace(cfg.SystemPrompt) == "" {
+		cfg.SystemPrompt = cfg.Intent.Content
 	}
 	agent, err := newLLMAgent(cfg, modelRuntime, toolExecutor, tools, LLMAgentOptions{})
 	if err != nil {
@@ -579,14 +517,11 @@ func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
 
 func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
 	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: llm.NoopRuntime{}}, actorScopedFactoryToolExec{}, LLMAgentOptions{})
-	agent, err := factory(models.AgentConfig{
+	agent, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analysis-agent",
 		Tools:         []string{"query_entities"},
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"system_prompt": "You are here.",
-		}),
-	})
+	}, "You are here."))
 	if err != nil {
 		t.Fatalf("factory error: %v", err)
 	}
@@ -613,15 +548,12 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 		},
 	}
 	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: rt}, contextAwareFactoryToolExec{}, LLMAgentOptions{})
-	agent, err := factory(models.AgentConfig{
+	agent, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ID:            "market-research-agent",
 		Role:          "market_research",
 		Memory:        agentmemory.Authored(false),
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"system_prompt": "You are here.",
-		}),
-	})
+	}, "You are here."))
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -667,15 +599,12 @@ func TestLLMAgentBoardStep_UsesExactContextAwareDefinitionsForDirective(t *testi
 		},
 	}
 	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: rt}, contextAwareFactoryToolExec{}, LLMAgentOptions{})
-	created, err := factory(models.AgentConfig{
+	created, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ID:            "market-research-agent",
 		Role:          "market_research",
 		Memory:        agentmemory.Authored(false),
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"system_prompt": "You are here.",
-		}),
-	})
+	}, "You are here."))
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
@@ -758,6 +687,7 @@ func (b *directiveFactoryPublishBus) PublishDirectRoutes(_ context.Context, evt 
 
 func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, bundle *runtimecontracts.WorkflowContractBundle) (*LLMAgent, *directiveFactoryPublishBus) {
 	t.Helper()
+	cfg = withTestResolvedIntent(t, cfg, "You coordinate workflow launch.")
 
 	source := semanticview.Wrap(bundle)
 	authority := runtimeauthority.NewSourceProvider(source)
@@ -799,9 +729,6 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		Identity:      agentidentitytest.RootRuntime(t, "campaign-coordinator", "directive-factory-test"),
 		EntityID:      eventtest.UUID("campaign-coordinator-source"),
 		Role:          "campaign_coordinator",
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"system_prompt": "You coordinate workflow launch.",
-		}),
 	}, rt, &runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"campaign-coordinator": {
@@ -860,9 +787,6 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		FlowID:        "campaign-flow",
 		FlowPath:      "campaign-flow/inst-1",
 		EmitEvents:    []string{"campaign-flow/inst-1/scan.requested"},
-		Config: mustAgentConfigJSON(t, map[string]any{
-			"system_prompt": "You coordinate workflow launch.",
-		}),
 	}, rt, &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.requested": {
@@ -1080,4 +1004,15 @@ func mustAgentConfigJSON(t *testing.T, value any) json.RawMessage {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	return raw
+}
+
+func withTestResolvedIntent(t testing.TB, cfg models.AgentConfig, content string) models.AgentConfig {
+	t.Helper()
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "test#agents."+cfg.ID+".intent", content)
+	if err != nil {
+		t.Fatalf("resolve test intent: %v", err)
+	}
+	cfg.Intent = intent
+	cfg.SystemPrompt = content
+	return cfg
 }

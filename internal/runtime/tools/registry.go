@@ -229,7 +229,12 @@ func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfi
 }
 
 func runtimeToolHiddenFromAgents(name string) bool {
-	return strings.TrimSpace(name) == "configure_routing"
+	switch strings.TrimSpace(name) {
+	case "configure_routing", "agent_hire", "agent_reconfigure":
+		return true
+	default:
+		return false
+	}
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {

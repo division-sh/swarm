@@ -139,8 +139,6 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 		{id: "B151", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.ping", emitted: "cycle.pong", disposition: "same_flow"},
 		{id: "B152", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.pong", emitted: "cycle.ping", disposition: "same_flow"},
 		{id: "B164", fixture: "tests/tier8-boot-verification/test-boot-permission-tool-mismatch", nodeID: "test-node", trigger: "task.requested", emitted: "task.completed", disposition: "same_flow"},
-		{id: "B169", fixture: "tests/tier8-boot-verification/test-boot-prompt-ref-stub", nodeID: "prompt-ref-stub-node", trigger: "task.requested", emitted: "task.completed", disposition: "external"},
-		{id: "B170", fixture: "tests/tier8-boot-verification/test-boot-prompt-ref", nodeID: "prompt-ref-node", trigger: "task.requested", emitted: "task.completed", disposition: "external"},
 		{id: "B171", fixture: "tests/tier8-boot-verification/test-boot-prompt-stub", nodeID: "stub-agent-node", trigger: "task.requested", emitted: "task.completed", disposition: "external", payload: map[string]any{"task_type": "proof"}},
 		{id: "B173", fixture: "tests/tier8-boot-verification/test-boot-self-emit", nodeID: "test-node", trigger: "loop.event", emitted: "loop.event", disposition: "same_flow"},
 	}
@@ -207,6 +205,28 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 				}
 			default:
 				t.Fatalf("unsupported disposition %q", tc.disposition)
+			}
+		})
+	}
+}
+
+func TestProducerRoutingRetiredIntentFixturesFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		id      string
+		fixture string
+	}{
+		{id: "B169", fixture: "tests/tier8-boot-verification/test-boot-prompt-ref-stub"},
+		{id: "B170", fixture: "tests/tier8-boot-verification/test-boot-prompt-ref"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			repoRoot := canonicalrouting.RepoRoot(t)
+			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+				repoRoot,
+				filepath.Join(repoRoot, tc.fixture),
+				runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+			)
+			if err == nil || !strings.Contains(err.Error(), "RETIRED: agent field prompt_ref") {
+				t.Fatalf("load error = %v, want retired prompt_ref teaching rejection", err)
 			}
 		})
 	}

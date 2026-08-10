@@ -50,97 +50,9 @@ func canonicalRuntimeToolInput(name string, input any) any {
 				payload["message"] = "runtime_tool"
 			}
 		}
-	case "agent_hire":
-		if strings.TrimSpace(asString(payload["agent_id"])) == "" {
-			if config, ok := payload["config"].(map[string]any); ok {
-				payload["agent_id"] = strings.TrimSpace(asString(config["id"]))
-			}
-		}
-		if strings.TrimSpace(asString(payload["role"])) == "" {
-			if config, ok := payload["config"].(map[string]any); ok {
-				payload["role"] = strings.TrimSpace(asString(config["role"]))
-			}
-		}
-		if payload["config"] == nil {
-			config := map[string]any{
-				"id":   strings.TrimSpace(asString(payload["agent_id"])),
-				"role": strings.TrimSpace(asString(payload["role"])),
-			}
-			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
-				config["mode"] = mode
-			}
-			if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
-				config["entity_id"] = entityID
-			}
-			if modelTier := strings.TrimSpace(asString(payload["model"])); modelTier != "" {
-				config["model"] = modelTier
-			}
-			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
-				config["max_turns_per_task"] = maxTurns
-			}
-			if tools, ok := payload["tools"]; ok && tools != nil {
-				config["tools"] = tools
-			}
-			if emitEvents, ok := payload["emit_events"]; ok && emitEvents != nil {
-				config["emit_events"] = emitEvents
-			}
-			if nativeTools, ok := payload["native_tools"]; ok && nativeTools != nil {
-				config["native_tools"] = nativeTools
-			}
-			if workspaceClass := strings.TrimSpace(asString(payload["workspace_class"])); workspaceClass != "" {
-				config["workspace_class"] = workspaceClass
-			}
-			if managerFallback := strings.TrimSpace(asString(payload["manager_fallback"])); managerFallback != "" {
-				config["manager_fallback"] = managerFallback
-			}
-			rawConfig := map[string]any{}
-			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
-				rawConfig["system_prompt"] = systemPrompt
-			}
-			if len(rawConfig) > 0 {
-				config["config"] = rawConfig
-			}
-			payload["config"] = config
-		}
 	case "agent_fire":
 		if strings.TrimSpace(asString(payload["reason"])) == "" {
 			payload["reason"] = "runtime_tool"
-		}
-	case "agent_reconfigure":
-		if payload["config"] == nil {
-			config := map[string]any{}
-			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
-				config["mode"] = mode
-			}
-			if modelTier := strings.TrimSpace(asString(payload["model"])); modelTier != "" {
-				config["model"] = modelTier
-			}
-			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
-				config["max_turns_per_task"] = maxTurns
-			}
-			if tools, ok := payload["tools"]; ok && tools != nil {
-				config["tools"] = tools
-			}
-			if emitEvents, ok := payload["emit_events"]; ok && emitEvents != nil {
-				config["emit_events"] = emitEvents
-			}
-			if nativeTools, ok := payload["native_tools"]; ok && nativeTools != nil {
-				config["native_tools"] = nativeTools
-			}
-			if workspaceClass := strings.TrimSpace(asString(payload["workspace_class"])); workspaceClass != "" {
-				config["workspace_class"] = workspaceClass
-			}
-			if managerFallback := strings.TrimSpace(asString(payload["manager_fallback"])); managerFallback != "" {
-				config["manager_fallback"] = managerFallback
-			}
-			rawConfig := map[string]any{}
-			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
-				rawConfig["system_prompt"] = systemPrompt
-			}
-			if len(rawConfig) > 0 {
-				config["config"] = rawConfig
-			}
-			payload["config"] = config
 		}
 	case "mailbox_send":
 		if mailboxType, err := NormalizeMailboxType(asString(payload["type"])); err == nil && mailboxType != "" {

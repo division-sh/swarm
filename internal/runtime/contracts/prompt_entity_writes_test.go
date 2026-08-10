@@ -51,6 +51,7 @@ func TestDerivePromptEntityWriteEvidence(t *testing.T) {
 writer:
   id: writer
   role: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops-lead
 `)...)
@@ -59,9 +60,7 @@ writer:
 	}
 
 	prompt := "Call create_entity using the delivered schema.\nThen call save_entity_field for `business_brief`.\n"
-	if err := os.WriteFile(filepath.Join(root, "prompts", "writer.md"), []byte(prompt), 0o644); err != nil {
-		t.Fatalf("write prompt: %v", err)
-	}
+	writePromptWriterFixtureFile(t, filepath.Join(root, "prompts", "writer.md"), prompt)
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -151,7 +150,7 @@ case:
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
 `)

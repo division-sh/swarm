@@ -22,13 +22,13 @@ import (
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: models.AgentConfig{
+		Config: managerTestAgentConfig(models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
 			Identity:      runtimeagentidentitytest.RootRuntime(t, "agent-1", "manager-llm-backend-test"),
 			Role:          "reviewer",
 			Model:         "regular",
-		},
+		}),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -149,15 +149,15 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 			},
 		},
 	})
-	staticCfg, err := buildStaticFlowAgentConfig(source, "static-support", "static-support", "static-worker", runtimecontracts.AgentRegistryEntry{
+	staticCfg, err := buildStaticFlowAgentConfig(source, "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
 		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
-	}, nil)
+	}), nil)
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
-	instantiatedCfg, err := buildFlowAgentConfig(source, "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", runtimecontracts.AgentRegistryEntry{
+	instantiatedCfg, err := buildFlowAgentConfig(source, "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
 		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
-	}, map[string]string{"instance_id": "inst-1"}, nil, nil)
+	}), map[string]string{"instance_id": "inst-1"}, nil, nil)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
 		built[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendClaudeCLI})
-	if err := am.SpawnAgent(models.AgentConfig{ID: "mock-lifecycle-agent", Role: "worker", Model: "regular", Mock: artifact}); err != nil {
+	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ID: "mock-lifecycle-agent", Role: "worker", Model: "regular", Mock: artifact})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	base, err := am.ResolveAgentConfig("mock-lifecycle-agent", "")
@@ -248,7 +248,7 @@ func TestAgentRuntimeSetRecoveryRederivesUnpinnedBackendFromCurrentConfiguration
 	store := &liveMockAlternativePersistence{}
 	initialBuilt := map[string]models.AgentConfig{}
 	initial := newRuntimeSetBackedManager(t, llmselection.BackendAnthropic, store, initialBuilt)
-	if err := initial.SpawnAgent(models.AgentConfig{ID: "backend-change-agent", Role: "worker"}); err != nil {
+	if err := initial.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ID: "backend-change-agent", Role: "worker"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if len(store.records) != 1 {
@@ -280,7 +280,7 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 	store := &liveMockAlternativePersistence{}
 	built := map[string]models.AgentConfig{}
 	manager := newRuntimeSetBackedManager(t, llmselection.BackendAnthropic, store, built)
-	if err := manager.SpawnAgent(models.AgentConfig{ID: "backend-patch-agent", Role: "worker"}); err != nil {
+	if err := manager.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ID: "backend-patch-agent", Role: "worker"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

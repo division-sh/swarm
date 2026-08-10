@@ -648,20 +648,19 @@ func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID
 
 func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID string, entityID string, subscriptions ...string) {
 	t.Helper()
-	cfg := runtimeactors.AgentConfig{
-		ID:                 agentID,
-		Role:               agentID,
-		FlowID:             "global",
-		FlowPath:           "global",
-		Type:               "stub",
-		Model:              "regular",
-		ResolvedLLMBackend: "anthropic",
-		ExecutionMode:      "live",
-		EntityID:           strings.TrimSpace(entityID),
-		Subscriptions:      subscriptions,
-		Config:             []byte(`{"system_prompt":"x"}`),
-		Identity:           specMemoryIdentity(agentID, "global").Agent,
-	}
+	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ID:            agentID,
+		Role:          agentID,
+		FlowID:        "global",
+		FlowPath:      "global",
+		Type:          "stub",
+		Model:         "regular",
+		ExecutionMode: "live",
+		EntityID:      strings.TrimSpace(entityID),
+		Subscriptions: subscriptions,
+		Config:        []byte(`{}`),
+		Identity:      specMemoryIdentity(agentID, "global").Agent,
+	})
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config:    cfg,
 		Status:    "active",
@@ -2427,15 +2426,15 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	ctx := testAuthorActivityContext()
 
 	rec := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: "a1",
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
 			Identity:      testAgentIdentity(t, "a1", ""),
 			Type:          "sonnet",
 			Role:          "a1",
 			FlowID:        "global",
 			Model:         "regular",
 			Subscriptions: []string{"inbound.*"},
-			Config:        []byte(`{"system_prompt":"x"}`),
-		},
+			Config:        []byte(`{}`),
+		}),
 		Status:  "active",
 		HiredBy: "test",
 	}
@@ -2471,35 +2470,34 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 
 	entityID := uuid.NewString()
 	rec := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-canonical-1",
-			Identity:           testAgentIdentity(t, "agent-canonical-1", "review/inst-1"),
-			Type:               "review-worker",
-			Role:               "reviewer",
-			FlowID:             "review",
-			Model:              "regular",
-			LLMBackend:         "claude_cli",
-			ResolvedLLMBackend: "claude_cli",
-			Memory:             agentmemory.Authored(true),
-			MaxTurnsPerTask:    7,
-			Subscriptions:      []string{"review.ready"},
-			EmitEvents:         []string{"review.completed"},
-			Tools:              []string{"agent_message"},
-			Permissions:        []string{"agent_message"},
-			NativeTools:        runtimeactors.NativeToolConfig{FileIO: true},
-			WorkspaceClass:     "shared_flow",
-			ManagerFallback:    "control-plane",
-			FlowPath:           "review/inst-1",
-			EntityID:           entityID,
-			ParentAgent:        "manager-1",
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-canonical-1",
+			Identity:        testAgentIdentity(t, "agent-canonical-1", "review/inst-1"),
+			Type:            "review-worker",
+			Role:            "reviewer",
+			FlowID:          "review",
+			Model:           "regular",
+			LLMBackend:      "claude_cli",
+			Memory:          agentmemory.Authored(true),
+			MaxTurnsPerTask: 7,
+			Subscriptions:   []string{"review.ready"},
+			EmitEvents:      []string{"review.completed"},
+			Tools:           []string{"agent_message"},
+			Permissions:     []string{"agent_message"},
+			NativeTools:     runtimeactors.NativeToolConfig{FileIO: true},
+			WorkspaceClass:  "shared_flow",
+			ManagerFallback: "control-plane",
+			FlowPath:        "review/inst-1",
+			EntityID:        entityID,
+			ParentAgent:     "manager-1",
 			Config: json.RawMessage(`{
-				"system_prompt":"x",
+				"custom_label":"x",
 				"type":"wrong-type",
 				"memory":false,
 				"subscriptions":["wrong.subscription"],
 				"manager_fallback":"wrong-manager",
 				"workspace_class":"wrong-workspace"
 			}`),
-		},
+		}),
 		Status: "active",
 	}
 	if err := pg.UpsertAgent(ctx, rec); err != nil {
@@ -2554,8 +2552,8 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	if err := json.Unmarshal(got.Config, &opaque); err != nil {
 		t.Fatalf("unmarshal opaque config: %v", err)
 	}
-	if len(opaque) != 1 || opaque["system_prompt"] != "x" {
-		t.Fatalf("opaque config = %#v, want only system_prompt", opaque)
+	if len(opaque) != 1 || opaque["custom_label"] != "x" {
+		t.Fatalf("opaque config = %#v, want only custom_label", opaque)
 	}
 
 	var (
@@ -2585,15 +2583,14 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 }
 
 func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.T) {
-	projection, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
-		ID:                 "agent-default-backend",
-		Identity:           testAgentIdentity(t, "agent-default-backend", ""),
-		Role:               "reviewer",
-		Model:              "regular",
-		ResolvedLLMBackend: "anthropic",
-		ExecutionMode:      runtimeeffects.ExecutionModeLive,
-		Memory:             agentmemory.PlatformDefault(),
-	}, "")
+	projection, err := projectPersistedAgentConfig(withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ID:            "agent-default-backend",
+		Identity:      testAgentIdentity(t, "agent-default-backend", ""),
+		Role:          "reviewer",
+		Model:         "regular",
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		Memory:        agentmemory.PlatformDefault(),
+	}), "")
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig: %v", err)
 	}
@@ -2601,16 +2598,15 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		t.Fatalf("llm_backend = %q, want anthropic default profile", projection.LLMBackend)
 	}
 
-	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
-		ID:                 "agent-openai-compatible-backend",
-		Identity:           testAgentIdentity(t, "agent-openai-compatible-backend", ""),
-		Role:               "reviewer",
-		Model:              "regular",
-		LLMBackend:         "openai_compatible",
-		ResolvedLLMBackend: "openai_compatible",
-		ExecutionMode:      runtimeeffects.ExecutionModeLive,
-		Memory:             agentmemory.PlatformDefault(),
-	}, "")
+	projection, err = projectPersistedAgentConfig(withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ID:            "agent-openai-compatible-backend",
+		Identity:      testAgentIdentity(t, "agent-openai-compatible-backend", ""),
+		Role:          "reviewer",
+		Model:         "regular",
+		LLMBackend:    "openai_compatible",
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		Memory:        agentmemory.PlatformDefault(),
+	}), "")
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig openai_compatible: %v", err)
 	}
@@ -2618,16 +2614,15 @@ func TestProjectPersistedAgentConfig_UsesCanonicalLLMBackendProfiles(t *testing.
 		t.Fatalf("llm_backend = %q, want openai_compatible", projection.LLMBackend)
 	}
 
-	projection, err = projectPersistedAgentConfig(runtimeactors.AgentConfig{
-		ID:                 "agent-openai-responses-backend",
-		Identity:           testAgentIdentity(t, "agent-openai-responses-backend", ""),
-		Role:               "reviewer",
-		Model:              "regular",
-		LLMBackend:         "openai_responses",
-		ResolvedLLMBackend: "openai_responses",
-		ExecutionMode:      runtimeeffects.ExecutionModeLive,
-		Memory:             agentmemory.PlatformDefault(),
-	}, "")
+	projection, err = projectPersistedAgentConfig(withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ID:            "agent-openai-responses-backend",
+		Identity:      testAgentIdentity(t, "agent-openai-responses-backend", ""),
+		Role:          "reviewer",
+		Model:         "regular",
+		LLMBackend:    "openai_responses",
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		Memory:        agentmemory.PlatformDefault(),
+	}), "")
 	if err != nil {
 		t.Fatalf("projectPersistedAgentConfig openai_responses: %v", err)
 	}
@@ -2742,7 +2737,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	seedSpecEntityState(t, ctx, db, entityID, "testco", "testco", "TestCo", "operating")
 	a1Identity := testAgentIdentity(t, "a1", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: "a1",
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
 			Identity: a1Identity,
 			Role:     "role",
 			FlowID:   "global",
@@ -2750,8 +2745,8 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			Model:    "regular",
 			Memory:   agentmemory.PlatformDefault(),
 			EntityID: "",
-			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["system.*"]}`),
-		},
+			Config:   json.RawMessage(`{}`),
+		}),
 		Status:          "active",
 		HiredBy:         "test",
 		StartedAt:       time.Now().UTC(),
@@ -2762,7 +2757,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	terminateSpecAgentViaLifecycle(t, ctx, pg, a1Identity)
 	ephemeralIdentity := testAgentIdentity(t, "ephemeral-shard-1", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: "ephemeral-shard-1",
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "ephemeral-shard-1",
 			Identity: ephemeralIdentity,
 			Role:     "worker",
 			FlowID:   "worker",
@@ -2770,8 +2765,8 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			Model:    "regular",
 			Memory:   agentmemory.PlatformDefault(),
 			EntityID: "",
-			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.ready"]}`),
-		},
+			Config:   json.RawMessage(`{}`),
+		}),
 		Status:          "ephemeral",
 		HiredBy:         "runtime",
 		StartedAt:       time.Now().UTC(),
@@ -2795,7 +2790,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	ceoID := "operator-" + entityID
 	ceoIdentity := testAgentIdentity(t, ceoID, "operating/global")
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: ceoID,
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
 			Identity: ceoIdentity,
 			Role:     "operator",
 			FlowID:   "operating",
@@ -2804,8 +2799,8 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			Memory:   agentmemory.Authored(true),
 			FlowPath: "operating/global",
 			EntityID: entityID,
-			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.*"]}`),
-		},
+			Config:   json.RawMessage(`{}`),
+		}),
 		Status:          "active",
 		HiredBy:         "test",
 		StartedAt:       time.Now().UTC(),
@@ -2955,7 +2950,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: "agent-cleanup-1",
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
 			Identity: testAgentIdentity(t, "agent-cleanup-1", "global"),
 			Role:     "worker",
 			FlowID:   "worker",
@@ -2963,11 +2958,8 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 			Model:    "regular",
 			Memory:   agentmemory.Authored(true),
 			FlowPath: "global",
-			Config: json.RawMessage(`{
-			"system_prompt":"x",
-			"subscriptions":["review.ready"]
-		}`),
-		},
+			Config:   json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),

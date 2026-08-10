@@ -116,7 +116,7 @@ pins:
 	writeClosedVariantFile(t, root, "flows/hold/agents.yaml", `load-agent:
   id: load-agent
   role: load_agent
-  prompt_ref: load-agent
+  intent: prompts/load-agent.md
   model: regular
   memory: true
   subscriptions:
@@ -140,7 +140,7 @@ func addServedItemProcessedAgent(t testing.TB, root, prompt string) {
 	writeClosedVariantFile(t, root, "agents.yaml", `load-agent:
   id: load-agent
   role: load_agent
-  prompt_ref: load-agent
+  intent: prompts/load-agent.md
   model: regular
   subscriptions:
     - item.processed

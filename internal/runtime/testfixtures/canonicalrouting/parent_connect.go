@@ -21,6 +21,7 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "flows/producer/agents.yaml", `analyzer:
   id: analyzer
+  intent: {inline: "Analyze work before delivery."}
   model: regular
   subscriptions: [work.requested]
   emit_events: [producer/work.ready]

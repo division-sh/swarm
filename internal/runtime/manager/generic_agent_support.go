@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -50,14 +49,6 @@ func (a *genericAgent) OnEvent(context.Context, events.Event) ([]events.Event, e
 
 func mergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.AgentConfig {
 	return runtimeactors.MergeAgentConfig(base, patch)
-}
-
-func extractSystemPromptFromConfig(raw json.RawMessage) string {
-	return ExtractSystemPromptFromConfig(raw)
-}
-
-func withSystemPrompt(raw json.RawMessage, prompt string) (json.RawMessage, error) {
-	return WithSystemPrompt(raw, prompt)
 }
 
 func (am *AgentManager) SetWorkspaceLifecycle(workspaces workspace.Lifecycle) {
