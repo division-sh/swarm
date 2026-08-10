@@ -6,11 +6,15 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/google/uuid"
 )
@@ -161,5 +165,139 @@ func TestRunControlStopCancelsExactGenericAndWorkflowTimerFamiliesOnBothStores(t
 			}
 			assertGenericScheduleTimerFamilyCancellation(t, selected, db, ctx, generic, workflow, state.TimerCancellations)
 		})
+	}
+}
+
+type runControlTimerWorkflowModule struct {
+	workflowTestModule
+	source semanticview.Source
+}
+
+func (m runControlTimerWorkflowModule) SemanticSource() semanticview.Source { return m.source }
+
+func runControlTimerBundle() *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Name: "run-stop-timer-proof", Version: "1", InitialStage: "waiting", TerminalStages: []string{"done"},
+		Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
+			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+			StartOn: "state:waiting", Delay: "1h",
+		}},
+	}}
+}
+
+func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db, seedCtx := tc.open(t)
+			selected := store.(genericScheduleLifecycleConsumerStore)
+			runID := runtimecorrelation.RunIDFromContext(seedCtx)
+			ctx := authorGenericScheduleConsumerContext(runID)
+			entityID := uuid.NewString()
+
+			process := worklifetime.NewProcess()
+			workOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+				RuntimeInstanceID: "run-stop-timer-proof", BundleHash: genericScheduleConsumerTestBundleHash,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(workOwner)
+			planner := &terminalSchedulePlannerProbe{}
+			dispatcher := &terminalScheduleDispatcherProbe{}
+			genericLifecycle, err := runtimegenericschedule.NewLifecycle(selected, scheduler, planner, dispatcher, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			source := semanticview.Wrap(runControlTimerBundle())
+			options := completeWorkflowTestCoordinatorOptions(runtimepipeline.NewWorkflowPersistence(selected.(workflowTestSelectedStore)), selected.(workflowTestSelectedStore))
+			options.Module = runControlTimerWorkflowModule{source: source}
+			options.TimerScheduler = scheduler
+			options.GenericSchedules = genericLifecycle
+			options.WorkOwner = workOwner
+			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, options)
+			if coordinator == nil {
+				t.Fatal("construct run-stop timer coordinator")
+			}
+			t.Cleanup(func() {
+				stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = coordinator.StopWorkflowTimerLifecycle(stopCtx)
+				_ = genericLifecycle.Stop(stopCtx)
+				scheduler.Stop()
+				_, _ = workOwner.RetireAndWait(stopCtx)
+				_, _ = process.Join(stopCtx)
+			})
+
+			genericResult, err := genericLifecycle.Admit(ctx, testAgentGenericScheduleCommand(
+				t, runID, "run-stop-agent", "run-stop/instance", entityID, "run-stop-generic",
+				runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			enteredAt := time.Now().UTC()
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, WorkflowName: "run-stop-timer-proof", WorkflowVersion: "1",
+				CurrentState: "waiting", EnteredStageAt: enteredAt, CreatedAt: enteredAt,
+				Metadata: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+			}, enteredAt); err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.ArmInitialEntryTimers(ctx, runtimeflowidentity.RouteForInstancePath(runID)); err != nil {
+				t.Fatal(err)
+			}
+
+			controller := runtimeruncontrol.NewController(selected.(runtimeruncontrol.Store), nil, runtimeruncontrol.Options{
+				TimerCancellations: coordinator.TimerCancellationReconciler(),
+			})
+			result, err := controller.Stop(ctx, runtimeruncontrol.TransitionRequest{
+				RunID: runID, Reason: "supported_run_stop", ControlledBy: "test", Now: time.Now().UTC(),
+			})
+			if err != nil || result.Recovery.Disposition != runtimeruncontrol.RecoveryComplete {
+				t.Fatalf("run stop result=%#v err=%v", result, err)
+			}
+
+			quiesceCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := workOwner.WaitForQuiescence(quiesceCtx); err != nil {
+				t.Fatalf("timer wakeups remained live after committed stop: %v", err)
+			}
+			generic, found, err := selected.LoadGenericScheduleActivation(ctx, genericResult.Activation.ID)
+			if err != nil || !found || generic.Status != runtimegenericschedule.StatusCancelled {
+				t.Fatalf("generic stop state=%#v found=%v err=%v", generic, found, err)
+			}
+			query := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND task_type = 'workflow_timer' AND status = 'cancelled'`
+			args := []any{runID}
+			if _, postgres := selected.(*PostgresStore); postgres {
+				query = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'cancelled'`
+			}
+			var cancelledWorkflowTimers int
+			if err := db.QueryRowContext(ctx, query, args...).Scan(&cancelledWorkflowTimers); err != nil || cancelledWorkflowTimers != 1 {
+				t.Fatalf("cancelled workflow timers=%d err=%v", cancelledWorkflowTimers, err)
+			}
+			if planner.prepareCalls != 0 || dispatcher.calls != 0 {
+				t.Fatalf("stopped long-future timers emitted events: prepare=%d dispatch=%d", planner.prepareCalls, dispatcher.calls)
+			}
+			if _, postgres := selected.(*PostgresStore); postgres {
+				assertAdvisoryLockAvailableOnPool(t, db, "swarm:generic_schedule:"+generic.ID)
+			}
+		})
+	}
+}
+
+func assertAdvisoryLockAvailableOnPool(t *testing.T, db *sql.DB, lockKey string) {
+	t.Helper()
+	var acquired bool
+	if err := db.QueryRow(`SELECT pg_try_advisory_lock(hashtext($1))`, lockKey).Scan(&acquired); err != nil {
+		t.Fatal(err)
+	}
+	if !acquired {
+		t.Fatalf("PostgreSQL advisory claim %q remained live", lockKey)
+	}
+	var released bool
+	if err := db.QueryRow(`SELECT pg_advisory_unlock(hashtext($1))`, lockKey).Scan(&released); err != nil || !released {
+		t.Fatalf("release proof advisory lock=%v err=%v", released, err)
 	}
 }

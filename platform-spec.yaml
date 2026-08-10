@@ -6870,27 +6870,44 @@ engine:
         current or terminal activation as exact replay; changed content is a conflict. Absolute agent and join coordinates,
         rendered boot delay, canonical UTC cron, and exact @every duration remain distinct due-basis kinds. Replay returns
         persisted coordinates and never re-resolves relative time. Replacement, reschedule, generation, and destructive
-        upsert semantics do not exist. Persisted activation identity is not task_id, payload content, or a process key.
+        upsert semantics do not exist. Persisted activation identity is not task_id, payload content, or a process key. The
+        supported schedule builtin has one closed grammar: mode absolute requires only RFC3339 at; mode delay requires only
+        a duration-valued delay; mode cron requires only a UTC cron expression; and mode every requires only a duration-valued
+        every. Mode, schedule_key, and event_type are required. action, context, delay_seconds, once, @every-in-cron, omitted
+        mode, and cross-mode timing fields are rejected rather than normalized. Relative delay remains a typed DelayDue until
+        selected-store admission stamps its first due coordinate after exact-replay lookup.
       wakeup: >
         Persistence commits before registration. A wakeup contains only activation identity and current due coordinate,
         reloads durable facts before execution, and is fenced by lifecycle-owned bounded/coalesced recovery. Process-local
         recurrence is forbidden: each recurring occurrence advances the durable coordinate and registers a new inert
         one-shot wakeup only after commit. Cron is UTC; @every advances from the prior persisted coordinate. Downtime catch-up
-        processes every persisted coordinate in order and emits a typed depth warning rather than skipping work.
+        processes every persisted coordinate in order and emits a typed depth warning rather than skipping work. Every
+        terminal preparation, including a concurrently missing row or fail-loud malformed row with no reloadable activation,
+        retires and releases the original exact wakeup. Retirement/release failure retries from that exact wakeup and never
+        reconstructs it from absent state.
       occurrence: >
         Occurrence event identity is deterministic from activation identity plus persisted due coordinate. The selected
         store stamps occurrence admission once and retries/restarts preserve event identity, admitted_at, and due_at exactly.
+        Occurrence admission and acceptance use the selected-store transaction clock domain; PostgreSQL uses database
+        transaction time for both and never compares a process clock with a database acceptance clock.
         Event acceptance plus one-shot settlement or recurring advancement commits in one selected-store transaction and
         returns exactly committed, retry, terminal, or stale_cancelled. Completion is a durable claim that the declared
         publication was accepted: no effect may be marked complete before its acceptance fact commits. A committed retry is
         exact replay and never synchronously redispatches; durable delivery recovery owns unfinished downstream dispatch.
-        Typed terminal corruption or identity conflict is persisted loudly. Canonical cancellation remains cancellation and
-        a stale callback cannot rewrite it as failure.
+        The activation state law pairs occurrence identity with occurrence admission and fired history with acceptance,
+        requires chronological fired/accepted facts, forbids accepted history on an active one-shot, permits an active
+        recurring schedule to retain only a complete prior-occurrence pair, and keeps cancellation and failure facts paired
+        and mutually exclusive. Runtime validation and fresh selected-store DDL enforce the same law. Typed terminal
+        corruption or identity conflict is persisted loudly. Canonical cancellation remains cancellation and a stale
+        callback cannot rewrite it as failure.
       cancellation: >
         Exact/join cancellation, run quiescence and stop, standing terminalization, and preservation cleanup retain their
         outer selected-store transaction while delegating generic and workflow rows to distinct private family owners. Each
-        returns exact activation evidence for post-commit wakeup retirement. No raw mixed-family status writer, public SQL
-        transaction, copied comparison SQL, migration reader, or compatibility path is supported.
+        returns exact activation evidence for post-commit wakeup retirement. One family-typed post-commit reconciler consumes
+        that evidence for every live operation, including public run.stop, and attempts every committed cancellation even if
+        one retirement fails. Reconciliation failure is diagnostic recovery evidence after an already committed stop; it
+        never replays the stop transaction. No raw mixed-family status writer, public SQL transaction, copied comparison SQL,
+        migration reader, or compatibility path is supported.
       reply_and_scope: >
         reply_context_id is immutable one-shot routing authority; recurrence with reply context is rejected before mutation.
         Run-scoped admission requires a running or paused run. Missing or terminal linkage fails closed. start_on boot is a
@@ -13965,6 +13982,9 @@ platform_tables:
             CHECK (task_type = 'workflow_timer' OR ((due_basis_kind = 'absolute' AND due_basis_absolute IS NOT NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'delay' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'cron' AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NOT NULL) OR (due_basis_kind = 'every' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL))),
             CHECK (task_type = 'workflow_timer' OR ((recurring = FALSE AND due_basis_kind IN ('absolute', 'delay') AND task_type = 'timer') OR (recurring = TRUE AND due_basis_kind IN ('cron', 'every') AND task_type IN ('scheduled_task', 'global_recurring')))),
             CHECK (task_type = 'workflow_timer' OR ((occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL) OR (occurrence_event_id IS NOT NULL AND occurrence_admitted_at IS NOT NULL))),
+            CHECK (task_type = 'workflow_timer' OR ((fired_at IS NULL AND accepted_at IS NULL) OR (fired_at IS NOT NULL AND accepted_at IS NOT NULL AND accepted_at >= fired_at))),
+            CHECK (task_type = 'workflow_timer' OR recurring = TRUE OR status = 'fired' OR (fired_at IS NULL AND accepted_at IS NULL)),
+            CHECK (task_type = 'workflow_timer' OR status <> 'fired' OR occurrence_admitted_at IS NULL OR accepted_at >= occurrence_admitted_at),
             CHECK (task_type = 'workflow_timer' OR ((status = 'active' AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'fired' AND recurring = FALSE AND fired_at IS NOT NULL AND accepted_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'cancelled' AND cancel_cause IS NOT NULL AND cancelled_at IS NOT NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'failed' AND failure_code IS NOT NULL AND failed_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL))),
             CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_scope_key = TRIM(flow_scope_key) AND NULLIF(flow_scope_key, '') IS NOT NULL AND flow_instance_id = TRIM(flow_instance_id) AND NULLIF(flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),

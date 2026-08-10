@@ -150,7 +150,9 @@ func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Cont
 		},
 		func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
 			return requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
-		}, postgresTransactionTime, command,
+		}, func(ctx context.Context, tx *sql.Tx) (time.Time, error) {
+			return privategenericschedule.SelectedStoreTimeTx(ctx, tx, true, nil)
+		}, command,
 	)
 }
 
@@ -166,14 +168,8 @@ func (s *PipelineSQLiteOwner) CommitGenericScheduleOccurrence(ctx context.Contex
 		},
 		func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
 			return requestSQLiteCompletionCandidateTx(ctx, tx, runID, nil, s.now(), false)
-		}, func(context.Context, *sql.Tx) (time.Time, error) { return s.now(), nil }, command,
+		}, func(ctx context.Context, tx *sql.Tx) (time.Time, error) {
+			return privategenericschedule.SelectedStoreTimeTx(ctx, tx, false, s.now)
+		}, command,
 	)
-}
-
-func postgresTransactionTime(ctx context.Context, tx *sql.Tx) (time.Time, error) {
-	var selected time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&selected); err != nil {
-		return time.Time{}, err
-	}
-	return selected.UTC().Truncate(time.Microsecond), nil
 }

@@ -17,7 +17,7 @@ const maxUsageHintRunes = 1200
 var builtinToolUsageHints = map[string]string{
 	"agent_message":      "Use for agent-to-agent messages only. Provide the exact target agent ID and message content. Do not use this to publish workflow events; use emit_* tools for events.",
 	"mailbox_send":       "Use for human mailbox items only. Provide the task kind, subject/summary, priority when relevant, and structured context. Do not use this for agent-to-agent messages.",
-	"schedule":           "Use only when scheduling a future event/action for the current entity or actor. Provide concrete RFC3339 time or delay-derived timing and the event/action payload expected by the workflow.",
+	"schedule":           "Create a durable event schedule for the current actor. Use exactly one typed mode: absolute with RFC3339 at, delay with a duration, cron with a UTC cron expression, or every with a duration.",
 	"agent_hire":         "Use only with explicit permission to spawn a runtime agent. Provide the agent config fields required by the target role; do not invent product-specific tool names.",
 	"agent_fire":         "Use only with explicit permission to terminate an agent session. Provide the target agent ID and a concrete reason.",
 	"agent_reconfigure":  "Use only with explicit permission to modify an existing agent. Provide only supported agent config fields such as model alias, runtime mode, tools, emit events, native tools, or prompt config.",

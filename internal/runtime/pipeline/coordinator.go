@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
@@ -56,6 +57,7 @@ type PipelineCoordinator struct {
 	timerScheduler         *Scheduler
 	genericSchedules       GenericScheduleWakeupOwner
 	workflowTimers         *WorkflowTimerLifecycle
+	timerCancellations     *runtimetimercancellation.Reconciler
 	mailboxMaterializer    MailboxWriteMaterializationStore
 	decisionCards          decisioncard.Store
 	proposedEffects        decisioncard.ProposedEffectStore
@@ -278,6 +280,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 	if workflowStore != nil {
 		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler)
 	}
+	coordinator.timerCancellations = runtimetimercancellation.NewReconciler(coordinator.genericSchedules, coordinator.workflowTimers)
 	return coordinator
 }
 

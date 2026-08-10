@@ -194,15 +194,14 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		Mode        string `json:"mode"`
 		Cron        string `json:"cron"`
 		At          string `json:"at"`
+		Delay       string `json:"delay"`
+		Every       string `json:"every"`
 		EntityID    string `json:"entity_id"`
 		TaskID      string `json:"task_id"`
 		Payload     any    `json:"payload"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(in.Mode) == "" {
-		in.Mode = "once"
 	}
 	if strings.TrimSpace(in.ScheduleKey) == "" {
 		return nil, errors.New("schedule_key is required")
@@ -221,15 +220,6 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	actorEntityID := actor.EffectiveEntityID()
 	if entityID != "" && actorEntityID != "" && entityID != actorEntityID {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "cross_entity_schedule_forbidden", "tool-executor", "schedule.authorize", map[string]any{"action": "schedule_create", "actor_id": actor.ID, "entity_id": entityID})
-	}
-
-	var at time.Time
-	if strings.TrimSpace(in.At) != "" {
-		parsed, err := time.Parse(time.RFC3339, in.At)
-		if err != nil {
-			return nil, fmt.Errorf("invalid at value: %w", err)
-		}
-		at = parsed
 	}
 
 	payloadInput := in.Payload
@@ -262,21 +252,44 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 
 	var due runtimegenericschedule.DueBasis
 	switch strings.TrimSpace(in.Mode) {
-	case "once":
-		due = runtimegenericschedule.AbsoluteDue(at)
-	case "cron":
-		cron := strings.TrimSpace(in.Cron)
-		if strings.HasPrefix(cron, "@every ") {
-			interval, parseErr := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(cron, "@every ")))
-			if parseErr != nil {
-				return nil, fmt.Errorf("invalid @every duration: %w", parseErr)
-			}
-			due = runtimegenericschedule.EveryDue(interval)
-		} else {
-			due = runtimegenericschedule.CronDue(cron)
+	case "absolute":
+		if strings.TrimSpace(in.Delay) != "" || strings.TrimSpace(in.Cron) != "" || strings.TrimSpace(in.Every) != "" {
+			return nil, errors.New("absolute schedule requires only at")
 		}
+		at, err := time.Parse(time.RFC3339, strings.TrimSpace(in.At))
+		if err != nil {
+			return nil, fmt.Errorf("absolute schedule requires RFC3339 at: %w", err)
+		}
+		due = runtimegenericschedule.AbsoluteDue(at)
+	case "delay":
+		if strings.TrimSpace(in.At) != "" || strings.TrimSpace(in.Cron) != "" || strings.TrimSpace(in.Every) != "" {
+			return nil, errors.New("delay schedule requires only delay")
+		}
+		delay, err := time.ParseDuration(strings.TrimSpace(in.Delay))
+		if err != nil {
+			return nil, fmt.Errorf("invalid schedule delay: %w", err)
+		}
+		due = runtimegenericschedule.DelayDue(delay)
+	case "cron":
+		if strings.TrimSpace(in.At) != "" || strings.TrimSpace(in.Delay) != "" || strings.TrimSpace(in.Every) != "" {
+			return nil, errors.New("cron schedule requires only cron")
+		}
+		cron := strings.TrimSpace(in.Cron)
+		if strings.HasPrefix(cron, "@every") {
+			return nil, errors.New("cron schedule cannot use @every; use mode every")
+		}
+		due = runtimegenericschedule.CronDue(cron)
+	case "every":
+		if strings.TrimSpace(in.At) != "" || strings.TrimSpace(in.Delay) != "" || strings.TrimSpace(in.Cron) != "" {
+			return nil, errors.New("every schedule requires only every")
+		}
+		interval, err := time.ParseDuration(strings.TrimSpace(in.Every))
+		if err != nil {
+			return nil, fmt.Errorf("invalid schedule every interval: %w", err)
+		}
+		due = runtimegenericschedule.EveryDue(interval)
 	default:
-		return nil, fmt.Errorf("unsupported schedule mode: %s", in.Mode)
+		return nil, fmt.Errorf("unsupported schedule mode %q; use absolute, delay, cron, or every", in.Mode)
 	}
 	command := runtimegenericschedule.AdmissionCommand{
 		ScheduleKey:   in.ScheduleKey,

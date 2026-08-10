@@ -276,10 +276,7 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) er
 			if wakeErr != nil {
 				return wakeErr
 			}
-			if err := l.scheduler.RetireGenericScheduleWakeup(wakeup); err != nil {
-				return err
-			}
-			return l.store.ReleaseGenericScheduleWakeup(context.WithoutCancel(ctx), wakeup)
+			return l.retireExactWakeup(context.WithoutCancel(ctx), wakeup)
 		}
 		return nil
 	}
@@ -334,6 +331,13 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 		if reconcileErr := l.ReconcileWakeup(context.WithoutCancel(callbackCtx), result.Next.ID); reconcileErr != nil {
 			l.log(callbackCtx, "reconcile_after_fire", result.Next.ID, reconcileErr)
 			l.startRecovery(result.Next.ID)
+		}
+		return
+	}
+	if result.Outcome == CommitTerminal || result.Outcome == CommitStaleCancelled {
+		if retireErr := l.retireExactWakeup(context.WithoutCancel(callbackCtx), wakeup); retireErr != nil {
+			l.log(callbackCtx, "retire_terminal_wakeup", wakeup.ActivationID(), retireErr)
+			l.startTerminalRetirementRecovery(wakeup)
 		}
 	}
 }
@@ -454,6 +458,59 @@ func (l *Lifecycle) startRecovery(activationID string) {
 				return
 			} else {
 				l.log(l.ctx, "recovery", activationID, err)
+			}
+			if delay < time.Second {
+				delay *= 2
+			}
+		}
+	}()
+}
+
+func (l *Lifecycle) retireExactWakeup(ctx context.Context, wakeup Wakeup) error {
+	if err := wakeup.Validate(); err != nil {
+		return err
+	}
+	if err := l.scheduler.RetireGenericScheduleWakeup(wakeup); err != nil {
+		return err
+	}
+	return l.store.ReleaseGenericScheduleWakeup(ctx, wakeup)
+}
+
+func (l *Lifecycle) startTerminalRetirementRecovery(wakeup Wakeup) {
+	if l == nil || wakeup.Validate() != nil {
+		return
+	}
+	recoveryKey := "terminal:" + wakeup.ActivationID() + ":" + formatTime(wakeup.DueAt())
+	l.mu.Lock()
+	if l.stop {
+		l.mu.Unlock()
+		return
+	}
+	if _, exists := l.retry[recoveryKey]; exists {
+		l.mu.Unlock()
+		return
+	}
+	l.retry[recoveryKey] = struct{}{}
+	l.wg.Add(1)
+	l.mu.Unlock()
+	go func() {
+		defer l.wg.Done()
+		defer func() {
+			l.mu.Lock()
+			delete(l.retry, recoveryKey)
+			l.mu.Unlock()
+		}()
+		delay := 50 * time.Millisecond
+		for {
+			select {
+			case <-l.ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+			if err := l.retireExactWakeup(l.ctx, wakeup); err == nil {
+				return
+			} else {
+				l.log(l.ctx, "terminal_retirement_recovery", wakeup.ActivationID(), err)
 			}
 			if delay < time.Second {
 				delay *= 2

@@ -55,6 +55,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -1077,10 +1078,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	rt.Bus = bus
 	rt.RuntimeIngress = runtimeingress.NewController(runtimeDeps.RuntimeIngressStore, rt.Bus, runtimeingress.Options{})
 	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
-	if runtimeDeps.RunControlStore != nil {
-		rt.RunControl = runtimeruncontrol.NewController(runtimeDeps.RunControlStore, rt.Bus, runtimeruncontrol.Options{})
-		rt.Bus.SetRunDispatchGate(rt.RunControl)
-	}
 	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence)
 	if runtimeDeps.GenericScheduleStore != nil {
 		genericSchedules, err := runtimegenericschedule.NewLifecycle(
@@ -1160,6 +1157,16 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes()...)
 		}
+	}
+	if runtimeDeps.RunControlStore != nil {
+		var timerCancellations runtimeruncontrol.TimerCancellationReconciler = runtimetimercancellation.NewReconciler(rt.GenericSchedules, nil)
+		if rt.Pipeline != nil {
+			timerCancellations = rt.Pipeline.TimerCancellationReconciler()
+		}
+		rt.RunControl = runtimeruncontrol.NewController(runtimeDeps.RunControlStore, rt.Bus, runtimeruncontrol.Options{
+			TimerCancellations: timerCancellations,
+		})
+		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}
 
 	if runtimeDeps.BudgetSpendStore != nil {
