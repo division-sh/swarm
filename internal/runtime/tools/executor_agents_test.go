@@ -1260,6 +1260,64 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 	}
 }
 
+func TestAgentHireHandlerRejectsMockCausalLiveAuthorityBeforeSpawn(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		actorMode     runtimeeffects.ExecutionMode
+		causalMode    runtimeeffects.ExecutionMode
+		hasCausalMode bool
+	}{
+		{name: "selected mock actor and mock causality", actorMode: runtimeeffects.ExecutionModeMock, causalMode: runtimeeffects.ExecutionModeMock, hasCausalMode: true},
+		{name: "selected mock actor without contextual mode", actorMode: runtimeeffects.ExecutionModeMock},
+		{name: "mock causality with inconsistent live actor", actorMode: runtimeeffects.ExecutionModeLive, causalMode: runtimeeffects.ExecutionModeMock, hasCausalMode: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{
+					"manager": {ID: "manager", Role: "manager", Permissions: []string{"agent_hire"}},
+					"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+				},
+			})
+			manager := &captureManagerStub{}
+			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+				Manager:           manager,
+				AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+				WorkflowSource:    source,
+			})
+			actor := models.AgentConfig{
+				ExecutionMode: tc.actorMode,
+				ID:            "manager",
+				Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+				Role:          "manager",
+				Permissions:   []string{"agent_hire"},
+				FlowPath:      "review/inst-1",
+			}
+			ctx := WithActor(context.Background(), actor)
+			if tc.hasCausalMode {
+				ctx = runtimeeffects.WithExecutionMode(ctx, tc.causalMode)
+			}
+			handler := exec.buildToolHandlers()["agent_hire"]
+
+			_, err := handler(ctx, actor, map[string]any{
+				"config": map[string]any{
+					"id":               "live-worker-1",
+					"role":             "worker",
+					"manager_fallback": "manager",
+				},
+			})
+			failure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "mock_agent_hire_forbidden")
+			if failure.Operation != "agent_hire.authorize_execution_mode" {
+				t.Fatalf("failure operation = %q, want agent_hire.authorize_execution_mode", failure.Operation)
+			}
+			if manager.spawnCalled {
+				t.Fatal("mock-causal hire reached the agent manager")
+			}
+		})
+	}
+}
+
 func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 	t.Parallel()
 
