@@ -134,17 +134,22 @@ type bundleDeletePartialError struct {
 }
 
 type bundleAgentDefinition struct {
-	AgentID       string   `json:"agent_id"`
-	FlowInstance  string   `json:"flow_instance,omitempty"`
-	Role          string   `json:"role,omitempty"`
-	Type          string   `json:"type,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	LLMBackend    string   `json:"llm_backend,omitempty"`
-	Memory        bool     `json:"memory"`
-	MemorySource  string   `json:"memory_source"`
-	PromptPath    string   `json:"prompt_path,omitempty"`
-	Subscriptions []string `json:"subscriptions,omitempty"`
-	Tools         []string `json:"tools,omitempty"`
+	AgentID           string   `json:"agent_id"`
+	FlowInstance      string   `json:"flow_instance,omitempty"`
+	Role              string   `json:"role,omitempty"`
+	Type              string   `json:"type,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	LLMBackend        string   `json:"llm_backend,omitempty"`
+	Memory            bool     `json:"memory"`
+	MemorySource      string   `json:"memory_source"`
+	IntentKind        string   `json:"intent_kind"`
+	IntentSource      string   `json:"intent_source"`
+	IntentProvenance  string   `json:"intent_provenance"`
+	IntentContentHash string   `json:"intent_content_hash"`
+	IntentIdentity    string   `json:"intent_identity"`
+	IntentContent     string   `json:"intent_content"`
+	Subscriptions     []string `json:"subscriptions,omitempty"`
+	Tools             []string `json:"tools,omitempty"`
 }
 
 func newBundleCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
@@ -942,7 +947,10 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 			agent.LLMBackend,
 			fmt.Sprintf("%t", agent.Memory),
 			formatCLIHumanCode(cliHumanCodeMemorySource, agent.MemorySource),
-			agent.PromptPath,
+			agent.IntentKind,
+			agent.IntentSource,
+			agent.IntentContentHash,
+			agent.IntentIdentity,
 			strings.Join(agent.Subscriptions, ","),
 			strings.Join(agent.Tools, ","),
 		})
@@ -957,7 +965,10 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 			{Header: "LLM_BACKEND"},
 			{Header: "MEMORY"},
 			{Header: "MEMORY_SOURCE"},
-			{Header: "PROMPT_PATH"},
+			{Header: "INTENT_KIND"},
+			{Header: "INTENT_SOURCE"},
+			{Header: "INTENT_HASH"},
+			{Header: "INTENT_IDENTITY"},
 			{Header: "SUBSCRIPTIONS", Truncatable: true},
 			{Header: "TOOLS", Truncatable: true},
 		},

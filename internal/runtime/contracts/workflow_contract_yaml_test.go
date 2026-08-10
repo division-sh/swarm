@@ -3536,6 +3536,24 @@ config_from:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsAuthoredSystemPromptConfigFrom(t *testing.T) {
+	for _, key := range []string{"system_prompt", "config.system_prompt", "config[nested][system_prompt]"} {
+		t.Run(key, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(`
+action: create_flow_instance
+template: worker
+instance_id_from: payload.worker_id
+config_from:
+  `+key+`: payload.prompt
+`), &handler)
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+				t.Fatalf("yaml.Unmarshal error = %v, want authored system_prompt teaching rejection", err)
+			}
+		})
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_PreservesEvidenceTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`

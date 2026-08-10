@@ -40,13 +40,14 @@ func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T)
 		}
 	}
 	wantPaths := []string{
+		"agents.yaml",
 		"flows/alpha/flows/gamma/schema.yaml",
 		"flows/alpha/package.yaml",
 		"flows/alpha/schema.yaml",
 		"package.yaml",
 		"packages/foo/flows/beta/schema.yaml",
 		"packages/foo/package.yaml",
-		"prompts/root.md",
+		"prompts/declared.md",
 	}
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("files = %#v, want %#v\n%s", paths, wantPaths, upload.ContentYAML)
@@ -201,7 +202,10 @@ func TestBuildBundleRegistrationDirectoryUploadFailsClosed(t *testing.T) {
 			name: "symlink",
 			mutate: func(t *testing.T, root string) {
 				target := filepath.Join(root, "prompts", "root.md")
-				link := filepath.Join(root, "prompts", "link.md")
+				link := filepath.Join(root, "prompts", "declared.md")
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Symlink(target, link); err != nil {
 					t.Skipf("symlink unsupported: %v", err)
 				}
@@ -211,9 +215,10 @@ func TestBuildBundleRegistrationDirectoryUploadFailsClosed(t *testing.T) {
 		{
 			name: "ascii case collision",
 			mutate: func(t *testing.T, root string) {
-				writeBundleHashText(t, filepath.Join(root, "prompts", "Root.md"), "collision\n")
-				lower, errLower := os.Stat(filepath.Join(root, "prompts", "root.md"))
-				upper, errUpper := os.Stat(filepath.Join(root, "prompts", "Root.md"))
+				writeBundleHashText(t, filepath.Join(root, "prompts", "Declared.md"), "collision\n")
+				writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "root:\n  id: root\n  role: root\n  intent: prompts/declared.md\n  model: regular\n  subscriptions: [root.requested]\ncollider:\n  id: collider\n  role: collision\n  intent: prompts/Declared.md\n  model: regular\n  subscriptions: [collision.requested]\n")
+				lower, errLower := os.Stat(filepath.Join(root, "prompts", "declared.md"))
+				upper, errUpper := os.Stat(filepath.Join(root, "prompts", "Declared.md"))
 				if errLower == nil && errUpper == nil && os.SameFile(lower, upper) {
 					t.Skip("case-insensitive filesystem cannot represent ASCII case collision fixture")
 				}
@@ -223,9 +228,9 @@ func TestBuildBundleRegistrationDirectoryUploadFailsClosed(t *testing.T) {
 		{
 			name: "invalid prompt utf8",
 			mutate: func(t *testing.T, root string) {
-				writeBundleHashBytes(t, filepath.Join(root, "prompts", "bad.md"), []byte{0xff})
+				writeBundleHashBytes(t, filepath.Join(root, "prompts", "declared.md"), []byte{0xff})
 			},
-			wantErrSub: "not valid UTF-8",
+			wantErrSub: "valid UTF-8",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -260,6 +265,8 @@ states:
   - done
 `)
 	writeBundleHashText(t, filepath.Join(root, "prompts", "root.md"), "root prompt\n")
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "root:\n  id: root\n  role: root\n  intent: prompts/declared.md\n  model: regular\n  subscriptions: [root.requested]\n")
+	writeBundleHashText(t, filepath.Join(root, "prompts", "declared.md"), "declared intent\n")
 	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "package.yaml"), `
 name: nested-flow-package
 version: "1.0.0"

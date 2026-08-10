@@ -80,7 +80,6 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		ProjectAgentsFile:     existingFile(filepath.Join(workflowDir, "agents.yaml")),
 		ProjectToolsFile:      existingFile(filepath.Join(workflowDir, "tools.yaml")),
 		ProjectPolicyFile:     existingFile(filepath.Join(workflowDir, "policy.yaml")),
-		ProjectPromptsDir:     existingDir(filepath.Join(workflowDir, "prompts")),
 		PlatformSpecFile:      platformSpecFile,
 		VerificationGatesFile: defaultAuxFile(repoRoot, "SWARM_VERIFICATION_GATES_FILE", "docs", "specs", "swarm-platform", "verification-gates.yaml"),
 		ToolingLockFile:       defaultAuxFile(repoRoot, "SWARM_TOOLING_LOCK_FILE", "docs", "specs", "swarm-platform", "tooling.lock"),
@@ -216,7 +215,6 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			ProjectAgentsFile: existingFile(filepath.Join(packageDir, "agents.yaml")),
 			ProjectToolsFile:  existingFile(filepath.Join(packageDir, "tools.yaml")),
 			ProjectPolicyFile: existingFile(filepath.Join(packageDir, "policy.yaml")),
-			ProjectPromptsDir: existingDir(filepath.Join(packageDir, "prompts")),
 		}
 		if manifestErr != nil {
 			out = append(out, pkg)
@@ -245,7 +243,6 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 				AgentsFile:   existingFile(filepath.Join(dir, "agents.yaml")),
 				ToolsFile:    existingFile(filepath.Join(dir, "tools.yaml")),
 				PolicyFile:   existingFile(filepath.Join(dir, "policy.yaml")),
-				PromptsDir:   existingDir(filepath.Join(dir, "prompts")),
 			})
 		}
 		sort.Slice(pkg.Flows, func(i, j int) bool {
@@ -355,9 +352,6 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	}
 	if len(in.Subscriptions) > 0 {
 		out.Subscriptions = append([]string{}, in.Subscriptions...)
-	}
-	if len(in.PromptInputs) > 0 {
-		out.PromptInputs = append([]string{}, in.PromptInputs...)
 	}
 	if len(in.Tools) > 0 {
 		out.Tools = append([]string{}, in.Tools...)

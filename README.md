@@ -32,7 +32,7 @@ Swarm makes a small number of opinionated choices and sticks to them.
 - **Flows are composable units.** A flow package declares its identity, state machine, system nodes, events, agents, tools, and policy. Typed input and output pins make composition mechanical rather than a refactor. Create your specialized flows and import them in other Swarm projects.
 - **Agents are isolated.** Each agent runs in a scoped session and observes only the events it subscribes to. A coordinator addresses managers; managers address workers; workers do not share a context window. Per-entity Docker workspaces extend the isolation to the filesystem and process level: agents working on entity X have no access to entity Y's working tree.
 - **Execution is replayable.** Every event and every state mutation is persisted. Any run can be reconstructed turn by turn, audited end to end, or resumed from its last consistent checkpoint after a crash. Auditability is native.
-- **Runs are forkable.** Re-execute any run from any point in its history with a counterfactual like a different policy value, a tweaked prompt, or an entirely new contract bundle, and compare outcomes against the original. Last week's failed run can be replayed against this week's fixed contracts. The cost of iterating on a flow drops to the cost of forking a run, which turns continuous improvement into a regular engineering loop instead of a deploy-and-watch cycle.
+- **Runs are forkable.** Re-execute any run from any point in its history with a counterfactual like a different policy value, revised agent intent, or an entirely new contract bundle, and compare outcomes against the original. Last week's failed run can be replayed against this week's fixed contracts. The cost of iterating on a flow drops to the cost of forking a run, which turns continuous improvement into a regular engineering loop instead of a deploy-and-watch cycle.
 - **Humans participate as a first-class actor.** Approvals, rejections, and deferrals flow through a durable mailbox using the same event model as the rest of the runtime. A pending decision is just another event waiting for its handler: a human's, in this case. Autonomy is a dial, not a switch.
 - **Spec-driven and well-suited for agentic authoring.** The platform specification is a single machine-readable YAML file, the static analyzer's errors cite check ids and exact field paths an LLM can act on directly, and 200+ verifying conformance bundles provide working patterns to mirror. See [For agent authors](https://docs.division.sh/build/agentic-authoring).
 
@@ -116,7 +116,7 @@ agent one contracts-root-relative Python performance:
 reviewer:
   id: reviewer
   role: reviewer
-  prompt_ref: reviewer
+  intent: intent/reviewer.md
   model: regular
   memory: false
   subscriptions: [review.requested]
@@ -174,7 +174,7 @@ flowchart TB
 
 Only the system node writes state, and it does so in one transaction; agents reach the store only indirectly, by emitting an event a node handles. Underneath the loop are the primitives that make the design positions enforceable:
 
-- **A static analyzer for contracts.** Before any event fires, every contract is run through dozens of structural checks: state reachability, payload completeness, agent routing, timer lifecycle, CEL parse, prompt linting. A bundle that boots has passed this analysis.
+- **A static analyzer for contracts.** Before any event fires, every contract is run through dozens of structural checks: state reachability, payload completeness, agent routing, timer lifecycle, CEL parse, and agent-intent validation. A bundle that boots has passed this analysis.
 - **Two-layer event-sourced persistence.** Every event lands in the selected runtime store; every entity state mutation lands in a separate mutation log with before/after diffs. Local/dev runs use SQLite by default, while Postgres remains the explicit external/production option. Replay says "show me what happened"; the mutation log says "show me exactly what changed." Accumulator projections compute read-models off the streams, so handlers and external readers can query aggregated state without scanning the raw logs.
 - **Role-based routing authority.** Agent isolation is enforced by an authority layer that decides, per entity status, which agent role may address which other role. "Any agent can talk to any agent" is not a default the runtime offers.
 - **Reliability primitives.** Undeliverable events retry with exponential backoff and land in a dead-letter store after exhaustion. Dead-letters are indexed and replayable.

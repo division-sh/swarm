@@ -1,6 +1,7 @@
 test-agent:
   id: test-agent
   model: regular
+  intent: prompts/test-agent.md
   subscriptions:
     - task.ready
   emit_events: []

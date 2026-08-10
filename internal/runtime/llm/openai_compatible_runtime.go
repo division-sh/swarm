@@ -154,7 +154,7 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 			}
 			return ""
 		}(),
-		SystemPrompt: strings.TrimSpace(systemPrompt),
+		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -388,8 +388,8 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Se
 func (r *OpenAICompatibleRuntime) buildRequest(ctx context.Context, s *Session, input Message) (openAICompatibleRequest, error) {
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
 	msgs := make([]openAICompatibleMessage, 0, len(s.Messages)+2)
-	if system := strings.TrimSpace(s.SystemPrompt); system != "" {
-		msgs = append(msgs, openAICompatibleMessage{Role: "system", Content: system})
+	if strings.TrimSpace(s.SystemPrompt) != "" {
+		msgs = append(msgs, openAICompatibleMessage{Role: "system", Content: s.SystemPrompt})
 	}
 	for _, m := range s.Messages {
 		msgs = append(msgs, toOpenAICompatibleMessages(m)...)

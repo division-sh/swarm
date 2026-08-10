@@ -1,5 +1,6 @@
 tool-agent:
   model: regular
+  intent: prompts/tool-agent.md
   tools:
     - lookup_data
   permissions:

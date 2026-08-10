@@ -28,6 +28,7 @@ files:
       assistant:
         id: assistant
         role: helper
+        intent: {inline: "Help with the requested task."}
         model: regular
         mock:
           kind: python

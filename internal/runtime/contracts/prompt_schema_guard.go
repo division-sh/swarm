@@ -2,8 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -44,11 +42,8 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 	findings := make([]PromptSchemaGuardFinding, 0)
 
 	for _, tc := range cases {
-		path, raw, err := readPromptSchemaGuardFile(bundle, tc.PromptFile)
-		if err != nil {
-			return nil, err
-		}
-		text := raw
+		path := tc.IntentSource
+		text := tc.IntentContent
 
 		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.EmitTool, "emit_"), "_", ".")
 		schema, ok := schemas[eventType]
@@ -73,7 +68,7 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 				findings = append(findings, PromptSchemaGuardFinding{
 					CheckID:  "agent_prompt_lint_structural",
 					Severity: "hard_invalidity",
-					Message:  fmt.Sprintf("prompt %s: fields not in %s schema: %v", tc.PromptFile, eventType, invalid),
+					Message:  fmt.Sprintf("intent %s: fields not in %s schema: %v", tc.IntentSource, eventType, invalid),
 					Location: path,
 				})
 			}
@@ -84,7 +79,7 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 				findings = append(findings, PromptSchemaGuardFinding{
 					CheckID:  "agent_prompt_lint_structural",
 					Severity: "hard_invalidity",
-					Message:  fmt.Sprintf("prompt %s: missing required top-level field %q for %s", tc.PromptFile, required, tc.EmitTool),
+					Message:  fmt.Sprintf("intent %s: missing required top-level field %q for %s", tc.IntentSource, required, tc.EmitTool),
 					Location: path,
 				})
 			}
@@ -95,36 +90,13 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 				findings = append(findings, PromptSchemaGuardFinding{
 					CheckID:  "agent_prompt_lint_structural",
 					Severity: "hard_invalidity",
-					Message:  fmt.Sprintf("prompt %s: contains forbidden legacy token %q", tc.PromptFile, forbidden),
+					Message:  fmt.Sprintf("intent %s: contains forbidden legacy token %q", tc.IntentSource, forbidden),
 					Location: path,
 				})
 			}
 		}
 	}
 	return findings, nil
-}
-
-func readPromptSchemaGuardFile(bundle *WorkflowContractBundle, promptFile string) (string, string, error) {
-	if filepath.IsAbs(promptFile) {
-		raw, err := os.ReadFile(promptFile)
-		if err == nil {
-			return promptFile, string(raw), nil
-		}
-		if err != nil && !os.IsNotExist(err) {
-			return "", "", fmt.Errorf("read %s: %w", promptFile, err)
-		}
-	}
-	for _, dir := range promptBundlePromptDirs(bundle) {
-		path := filepath.Join(dir, promptFile)
-		raw, err := os.ReadFile(path)
-		if err == nil {
-			return path, string(raw), nil
-		}
-		if err != nil && !os.IsNotExist(err) {
-			return "", "", fmt.Errorf("read %s: %w", path, err)
-		}
-	}
-	return "", "", fmt.Errorf("prompt %s not found in workflow contract bundle", promptFile)
 }
 
 var promptEmitFieldBulletPattern = regexp.MustCompile(`^\s*-\s*([a-zA-Z0-9_]+)\s*:`)

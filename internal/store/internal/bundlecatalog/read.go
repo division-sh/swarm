@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"gopkg.in/yaml.v3"
 )
@@ -50,17 +51,22 @@ type BundleCatalogAgentsResult struct {
 }
 
 type BundleCatalogAgentDefinition struct {
-	AgentID       string   `json:"agent_id"`
-	FlowInstance  string   `json:"flow_instance,omitempty"`
-	Role          string   `json:"role,omitempty"`
-	Type          string   `json:"type,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	LLMBackend    string   `json:"llm_backend,omitempty"`
-	Memory        bool     `json:"memory"`
-	MemorySource  string   `json:"memory_source"`
-	PromptPath    string   `json:"prompt_path,omitempty"`
-	Subscriptions []string `json:"subscriptions,omitempty"`
-	Tools         []string `json:"tools,omitempty"`
+	AgentID           string   `json:"agent_id"`
+	FlowInstance      string   `json:"flow_instance,omitempty"`
+	Role              string   `json:"role,omitempty"`
+	Type              string   `json:"type,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	LLMBackend        string   `json:"llm_backend,omitempty"`
+	Memory            bool     `json:"memory"`
+	MemorySource      string   `json:"memory_source"`
+	IntentKind        string   `json:"intent_kind"`
+	IntentSource      string   `json:"intent_source"`
+	IntentProvenance  string   `json:"intent_provenance"`
+	IntentContentHash string   `json:"intent_content_hash"`
+	IntentIdentity    string   `json:"intent_identity"`
+	IntentContent     string   `json:"intent_content"`
+	Subscriptions     []string `json:"subscriptions,omitempty"`
+	Tools             []string `json:"tools,omitempty"`
 }
 
 type bundleCatalogCursor struct {
@@ -480,6 +486,9 @@ func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]Bundle
 }
 
 func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[string]any) (BundleCatalogAgentDefinition, error) {
+	if _, retired := def["prompt_path"]; retired {
+		return BundleCatalogAgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: RETIRED field prompt_path is not accepted; use canonical intent metadata")
+	}
 	for key := range def {
 		if bundleCatalogRuntimeAgentFields[key] {
 			return BundleCatalogAgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: runtime field %q is not allowed", key)
@@ -503,18 +512,34 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 	if err != nil {
 		return BundleCatalogAgentDefinition{}, err
 	}
+	intent := runtimeagentintent.Resolved{
+		Kind:        runtimeagentintent.SourceKind(stringFromMap(def, "intent_kind")),
+		Coordinate:  stringFromMap(def, "intent_source"),
+		Provenance:  stringFromMap(def, "intent_provenance"),
+		ContentHash: stringFromMap(def, "intent_content_hash"),
+		Identity:    stringFromMap(def, "intent_identity"),
+		Content:     exactStringFromMap(def, "intent_content"),
+	}
+	if err := intent.Validate(); err != nil {
+		return BundleCatalogAgentDefinition{}, fmt.Errorf("bundle catalog agent %s intent: %w", agentID, err)
+	}
 	return BundleCatalogAgentDefinition{
-		AgentID:       agentID,
-		FlowInstance:  strings.TrimSpace(flowInstance),
-		Role:          stringFromMap(def, "role"),
-		Type:          stringFromMap(def, "type"),
-		Model:         stringFromMap(def, "model"),
-		LLMBackend:    stringFromMap(def, "llm_backend"),
-		Memory:        boolFromMap(def, "memory"),
-		MemorySource:  stringFromMap(def, "memory_source"),
-		PromptPath:    stringFromMap(def, "prompt_path"),
-		Subscriptions: subscriptions,
-		Tools:         tools,
+		AgentID:           agentID,
+		FlowInstance:      strings.TrimSpace(flowInstance),
+		Role:              stringFromMap(def, "role"),
+		Type:              stringFromMap(def, "type"),
+		Model:             stringFromMap(def, "model"),
+		LLMBackend:        stringFromMap(def, "llm_backend"),
+		Memory:            boolFromMap(def, "memory"),
+		MemorySource:      stringFromMap(def, "memory_source"),
+		IntentKind:        string(intent.Kind),
+		IntentSource:      intent.Coordinate,
+		IntentProvenance:  intent.Provenance,
+		IntentContentHash: intent.ContentHash,
+		IntentIdentity:    intent.Identity,
+		IntentContent:     intent.Content,
+		Subscriptions:     subscriptions,
+		Tools:             tools,
 	}, nil
 }
 
@@ -536,6 +561,11 @@ var bundleCatalogRuntimeAgentFields = map[string]bool{
 func stringFromMap(values map[string]any, key string) string {
 	value, _ := values[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func exactStringFromMap(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }
 
 func boolFromMap(values map[string]any, key string) bool {

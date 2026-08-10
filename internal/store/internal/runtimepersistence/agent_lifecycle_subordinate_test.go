@@ -96,7 +96,7 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 		BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, store)
-	cfg := runtimeactors.AgentConfig{
+	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "concurrent-partial-reconfigure-agent",
 		Identity:      testAgentIdentity(t, "concurrent-partial-reconfigure-agent", "support/serialized"),
@@ -107,7 +107,7 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 		Memory:        agentmemory.Authored(true),
 		FlowPath:      "support/serialized",
 		Tools:         []string{"tool-a"},
-	}
+	})
 	if err := manager.SpawnAgent(cfg); err != nil {
 		t.Fatalf("spawn agent: %v", err)
 	}
@@ -287,7 +287,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 		BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, store)
-	cfg := runtimeactors.AgentConfig{
+	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "reconfigure-occurrence-agent",
 		Identity:      testAgentIdentity(t, "reconfigure-occurrence-agent", "support/occurrence"),
@@ -297,7 +297,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 		FlowID:        "global",
 		Memory:        agentmemory.Authored(true),
 		FlowPath:      "support/occurrence",
-	}
+	})
 	if err := manager.SpawnAgent(cfg); err != nil {
 		t.Fatalf("spawn agent: %v", err)
 	}
@@ -355,12 +355,12 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	agentID := "subordinate-transaction-agent"
 	identity := testAgentIdentity(t, agentID, "global")
 	rec := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
 			ExecutionMode: runtimeeffects.ExecutionModeLive,
 			Memory:        agentmemory.Authored(true), FlowPath: "global",
-			Config: []byte(`{"system_prompt":"test"}`),
-		},
+			Config: []byte(`{}`),
+		}),
 		Status: "active", HiredBy: "test", StartedAt: now,
 	}
 	spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{

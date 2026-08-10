@@ -1910,7 +1910,7 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	container := buildSelectedForkProofContainer(t, ctx, db)
 
 	manager := runtimemanager.NewAgentManager(nil, nil)
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health"}); err != nil {
+	if err := manager.SpawnAgent(selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	executor := &selectedForkStartupProbeExecutor{}
@@ -2686,6 +2686,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 					ID:            "bad-agent",
 					Identity:      badIdentity,
 					Role:          "worker",
+					Intent:        selectedContractTestIntent(t, "bad-agent"),
 					LLMBackend:    "claude_cli",
 					Model:         "regular",
 					Subscriptions: []string{"item.received"},
@@ -2700,7 +2701,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 			},
 		},
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
-	if err == nil || !strings.Contains(err.Error(), "missing required system_prompt") {
+	if err == nil || !strings.Contains(err.Error(), "derived system prompt is required") {
 		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
 	}
 	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {

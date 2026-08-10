@@ -479,7 +479,7 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, faults))
 	rec := runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live",
 			ID:            agent.id,
 			Identity:      identity,
@@ -488,7 +488,7 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 			Role:          "test",
 			Model:         "regular",
 			LLMBackend:    "claude_cli",
-		},
+		}),
 		Status: "active",
 	}
 	if err := backend.store.UpsertAgent(testAuthorActivityContext(), rec); err != nil {

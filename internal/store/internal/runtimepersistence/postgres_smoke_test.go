@@ -45,7 +45,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Upsert agent + load agents.
 	controlPlaneIdentity := testAgentIdentity(t, "control-plane", "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "control-plane",
 			Identity:      controlPlaneIdentity,
 			Role:          "control-plane",
@@ -53,9 +53,8 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			Model:         "regular",
 			ExecutionMode: "live",
 			EntityID:      "",
-			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
-			Config: json.RawMessage(`{"system_prompt":"You are the control plane.","tools":[],"subscriptions":["system.started"]}`),
-		},
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -71,7 +70,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	ceoID := "operator-" + entityID
 	ceoIdentity := testAgentIdentity(t, ceoID, "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            ceoID,
 			Identity:      ceoIdentity,
 			Role:          "operator",
@@ -79,8 +78,8 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			Model:         "regular",
 			ExecutionMode: "live",
 			EntityID:      entityID,
-			Config:        json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
-		},
+			Config:        json.RawMessage(`{}`),
+		}),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),

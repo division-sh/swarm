@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -2042,6 +2043,10 @@ func requireTableColumns(t *testing.T, ctx context.Context, db *sql.DB, tableNam
 func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) {
 	t.Helper()
 	identity := conformanceAgentIdentity(t, agentID)
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "conformance#agents."+agentID+".intent", "Exercise the conformance surface.")
+	if err != nil {
+		t.Fatalf("resolve conformance agent intent: %v", err)
+	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            agentID,
@@ -2052,7 +2057,9 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 			Type:          "stub",
 			Model:         "regular",
 			ExecutionMode: "live",
-			Config:        []byte(`{"system_prompt":"x"}`),
+			Intent:        intent,
+			SystemPrompt:  intent.Content,
+			Config:        []byte(`{}`),
 		},
 		Status:    "active",
 		HiredBy:   "conformance-test",

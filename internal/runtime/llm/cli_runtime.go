@@ -195,7 +195,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			}
 			return ""
 		}(),
-		SystemPrompt: strings.TrimSpace(systemPrompt),
+		SystemPrompt: systemPrompt,
 		Tools:        tools,
 		Messages:     append([]Message(nil), hydrated.Messages...),
 		TurnCount:    hydrated.TurnCount,
@@ -285,7 +285,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		"prompt":                  prompt,
 		"run_id":                  resolved.Identity.RunID,
 		"flow_instance":           resolved.Identity.FlowInstance(),
-		"system_prompt":           strings.TrimSpace(s.SystemPrompt),
+		"system_prompt":           s.SystemPrompt,
 		"tools":                   s.Tools,
 		"turn_count":              s.TurnCount,
 	})
@@ -314,8 +314,8 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
-		if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
-			args = append(args, "--system-prompt", sys)
+		if strings.TrimSpace(s.SystemPrompt) != "" {
+			args = append(args, "--system-prompt", s.SystemPrompt)
 		}
 		args = append(args, "--tools", toolProjection.builtinSelectionArg())
 		args = append(args, "--allowedTools", toolProjection.permissionAdmissionArg())

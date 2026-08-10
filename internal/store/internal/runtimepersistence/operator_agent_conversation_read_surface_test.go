@@ -244,18 +244,24 @@ func TestOperatorConversationQuerySourcesAlwaysProjectRunID(t *testing.T) {
 
 func testOperatorAgent(agentID string) runtimemanager.PersistedAgent {
 	return runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity(agentID),
-			ID:            agentID,
-			Role:          "researcher",
-			Type:          "managed",
-			ExecutionMode: "live",
-			Memory:        agentmemory.Authored(true),
-			FlowPath:      "global",
-		},
+		Config:    testOperatorAgentConfig(agentID, "researcher"),
 		Status:    "active",
 		StartedAt: time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC),
 	}
+}
+
+func testOperatorAgentConfig(agentID, role string) runtimeactors.AgentConfig {
+	return runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
+		Identity:      testOperatorAgentIdentity(agentID),
+		ID:            agentID,
+		Role:          role,
+		Type:          "managed",
+		Model:         "cheap",
+		ExecutionMode: "live",
+		Memory:        agentmemory.PlatformDefault(),
+		FlowPath:      "global",
+		Config:        json.RawMessage(`{}`),
+	})
 }
 
 func testOperatorAgentIdentity(agentID string) agentidentity.Identity {
@@ -517,17 +523,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-1"),
-			ID:            "agent-1",
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -626,34 +622,14 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-1"),
-			ID:            "agent-1",
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent agent-1: %v", err)
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-2"),
-			ID:            "agent-2",
-			Role:          "other",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-2", "other"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -836,17 +812,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, agentID string, status string) {
 	t.Helper()
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity(agentID),
-			ID:            agentID,
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
-		},
+		Config:    testOperatorAgentConfig(agentID, "researcher"),
 		Status:    status,
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -861,17 +827,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-1"),
-			ID:            "agent-1",
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -907,17 +863,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		{"agent-2", "reviewer"},
 	} {
 		if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-			Config: runtimeactors.AgentConfig{
-				Identity:      testOperatorAgentIdentity(agent.id),
-				ID:            agent.id,
-				Role:          agent.role,
-				Type:          "managed",
-				Model:         "cheap",
-				ExecutionMode: "live",
-				Memory:        agentmemory.PlatformDefault(),
-				FlowPath:      "global",
-				Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
-			},
+			Config:    testOperatorAgentConfig(agent.id, agent.role),
 			Status:    "active",
 			StartedAt: time.Now().UTC(),
 		}); err != nil {
@@ -1069,34 +1015,14 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-1"),
-			ID:            "agent-1",
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-2"),
-			ID:            "agent-2",
-			Role:          "reviewer",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"lifecycle"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-2", "reviewer"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
@@ -1313,17 +1239,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 
 	ctx := testAuthorActivityContext()
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			Identity:      testOperatorAgentIdentity("agent-1"),
-			ID:            "agent-1",
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			Memory:        agentmemory.PlatformDefault(),
-			FlowPath:      "global",
-			Config:        json.RawMessage(`{"system_prompt":"diagnose"}`),
-		},
+		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {

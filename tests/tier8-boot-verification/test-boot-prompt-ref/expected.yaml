@@ -1,5 +1,8 @@
 conformance:
   disposition: verify-only
-  verify: pass
+  verify: reject
   proves:
     - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "RETIRED"
+    contains: "agent field prompt_ref"

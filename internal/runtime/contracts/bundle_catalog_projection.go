@@ -66,7 +66,7 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 	dataEntries := make([]bundleCatalogDataEntry, 0)
 	contentFiles := make([]bundleCatalogDataEntry, 0)
 	for _, entry := range entries {
-		content, err := canonicalBundleHashContent(entry.Path, entry.Policy)
+		content, err := canonicalBundleHashEntryContent(entry)
 		if err != nil {
 			return BundleCatalogProjection{}, fmt.Errorf("canonicalize bundle catalog input %s: %w", entry.Label, err)
 		}
@@ -128,8 +128,8 @@ func bundleCatalogPolicyName(policy bundleHashContentPolicy) string {
 	switch policy {
 	case bundleHashYAML:
 		return "yaml"
-	case bundleHashPrompt:
-		return "prompt_text"
+	case bundleHashIntent:
+		return "intent_text"
 	case bundleHashRaw:
 		return "raw_data"
 	default:
@@ -242,31 +242,29 @@ func packageExtraJSON(extra map[string]string) map[string]string {
 	return out
 }
 
-func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) map[string]any {
-	entries := bundle.AgentEntries()
-	agentIDs := make([]string, 0, len(entries))
-	for agentID := range entries {
-		agentIDs = append(agentIDs, agentID)
-	}
-	sort.Strings(agentIDs)
-	out := make(map[string]any, len(agentIDs))
-	for _, agentID := range agentIDs {
-		entry := entries[agentID]
+func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) []any {
+	records := bundleAgentRecords(bundle)
+	out := make([]any, 0, len(records))
+	for _, record := range records {
+		entry := record.Entry
 		def := map[string]any{
-			"agent_id": agentID,
+			"agent_id": record.LogicalID,
 		}
 		addStringField(def, "role", entry.Role)
 		addStringField(def, "type", firstNonEmpty(entry.Type, entry.NodeType))
 		addStringField(def, "model", entry.Model)
 		def["memory"] = entry.MemoryPlan.Enabled
 		addStringField(def, "memory_source", string(entry.MemoryPlan.Source))
-		addStringField(def, "prompt_path", entry.PromptRef)
-		if source, ok := bundle.AgentContractSource(agentID); ok {
-			addStringField(def, "flow_instance", source.FlowID)
-		}
+		addStringField(def, "intent_kind", string(entry.ResolvedIntent.Kind))
+		addStringField(def, "intent_source", entry.ResolvedIntent.Coordinate)
+		addStringField(def, "intent_provenance", entry.ResolvedIntent.Provenance)
+		addStringField(def, "intent_content_hash", entry.ResolvedIntent.ContentHash)
+		addStringField(def, "intent_identity", entry.ResolvedIntent.Identity)
+		def["intent_content"] = entry.ResolvedIntent.Content
+		addStringField(def, "flow_instance", record.Source.FlowID)
 		addStringListField(def, "subscriptions", entry.Subscriptions)
 		addStringListField(def, "tools", entry.ConfiguredTools())
-		out[agentID] = def
+		out = append(out, def)
 	}
 	return out
 }

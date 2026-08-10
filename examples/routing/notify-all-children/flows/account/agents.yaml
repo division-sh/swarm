@@ -2,7 +2,7 @@ account-worker:
   id: account-worker
   type: generic
   role: account_worker
-  prompt_ref: account-worker
+  intent: prompts/account-worker.md
   model: regular
   memory: false
   subscriptions:

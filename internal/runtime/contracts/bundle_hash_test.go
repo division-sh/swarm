@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
@@ -27,10 +28,12 @@ api_specification:
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `
 version: "1.0.0"
 name: golden-bundle
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - flow: alpha
     id: alpha
 `)
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "guide:\n  id: guide\n  role: guide\n  intent: prompts/guide.md\n  model: regular\n  subscriptions: [guide.requested]\n")
 	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), `
 description: root schema
 fields:
@@ -49,12 +52,12 @@ ref_example:
 	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "prompts", "alpha.md"), "alpha prompt\rwithout final newline")
 	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x00, 0xff, 'a', '\r', '\n'})
 
-	bundle := bundleHashTestBundle(root, platform)
+	bundle := bundleHashTestBundleWithIntent(t, root, platform, "prompts/guide.md")
 	got, err := BundleHash(bundle)
 	if err != nil {
 		t.Fatalf("BundleHash: %v", err)
 	}
-	const want = "bundle-v1:sha256:c556830bbbad9624a56718bdd101d7ceb00fde71cb79f5c533a6b5181721204b"
+	const want = "bundle-v1:sha256:6174fa3ad78adc42d11935d6b5d91e609b5171d651418d3013bea3d98617a5a5"
 	if got != want {
 		t.Fatalf("BundleHash = %q, want %q", got, want)
 	}
@@ -67,16 +70,16 @@ func TestBundleHashV1EquivalentYAMLAndPromptLineEndings(t *testing.T) {
 	rootA, platformA := writeEquivalentBundleHashFixture(t, "\r\n", "name: equivalent\r\nversion: \"1.0.0\"\r\nflows: []\r\n")
 	rootB, platformB := writeEquivalentBundleHashFixture(t, "\n", "flows: []\nversion: \"1.0.0\"\nname: equivalent\n")
 
-	hashA, err := BundleHash(bundleHashTestBundle(rootA, platformA))
+	hashA, err := BundleHash(bundleHashTestBundleWithIntent(t, rootA, platformA, "prompts/guide.md"))
 	if err != nil {
 		t.Fatalf("BundleHash A: %v", err)
 	}
-	hashB, err := BundleHash(bundleHashTestBundle(rootB, platformB))
+	hashB, err := BundleHash(bundleHashTestBundleWithIntent(t, rootB, platformB, "prompts/guide.md"))
 	if err != nil {
 		t.Fatalf("BundleHash B: %v", err)
 	}
-	if hashA != hashB {
-		t.Fatalf("equivalent bundle hashes drifted:\nA=%s\nB=%s", hashA, hashB)
+	if hashA == hashB {
+		t.Fatalf("exact intent bytes did not distinguish line endings:\nA=%s\nB=%s", hashA, hashB)
 	}
 }
 
@@ -201,6 +204,7 @@ agents:
   reviewer:
     role: review
 `)
+	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "prompts", "reviewer.md"), "Review intent.\n")
 	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
 	bundle := bundleHashTestBundle(root, platform)
 	bundle.Package = ProjectPackageDocument{
@@ -221,13 +225,26 @@ agents:
 			Role:          "review",
 			Type:          "managed",
 			Model:         "cheap",
-			PromptRef:     "flows/alpha/prompts/reviewer.md",
 			Subscriptions: []string{"scan.requested"},
 			Tools:         []string{"web_search"},
 			Memory:        true,
 			MemoryPlan:    mustAgentMemoryPlan(t, true),
 		},
 	}
+	resolvedReviewerIntent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceLocal, "flows/alpha/prompts/reviewer.md", "flows/alpha/agents.yaml#agents.reviewer.intent", "Review intent.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerEntry := bundle.Agents["reviewer"]
+	reviewerEntry.Intent = runtimeagentintent.Source{Kind: runtimeagentintent.SourceLocal, Local: "prompts/reviewer.md"}
+	reviewerEntry.ResolvedIntent = resolvedReviewerIntent
+	bundle.Agents["reviewer"] = reviewerEntry
+	bundle.scopedAgents = map[string]AgentRegistryEntry{"alpha::reviewer": reviewerEntry}
+	flow := FlowContractView{
+		Paths:  FlowContractPaths{ID: "alpha", Flow: "alpha", AgentsFile: filepath.Join(root, "flows", "alpha", "agents.yaml")},
+		Agents: map[string]AgentRegistryEntry{"reviewer": reviewerEntry},
+	}
+	bundle.FlowTree = FlowTree{Root: &flow, ByID: map[string]*FlowContractView{"alpha": &flow}}
 
 	projection, err := BuildBundleCatalogProjection(bundle)
 	if err != nil {
@@ -261,14 +278,14 @@ agents:
 	if len(data.Entries) != 1 || data.Entries[0].Label != "bundle/flows/alpha/data/payload.bin" || data.Entries[0].ContentBase64 != base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03}) {
 		t.Fatalf("data blob = %#v", data)
 	}
-	agents, ok := projection.ParsedJSON["agents"].(map[string]any)
+	agents, ok := projection.ParsedJSON["agents"].([]any)
 	if !ok {
 		t.Fatalf("agents projection = %#v", projection.ParsedJSON["agents"])
 	}
-	reviewer, ok := agents["reviewer"].(map[string]any)
-	if !ok {
-		t.Fatalf("reviewer projection = %#v", agents["reviewer"])
+	if len(agents) != 1 {
+		t.Fatalf("agents projection = %#v, want one reviewer", agents)
 	}
+	reviewer := agents[0].(map[string]any)
 	if _, hasRuntimeState := reviewer["runtime_state"]; hasRuntimeState {
 		t.Fatalf("agents projection contains runtime state: %#v", reviewer)
 	}
@@ -452,16 +469,77 @@ func TestBundleHashV1PromptPreservesTrailingWhitespace(t *testing.T) {
 	writeBundleHashText(t, filepath.Join(rootA, "prompts", "guide.md"), "same line\n")
 	writeBundleHashText(t, filepath.Join(rootB, "prompts", "guide.md"), "same line  \n")
 
-	hashA, err := BundleHash(bundleHashTestBundle(rootA, platformA))
+	hashA, err := BundleHash(bundleHashTestBundleWithIntent(t, rootA, platformA, "prompts/guide.md"))
 	if err != nil {
 		t.Fatalf("BundleHash A: %v", err)
 	}
-	hashB, err := BundleHash(bundleHashTestBundle(rootB, platformB))
+	hashB, err := BundleHash(bundleHashTestBundleWithIntent(t, rootB, platformB, "prompts/guide.md"))
 	if err != nil {
 		t.Fatalf("BundleHash B: %v", err)
 	}
 	if hashA == hashB {
 		t.Fatalf("prompt trailing spaces were not preserved: %s", hashA)
+	}
+}
+
+func TestBundleHashV1UsesOnlyExplicitIntentInputsRegardlessOfDirectory(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: explicit-intent-input\nversion: \"1.0.0\"\nflows: []\n")
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "guide:\n  id: guide\n  role: guide\n  intent: agent-content/guide.intent\n  model: regular\n  subscriptions: [guide.requested]\n")
+	writeBundleHashText(t, filepath.Join(root, "agent-content", "guide.intent"), "Declared outside the legacy prompt directory.\n")
+
+	load := func() *WorkflowContractBundle {
+		t.Helper()
+		bundle, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform)
+		if err != nil {
+			t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+		}
+		return bundle
+	}
+	before, err := BundleHash(load())
+	if err != nil {
+		t.Fatalf("BundleHash before: %v", err)
+	}
+
+	writeBundleHashText(t, filepath.Join(root, "prompts", "guide.md"), "Unreferenced legacy prompt debris changed.\n")
+	afterDebris, err := BundleHash(load())
+	if err != nil {
+		t.Fatalf("BundleHash after unreferenced prompt change: %v", err)
+	}
+	if afterDebris != before {
+		t.Fatalf("unreferenced legacy prompt changed bundle hash: before=%s after=%s", before, afterDebris)
+	}
+
+	writeBundleHashText(t, filepath.Join(root, "agent-content", "guide.intent"), "Declared intent bytes changed.\n")
+	afterIntent, err := BundleHash(load())
+	if err != nil {
+		t.Fatalf("BundleHash after declared intent change: %v", err)
+	}
+	if afterIntent == before {
+		t.Fatalf("declared intent outside prompts directory did not change bundle hash: %s", before)
+	}
+}
+
+func TestBundleHashV1RejectsIntentBytesChangedAfterResolution(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: exact-intent-snapshot\nversion: \"1.0.0\"\nflows: []\n")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	writeBundleHashText(t, filepath.Join(root, "prompts", "guide.md"), "Changed after contract resolution.\n")
+	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "changed after exact agent intent resolution") {
+		t.Fatalf("BundleHash error = %v, want exact resolved intent mismatch", err)
+	}
+}
+
+func TestBundleHashV1RejectsIntentPathThatIsAnotherCanonicalInput(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: overlapping-intent-input\nversion: \"1.0.0\"\nflows: []\n")
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "guide:\n  id: guide\n  role: guide\n  intent: agents.yaml\n  model: regular\n")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "overlaps canonical input") {
+		t.Fatalf("BundleHash error = %v, want intent/non-intent policy overlap rejection", err)
 	}
 }
 
@@ -485,8 +563,8 @@ func TestBundleHashV1RawDataAndIgnoredFiles(t *testing.T) {
 		t.Fatalf("ignored files changed bundle hash: before=%s after=%s", before, after)
 	}
 
-	writeBundleHashBytes(t, filepath.Join(root, "prompts", "invalid.md"), []byte{0xff})
-	if _, err := BundleHash(bundleHashTestBundle(root, platform)); err == nil || !strings.Contains(err.Error(), "valid UTF-8") {
+	writeBundleHashBytes(t, filepath.Join(root, "prompts", "guide.md"), []byte{0xff})
+	if _, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform); err == nil || !strings.Contains(err.Error(), "valid UTF-8") {
 		t.Fatalf("BundleHash invalid prompt error = %v, want UTF-8 failure", err)
 	}
 }
@@ -494,12 +572,15 @@ func TestBundleHashV1RawDataAndIgnoredFiles(t *testing.T) {
 func TestBundleHashV1RejectsSymlinksWhenSupported(t *testing.T) {
 	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: symlink\nversion: \"1.0.0\"\nflows: []\n")
 	target := filepath.Join(root, "prompts", "target.md")
-	link := filepath.Join(root, "prompts", "link.md")
+	link := filepath.Join(root, "prompts", "guide.md")
 	writeBundleHashText(t, target, "target\n")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink creation unsupported: %v", err)
 	}
-	if _, err := BundleHash(bundleHashTestBundle(root, platform)); err == nil || !strings.Contains(err.Error(), "symlink") {
+	if _, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("BundleHash symlink error = %v, want symlink rejection", err)
 	}
 }
@@ -510,6 +591,7 @@ func TestBundleCatalogProjectionConsumesCanonicalBundleHashOwner(t *testing.T) {
 researcher:
   id: researcher
   role: research
+  intent: {inline: "Research the requested topic."}
   model: regular
   subscriptions:
     - scan.requested
@@ -535,8 +617,11 @@ researcher:
 	if projection.Metadata["source"] != "bundle.register" || projection.Metadata["platform_spec_sha256"] != strings.Repeat("a", 64) {
 		t.Fatalf("projection metadata = %#v", projection.Metadata)
 	}
-	agents := projection.ParsedJSON["agents"].(map[string]any)
-	researcher := agents["researcher"].(map[string]any)
+	agents := projection.ParsedJSON["agents"].([]any)
+	if len(agents) != 1 {
+		t.Fatalf("projected agents = %#v, want one researcher", agents)
+	}
+	researcher := agents[0].(map[string]any)
 	if researcher["model"] != "regular" || researcher["memory"] != false || researcher["memory_source"] != "platform_default" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
@@ -632,17 +717,17 @@ func TestBundleHashV1LabelValidation(t *testing.T) {
 		labels:       map[string]string{},
 		foldedLabels: map[string]string{},
 	}
-	if err := builder.addEntry("/tmp/A", "bundle/A.md", bundleHashPrompt); err != nil {
+	if err := builder.addEntry("/tmp/A", "bundle/A.md", bundleHashIntent); err != nil {
 		t.Fatalf("add entry A: %v", err)
 	}
-	if err := builder.addEntry("/tmp/B", "bundle/A.md", bundleHashPrompt); err == nil || !strings.Contains(err.Error(), "duplicate") {
+	if err := builder.addEntry("/tmp/B", "bundle/A.md", bundleHashIntent); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("duplicate label error = %v, want duplicate", err)
 	}
 	builder = &bundleHashEntryBuilder{seenPaths: map[string]struct{}{}, labels: map[string]string{}, foldedLabels: map[string]string{}}
-	if err := builder.addEntry("/tmp/A", "bundle/A.md", bundleHashPrompt); err != nil {
+	if err := builder.addEntry("/tmp/A", "bundle/A.md", bundleHashIntent); err != nil {
 		t.Fatalf("add entry A: %v", err)
 	}
-	if err := builder.addEntry("/tmp/a", "bundle/a.md", bundleHashPrompt); err == nil || !strings.Contains(err.Error(), "case-colliding") {
+	if err := builder.addEntry("/tmp/a", "bundle/a.md", bundleHashIntent); err == nil || !strings.Contains(err.Error(), "case-colliding") {
 		t.Fatalf("case collision error = %v, want case collision", err)
 	}
 	if err := validateBundleHashLabel("bundle/cafe\u0301.md"); err == nil || !strings.Contains(err.Error(), "NFC") {
@@ -660,6 +745,7 @@ func writeEquivalentBundleHashFixture(t *testing.T, lineEnding, packageYAML stri
 	}
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), packageYAML)
 	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll("name: equivalent\n", "\n", lineEnding))
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "guide:\n  id: guide\n  role: guide\n  intent: prompts/guide.md\n  model: regular\n  subscriptions: [guide.requested]\n")
 	writeBundleHashText(t, filepath.Join(root, "prompts", "guide.md"), strings.ReplaceAll("hello\nworld", "\n", lineEnding))
 	return root, platform
 }
@@ -667,6 +753,68 @@ func writeEquivalentBundleHashFixture(t *testing.T, lineEnding, packageYAML stri
 func bundleHashTestBundle(root, platform string) *WorkflowContractBundle {
 	return &WorkflowContractBundle{
 		Paths: ResolveWorkflowContractPathsWithOverrides(filepath.Dir(root), root, platform),
+	}
+}
+
+func bundleHashTestBundleWithIntent(t *testing.T, root, platform, coordinate string) *WorkflowContractBundle {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(coordinate)))
+	if err != nil {
+		t.Fatalf("read declared intent %s: %v", coordinate, err)
+	}
+	resolved, err := runtimeagentintent.Resolve(runtimeagentintent.SourceLocal, coordinate, "agents.yaml#agents.guide.intent", string(raw))
+	if err != nil {
+		t.Fatalf("resolve declared intent %s: %v", coordinate, err)
+	}
+	bundle := bundleHashTestBundle(root, platform)
+	bundle.projectContracts = map[string]ProjectContractView{
+		".": {
+			Paths:  ProjectPackagePaths{Key: ".", ProjectAgentsFile: filepath.Join(root, "agents.yaml")},
+			Agents: map[string]AgentRegistryEntry{"guide": {ID: "guide", ResolvedIntent: resolved}},
+		},
+	}
+	return bundle
+}
+
+func TestBundleCatalogAgentProjectionPreservesScopedDuplicateLogicalIDs(t *testing.T) {
+	rootIntent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.worker.intent", "root intent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flowIntent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "flows/review/agents.yaml#agents.worker.intent", "flow intent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := FlowContractView{
+		Paths:  FlowContractPaths{ID: "review", Flow: "review", AgentsFile: "/contracts/flows/review/agents.yaml"},
+		Agents: map[string]AgentRegistryEntry{"worker": {ID: "worker", ResolvedIntent: flowIntent}},
+	}
+	bundle := &WorkflowContractBundle{
+		projectContracts: map[string]ProjectContractView{
+			".": {
+				Paths:  ProjectPackagePaths{Key: ".", ProjectAgentsFile: "/contracts/agents.yaml"},
+				Agents: map[string]AgentRegistryEntry{"worker": {ID: "worker", ResolvedIntent: rootIntent}},
+			},
+		},
+		FlowTree: FlowTree{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
+	}
+
+	projected := bundleCatalogAgentsJSON(bundle)
+	if len(projected) != 2 {
+		t.Fatalf("catalog agents = %#v, want both scoped worker declarations", projected)
+	}
+	first := projected[0].(map[string]any)
+	second := projected[1].(map[string]any)
+	if first["agent_id"] != "worker" || second["agent_id"] != "worker" {
+		t.Fatalf("catalog agent ids = %#v, want duplicate logical ids preserved", projected)
+	}
+	seen := map[string]string{}
+	for _, raw := range projected {
+		def := raw.(map[string]any)
+		seen[def["intent_provenance"].(string)] = def["intent_content"].(string)
+	}
+	if seen[rootIntent.Provenance] != rootIntent.Content || seen[flowIntent.Provenance] != flowIntent.Content {
+		t.Fatalf("catalog intent readback = %#v, want both exact scoped artifacts", seen)
 	}
 }
 
