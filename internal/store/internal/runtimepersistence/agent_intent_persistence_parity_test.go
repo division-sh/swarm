@@ -13,6 +13,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -83,6 +84,7 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx 
 	}, runtimemanager.AgentManagerOptions{
 		SemanticSource:    selectedIntentRecoverySource(t),
 		ReceiverExecution: eventreceiver.NormalExecution(),
+		ExecutionPosture:  executionposture.Live,
 	}, store)
 	if _, err := manager.HydrateForStartup(ctx); err == nil || !strings.Contains(err.Error(), "runtime refs must match contract agent criteria") {
 		t.Fatalf("HydrateForStartup error = %v, want criteria mismatch rejection", err)
