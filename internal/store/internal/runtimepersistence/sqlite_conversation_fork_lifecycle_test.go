@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -83,7 +84,8 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 
 	firstMessage := "inspect fork 0"
 	prepared, err := s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
-		ForkID: turnFork.ForkID, Message: firstMessage, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+		ExecutionPosture: executionposture.Live,
+		ForkID:           turnFork.ForkID, Message: firstMessage, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 		RequestHash: runtimeeffects.Fingerprint([]byte(firstMessage)), Now: now.Add(4 * time.Second),
 	})
 	if err != nil {
@@ -106,7 +108,8 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 			if i > 0 {
 				var err error
 				turnPrepared, err = s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
-					ForkID: turnFork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+					ExecutionPosture: executionposture.Live,
+					ForkID:           turnFork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 					RequestHash: runtimeeffects.Fingerprint([]byte(message)), Now: now.Add(time.Duration(4+i) * time.Second),
 				})
 				if err != nil {

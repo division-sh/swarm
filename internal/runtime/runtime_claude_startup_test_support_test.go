@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -25,6 +26,7 @@ type startupCapabilityStore struct {
 
 func newClaudeStartupManager() *runtimemanager.AgentManager {
 	return runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		LLMBackend:        "claude_cli",
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})

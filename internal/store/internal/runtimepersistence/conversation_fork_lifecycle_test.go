@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -248,7 +249,8 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("CreateOperatorConversationFork: %v", err)
 	}
 	prepared, err := s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
-		ForkID: fork.ForkID, Message: "inspect the fork", Method: "conversation.fork_chat",
+		ExecutionPosture: executionposture.Live,
+		ForkID:           fork.ForkID, Message: "inspect the fork", Method: "conversation.fork_chat",
 		ActorTokenID: "actor-token", RequestHash: runtimeeffects.Fingerprint([]byte("inspect the fork")),
 		Now: now.Add(time.Second),
 	})
@@ -401,7 +403,8 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("DeleteOperatorConversationFork: %v", err)
 	}
 	_, err = s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
-		ForkID: fork.ForkID, Message: "after delete", Method: "conversation.fork_chat",
+		ExecutionPosture: executionposture.Live,
+		ForkID:           fork.ForkID, Message: "after delete", Method: "conversation.fork_chat",
 		ActorTokenID: "actor-token", RequestHash: runtimeeffects.Fingerprint([]byte("after delete")),
 		Now: now.Add(3 * time.Second),
 	})
@@ -436,7 +439,8 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 			defer wg.Done()
 			message := fmt.Sprintf("concurrent fork chat %d", i)
 			prepared, err := s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
-				ForkID: fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+				ExecutionPosture: executionposture.Live,
+				ForkID:           fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 				RequestHash: runtimeeffects.Fingerprint([]byte(message)), Now: now.Add(time.Duration(i+1) * time.Second),
 			})
 			if err != nil {

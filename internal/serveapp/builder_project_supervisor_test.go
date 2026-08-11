@@ -2411,6 +2411,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:               executionposture.Live,
 		RuntimeShutdownAdmissionClosed: func() bool { return true },
 		WorkOwner:                      workOwner,
 		ReceiverExecution:              eventreceiver.NormalExecution(),

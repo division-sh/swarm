@@ -21,6 +21,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -197,6 +198,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
@@ -297,6 +299,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
@@ -389,6 +392,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
@@ -473,6 +477,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
@@ -590,6 +595,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,

@@ -283,7 +283,8 @@ func proveForkChatCompletionGroupSucceededReplay(t *testing.T, fixture forkChatC
 func proveForkChatCompletionGroupConflictingRequestReuse(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "conflict-key", "original request")
 	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
-		ForkID: fixture.fork.ForkID, Message: "changed request", Method: "conversation.fork_chat",
+		ExecutionPosture: executionposture.Live,
+		ForkID:           fixture.fork.ForkID, Message: "changed request", Method: "conversation.fork_chat",
 		ActorTokenID: prepared.ActorTokenID, RequestHash: runtimeeffects.Fingerprint([]byte("changed request")),
 		IdempotencyKey: prepared.IdempotencyKey, Now: fixture.now.Add(2 * time.Second),
 	})
@@ -331,7 +332,8 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) runfork.ConversationForkChatPrepared {
 	t.Helper()
 	prepared, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
-		ForkID: fixture.fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
+		ExecutionPosture: executionposture.Live,
+		ForkID:           fixture.fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 		RequestHash: runtimeeffects.Fingerprint([]byte(message)), IdempotencyKey: key, Now: fixture.now.Add(time.Second),
 	})
 	if err != nil {
@@ -439,7 +441,8 @@ func successfulForkChatRecord(prepared runfork.ConversationForkChatPrepared, mes
 func requireForkChatReplayState(t *testing.T, fixture forkChatCompletionAuthorityFixture, prepared runfork.ConversationForkChatPrepared, message, wantState string) {
 	t.Helper()
 	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
-		ForkID: prepared.Fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: prepared.ActorTokenID,
+		ExecutionPosture: executionposture.Live,
+		ForkID:           prepared.Fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: prepared.ActorTokenID,
 		RequestHash: prepared.RequestHash, IdempotencyKey: prepared.IdempotencyKey, Now: fixture.now.Add(20 * time.Second),
 	})
 	var replay *runfork.ConversationForkChatReplayStateError

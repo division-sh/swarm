@@ -27,6 +27,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -262,7 +263,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				}
 				return startupRecoveryOrderAgent{id: cfg.ID, subscriptions: subscriptions}, nil
 			}, runtimemanager.AgentManagerOptions{
-				BaseContext: ctx, LifecycleStore: selected, DeliveryStore: selected, SemanticSource: source,
+				ExecutionPosture: executionposture.Live,
+				BaseContext:      ctx, LifecycleStore: selected, DeliveryStore: selected, SemanticSource: source,
 				PersistenceRoles:  externalRuntimeTestManagerBusRoles(runtime.Bus),
 				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
