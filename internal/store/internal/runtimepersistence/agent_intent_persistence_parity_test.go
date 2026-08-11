@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -99,7 +100,12 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store inter
 }) {
 	t.Helper()
 	intent := selectedStoreIntent(t)
-	prompt, err := runtimeagentintent.NewDerivedPrompt(intent, []string{"hostile-replacement"}, "\n\n## Contract Criteria\n\n### hostile-replacement\n")
+	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"hostile-replacement"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
+		"hostile-replacement": {
+			Classes: map[string]runtimeflowmodel.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
+			Rules:   []runtimeflowmodel.PolicyCriteriaRule{{ID: "HOSTILE-01", Class: "hard", Text: "Reject the hostile replacement."}},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

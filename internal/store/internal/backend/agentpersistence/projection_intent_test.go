@@ -11,6 +11,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
@@ -154,7 +155,12 @@ func persistedIntentTestAgent(t testing.TB) runtimeactors.AgentConfig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt, err := runtimeagentintent.NewDerivedPrompt(intent, []string{"quality"}, "\n\n## Contract Criteria\n\n### quality\n")
+	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"quality"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
+		"quality": {
+			Classes: map[string]runtimeflowmodel.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
+			Rules:   []runtimeflowmodel.PolicyCriteriaRule{{ID: "QUALITY-01", Class: "hard", Text: "Require exact quality."}},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

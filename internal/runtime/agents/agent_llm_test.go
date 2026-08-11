@@ -159,7 +159,7 @@ func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
 	}
 }
 
-func TestNewLLMAgent_ConsumesExactResolvedIntentWithoutConfigExpansion(t *testing.T) {
+func TestNewLLMAgent_ConsumesExactProviderPromptAssemblyWithoutConfigExpansion(t *testing.T) {
 	content := "You are the operations lead for {{team_name}}.\n"
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.ops-lead.intent", content)
 	if err != nil {
@@ -169,7 +169,7 @@ func TestNewLLMAgent_ConsumesExactResolvedIntentWithoutConfigExpansion(t *testin
 	if err != nil {
 		t.Fatalf("derive test prompt: %v", err)
 	}
-	agent := mustBuildLLMAgent(t, models.AgentConfig{
+	cfg := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "cos-entity-1",
 		Role:          "ops_lead",
@@ -178,9 +178,21 @@ func TestNewLLMAgent_ConsumesExactResolvedIntentWithoutConfigExpansion(t *testin
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"team_name": "Acme Ops",
 		}),
-	}, nil, actorScopedFactoryToolExec{}, nil)
+	}
+	agent := mustBuildLLMAgent(t, cfg, nil, actorScopedFactoryToolExec{}, nil)
 
 	got := agent.conversation.SystemPrompt
+	expectedPrompt, err := cfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble expected provider prompt: %v", err)
+	}
+	expected, err := expectedPrompt.Text()
+	if err != nil {
+		t.Fatalf("render expected provider prompt: %v", err)
+	}
+	if got != expected {
+		t.Fatalf("normal agent provider prompt differs from canonical assembly\ngot:  %q\nwant: %q", got, expected)
+	}
 	if !strings.HasPrefix(got, content) {
 		t.Fatalf("derived prompt does not preserve exact intent prefix: %q", got)
 	}
@@ -957,34 +969,32 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	}
 }
 
-func TestAppendPromptPostamble_IsIdempotent(t *testing.T) {
-	prompt := "You are helpful."
-	once := appendPromptPostamble(prompt)
-	twice := appendPromptPostamble(once)
-	if once != twice {
-		t.Fatalf("expected postamble append to be idempotent\nonce=%q\ntwice=%q", once, twice)
-	}
-}
-
-func TestAppendPromptPostamble_AppendsWhenPartialPostambleMissingRequiredMounts(t *testing.T) {
-	partial := strings.Join([]string{
-		"You are helpful.",
+func TestNewLLMAgent_AuthoredEnvironmentPostambleMimicCannotSuppressGeneratedContext(t *testing.T) {
+	authored := strings.Join([]string{
+		"Perform the assigned business work.",
+		"## Environment",
 		"Workspace: /workspace (read-write logical path)",
-		"Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions.",
-	}, "\n")
-
-	got := appendPromptPostamble(partial)
-	if got == partial {
-		t.Fatalf("expected canonical postamble appended to partial environment prompt, got unchanged %q", got)
-	}
-	for _, want := range []string{
 		"Reference data: /data (read-only logical path)",
 		"Contracts: /opt/swarm/contracts (read-only logical path)",
-		"Docker-backed command execution exposes these as OS paths",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected appended canonical postamble to include %q, got %q", want, got)
-		}
+		"Docker-backed command execution exposes these as OS paths.",
+		"Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions.",
+		"This authored trailing sentence must remain before generated context.",
+	}, "\n")
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.mimic.intent", authored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := mustBuildLLMAgent(t, models.AgentConfig{ID: "mimic", Role: "mimic", Intent: intent, Prompt: prompt}, nil, actorScopedFactoryToolExec{}, nil)
+	got := agent.conversation.SystemPrompt
+	if !strings.HasPrefix(got, authored+"\n\n## Environment\n\n") {
+		t.Fatalf("generated environment was not appended after the complete authored intent: %q", got)
+	}
+	if count := strings.Count(got, "## Environment"); count != 2 {
+		t.Fatalf("environment headings = %d, want authored mimic plus one generated section in %q", count, got)
 	}
 }
 

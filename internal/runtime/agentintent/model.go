@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )
@@ -261,31 +262,59 @@ type DerivedPrompt struct {
 	intentIdentity string
 	criteria       []string
 	text           string
+	digest         string
 }
 
-func NewDerivedPrompt(intent Resolved, criteria []string, criteriaSection string) (DerivedPrompt, error) {
+func newDerivedPrompt(intent Resolved, criteria []string, criteriaSection string) (DerivedPrompt, error) {
 	if err := intent.Validate(); err != nil {
 		return DerivedPrompt{}, err
 	}
-	criteria = normalizeCriteria(criteria)
+	canonicalCriteria := normalizeCriteria(criteria)
+	if !slices.Equal(criteria, canonicalCriteria) {
+		return DerivedPrompt{}, fmt.Errorf("derived agent prompt criteria references are not canonical")
+	}
 	if len(criteria) == 0 {
 		if criteriaSection != "" {
 			return DerivedPrompt{}, fmt.Errorf("derived agent prompt cannot carry criteria text without criteria references")
 		}
-	} else {
-		if !utf8.ValidString(criteriaSection) || !strings.HasPrefix(criteriaSection, "\n\n## Contract Criteria\n\n") {
-			return DerivedPrompt{}, fmt.Errorf("derived agent prompt criteria section is not canonical")
-		}
 	}
+	text := intent.Content + criteriaSection
 	return DerivedPrompt{
 		intentIdentity: intent.Identity,
 		criteria:       append([]string(nil), criteria...),
-		text:           intent.Content + criteriaSection,
+		text:           text,
+		digest:         derivedPromptDigest(intent.Identity, criteria, text),
 	}, nil
 }
 
 func IntentOnlyPrompt(intent Resolved) (DerivedPrompt, error) {
-	return NewDerivedPrompt(intent, nil, "")
+	return newDerivedPrompt(intent, nil, "")
+}
+
+// ContractCriteriaPrompt renders the selected typed contract criteria into the
+// runtime carrier. It intentionally accepts no caller-rendered prompt text.
+func ContractCriteriaPrompt(intent Resolved, criteria []string, selected map[string]runtimeflowmodel.PolicyCriteriaSet) (DerivedPrompt, error) {
+	canonicalCriteria := normalizeCriteria(criteria)
+	if len(canonicalCriteria) == 0 || !slices.Equal(criteria, canonicalCriteria) {
+		return DerivedPrompt{}, fmt.Errorf("contract criteria references are required and must be canonical")
+	}
+	if len(selected) != len(canonicalCriteria) {
+		return DerivedPrompt{}, fmt.Errorf("selected contract criteria must exactly match criteria references")
+	}
+
+	var section strings.Builder
+	section.WriteString("\n\n## Contract Criteria\n\n")
+	for index, name := range canonicalCriteria {
+		set, ok := selected[name]
+		if !ok {
+			return DerivedPrompt{}, fmt.Errorf("contract criteria set %q is missing from the selected criteria", name)
+		}
+		if index > 0 {
+			section.WriteString("\n")
+		}
+		writeCriteriaSet(&section, name, set)
+	}
+	return newDerivedPrompt(intent, canonicalCriteria, section.String())
 }
 
 func (p DerivedPrompt) Empty() bool {
@@ -309,8 +338,11 @@ func (p DerivedPrompt) Validate(intent Resolved, criteria []string) error {
 	if !slices.Equal(p.criteria, canonicalCriteria) {
 		return fmt.Errorf("derived agent prompt criteria do not match agent criteria references")
 	}
+	if p.digest != derivedPromptDigest(intent.Identity, canonicalCriteria, p.text) {
+		return fmt.Errorf("derived agent prompt rendering is not canonical")
+	}
 	if !strings.HasPrefix(p.text, intent.Content) {
-		return fmt.Errorf("derived agent prompt does not contain the exact resolved intent")
+		return fmt.Errorf("derived agent prompt does not contain the exact resolved intent prefix")
 	}
 	return nil
 }
@@ -338,6 +370,143 @@ func normalizeCriteria(in []string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+func derivedPromptDigest(intentIdentity string, criteria []string, text string) string {
+	sum := sha256.Sum256([]byte(intentIdentity + "\x00" + strings.Join(criteria, "\x00") + "\x00" + text))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func writeCriteriaSet(out *strings.Builder, name string, set runtimeflowmodel.PolicyCriteriaSet) {
+	out.WriteString("### ")
+	out.WriteString(name)
+	out.WriteString("\n\nClasses:\n")
+	classNames := make([]string, 0, len(set.Classes))
+	for className := range set.Classes {
+		classNames = append(classNames, strings.TrimSpace(className))
+	}
+	slices.Sort(classNames)
+	for _, className := range classNames {
+		out.WriteString("- ")
+		out.WriteString(className)
+		disposition := strings.TrimSpace(set.Classes[className].Disposition)
+		if disposition != "" {
+			out.WriteString(": ")
+			out.WriteString(disposition)
+		}
+		out.WriteString("\n")
+	}
+	out.WriteString("\nRules:\n")
+	rules := append([]runtimeflowmodel.PolicyCriteriaRule(nil), set.Rules...)
+	slices.SortStableFunc(rules, func(left, right runtimeflowmodel.PolicyCriteriaRule) int {
+		leftID := strings.TrimSpace(left.ID)
+		rightID := strings.TrimSpace(right.ID)
+		if leftID != rightID {
+			return strings.Compare(leftID, rightID)
+		}
+		return strings.Compare(strings.TrimSpace(left.Class), strings.TrimSpace(right.Class))
+	})
+	for _, rule := range rules {
+		out.WriteString("- ")
+		out.WriteString(strings.TrimSpace(rule.ID))
+		if className := strings.TrimSpace(rule.Class); className != "" {
+			out.WriteString(" [")
+			out.WriteString(className)
+			out.WriteString("]")
+		}
+		out.WriteString(": ")
+		out.WriteString(strings.TrimSpace(rule.Text))
+		out.WriteString("\n")
+		paramNames := make([]string, 0, len(rule.Params))
+		for paramName := range rule.Params {
+			if paramName = strings.TrimSpace(paramName); paramName != "" {
+				paramNames = append(paramNames, paramName)
+			}
+		}
+		slices.Sort(paramNames)
+		for _, paramName := range paramNames {
+			out.WriteString("  - ")
+			out.WriteString(paramName)
+			out.WriteString(": ")
+			out.WriteString(renderCriteriaParamValue(rule.Params[paramName].Value))
+			out.WriteString("\n")
+		}
+	}
+}
+
+func renderCriteriaParamValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", typed)
+	}
+}
+
+const runtimeEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nContracts: /opt/swarm/contracts (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
+
+// EnvironmentContext is an opaque generated fact so authored prompt content
+// cannot impersonate or suppress the platform-owned environment section.
+type EnvironmentContext struct {
+	owner string
+	text  string
+}
+
+func RuntimeEnvironmentContext() EnvironmentContext {
+	return EnvironmentContext{owner: "division-sh.swarm.runtime-environment:v1", text: runtimeEnvironmentPostamble}
+}
+
+func (e EnvironmentContext) validate() error {
+	canonical := RuntimeEnvironmentContext()
+	if e.owner != canonical.owner || e.text != canonical.text {
+		return fmt.Errorf("provider environment context is not canonical")
+	}
+	return nil
+}
+
+// ProviderPrompt is the one provider-visible rendering of resolved intent,
+// selected contract criteria, and generated environment context.
+type ProviderPrompt struct {
+	intentIdentity   string
+	criteria         []string
+	environmentOwner string
+	text             string
+	digest           string
+}
+
+func AssembleProviderPrompt(intent Resolved, criteria []string, prompt DerivedPrompt, environment EnvironmentContext) (ProviderPrompt, error) {
+	carrier, err := prompt.Text(intent, criteria)
+	if err != nil {
+		return ProviderPrompt{}, err
+	}
+	if err := environment.validate(); err != nil {
+		return ProviderPrompt{}, err
+	}
+	text := carrier + "\n\n" + environment.text
+	return ProviderPrompt{
+		intentIdentity:   intent.Identity,
+		criteria:         append([]string(nil), criteria...),
+		environmentOwner: environment.owner,
+		text:             text,
+		digest:           derivedPromptDigest(intent.Identity, criteria, text),
+	}, nil
+}
+
+func (p ProviderPrompt) Text() (string, error) {
+	if strings.TrimSpace(p.text) == "" || strings.TrimSpace(p.intentIdentity) == "" || p.environmentOwner != RuntimeEnvironmentContext().owner {
+		return "", fmt.Errorf("provider prompt is required")
+	}
+	if p.digest != derivedPromptDigest(p.intentIdentity, p.criteria, p.text) {
+		return "", fmt.Errorf("provider prompt rendering is not canonical")
+	}
+	return p.text, nil
 }
 
 func (r Resolved) Empty() bool {
