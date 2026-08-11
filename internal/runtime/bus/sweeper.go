@@ -510,6 +510,10 @@ func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (
 	return eb.SweepPipelineObligations(ctx, limit)
 }
 
+func (eb *EventBus) PreflightRuntimeIngressQueue(ctx context.Context) error {
+	return eb.preflightPipelineObligations(ctx, runtimepipelineobligation.GlobalScanRequest())
+}
+
 // ReleaseRunQueue owns only the #2106 half. Executable delivery backlog is
 // continuously recovered by #2105's agent/node owners and is not republished
 // or acknowledged through this pipeline operation.
@@ -530,6 +534,29 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, limit int
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
 	return eb.sweepPipelineObligations(ctx, runtimepipelineobligation.RunScanRequest(runID), limit)
+}
+
+func (eb *EventBus) PreflightRunQueue(ctx context.Context, runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return errors.New("run ID is required")
+	}
+	return eb.preflightPipelineObligations(ctx, runtimepipelineobligation.RunScanRequest(runID))
+}
+
+func (eb *EventBus) preflightPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest) error {
+	if eb == nil || eb.pipelineObligations == nil {
+		return errors.New("pipeline obligation owner is required")
+	}
+	preflighter, ok := eb.pipelineObligations.(runtimepipelineobligation.AdmissionPreflighter)
+	if !ok {
+		return errors.New("pipeline obligation admission preflight is required")
+	}
+	request = request.WithExecutionPosture(eb.executionPosture)
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	return preflighter.Preflight(ctx, request)
 }
 
 func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {

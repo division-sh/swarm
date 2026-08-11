@@ -25,7 +25,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -590,14 +589,15 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(op.AgentIdentity.Description(), runtimeagentcontrol.StatusIdle)
 	}
 	ownerID := uuid.NewString()
-	admitted, err := store.AdmitDirectiveExecution(ctx, op.OperationID, ownerID, time.Now().UTC(), directiveExecutionLease)
+	admission, err := store.AdmitDirectiveExecution(ctx, runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+		OperationID: op.OperationID, OwnerID: ownerID, Now: time.Now().UTC(), Lease: directiveExecutionLease,
+		ExecutionPosture: am.executionPosture,
+	})
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	directiveEvent, err := directiveEventFromOperation(admitted, am.executionPosture)
-	if err != nil {
-		return runtimeagentcontrol.SendDirectiveResult{}, err
-	}
+	admitted := admission.Operation
+	directiveEvent := admission.Event.Event()
 	directiveCtx := runtimecorrelation.WithRunID(lease.Context, strings.TrimSpace(directiveEvent.RunID()))
 	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
 	heartbeatConfig := am.directiveHeartbeat.normalized()
@@ -692,17 +692,6 @@ func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, s
 			cancel()
 		}
 	}
-}
-
-func directiveEventFromOperation(op runtimeagentcontrol.DirectiveOperation, posture executionposture.Posture) (events.Event, error) {
-	return runtimeagentcontrol.NewDirectiveEvent(runtimeagentcontrol.SendDirectiveRequest{
-		AgentID:      op.AgentID(),
-		FlowInstance: op.FlowInstance(),
-		Directive:    op.Directive,
-		RunID:        op.RequestedRunID,
-		Source:       op.Source,
-		OperatorID:   op.OperatorID,
-	}, runtimeagentcontrol.RunTargetResolution{RunID: op.ResolvedRunID, Mode: op.RunIDResolution}, op.OperationID, op.DirectiveEventID, op.CreatedAt, posture)
 }
 
 func directiveResultFromOperation(op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
@@ -1477,6 +1466,9 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		if err := am.resolveAgentModel(&updated); err != nil {
 			return replaceExecutionResult{}, err
 		}
+		if err := am.executionPosture.Admit(updated.ExecutionMode, "agent lifecycle replacement"); err != nil {
+			return replaceExecutionResult{}, err
+		}
 		subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &updated, nil)
 		if err != nil {
 			return replaceExecutionResult{}, err
@@ -1508,6 +1500,11 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		candidateAdmission = subscriptionAdmission
 		rec = &candidateRecord
 		subordinate = reconfigureSessionMutationPlan(current.Config, updated)
+	}
+	if patch == nil {
+		if err := am.executionPosture.Admit(candidate.Config.ExecutionMode, "agent lifecycle replacement"); err != nil {
+			return replaceExecutionResult{}, err
+		}
 	}
 
 	runCtx, runMode, runtimeRunning := am.lifecycle.runSnapshot()

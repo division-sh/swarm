@@ -184,7 +184,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAut
 	if err != nil {
 		t.Fatalf("ReserveDirectiveOperation: %v", err)
 	}
-	if _, err := pg.AdmitDirectiveExecution(ctx, reserved.Operation.OperationID, "reset-active-owner", now.Add(-time.Minute), time.Hour); err != nil {
+	if _, err := admitDirectiveExecutionForTest(ctx, pg, reserved.Operation.OperationID, "reset-active-owner", now.Add(-time.Minute), time.Hour); err != nil {
 		t.Fatalf("AdmitDirectiveExecution: %v", err)
 	}
 
@@ -229,7 +229,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 				t.Fatalf("ReserveDirectiveOperation: %v", err)
 			}
 			const ownerID = "reset-terminal-owner"
-			if _, err := pg.AdmitDirectiveExecution(ctx, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
+			if _, err := admitDirectiveExecutionForTest(ctx, pg, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
 				t.Fatalf("AdmitDirectiveExecution: %v", err)
 			}
 			switch terminalState {

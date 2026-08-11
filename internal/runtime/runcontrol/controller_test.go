@@ -114,6 +114,20 @@ func TestControllerContinueDrainsUntilExplicitExhaustion(t *testing.T) {
 	}
 }
 
+func TestControllerContinuePreflightsQueueBeforeRunMutation(t *testing.T) {
+	preflightErr := errors.New("live queue rejected")
+	store := &fakeRunControlStore{}
+	queue := &fakeRunControlQueue{preflightErr: preflightErr}
+	controller := NewController(store, queue, Options{})
+
+	if _, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"}); !errors.Is(err, preflightErr) {
+		t.Fatalf("Continue() error = %v, want preflight rejection", err)
+	}
+	if store.continued || queue.called || queue.preflightCalls != 1 {
+		t.Fatalf("preflight calls=%d continued=%v released=%v, want 1/false/false", queue.preflightCalls, store.continued, queue.called)
+	}
+}
+
 type fakeRunControlStore struct {
 	continued bool
 	stopped   bool
@@ -159,10 +173,17 @@ func (s *fakeRunControlStore) RunDispatchBlocked(context.Context, string) (bool,
 }
 
 type fakeRunControlQueue struct {
-	called  bool
-	calls   int
-	err     error
-	results []runtimepipelineobligation.SweepResult
+	called         bool
+	calls          int
+	preflightCalls int
+	preflightErr   error
+	err            error
+	results        []runtimepipelineobligation.SweepResult
+}
+
+func (q *fakeRunControlQueue) PreflightRunQueue(context.Context, string) error {
+	q.preflightCalls++
+	return q.preflightErr
 }
 
 func (q *fakeRunControlQueue) ReleaseRunQueue(context.Context, string, int) (runtimepipelineobligation.SweepResult, error) {

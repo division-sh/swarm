@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -132,9 +133,22 @@ type DirectiveOperationReconcileResult struct {
 	Deleted       int
 }
 
+type DirectiveExecutionAdmissionRequest struct {
+	OperationID      string
+	OwnerID          string
+	Now              time.Time
+	Lease            time.Duration
+	ExecutionPosture executionposture.Posture
+}
+
+type DirectiveExecutionAdmission struct {
+	Operation DirectiveOperation
+	Event     events.AdmittedEvent
+}
+
 type DirectiveOperationStore interface {
 	ReserveDirectiveOperation(context.Context, ReserveDirectiveOperationRequest) (DirectiveOperationReservation, error)
-	AdmitDirectiveExecution(context.Context, string, string, time.Time, time.Duration) (DirectiveOperation, error)
+	AdmitDirectiveExecution(context.Context, DirectiveExecutionAdmissionRequest) (DirectiveExecutionAdmission, error)
 	RenewDirectiveExecutionLease(context.Context, string, string, time.Time, time.Duration) error
 	RecordDirectiveExecuted(context.Context, string, string, json.RawMessage, time.Time) (DirectiveOperation, error)
 	FinalizeDirectiveSuccess(context.Context, string, time.Time, time.Duration) (DirectiveOperation, error)

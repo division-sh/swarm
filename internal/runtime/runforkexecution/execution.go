@@ -177,6 +177,18 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{}, err
 	}
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
+	if !req.AgentRuntime.ExecutionPosture.Valid() {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution posture is invalid")
+	}
+	sourceModes, err := ports.replay.LoadRunForkSelectedContractSourceEventModes(ctx, plan.SourceRunID, sourceEventIDs)
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
+	for _, mode := range sourceModes {
+		if err := req.AgentRuntime.ExecutionPosture.Admit(mode, "selected-contract source event admission"); err != nil {
+			return SelectedContractExecutionResult{}, err
+		}
+	}
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:       plan.SourceRunID,
 		At:                plan.ForkPoint.EventID,

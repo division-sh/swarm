@@ -125,6 +125,10 @@ func (p *recordingIngressRecoveryPublisher) Publish(ctx context.Context, event e
 	return p.bus.Publish(ctx, event)
 }
 
+func (p *recordingIngressRecoveryPublisher) PreflightRuntimeIngressQueue(ctx context.Context) error {
+	return p.bus.PreflightRuntimeIngressQueue(ctx)
+}
+
 func (p *recordingIngressRecoveryPublisher) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {
 	result, err := p.bus.ReleaseRuntimeIngressQueue(ctx, limit)
 	p.results = append(p.results, result)
@@ -146,6 +150,8 @@ type terminalRunRecoveryQueue struct {
 	err    error
 }
 
+func (q terminalRunRecoveryQueue) PreflightRunQueue(context.Context, string) error { return nil }
+
 func (q terminalRunRecoveryQueue) ReleaseRunQueue(
 	context.Context,
 	string,
@@ -162,6 +168,10 @@ func (q *recordingRunRecoveryQueue) ReleaseRunQueue(ctx context.Context, runID s
 		q.cancelAfterFirst()
 	}
 	return result, err
+}
+
+func (q *recordingRunRecoveryQueue) PreflightRunQueue(ctx context.Context, runID string) error {
+	return q.bus.PreflightRunQueue(ctx, runID)
 }
 
 func TestStandingPipelineRecoveryWaitsForOwnerInstallationOnSQLiteAndPostgres(t *testing.T) {

@@ -545,3 +545,10 @@ type Store interface {
 	GlobalWorkPresence(context.Context) (GlobalWorkPresence, error)
 	SummarizeRun(context.Context, string) (RunSummary, error)
 }
+
+// AdmissionPreflighter inspects the exact selected-store queue without
+// claiming or settling work. Transition owners consume it before reopening a
+// run or the runtime ingress gate.
+type AdmissionPreflighter interface {
+	Preflight(context.Context, ScanRequest) error
+}

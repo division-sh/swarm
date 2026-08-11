@@ -107,7 +107,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorBundleCatalogHandlers(BundleCatalogHandlerOptions{Catalog: c.BundleCatalog}),
 		testOperatorBundleRegisterHandlers(c),
 		OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
-		OperatorConversationForkHandlers(ConversationForkHandlerOptions{Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
+		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
 		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
 	)
 }
@@ -127,7 +127,7 @@ func testOperatorBundleRegisterHandlers(c testOperatorCapabilities) map[string]M
 }
 
 func testOperatorConversationForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	return OperatorConversationForkHandlers(ConversationForkHandlerOptions{Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency})
+	return OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency})
 }
 
 func testOperatorEventReplayHandlers(c testOperatorCapabilities) map[string]MethodHandler {

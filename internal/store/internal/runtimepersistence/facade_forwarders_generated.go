@@ -29,6 +29,7 @@ import (
 	destructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	effects "github.com/division-sh/swarm/internal/runtime/effects"
 	entityquery "github.com/division-sh/swarm/internal/runtime/entityquery"
+	executionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
 	executionposture "github.com/division-sh/swarm/internal/runtime/executionposture"
 	failures "github.com/division-sh/swarm/internal/runtime/failures"
 	inboundpublication "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -88,8 +89,12 @@ func (s *PostgresStore) ActiveRunDeliveryQuiesced(ctx context.Context, eventID s
 	return s.runLifecyclePostgresOwner.ActiveRunDeliveryQuiesced(ctx, eventID, route)
 }
 
-func (s *PostgresStore) AdmitDirectiveExecution(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) (agentcontrol.DirectiveOperation, error) {
-	return s.agentPostgresOwner.AdmitDirectiveExecution(ctx, operationID, ownerID, now, lease)
+func (s *PostgresStore) AdmitDirectiveExecution(ctx context.Context, req agentcontrol.DirectiveExecutionAdmissionRequest) (agentcontrol.DirectiveExecutionAdmission, error) {
+	return s.agentPostgresOwner.AdmitDirectiveExecution(ctx, req)
+}
+
+func (s *PostgresStore) AdmitOperatorConversationForkChat(ctx context.Context, forkID string, posture executionposture.Posture) error {
+	return s.runForkPostgresOwner.AdmitOperatorConversationForkChat(ctx, forkID, posture)
 }
 
 func (s *PostgresStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
@@ -716,6 +721,10 @@ func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Con
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
 }
 
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEventModes(ctx context.Context, sourceRunID string, sourceEventIDs []string) ([]executionmode.Mode, error) {
+	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
+}
+
 func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, workflowStates []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error) {
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, workflowStates)
 }
@@ -1172,8 +1181,12 @@ func (s *SQLiteRuntimeStore) ActiveRunDeliveryQuiesced(ctx context.Context, even
 	return s.runLifecycleSQLiteOwner.ActiveRunDeliveryQuiesced(ctx, eventID, route)
 }
 
-func (s *SQLiteRuntimeStore) AdmitDirectiveExecution(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) (agentcontrol.DirectiveOperation, error) {
-	return s.agentSQLiteOwner.AdmitDirectiveExecution(ctx, operationID, ownerID, now, lease)
+func (s *SQLiteRuntimeStore) AdmitDirectiveExecution(ctx context.Context, req agentcontrol.DirectiveExecutionAdmissionRequest) (agentcontrol.DirectiveExecutionAdmission, error) {
+	return s.agentSQLiteOwner.AdmitDirectiveExecution(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) AdmitOperatorConversationForkChat(ctx context.Context, forkID string, posture executionposture.Posture) error {
+	return s.runForkSQLiteOwner.AdmitOperatorConversationForkChat(ctx, forkID, posture)
 }
 
 func (s *SQLiteRuntimeStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {

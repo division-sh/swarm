@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
@@ -884,6 +885,54 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 	}
 	committed = true
 	return out, nil
+}
+
+func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEventModes(ctx context.Context, sourceRunID string, sourceEventIDs []string) ([]executionmode.Mode, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres store is required")
+	}
+	sourceRunID = strings.TrimSpace(sourceRunID)
+	if sourceRunID == "" {
+		return nil, fmt.Errorf("source run_id is required")
+	}
+	ids := uniqueNonEmptyStrings(sourceEventIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var sourceStatus string
+	if err := s.backend.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &runtimerunlifecycle.RunNotFoundError{RunID: sourceRunID}
+		}
+		return nil, fmt.Errorf("load selected-contract source event admission status: %w", err)
+	}
+	if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
+		state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		return nil, fmt.Errorf("selected-contract source event admission state %s is unsupported", state)
+	}
+	records, err := eventrecordpostgres.LoadMany(ctx, s.backend, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load selected-contract source event modes: %w", err)
+	}
+	if len(records) != len(ids) {
+		return nil, fmt.Errorf("selected-contract source event admission found %d of %d events", len(records), len(ids))
+	}
+	modes := make([]executionmode.Mode, 0, len(records))
+	for _, record := range records {
+		admitted, err := record.Decode()
+		if err != nil {
+			return nil, fmt.Errorf("decode selected-contract source event %s: %w", record.EventID, err)
+		}
+		event := admitted.Event()
+		if event.RunID() != sourceRunID {
+			return nil, fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
+		}
+		modes = append(modes, event.ExecutionMode())
+	}
+	return modes, nil
 }
 
 func projectRunForkSelectedContractSourceEventWorkflowState(

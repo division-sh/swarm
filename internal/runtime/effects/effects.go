@@ -787,6 +787,16 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if !ok {
 		return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_authority_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 	}
+	if !c.executionPosture.Valid() {
+		return Attempt{}, runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_missing", "external-effects", "authorize_attempt", map[string]any{
+			"action": "execute_external_effect", "adapter": strings.TrimSpace(req.Adapter),
+		})
+	}
+	if err := c.executionPosture.Admit(authority.ExecutionMode, "external effect authorization"); err != nil {
+		return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_rejected", "external-effects", "authorize_attempt", map[string]any{
+			"adapter": strings.TrimSpace(req.Adapter), "execution_mode": authority.ExecutionMode, "execution_posture": c.executionPosture,
+		}, err)
+	}
 	if registration.Kind == KindProviderTurn {
 		if err := authority.ValidateCompletionAdapter(req.Adapter); err != nil {
 			return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)

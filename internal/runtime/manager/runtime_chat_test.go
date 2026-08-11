@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -153,6 +154,7 @@ func directiveTestAgentIdentity(t testing.TB, agentID string) runtimeagentidenti
 type directiveEventStore struct {
 	mu                   sync.Mutex
 	events               []events.Event
+	admittedEvents       map[string]events.AdmittedEvent
 	operations           map[string]runtimeagentcontrol.DirectiveOperation
 	recordExecutedErr    error
 	finalizeSuccessErr   error
@@ -192,22 +194,33 @@ func (s *directiveEventStore) ReserveDirectiveOperation(_ context.Context, req r
 	op.CreatedAt, op.UpdatedAt = req.Now, req.Now
 	s.operations[op.OperationID] = op
 	s.events = append(s.events, req.Event.Event())
+	if s.admittedEvents == nil {
+		s.admittedEvents = map[string]events.AdmittedEvent{}
+	}
+	s.admittedEvents[req.Event.ID()] = req.Event
 	return runtimeagentcontrol.DirectiveOperationReservation{Operation: op, Created: true}, nil
 }
 
-func (s *directiveEventStore) AdmitDirectiveExecution(_ context.Context, operationID, ownerID string, now time.Time, lease time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+func (s *directiveEventStore) AdmitDirectiveExecution(_ context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	op := s.operations[operationID]
+	op := s.operations[req.OperationID]
 	if op.State != runtimeagentcontrol.DirectiveOperationPrepared {
-		return op, runtimeagentcontrol.ErrorForDirectiveOperation(op)
+		return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op}, runtimeagentcontrol.ErrorForDirectiveOperation(op)
+	}
+	event, found := s.admittedEvents[op.DirectiveEventID]
+	if !found {
+		return runtimeagentcontrol.DirectiveExecutionAdmission{}, fmt.Errorf("directive event %s not found", op.DirectiveEventID)
+	}
+	if err := req.ExecutionPosture.Admit(event.Event().ExecutionMode(), "prepared directive execution"); err != nil {
+		return runtimeagentcontrol.DirectiveExecutionAdmission{}, err
 	}
 	op.State = runtimeagentcontrol.DirectiveOperationExecuting
-	op.ExecutionOwnerID = ownerID
-	op.ExecutionLeaseExpiresAt = now.Add(lease)
-	op.ExecutionAdmittedAt, op.UpdatedAt = now, now
-	s.operations[operationID] = op
-	return op, nil
+	op.ExecutionOwnerID = req.OwnerID
+	op.ExecutionLeaseExpiresAt = req.Now.Add(req.Lease)
+	op.ExecutionAdmittedAt, op.UpdatedAt = req.Now, req.Now
+	s.operations[req.OperationID] = op
+	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event}, nil
 }
 
 func (s *directiveEventStore) RenewDirectiveExecutionLease(ctx context.Context, _ string, _ string, _ time.Time, _ time.Duration) error {

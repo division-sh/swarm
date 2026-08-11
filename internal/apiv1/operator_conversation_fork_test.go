@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -37,6 +38,7 @@ type fakeConversationForkLifecycleStore struct {
 	viewResult    runfork.OperatorConversationForkSession
 	viewErr       error
 	prepareResult runfork.ConversationForkChatPrepared
+	admitErr      error
 	prepareErr    error
 	recordResult  runfork.ConversationForkChatResult
 	recordErr     error
@@ -47,6 +49,7 @@ type fakeConversationForkLifecycleStore struct {
 	createCalls    int
 	listCalls      int
 	viewCalls      int
+	admitCalls     int
 	prepareCalls   int
 	recordCalls    int
 	heartbeatCalls int
@@ -56,6 +59,8 @@ type fakeConversationForkLifecycleStore struct {
 	lastCreate  runfork.ConversationForkCreateRequest
 	lastList    runfork.ConversationForkListOptions
 	lastViewID  string
+	lastAdmitID string
+	lastPosture executionposture.Posture
 	lastPrepare runfork.ConversationForkChatPrepareRequest
 	lastRecord  runfork.ConversationForkChatRecordRequest
 	lastFailure runfork.ConversationForkChatFailureRequest
@@ -75,6 +80,13 @@ func (s *fakeConversationForkLifecycleStore) CreateOperatorConversationFork(_ co
 		s.recordEffect()
 	}
 	return s.createResult, nil
+}
+
+func (s *fakeConversationForkLifecycleStore) AdmitOperatorConversationForkChat(_ context.Context, forkID string, posture executionposture.Posture) error {
+	s.admitCalls++
+	s.lastAdmitID = forkID
+	s.lastPosture = posture
+	return s.admitErr
 }
 
 func (s *fakeConversationForkLifecycleStore) ListOperatorConversationForks(_ context.Context, opts runfork.ConversationForkListOptions) (runfork.ConversationForkListResult, error) {
@@ -536,6 +548,33 @@ func TestOperatorConversationForkChatHeartbeatFailurePreventsExecution(t *testin
 	}
 	if forks.lastFailure.Prepared.ForkTurnID != prepared.ForkTurnID || forks.lastFailure.Cause == nil {
 		t.Fatalf("heartbeat failure terminalization=%#v", forks.lastFailure)
+	}
+}
+
+func TestOperatorConversationForkChatAdmitsExactSourceModeBeforeIdempotency(t *testing.T) {
+	forkID := "00000000-0000-0000-0000-000000000301"
+	forks := &fakeConversationForkLifecycleStore{admitErr: errors.New("mock_only rejects live source actor")}
+	idempotency := newMutatingProbeIdempotencyStore()
+	executor := &fakeForkChatExecutor{}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
+			ExecutionPosture:          executionposture.MockOnly,
+			ConversationForkLifecycle: forks,
+			ForkChatExecutor:          executor,
+			Idempotency:               idempotency,
+		}),
+	})
+
+	response := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"chat","method":"conversation.fork_chat","params":{"fork_id":"`+forkID+`","message":"inspect","idempotency_key":"chat-1"}}`)
+	if response.Error == nil {
+		t.Fatalf("conversation.fork_chat response = %#v, want preflight rejection", response)
+	}
+	if forks.admitCalls != 1 || forks.lastAdmitID != forkID || forks.lastPosture != executionposture.MockOnly {
+		t.Fatalf("chat admission = calls %d fork %q posture %q", forks.admitCalls, forks.lastAdmitID, forks.lastPosture)
+	}
+	if idempotency.calls != 0 || forks.prepareCalls != 0 || forks.heartbeatCalls != 0 || executor.calls != 0 || forks.recordCalls != 0 {
+		t.Fatalf("rejected chat mutated downstream owners: idempotency=%d prepare=%d heartbeat=%d execute=%d record=%d", idempotency.calls, forks.prepareCalls, forks.heartbeatCalls, executor.calls, forks.recordCalls)
 	}
 }
 

@@ -74,6 +74,24 @@ func LoadSQLiteEventIdentity(ctx context.Context, q interface {
 	return loadSQLiteEventIdentity(ctx, q, eventID)
 }
 
+func (s *EventPostgresOwner) LoadDirectiveEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	row, found, err := loadPostgresEventIdentity(ctx, tx, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, found, err
+	}
+	admitted, err := decodeEventRecord(row)
+	return admitted, err == nil, err
+}
+
+func (s *EventSQLiteOwner) LoadDirectiveEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
+	row, found, err := loadSQLiteEventIdentity(ctx, tx, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, found, err
+	}
+	admitted, err := decodeEventRecord(row)
+	return admitted, err == nil, err
+}
+
 func (s *EventPostgresOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	row, found, err := loadPostgresEventIdentity(ctx, tx, eventID)
 	if err != nil || !found {

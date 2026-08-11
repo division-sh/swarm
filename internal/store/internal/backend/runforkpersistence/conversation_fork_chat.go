@@ -15,6 +15,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
@@ -23,6 +24,39 @@ import (
 )
 
 const conversationForkChatExecutionLease = 2 * time.Minute
+
+func (s *RunForkPostgresOwner) AdmitOperatorConversationForkChat(ctx context.Context, forkID string, posture executionposture.Posture) error {
+	owner, err := postgresConversationForkStore(s)
+	if err != nil {
+		return err
+	}
+	return owner.admitOperatorConversationForkChat(ctx, forkID, posture)
+}
+
+func (s *RunForkSQLiteOwner) AdmitOperatorConversationForkChat(ctx context.Context, forkID string, posture executionposture.Posture) error {
+	owner, err := sqliteConversationForkStore(s)
+	if err != nil {
+		return err
+	}
+	return owner.admitOperatorConversationForkChat(ctx, forkID, posture)
+}
+
+func (s conversationForkStore) admitOperatorConversationForkChat(ctx context.Context, forkID string, posture executionposture.Posture) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	if !posture.Valid() {
+		return fmt.Errorf("conversation fork chat execution posture is invalid")
+	}
+	fork, err := s.loadOperatorConversationFork(ctx, forkID)
+	if err != nil {
+		return err
+	}
+	if fork.State != "active" {
+		return &operatorread.EntityReadParamError{Field: "fork_id", Reason: "must reference an active fork"}
+	}
+	return admitConversationForkSourceAgent(ctx, s, s.db, fork, posture)
+}
 
 func (s *RunForkPostgresOwner) PrepareOperatorConversationForkChat(ctx context.Context, req runtimerunfork.ConversationForkChatPrepareRequest) (runtimerunfork.ConversationForkChatPrepared, error) {
 	owner, err := postgresConversationForkStore(s)
@@ -73,6 +107,9 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 		if err != nil {
 			return err
 		}
+		if err := admitConversationForkSourceAgent(txctx, s, tx, fork, req.ExecutionPosture); err != nil {
+			return err
+		}
 		sourceBundleHash, err := loadConversationForkChatBundleHash(txctx, s, tx, fork.SourceRunID)
 		if err != nil {
 			return err
@@ -101,6 +138,30 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 		return runtimerunfork.ConversationForkChatPrepared{}, fmt.Errorf("prepare conversation fork chat: %w", err)
 	}
 	return prepared, nil
+}
+
+func admitConversationForkSourceAgent(
+	ctx context.Context,
+	owner conversationForkStore,
+	q conversationForkQueryer,
+	fork runtimerunfork.OperatorConversationForkSession,
+	posture executionposture.Posture,
+) error {
+	if !posture.Valid() {
+		return fmt.Errorf("conversation fork chat execution posture is invalid")
+	}
+	snapshot, err := loadConversationForkSnapshot(ctx, owner, q, fork.ForkID)
+	if err == nil {
+		return posture.Admit(snapshot.SourceAgent.ExecutionMode, "conversation fork chat source actor admission")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	sourceAgent, err := loadConversationForkSourceAgent(ctx, owner, q, fork.SourceIdentity)
+	if err != nil {
+		return err
+	}
+	return posture.Admit(sourceAgent.ExecutionMode, "conversation fork chat source actor admission")
 }
 
 func rejectConversationForkChatReplay(
@@ -493,8 +554,8 @@ func ensureConversationForkSnapshot(ctx context.Context, owner conversationForkS
 	return snapshot, nil
 }
 
-func loadConversationForkSnapshot(ctx context.Context, owner conversationForkStore, tx *sql.Tx, forkID string) (runtimerunfork.ConversationForkSnapshot, error) {
-	row := owner.queryRow(ctx, tx, `
+func loadConversationForkSnapshot(ctx context.Context, owner conversationForkStore, q conversationForkQueryer, forkID string) (runtimerunfork.ConversationForkSnapshot, error) {
+	row := owner.queryRow(ctx, q, `
 		SELECT
 			CAST(fork_id AS TEXT), CAST(source_session_id AS TEXT), COALESCE(CAST(source_run_id AS TEXT), ''),
 			source_agent_id, source_agent_name_owner, source_agent_name_source, source_agent_route_presence,
@@ -555,12 +616,12 @@ func loadConversationForkSnapshot(ctx context.Context, owner conversationForkSto
 	return out, nil
 }
 
-func loadConversationForkSourceAgent(ctx context.Context, owner conversationForkStore, tx *sql.Tx, identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, error) {
+func loadConversationForkSourceAgent(ctx context.Context, owner conversationForkStore, q conversationForkQueryer, identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, error) {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, err
 	}
-	row := owner.queryRow(ctx, tx, `
+	row := owner.queryRow(ctx, q, `
 		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
 		       role, model, llm_backend, memory_enabled, memory_source,

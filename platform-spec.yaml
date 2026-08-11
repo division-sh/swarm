@@ -5955,6 +5955,19 @@ engine:
       transaction rejects live under mock_only before claim, release, decision/deferral, generation, run-state, journal,
       credential, transport, or dispatch mutation. Standing-service lifecycle admission and mutation share one selected-store
       transaction on SQLite and PostgreSQL.
+    canonical_pre_mutation_owners: >
+      Admission is performed by each canonical lifecycle owner, not deferred to a downstream EventBus, scanner, or effect
+      backstop. Persisted-agent reconstruction and replacement admit the exact selected actor config before factory, route,
+      generation, or registration work. Prepared-directive execution loads and admits the exact persisted directive event in
+      the selected-store transaction before changing operation state. run.continue and runtime.resume preflight the complete
+      selected-store queue before changing run/runtime state or opening dispatch. Dynamic readiness admits the exact persisted
+      plan before agent, route, timer, topology, or plan-revision mutation. Standing lifecycle census covers queued delivery,
+      active workflow timer, pending decision card, started/uncertain activity attempt, incomplete readiness plan, raw
+      unprocessed pipeline event, and pending decision-route obligation as separate executable families. Selected-contract
+      fork execution admits every exact frontier event before fork materialization or runtime startup. conversation.fork_chat
+      admits the exact persisted source actor before idempotency, snapshot, turn, lease, heartbeat, or failure mutation. The
+      central effect Controller.Authorize admits exact authority mode for every effect kind, including startup probes, before
+      authorization-store, journal, credential, or transport mutation.
     replay_and_fork: >
       event.replay and agent.replay preserve the original causal mode and reject a live original under mock_only before
       direct-route publication, idempotency, delivery, or audit mutation. Selected-contract and conversation fork execution

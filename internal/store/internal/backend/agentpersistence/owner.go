@@ -17,6 +17,7 @@ import (
 
 type DirectiveEventCommitter interface {
 	CommitDirectiveEventTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	LoadDirectiveEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
 }
 
 type DirectivePipelineOwner interface {

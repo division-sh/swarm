@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -89,13 +91,14 @@ type ConversationForkDeleteResult struct {
 }
 
 type ConversationForkChatPrepareRequest struct {
-	ForkID         string
-	Message        string
-	Method         string
-	ActorTokenID   string
-	RequestHash    string
-	IdempotencyKey string
-	Now            time.Time
+	ForkID           string
+	Message          string
+	Method           string
+	ActorTokenID     string
+	RequestHash      string
+	IdempotencyKey   string
+	Now              time.Time
+	ExecutionPosture executionposture.Posture
 }
 
 type ConversationForkChatRecordRequest struct {

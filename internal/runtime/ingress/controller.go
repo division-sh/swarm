@@ -61,6 +61,7 @@ type Store interface {
 
 type EventPublisher interface {
 	Publish(context.Context, events.Event) error
+	PreflightRuntimeIngressQueue(context.Context) error
 	ReleaseRuntimeIngressQueue(context.Context, int) (runtimepipelineobligation.SweepResult, error)
 }
 
@@ -156,6 +157,11 @@ func (c *Controller) transition(ctx context.Context, target Status, req Transiti
 	controlledBy := strings.TrimSpace(req.ControlledBy)
 	if controlledBy == "" {
 		controlledBy = "api.v1"
+	}
+	if target == StatusRunning && c.publisher != nil {
+		if err := c.publisher.PreflightRuntimeIngressQueue(ctx); err != nil {
+			return TransitionResult{}, err
+		}
 	}
 	state, changed, err := c.transitionState(ctx, target, reason, controlledBy, now)
 	if err != nil {

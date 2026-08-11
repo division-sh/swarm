@@ -14,6 +14,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -249,18 +250,67 @@ func insertSQLiteDirectiveOperationTx(ctx context.Context, tx *sql.Tx, op runtim
 	return nil
 }
 
-func (s *AgentPostgresOwner) AdmitDirectiveExecution(ctx context.Context, operationID, ownerID string, now time.Time, lease time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
-	return s.transitionPostgresDirectiveOperation(ctx, operationID, func(txctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executing', execution_owner_id = $2, execution_admitted_at = $3, execution_lease_expires_at = $4, updated_at = $3 WHERE operation_id = $1::uuid AND state = 'prepared'`, operationID, ownerID, now.UTC(), now.Add(normalizeDirectiveLease(lease)).UTC())
+func (s *AgentPostgresOwner) AdmitDirectiveExecution(ctx context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
+	var event events.AdmittedEvent
+	op, err := s.transitionPostgresDirectiveOperation(ctx, req.OperationID, func(txctx context.Context, tx *sql.Tx) error {
+		current, found, err := loadPostgresDirectiveOperationByID(txctx, tx, req.OperationID, false)
+		if err != nil || !found {
+			return errors.Join(err, fmt.Errorf("directive operation not found"))
+		}
+		event, err = s.loadAndAdmitDirectiveEvent(txctx, tx, current, req.ExecutionPosture)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executing', execution_owner_id = $2, execution_admitted_at = $3, execution_lease_expires_at = $4, updated_at = $3 WHERE operation_id = $1::uuid AND state = 'prepared'`, req.OperationID, req.OwnerID, req.Now.UTC(), req.Now.Add(normalizeDirectiveLease(req.Lease)).UTC())
 		return requireDirectiveTransition(res, err)
 	})
+	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event}, err
 }
 
-func (s *AgentSQLiteOwner) AdmitDirectiveExecution(ctx context.Context, operationID, ownerID string, now time.Time, lease time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
-	return s.transitionSQLiteDirectiveOperation(ctx, operationID, func(txctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executing', execution_owner_id = ?, execution_admitted_at = ?, execution_lease_expires_at = ?, updated_at = ? WHERE operation_id = ? AND state = 'prepared'`, ownerID, now.UTC(), now.Add(normalizeDirectiveLease(lease)).UTC(), now.UTC(), operationID)
+func (s *AgentSQLiteOwner) AdmitDirectiveExecution(ctx context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
+	var event events.AdmittedEvent
+	op, err := s.transitionSQLiteDirectiveOperation(ctx, req.OperationID, func(txctx context.Context, tx *sql.Tx) error {
+		current, found, err := loadSQLiteDirectiveOperationByID(txctx, tx, req.OperationID)
+		if err != nil || !found {
+			return errors.Join(err, fmt.Errorf("directive operation not found"))
+		}
+		event, err = s.loadAndAdmitDirectiveEvent(txctx, tx, current, req.ExecutionPosture)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = 'executing', execution_owner_id = ?, execution_admitted_at = ?, execution_lease_expires_at = ?, updated_at = ? WHERE operation_id = ? AND state = 'prepared'`, req.OwnerID, req.Now.UTC(), req.Now.Add(normalizeDirectiveLease(req.Lease)).UTC(), req.Now.UTC(), req.OperationID)
 		return requireDirectiveTransition(res, err)
 	})
+	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event}, err
+}
+
+func (s *AgentPostgresOwner) loadAndAdmitDirectiveEvent(ctx context.Context, tx *sql.Tx, op runtimeagentcontrol.DirectiveOperation, posture executionposture.Posture) (events.AdmittedEvent, error) {
+	return loadAndAdmitDirectiveEvent(ctx, tx, s.events, op, posture)
+}
+
+func (s *AgentSQLiteOwner) loadAndAdmitDirectiveEvent(ctx context.Context, tx *sql.Tx, op runtimeagentcontrol.DirectiveOperation, posture executionposture.Posture) (events.AdmittedEvent, error) {
+	return loadAndAdmitDirectiveEvent(ctx, tx, s.events, op, posture)
+}
+
+func loadAndAdmitDirectiveEvent(ctx context.Context, tx *sql.Tx, owner DirectiveEventCommitter, op runtimeagentcontrol.DirectiveOperation, posture executionposture.Posture) (events.AdmittedEvent, error) {
+	if owner == nil {
+		return events.AdmittedEvent{}, fmt.Errorf("directive event owner is required")
+	}
+	admitted, found, err := owner.LoadDirectiveEventTx(ctx, tx, op.DirectiveEventID)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	if !found {
+		return events.AdmittedEvent{}, fmt.Errorf("directive event %s not found", op.DirectiveEventID)
+	}
+	event := admitted.Event()
+	if event.ID() != op.DirectiveEventID || event.RunID() != op.ResolvedRunID || event.Type() != events.EventTypePlatformAgentDirective {
+		return events.AdmittedEvent{}, fmt.Errorf("directive event identity conflicts with operation %s", op.OperationID)
+	}
+	if err := posture.Admit(event.ExecutionMode(), "prepared directive execution"); err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return admitted, nil
 }
 
 func normalizeDirectiveLease(lease time.Duration) time.Duration {

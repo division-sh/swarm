@@ -395,6 +395,9 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		return err
 	}
+	if err := am.executionPosture.Admit(rec.Config.ExecutionMode, "agent lifecycle reconstruction"); err != nil {
+		return err
+	}
 	subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &rec.Config, nil)
 	if err != nil {
 		return err
