@@ -45,9 +45,9 @@ func TestConversationForkChatAdmitsExactSourceActorModeBeforeMutation(t *testing
 			test := test
 			t.Run(backend+"/"+test.name, func(t *testing.T) {
 				fixture := newForkChatCompletionAuthorityFixture(t, backend == "sqlite")
-				query := `UPDATE agents SET llm_backend = ?, runtime_descriptor = ? WHERE agent_id = ?`
+				query := `UPDATE agents SET llm_backend = ?, runtime_descriptor = json_patch(runtime_descriptor, ?) WHERE agent_id = ?`
 				if !fixture.sqlite {
-					query = `UPDATE agents SET llm_backend = $1, runtime_descriptor = $2::jsonb WHERE agent_id = $3`
+					query = `UPDATE agents SET llm_backend = $1, runtime_descriptor = runtime_descriptor || $2::jsonb WHERE agent_id = $3`
 				}
 				backend := "claude_cli"
 				descriptor := `{"type":"stub","execution_mode":"live"}`
