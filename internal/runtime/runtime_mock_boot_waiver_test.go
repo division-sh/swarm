@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -70,7 +72,10 @@ func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverInvariant(t 
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	manager := runtimemanager.NewAgentManager(nil, nil)
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live", ID: "recovered-agent", Role: "recovered",
 		Model: "regular", Config: json.RawMessage(`{"system_prompt":"Recovered agent"}`),
@@ -88,7 +93,10 @@ func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverAcceptsNoDiv
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	manager := runtimemanager.NewAgentManager(nil, nil)
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 
 	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{}, fullyMockedRuntimeAgentMemorySource(t), manager)
 	if err != nil {

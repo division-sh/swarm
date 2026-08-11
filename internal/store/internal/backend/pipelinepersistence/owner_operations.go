@@ -165,12 +165,12 @@ func (s *postgresPipelineObligationStore) Preflight(ctx context.Context, request
 		if !ok {
 			return nil
 		}
-		blocked, err := s.postgresLivePipelineWorkExists(ctx, query)
+		mode, found, err := s.postgresLivePipelineWorkMode(ctx, query)
 		if err != nil {
 			return err
 		}
-		if blocked {
-			return request.Admit(executionmode.Live)
+		if found {
+			return request.Admit(mode)
 		}
 	}
 }
@@ -187,19 +187,19 @@ func (s *sqlitePipelineObligationStore) Preflight(ctx context.Context, request r
 		if !ok {
 			return nil
 		}
-		blocked, err := s.sqliteLivePipelineWorkExists(ctx, query)
+		mode, found, err := s.sqliteLivePipelineWorkMode(ctx, query)
 		if err != nil {
 			return err
 		}
-		if blocked {
-			return request.Admit(executionmode.Live)
+		if found {
+			return request.Admit(mode)
 		}
 	}
 }
 
-func (s *PipelinePostgresOwner) postgresLivePipelineWorkExists(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (bool, error) {
+func (s *PipelinePostgresOwner) postgresLivePipelineWorkMode(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (executionmode.Mode, bool, error) {
 	if err := query.Validate(); err != nil {
-		return false, err
+		return "", false, err
 	}
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		args := []any{}
@@ -208,16 +208,19 @@ func (s *PipelinePostgresOwner) postgresLivePipelineWorkExists(ctx context.Conte
 			whereRun = "AND route.run_id = $1::uuid"
 			args = append(args, runID)
 		}
-		var exists bool
-		err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (
-			SELECT 1 FROM decision_card_route_obligations route
+		var mode executionmode.Mode
+		err := s.backend.QueryRowContext(ctx, `
+			SELECT e.execution_mode FROM decision_card_route_obligations route
 			JOIN runs run ON run.run_id = route.run_id
 			JOIN events e ON e.event_id = route.event_id
 			WHERE route.status = 'pending' AND route.next_attempt_at <= now()
 			  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 			  AND e.execution_mode = 'live' `+whereRun+`
-		)`, args...).Scan(&exists)
-		return exists, err
+			LIMIT 1`, args...).Scan(&mode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return mode, err == nil, err
 	}
 	args := diagnosticDirectReplayEventArgs()
 	whereRun := ""
@@ -225,9 +228,9 @@ func (s *PipelinePostgresOwner) postgresLivePipelineWorkExists(ctx context.Conte
 		whereRun = fmt.Sprintf("AND e.run_id = $%d::uuid", len(args)+1)
 		args = append(args, runID)
 	}
-	var exists bool
-	err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1 FROM events e
+	var mode executionmode.Mode
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT e.execution_mode FROM events e
 		LEFT JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
 		 AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
@@ -239,13 +242,16 @@ func (s *PipelinePostgresOwner) postgresLivePipelineWorkExists(ctx context.Conte
 			WHERE route.event_id = e.event_id AND route.status <> 'completed'
 		  )
 		  AND `+postgresDiagnosticDirectReplayExclusionSQL("e", 1)+`
-	)`, args...).Scan(&exists)
-	return exists, err
+		LIMIT 1`, args...).Scan(&mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return mode, err == nil, err
 }
 
-func (s *PipelineSQLiteOwner) sqliteLivePipelineWorkExists(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (bool, error) {
+func (s *PipelineSQLiteOwner) sqliteLivePipelineWorkMode(ctx context.Context, query runtimepipelineobligation.ClaimQuery) (executionmode.Mode, bool, error) {
 	if err := query.Validate(); err != nil {
-		return false, err
+		return "", false, err
 	}
 	if query.Purpose == runtimepipelineobligation.PurposeDecisionRoute {
 		args := []any{time.Now().UTC()}
@@ -254,16 +260,19 @@ func (s *PipelineSQLiteOwner) sqliteLivePipelineWorkExists(ctx context.Context, 
 			whereRun = "AND route.run_id = ?"
 			args = append(args, runID)
 		}
-		var exists bool
-		err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (
-			SELECT 1 FROM decision_card_route_obligations route
+		var mode executionmode.Mode
+		err := s.backend.QueryRowContext(ctx, `
+			SELECT e.execution_mode FROM decision_card_route_obligations route
 			JOIN runs run ON run.run_id = route.run_id
 			JOIN events e ON e.event_id = route.event_id
 			WHERE route.status = 'pending' AND route.next_attempt_at <= ?
 			  AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 			  AND e.execution_mode = 'live' `+whereRun+`
-		)`, args...).Scan(&exists)
-		return exists, err
+			LIMIT 1`, args...).Scan(&mode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return mode, err == nil, err
 	}
 	args := []any{}
 	whereRun := ""
@@ -272,9 +281,9 @@ func (s *PipelineSQLiteOwner) sqliteLivePipelineWorkExists(ctx context.Context, 
 		args = append(args, runID)
 	}
 	args = append(args, diagnosticDirectReplayEventArgs()...)
-	var exists bool
-	err := s.backend.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1 FROM events e
+	var mode executionmode.Mode
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT e.execution_mode FROM events e
 		LEFT JOIN runs run ON run.run_id = e.run_id
 		LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
 		 AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
@@ -286,8 +295,11 @@ func (s *PipelineSQLiteOwner) sqliteLivePipelineWorkExists(ctx context.Context, 
 			WHERE route.event_id = e.event_id AND route.status <> 'completed'
 		  )
 		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
-	)`, args...).Scan(&exists)
-	return exists, err
+		LIMIT 1`, args...).Scan(&mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return mode, err == nil, err
 }
 
 func (s *PipelinePostgresOwner) postgresPipelineClaims() *postgresPipelineClaimRegistry {

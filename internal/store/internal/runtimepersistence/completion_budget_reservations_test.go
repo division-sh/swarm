@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -235,7 +236,8 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 			t.Fatalf("create budget-race forkchat fork: %v", err)
 		}
 		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
-			ForkID: fork.ForkID, Message: "budget race", Method: "conversation.fork_chat", ActorTokenID: "budget-actor",
+			ExecutionPosture: executionposture.Live,
+			ForkID:           fork.ForkID, Message: "budget race", Method: "conversation.fork_chat", ActorTokenID: "budget-actor",
 			RequestHash: runtimeeffects.Fingerprint([]byte("budget race")), Now: now.Add(time.Second),
 		})
 		if err != nil {

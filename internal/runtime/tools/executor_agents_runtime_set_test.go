@@ -75,6 +75,7 @@ func TestExecAgentHireResolvesMockBeforeNativeToolAdmissionWithProductionRuntime
 		constructed[cfg.ID] = resolved.Actor
 		return runtimeSetHireAgent{id: cfg.ID}, nil
 	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture:  executionposture.Live,
 		LLMBackend:        llmselection.BackendClaudeCLI,
 		ReceiverExecution: runtimeeventreceiver.NormalExecution(),
 		SemanticSource:    source,

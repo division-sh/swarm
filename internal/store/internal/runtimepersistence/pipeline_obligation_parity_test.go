@@ -691,7 +691,9 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 				failures = append(failures, fmt.Sprintf("%s retains %s", rel, symbol))
 			}
 		}
-		if strings.Contains(source, "'pipeline'") && rel != "internal/store/internal/backend/pipelinepersistence/owner_operations.go" {
+		ownsCanonicalPipelineSQL := rel == "internal/store/internal/backend/pipelinepersistence/owner_operations.go" ||
+			rel == "internal/store/internal/backend/pipelinepersistence/standing_service.go"
+		if strings.Contains(source, "'pipeline'") && !ownsCanonicalPipelineSQL {
 			failures = append(failures, fmt.Sprintf("%s owns exact platform/pipeline SQL outside the private adapter", rel))
 		}
 		if strings.Contains(source, "committed_replay_scopes") && !allowedScopeFiles[rel] {
