@@ -10003,6 +10003,8 @@ agent_intent_model:
     source_and_artifact: internal/runtime/agentintent
     scoped_resolution: internal/runtime/contracts
     runtime_carrier: internal/runtime/core/actors.AgentConfig
+    generated_environment_context: internal/runtime/agentintent.EnvironmentContext
+    provider_prompt_assembly: internal/runtime/agentintent.ProviderPrompt
   authority_rule: >
     Every managed model agent has exactly one authored business-intent source declared by `intent:` in its exact scoped
     agents.yaml entry. Contract loading resolves that declaration once into one immutable artifact. Verification, bundle
@@ -10083,14 +10085,15 @@ agent_intent_model:
     derived_system_prompt: >
       The derived system prompt is an internal, non-serializable runtime carrier constructed from the exact resolved intent
       plus separately owned contract criteria. It is never a selected-store field or authored string. Runtime rejects a
-      missing carrier, an intent-identity mismatch, or criteria references that differ from the selected declaration. The LLM
-      runtime appends the separately owned generated environment postamble exactly once when constructing the
-      provider-visible system prompt; that step does not mutate or replace the resolved intent artifact or durable criteria
-      references. Persisted `derived_system_prompt` is unsupported and fails closed rather than being migrated or accepted.
+      missing carrier, an intent-identity mismatch, or criteria references that differ from the selected declaration. The
+      canonical provider-prompt assembly appends the separately owned generated environment context exactly once when
+      constructing the provider-visible system prompt; normal execution and startup preflight consume that same assembly.
+      This step does not mutate or replace the resolved intent artifact or durable criteria references. Persisted
+      `derived_system_prompt` is unsupported and fails closed rather than being migrated or accepted.
     event_invariance: Event payload shape, payload mode, date, entity state, workspace class, shard parent, runtime backend,
       and execution mode never select or mutate authored intent content or identity.
-    provider_boundary: API, CLI, OpenAI-compatible, Responses, mock, and startup-probe adapters receive the derived carrier;
-      provider adapters never resolve agent intent.
+    provider_boundary: API, CLI, OpenAI-compatible, Responses, mock, and startup-probe adapters receive the exact text emitted
+      by the canonical ProviderPrompt assembly; provider adapters never resolve agent intent or append generated context.
   contract_criteria_assembly:
     owner: criteria_contracts.delivery
     rule: >
@@ -10099,9 +10102,10 @@ agent_intent_model:
       closed.
   environment_postamble:
     rule: >
-      The LLM runtime appends workspace facts after the immutable runtime intent-and-criteria carrier when constructing the
-      provider-visible system prompt. The postamble is generated platform context, is not authorable, does not list tools,
-      and does not alter durable intent/criteria facts, the resolved intent artifact, or hashes.
+      The canonical ProviderPrompt assembly appends workspace facts after the immutable runtime intent-and-criteria carrier
+      when constructing the provider-visible system prompt. Normal execution and startup preflight use that same assembly.
+      The postamble is generated platform context, is not authorable, does not list tools, and does not alter durable
+      intent/criteria facts, the resolved intent artifact, or hashes.
     required_content:
     - 'Workspace: /workspace (read-write logical path)'
     - 'Reference data: /data (read-only logical path)'
