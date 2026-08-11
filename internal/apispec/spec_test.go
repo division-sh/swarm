@@ -21,8 +21,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 63 {
 		t.Fatalf("method count = %d, want 63", report.MethodCount)
 	}
-	if report.SchemaCount != 144 {
-		t.Fatalf("schema count = %d, want 144", report.SchemaCount)
+	if report.SchemaCount != 145 {
+		t.Fatalf("schema count = %d, want 145", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 47 {
 		t.Fatalf("error code count = %d, want 47", report.ErrorCodeCount)
@@ -97,8 +97,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Methods) != 63 {
 		t.Fatalf("generated OpenRPC methods = %d, want 63", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 144 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 144", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 145 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 145", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 47 {
 		t.Fatalf("generated OpenRPC errors = %d, want 47", len(doc.Components.Errors))

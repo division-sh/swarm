@@ -939,6 +939,80 @@ func TestEventsFollowMalformedWSFailsClosed(t *testing.T) {
 	}
 }
 
+func TestEventObservationSurfacesRejectImpossibleConnectPlanEvidence(t *testing.T) {
+	tests := []struct {
+		name       string
+		mutate     func(map[string]any)
+		wantStderr string
+	}{
+		{
+			name: "resolved without candidates",
+			mutate: func(event map[string]any) {
+				plan := eventNoDeliveryPlan(event)
+				plan["candidates"] = []any{}
+			},
+			wantStderr: "resolved plan requires candidate outcomes",
+		},
+		{
+			name: "no registration with accepted candidate",
+			mutate: func(event map[string]any) {
+				plan := eventNoDeliveryPlan(event)
+				plan["resolution"] = "no_registration"
+			},
+			wantStderr: "cannot carry candidate outcomes",
+		},
+		{
+			name: "connect target carries ownership kind",
+			mutate: func(event map[string]any) {
+				target := eventNoDeliveryPlan(event)["targets"].([]any)[0].(map[string]any)
+				target["kind"] = "existing_entity"
+			},
+			wantStderr: "unknown field",
+		},
+	}
+	for _, test := range tests {
+		for _, surface := range []string{"list", "get", "subscribe"} {
+			t.Run(test.name+"/"+surface, func(t *testing.T) {
+				setCLIAPITestToken(t, "test-token")
+				event := validEventObservationNoDeliveryEvent("event-impossible")
+				test.mutate(event)
+
+				var stdout, stderr bytes.Buffer
+				if surface == "subscribe" {
+					server, _ := newEventObservationWSServer(t, eventObservationWSServerOptions{
+						events: []map[string]any{event}, closeAfterRows: true,
+					})
+					defer server.Close()
+					code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
+					if code != 3 || !strings.Contains(stderr.String(), test.wantStderr) {
+						t.Fatalf("subscribe code=%d stderr=%q, want code 3 containing %q", code, stderr.String(), test.wantStderr)
+					}
+					return
+				}
+
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request jsonRPCRequest
+					_ = json.NewDecoder(r.Body).Decode(&request)
+					if surface == "list" {
+						writeJSONRPCResult(t, w, request.ID, map[string]any{"events": []any{event}})
+						return
+					}
+					writeJSONRPCResult(t, w, request.ID, event)
+				}))
+				defer server.Close()
+				args := []string{"event", "view", "event-impossible"}
+				if surface == "list" {
+					args = []string{"event", "list"}
+				}
+				code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+				if code != 3 || !strings.Contains(stderr.String(), test.wantStderr) {
+					t.Fatalf("%s code=%d stderr=%q, want code 3 containing %q", surface, code, stderr.String(), test.wantStderr)
+				}
+			})
+		}
+	}
+}
+
 func TestEventsFollowMapsHandshakeAuthToAuthExit(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var rpcCalls atomic.Int32
@@ -1099,6 +1173,33 @@ func validEventObservationEvent(eventID string) map[string]any {
 			},
 		},
 	}
+}
+
+func validEventObservationNoDeliveryEvent(eventID string) map[string]any {
+	event := validEventObservationEvent(eventID)
+	event["deliveries"] = []any{}
+	event["no_delivery"] = map[string]any{
+		"reason": "matched_no_recipient",
+		"plans": []any{map[string]any{
+			"plan_sha256": strings.Repeat("a", 64),
+			"resolution":  "resolved",
+			"targets": []any{map[string]any{
+				"flow_id": "review",
+			}},
+			"candidates": []any{map[string]any{
+				"receiver_sha256": strings.Repeat("b", 64),
+				"recipient_kind":  "node",
+				"recipient_id":    "reviewer",
+				"path":            "review",
+				"outcome":         "accepted",
+			}},
+		}},
+	}
+	return event
+}
+
+func eventNoDeliveryPlan(event map[string]any) map[string]any {
+	return event["no_delivery"].(map[string]any)["plans"].([]any)[0].(map[string]any)
 }
 
 func eventReplayTestResult() map[string]any {

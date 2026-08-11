@@ -218,8 +218,16 @@ type OperatorNoDelivery struct {
 type OperatorConnectPlanEvaluation struct {
 	PlanSHA256 string                             `json:"plan_sha256"`
 	Resolution string                             `json:"resolution"`
-	Targets    []OperatorDeliveryTarget           `json:"targets"`
+	Targets    []OperatorConnectPlanTarget        `json:"targets"`
 	Candidates []OperatorConnectCandidateEvidence `json:"candidates"`
+}
+
+// OperatorConnectPlanTarget is route-selection evidence, not admitted
+// delivery ownership, so it cannot carry an ownership kind.
+type OperatorConnectPlanTarget struct {
+	FlowID       string `json:"flow_id,omitempty"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityID     string `json:"entity_id,omitempty"`
 }
 
 type OperatorConnectCandidateEvidence struct {

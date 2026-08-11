@@ -96,7 +96,6 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 			id:        eventtest.UUID("evt-output-connect"),
 			eventType: "worker/work.completed",
 			recipient: "parent-listener",
-			envelope:  events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("root-entity")}),
 			source: mustStaticRoutingSource(t, events.RouteIdentity{
 				FlowID: "worker", FlowInstance: "worker", EntityID: eventtest.UUID("worker-output-source"),
 			}),
