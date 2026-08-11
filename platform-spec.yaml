@@ -5963,9 +5963,9 @@ engine:
       selected-store queue before changing run/runtime state or opening dispatch. That resume census includes every pending
       decision-route obligation regardless of next_attempt_at; due-time eligibility belongs only to claim selection and never
       narrows resume safety. Dynamic readiness admits the exact persisted plan before agent, route, timer, topology, or
-      plan-revision mutation. Standing lifecycle census covers queued delivery,
-      active workflow timer, pending decision card, started/uncertain activity attempt, incomplete readiness plan, raw
-      unprocessed pipeline event, and pending decision-route obligation as separate executable families. Selected-contract
+      plan-revision mutation. Standing lifecycle census covers queued delivery, active workflow timer, active generic schedule,
+      pending decision card, started/uncertain activity attempt, incomplete readiness plan, raw unprocessed pipeline event, and
+      pending decision-route obligation as separate executable families. Selected-contract
       fork execution admits every exact frontier event before fork materialization or runtime startup. conversation.fork_chat
       admits the exact persisted source actor before idempotency, snapshot, turn, lease, heartbeat, or failure mutation. The
       central effect Controller.Authorize admits exact authority mode for every effect kind, including startup probes, before
