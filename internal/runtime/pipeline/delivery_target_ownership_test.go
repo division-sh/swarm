@@ -392,6 +392,9 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision"}}},
 		{name: "activity input", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"state": runtimecontracts.RefExpression("entity.status")}}}},
 		{name: "guard escalation", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{OnFailSpec: runtimecontracts.GuardFailureSpec{Action: runtimecontracts.GuardFailureActionEscalate, Escalation: runtimecontracts.EmitSpec{Event: "guard.failed", From: "entity"}}}}},
+		{name: "platform entity identity", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`}}},
+		{name: "platform entity state", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.current_state == "active"`}}},
+		{name: "platform entity gate", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.gates.ready`}}},
 		{name: "nested rule fan out", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.items"}}}}},
 		{name: "nested rule activity", handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"owner": runtimecontracts.CELExpression("entity.owner")}}}}}},
 	}
@@ -406,6 +409,11 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 		FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
 	}) != handlerEntitylessSafe {
 		t.Fatal("payload-only fan out classified as entity-scoped")
+	}
+	if handlerExecutionEntityRequirement(nil, "review", runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{Check: `_entity.flow_instance == "review/one"`},
+	}) != handlerEntitylessSafe {
+		t.Fatal("flow-instance-only platform metadata classified as entity-scoped")
 	}
 }
 
@@ -438,6 +446,10 @@ func TestHandlerExecutionEntityRequirementOwnsDurableBehaviorCapabilities(t *tes
 		}, want: handlerExistingEntityRequired},
 		{name: "explicit creation may materialize", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
+		}, want: handlerMaterializingEntity},
+		{name: "creation dominates platform entity identity", handler: runtimecontracts.SystemNodeEventHandler{
+			CreateEntity: true,
+			Guard:        &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
 		}, want: handlerMaterializingEntity},
 		{name: "payload-only fanout is entityless safe", handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},

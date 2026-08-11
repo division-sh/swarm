@@ -3501,7 +3501,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		ID: "selected_owner", Check: "has(entity.id) || !has(entity.id)",
+		ID: "selected_owner", Check: `_entity.id != ""`,
 	}}
 	child := runtimecontracts.FlowContractView{
 		Path:  "child",

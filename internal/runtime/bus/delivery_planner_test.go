@@ -55,7 +55,7 @@ func testSelectedOwnerPolicy(owners ...ActiveTargetDescriptor) deliveryRecipient
 
 func existingOwnerHandlerFixture() runtimecontracts.SystemNodeEventHandler {
 	return runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
-		ID: "selected_owner", Check: "has(entity.id) || !has(entity.id)",
+		ID: "selected_owner", Check: `_entity.id != ""`,
 	}}
 }
 
