@@ -511,7 +511,7 @@ func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (
 }
 
 func (eb *EventBus) PreflightRuntimeIngressQueue(ctx context.Context) error {
-	return eb.preflightPipelineObligations(ctx, runtimepipelineobligation.GlobalScanRequest())
+	return eb.preflightPipelineResume(ctx, runtimepipelineobligation.GlobalResumeAdmissionRequest())
 }
 
 // ReleaseRunQueue owns only the #2106 half. Executable delivery backlog is
@@ -541,22 +541,22 @@ func (eb *EventBus) PreflightRunQueue(ctx context.Context, runID string) error {
 	if runID == "" {
 		return errors.New("run ID is required")
 	}
-	return eb.preflightPipelineObligations(ctx, runtimepipelineobligation.RunScanRequest(runID))
+	return eb.preflightPipelineResume(ctx, runtimepipelineobligation.RunResumeAdmissionRequest(runID))
 }
 
-func (eb *EventBus) preflightPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest) error {
+func (eb *EventBus) preflightPipelineResume(ctx context.Context, request runtimepipelineobligation.ResumeAdmissionRequest) error {
 	if eb == nil || eb.pipelineObligations == nil {
 		return errors.New("pipeline obligation owner is required")
 	}
-	preflighter, ok := eb.pipelineObligations.(runtimepipelineobligation.AdmissionPreflighter)
+	preflighter, ok := eb.pipelineObligations.(runtimepipelineobligation.ResumeAdmissionPreflighter)
 	if !ok {
-		return errors.New("pipeline obligation admission preflight is required")
+		return errors.New("pipeline resume admission preflight is required")
 	}
 	request = request.WithExecutionPosture(eb.executionPosture)
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	return preflighter.Preflight(ctx, request)
+	return preflighter.PreflightResume(ctx, request)
 }
 
 func (eb *EventBus) authoritativeRecipientsForEvent(ctx context.Context, eventID string) ([]string, error) {

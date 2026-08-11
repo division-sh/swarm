@@ -288,8 +288,33 @@ type RecoverySummary struct {
 	OutcomeUncertain  int
 }
 
+type RecoveryRequest struct {
+	now              time.Time
+	executionPosture executionposture.Posture
+}
+
+func NewRecoveryRequest(now time.Time, posture executionposture.Posture) RecoveryRequest {
+	return RecoveryRequest{now: now.UTC(), executionPosture: posture}
+}
+
+func (r RecoveryRequest) Validate() error {
+	if r.now.IsZero() {
+		return errors.New("external effect recovery time is required")
+	}
+	if !r.executionPosture.Valid() {
+		return errors.New("external effect recovery execution posture is required")
+	}
+	return nil
+}
+
+func (r RecoveryRequest) Now() time.Time { return r.now }
+
+func (r RecoveryRequest) Admit(mode ExecutionMode) error {
+	return r.executionPosture.Admit(mode, "external effect startup recovery")
+}
+
 type RecoveryStore interface {
-	ReconcileExternalEffectAttempts(context.Context, time.Time) (RecoverySummary, error)
+	ReconcileExternalEffectAttempts(context.Context, RecoveryRequest) (RecoverySummary, error)
 }
 
 type Controller struct {

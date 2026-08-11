@@ -89,7 +89,7 @@ func proveRuntimeEffectsNeutralSchemaRegisteredAdapterParity(t *testing.T, fixtu
 			authorized := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "authorized", false, false)
 			launched := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "launched", true, false)
 			observed := beginNeutralRecoveryAttempt(t, fixture, registration.Adapter, "response-observed", true, true)
-			summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), time.Now().UTC().Add(time.Minute))
+			summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 			if err != nil {
 				t.Fatalf("reconcile %s attempts: %v", registration.Adapter, err)
 			}

@@ -873,8 +873,8 @@ func (s *PostgresStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Con
 	return s.pipelinePostgresOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
 }
 
-func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (effects.RecoverySummary, error) {
-	return s.effectPostgresOwner.ReconcileExternalEffectAttempts(ctx, now)
+func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, request effects.RecoveryRequest) (effects.RecoverySummary, error) {
+	return s.effectPostgresOwner.ReconcileExternalEffectAttempts(ctx, request)
 }
 
 func (s *PostgresStore) ReconcileStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, error) {
@@ -1857,8 +1857,8 @@ func (s *SQLiteRuntimeStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx contex
 	return s.pipelineSQLiteOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
 }
 
-func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (effects.RecoverySummary, error) {
-	return s.effectSQLiteOwner.ReconcileExternalEffectAttempts(ctx, now)
+func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, request effects.RecoveryRequest) (effects.RecoverySummary, error) {
+	return s.effectSQLiteOwner.ReconcileExternalEffectAttempts(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, error) {

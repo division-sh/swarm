@@ -247,7 +247,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	requireExternalOperationState(t, db, sqlite, prelaunch.Attempt().OperationID, runtimeeffects.StateAuthorized)
 	requireExternalOperationState(t, db, sqlite, launched.Attempt().OperationID, runtimeeffects.StateLaunched)
 	recoveryStore := store.(runtimeeffects.RecoveryStore)
-	summary, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, now.Add(2*time.Second))
+	summary, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
 	if err != nil {
 		t.Fatalf("reconcile external effects: %v", err)
 	}

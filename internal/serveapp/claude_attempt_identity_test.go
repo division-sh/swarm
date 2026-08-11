@@ -354,7 +354,10 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			if got := loadClaudeAttemptProofProviderHead(t, backend); got != "" {
 				t.Fatalf("provider head = %q after injected commit failure, want empty", got)
 			}
-			summary, err := baseStore.ReconcileExternalEffectAttempts(claudeAttemptProofContext(), time.Now().UTC().Add(10*time.Minute))
+			summary, err := baseStore.ReconcileExternalEffectAttempts(
+				claudeAttemptProofContext(),
+				runtimeeffects.NewRecoveryRequest(time.Now().UTC().Add(10*time.Minute), executionposture.Live),
+			)
 			if err != nil || summary.OutcomeUncertain != 1 {
 				t.Fatalf("recover provider-head fault summary=%#v err=%v", summary, err)
 			}

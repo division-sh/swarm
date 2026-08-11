@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"time"
+
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
@@ -11,4 +13,8 @@ func liveTestEffectController(store runtimeeffects.Store) *runtimeeffects.Contro
 
 func liveTestCompletionController(store runtimeeffects.Store, completion runtimeeffects.CompletionStore, heartbeat runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) *runtimeeffects.Controller {
 	return runtimeeffects.NewCompletionController(store, completion, heartbeat, projector).WithExecutionPosture(executionposture.Live)
+}
+
+func liveExternalEffectRecoveryRequest(now time.Time) runtimeeffects.RecoveryRequest {
+	return runtimeeffects.NewRecoveryRequest(now, executionposture.Live)
 }
