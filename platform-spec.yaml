@@ -26664,19 +26664,50 @@ api_specification:
             items:
               $ref: '#/components/schemas/DeadLetterRecord'
       EventDeliveryTarget:
+        description: One-way structured projection of the persisted DeliveryRoute target. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, flow_id, flow_instance, entity_id]
+          properties:
+            kind:
+              type: string
+              enum: [existing_entity, materializing_entity]
+            flow_id:
+              type: string
+              minLength: 1
+            flow_instance:
+              type: string
+              minLength: 1
+            entity_id:
+              type: string
+              minLength: 1
+        - type: object
+          additionalProperties: false
+          required: [kind, flow_id, flow_instance]
+          properties:
+            kind:
+              type: string
+              enum: [entityless_receiver]
+            flow_id:
+              type: string
+              minLength: 1
+            flow_instance:
+              type: string
+              minLength: 1
+        - type: object
+          additionalProperties: false
+      EventConnectPlanTarget:
         type: object
         additionalProperties: false
         properties:
-          kind:
-            type: string
-            enum: [existing_entity, materializing_entity, entityless_receiver]
           flow_id:
             type: string
           flow_instance:
             type: string
           entity_id:
             type: string
-        description: One-way structured projection of the persisted DeliveryRoute target. Delivery rows expose kind when a node target owner is present; connect-plan target evidence omits kind because it is a route candidate rather than admitted ownership. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.
+        description: Structured connect-plan route projection. It is selection evidence, not admitted delivery ownership, and cannot carry an ownership kind.
       EventConnectCandidateEvidence:
         type: object
         additionalProperties: false
@@ -26711,7 +26742,7 @@ api_specification:
           targets:
             type: array
             items:
-              $ref: '#/components/schemas/EventDeliveryTarget'
+              $ref: '#/components/schemas/EventConnectPlanTarget'
           candidates:
             type: array
             items:

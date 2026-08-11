@@ -1147,6 +1147,9 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		FlowInstance: runID,
 		EntityID:     runtimeflowidentity.EntityID("root-entity"),
 	}
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: parentRoute.FlowInstance, EntityID: parentRoute.EntityID, FlowInstance: parentRoute.FlowInstance,
+	}}
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "producer-agent",

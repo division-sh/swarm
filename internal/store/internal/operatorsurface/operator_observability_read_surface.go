@@ -321,10 +321,10 @@ func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.R
 	}
 	plans := make([]operatorread.OperatorConnectPlanEvaluation, 0, len(settlement.Ledger().Plans()))
 	for _, plan := range settlement.Ledger().Plans() {
-		targets := make([]operatorread.OperatorDeliveryTarget, 0, len(plan.Targets()))
+		targets := make([]operatorread.OperatorConnectPlanTarget, 0, len(plan.Targets()))
 		for _, target := range plan.Targets() {
 			target = target.Normalized()
-			targets = append(targets, operatorread.OperatorDeliveryTarget{FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID})
+			targets = append(targets, operatorread.OperatorConnectPlanTarget{FlowID: target.FlowID, FlowInstance: target.FlowInstance, EntityID: target.EntityID})
 		}
 		candidates := make([]operatorread.OperatorConnectCandidateEvidence, 0, len(plan.Candidates()))
 		for _, candidate := range plan.Candidates() {

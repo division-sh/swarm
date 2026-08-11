@@ -611,6 +611,55 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	}
 }
 
+func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersistence(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
+			ItemsFrom: "entity.items", As: "item", Identity: "item.id", Emit: runtimecontracts.EmitSpec{Event: "item.ready", From: "payload"},
+		}}},
+		{name: "group by", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{
+			ItemsFrom: "entity.items", Key: "item.kind", StoreAs: "computed.groups",
+		}}},
+		{name: "on success emit", handler: runtimecontracts.SystemNodeEventHandler{OnSuccess: runtimecontracts.HandlerOnSuccessSpec{
+			Emit: runtimecontracts.EmitSpec{Event: "work.done", From: "entity"},
+		}}},
+		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{
+			ID: "all", Stage: "waiting", Members: runtimecontracts.JoinMembersSpec{From: "entity.expected", By: "payload.member_id"}, Output: "computed.members", CompleteWhen: "join.received_count == join.expected_count",
+		}}},
+		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const eventType = "task.started"
+			store := newTargetRouteMemoryStore()
+			source := semanticview.Wrap(materializedTargetBundleWithHandler("review", "target-node", eventType, test.handler))
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source,
+				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+					return []DeliveryRouteBlueprint{{
+						Recipient: events.MustNodeDeliveryRecipient("target-node"),
+						Target:    events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"},
+						Handler:   runtimepipeline.MustDeliveryTargetHandler("review", "target-node").ForEvent(eventType),
+					}}, nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(eventID, "review/inst-1/"+eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+				t.Fatalf("Publish error = %v, want missing typed target owner", err)
+			}
+			if _, persisted := store.events[eventID]; persisted || len(store.routes[eventID]) != 0 {
+				t.Fatalf("failed publish persisted event/routes: event=%t routes=%#v", persisted, store.routes[eventID])
+			}
+		})
+	}
+}
+
 func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *testing.T) {
 	const eventType = "worker/work.started"
 	eventID := uuid.NewString()
@@ -732,6 +781,10 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 }
 
 func materializedTargetBundle(flowID, nodeID, eventType string) *runtimecontracts.WorkflowContractBundle {
+	return materializedTargetBundleWithHandler(flowID, nodeID, eventType, runtimecontracts.SystemNodeEventHandler{})
+}
+
+func materializedTargetBundleWithHandler(flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
 	flow := runtimecontracts.FlowContractView{
 		Path: flowID, Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
@@ -739,7 +792,7 @@ func materializedTargetBundle(flowID, nodeID, eventType string) *runtimecontract
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			nodeID: {
 				ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{eventType},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: {}},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: handler},
 			},
 		},
 	}
@@ -1075,11 +1128,10 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(
+			ActiveTargetDescriptor{ID: "child-a", FlowInstance: "child-a/inst-1", EntityID: eventtest.UUID("ent-a")},
+			ActiveTargetDescriptor{ID: "child-b", FlowInstance: "child-b/inst-1", EntityID: eventtest.UUID("ent-b")},
+		),
 	)
 
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("child/output.done"))
@@ -1155,11 +1207,10 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(
+			ActiveTargetDescriptor{ID: "worker-one", FlowInstance: "worker/w-001", EntityID: workerOneID},
+			ActiveTargetDescriptor{ID: "worker-two", FlowInstance: "worker/w-002", EntityID: workerTwoID},
+		),
 	)
 
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("worker/work.assign"))
@@ -1214,11 +1265,7 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 				return []PublishDiagnosticRecipient{{ID: "task-handler", Type: "node", Path: "worker/w-001"}}
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{ID: "worker-one", FlowInstance: "worker/w-001", EntityID: workerID}),
 	)
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),

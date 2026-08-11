@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/google/uuid"
 )
 
@@ -121,6 +123,71 @@ func TestOperatorEventReadbackProjectsTypedDeliveryTargetOwnership(t *testing.T)
 						t.Fatalf("operator target = %#v, want %s %#v", got, test.owner.Code(), want)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.unmatched", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+			if err := commitSemanticEventFixture(ctx, fixture.store, event); err != nil {
+				t.Fatal(err)
+			}
+
+			receiver := events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("review-receiver")))
+			candidate, err := events.NewConnectCandidateEvidence(receiver, events.MustNodeDeliveryRecipient("reviewer"), "review", agentidentity.Identity{}, events.ConnectCandidateAccepted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("review-one-owner")}
+			plan, err := events.NewConnectPlanEvaluation(events.AdmitConnectPlanIdentity(sha256.Sum256([]byte("review-plan"))), events.ConnectPlanResolved, []events.RouteIdentity{target}, []events.ConnectCandidateEvidence{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledger, err := events.NewConnectEvaluationLedger([]events.ConnectPlanEvaluation{plan})
+			if err != nil {
+				t.Fatal(err)
+			}
+			settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryMatchedNoRecipient, ledger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(settlement)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if backend.name == "postgres" {
+				_, err = fixture.db.ExecContext(ctx, `UPDATE events SET route_settlement = $1::jsonb WHERE event_id = $2::uuid`, raw, event.ID())
+			} else {
+				_, err = fixture.db.ExecContext(ctx, `UPDATE events SET route_settlement = ? WHERE event_id = ?`, raw, event.ID())
+			}
+			if err != nil {
+				t.Fatalf("store connect settlement: %v", err)
+			}
+
+			full, err := fixture.store.(routeSettlementOperatorStore).LoadOperatorEvent(ctx, event.ID())
+			if err != nil {
+				t.Fatalf("LoadOperatorEvent: %v", err)
+			}
+			if full.NoDelivery == nil || len(full.NoDelivery.Plans) != 1 || len(full.NoDelivery.Plans[0].Targets) != 1 {
+				t.Fatalf("operator no-delivery projection = %#v", full.NoDelivery)
+			}
+			got := full.NoDelivery.Plans[0].Targets[0]
+			if got.FlowID != target.FlowID || got.FlowInstance != target.FlowInstance || got.EntityID != target.EntityID {
+				t.Fatalf("connect target = %#v, want %#v", got, target)
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "kind") {
+				t.Fatalf("connect target leaked delivery ownership discriminator: %s", encoded)
 			}
 		})
 	}

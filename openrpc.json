@@ -11467,7 +11467,7 @@
           },
           "targets": {
             "items": {
-              "$ref": "#/components/schemas/EventDeliveryTarget"
+              "$ref": "#/components/schemas/EventConnectPlanTarget"
             },
             "type": "array"
           }
@@ -11478,6 +11478,22 @@
           "targets",
           "candidates"
         ],
+        "type": "object"
+      },
+      "EventConnectPlanTarget": {
+        "additionalProperties": false,
+        "description": "Structured connect-plan route projection. It is selection evidence, not admitted delivery ownership, and cannot carry an ownership kind.",
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "flow_id": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "EventDelivery": {
@@ -11548,28 +11564,69 @@
         "type": "object"
       },
       "EventDeliveryTarget": {
-        "additionalProperties": false,
-        "description": "One-way structured projection of the persisted DeliveryRoute target. Delivery rows expose kind when a node target owner is present; connect-plan target evidence omits kind because it is a route candidate rather than admitted ownership. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.",
-        "properties": {
-          "entity_id": {
-            "type": "string"
-          },
-          "flow_id": {
-            "type": "string"
-          },
-          "flow_instance": {
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "existing_entity",
-              "materializing_entity",
-              "entityless_receiver"
+        "description": "One-way structured projection of the persisted DeliveryRoute target. An empty object is explicit target absence for an untargeted agent delivery owned by its typed agent identity. It is observation only and cannot be supplied as routing authority.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "entity_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "flow_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "flow_instance": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "existing_entity",
+                  "materializing_entity"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "flow_id",
+              "flow_instance",
+              "entity_id"
             ],
-            "type": "string"
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "flow_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "flow_instance": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "entityless_receiver"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "flow_id",
+              "flow_instance"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "type": "object"
           }
-        },
-        "type": "object"
+        ]
       },
       "EventFull": {
         "additionalProperties": false,

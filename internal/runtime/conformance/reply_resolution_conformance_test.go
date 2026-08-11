@@ -82,6 +82,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 		Durable: bus.DurableDependencies{
 			ReplyContext:      store,
 			ActiveFlows:       store,
+			TargetOwners:      store,
 			FlowRouteTopology: store,
 		},
 	})
@@ -148,6 +149,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 		Durable: bus.DurableDependencies{
 			ReplyContext:      store,
 			ActiveFlows:       store,
+			TargetOwners:      store,
 			FlowRouteTopology: store,
 		},
 	})
@@ -823,6 +825,7 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	if source == nil {
 		t.Fatal("reply conformance semantic source is required")
 	}
+	seedDurableReplyConformanceTargetOwners(t, ctx, backend)
 	eb, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, bus.EventBusOptions{ContractBundle: source}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -851,6 +854,27 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 		}
 	}
 	return eb
+}
+
+func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, backend durableReplyConformanceStore) {
+	t.Helper()
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	if runID == "" {
+		t.Fatal("reply conformance run identity is required before seeding target owners")
+	}
+	db := replyConformanceDB(t, backend)
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state)
+		VALUES ($1::uuid, $2::uuid, $3, 'active')
+		ON CONFLICT (run_id, entity_id) DO NOTHING`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, current_state)
+			VALUES (?, ?, ?, 'active')`
+	}
+	for _, owner := range replyConformanceTargetOwners() {
+		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance); err != nil {
+			t.Fatalf("seed reply conformance target owner %s: %v", owner.FlowInstance, err)
+		}
+	}
 }
 
 func replyConformanceDB(t *testing.T, backend durableReplyConformanceStore) *sql.DB {
@@ -1115,6 +1139,23 @@ func (s *replyConformanceStore) CommitPublication(ctx context.Context, command b
 
 func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
+}
+
+func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context) ([]bus.ActiveTargetDescriptor, error) {
+	return replyConformanceTargetOwners(), nil
+}
+
+func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
+	out := make([]bus.ActiveTargetDescriptor, 0, 2)
+	for _, accountID := range []string{"account-a", "account-b"} {
+		flowInstance := templatereply.RequesterFlowID + "/" + accountID
+		out = append(out, bus.ActiveTargetDescriptor{
+			ID:           flowInstance,
+			FlowInstance: flowInstance,
+			EntityID:     runtimeflowidentity.EntityID(flowInstance),
+		})
+	}
+	return out
 }
 
 func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) error {

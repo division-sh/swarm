@@ -125,8 +125,14 @@ type eventNoDelivery struct {
 type eventConnectPlanEvaluation struct {
 	PlanSHA256 string                          `json:"plan_sha256"`
 	Resolution string                          `json:"resolution"`
-	Targets    []eventDeliveryTarget           `json:"targets"`
+	Targets    []eventConnectPlanTarget        `json:"targets"`
 	Candidates []eventConnectCandidateEvidence `json:"candidates"`
+}
+
+type eventConnectPlanTarget struct {
+	FlowID       string `json:"flow_id,omitempty"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityID     string `json:"entity_id,omitempty"`
 }
 
 type eventConnectCandidateEvidence struct {
@@ -177,6 +183,11 @@ func (d *eventNoDelivery) UnmarshalJSON(raw []byte) error {
 func (p *eventConnectPlanEvaluation) UnmarshalJSON(raw []byte) error {
 	type wire eventConnectPlanEvaluation
 	return strictEventJSON(raw, (*wire)(p))
+}
+
+func (t *eventConnectPlanTarget) UnmarshalJSON(raw []byte) error {
+	type wire eventConnectPlanTarget
+	return strictEventJSON(raw, (*wire)(t))
 }
 
 func (e *eventConnectCandidateEvidence) UnmarshalJSON(raw []byte) error {
@@ -780,17 +791,33 @@ func validateEventNoDelivery(prefix string, disposition eventNoDelivery) error {
 		"resolved": {}, "runtime_resolution_required": {}, "resolution_blocker": {}, "no_registration": {},
 	}
 	validOutcomes := map[string]struct{}{"accepted": {}, "pin_mismatch": {}, "path_mismatch": {}}
+	seenPlans := map[string]struct{}{}
 	for index, plan := range disposition.Plans {
 		planPrefix := fmt.Sprintf("%s.plans[%d]", prefix, index)
 		if !validSHA256(plan.PlanSHA256) {
 			return fmt.Errorf("malformed %s: plan_sha256 is invalid", planPrefix)
 		}
+		if _, duplicate := seenPlans[plan.PlanSHA256]; duplicate {
+			return fmt.Errorf("malformed %s: duplicate plan_sha256", planPrefix)
+		}
+		seenPlans[plan.PlanSHA256] = struct{}{}
 		if _, ok := validResolutions[plan.Resolution]; !ok {
 			return fmt.Errorf("malformed %s: resolution=%q is invalid", planPrefix, plan.Resolution)
 		}
 		if plan.Targets == nil || plan.Candidates == nil {
 			return fmt.Errorf("malformed %s: targets and candidates are required", planPrefix)
 		}
+		switch plan.Resolution {
+		case "resolved":
+			if len(plan.Candidates) == 0 {
+				return fmt.Errorf("malformed %s: resolved plan requires candidate outcomes", planPrefix)
+			}
+		case "runtime_resolution_required", "resolution_blocker", "no_registration":
+			if len(plan.Candidates) != 0 {
+				return fmt.Errorf("malformed %s: plan-level resolution %q cannot carry candidate outcomes", planPrefix, plan.Resolution)
+			}
+		}
+		seenCandidates := map[string]string{}
 		for candidateIndex, candidate := range plan.Candidates {
 			candidatePrefix := fmt.Sprintf("%s.candidates[%d]", planPrefix, candidateIndex)
 			if !validSHA256(candidate.ReceiverSHA256) || strings.TrimSpace(candidate.RecipientID) == "" {
@@ -802,6 +829,17 @@ func validateEventNoDelivery(prefix string, disposition eventNoDelivery) error {
 			if _, ok := validOutcomes[candidate.Outcome]; !ok {
 				return fmt.Errorf("malformed %s: outcome=%q is invalid", candidatePrefix, candidate.Outcome)
 			}
+			if candidate.RecipientKind == "agent" && strings.TrimSpace(candidate.AgentIdentity) == "" {
+				return fmt.Errorf("malformed %s: agent_identity is required for an agent candidate", candidatePrefix)
+			}
+			if candidate.RecipientKind == "node" && strings.TrimSpace(candidate.AgentIdentity) != "" {
+				return fmt.Errorf("malformed %s: agent_identity is forbidden for a node candidate", candidatePrefix)
+			}
+			identity := strings.Join([]string{candidate.ReceiverSHA256, candidate.RecipientKind, candidate.RecipientID, candidate.Path, candidate.AgentIdentity}, "\x00")
+			if previous, exists := seenCandidates[identity]; exists && previous != candidate.Outcome {
+				return fmt.Errorf("malformed %s: candidate identity has conflicting outcomes", candidatePrefix)
+			}
+			seenCandidates[identity] = candidate.Outcome
 		}
 	}
 	return nil

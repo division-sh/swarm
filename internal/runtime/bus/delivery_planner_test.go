@@ -562,6 +562,8 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 }
 
 func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscriber(t *testing.T) {
+	rootRunID := uuid.NewString()
+	rootTarget := events.RouteIdentity{FlowID: "root", FlowInstance: rootRunID, EntityID: "ent-1"}
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -572,15 +574,9 @@ func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscri
 				return []PublishDiagnosticRecipient{{ID: "parent-listener", Type: "node"}}
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{ID: "root-owner", FlowInstance: rootTarget.FlowInstance, EntityID: rootTarget.EntityID}),
 	)
 
-	rootRunID := uuid.NewString()
-	rootTarget := events.RouteIdentity{FlowID: "root", FlowInstance: rootRunID, EntityID: "ent-1"}
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"child/output.done",
@@ -616,6 +612,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscri
 }
 
 func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing.T) {
+	parentRoute := events.RouteIdentity{FlowID: "parent", EntityID: "parent-entity", FlowInstance: "parent/inst-1"}
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -626,14 +623,9 @@ func TestDeliveryPlanner_TargetedParentRoutePersistsSemanticNodeRoute(t *testing
 				return []PublishDiagnosticRecipient{{ID: "parent-collector", Type: "node", Path: "parent/inst-1"}}
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{ID: "parent-owner", FlowInstance: parentRoute.FlowInstance, EntityID: parentRoute.EntityID}),
 	)
 
-	parentRoute := events.RouteIdentity{FlowID: "parent", EntityID: "parent-entity", FlowInstance: "parent/inst-1"}
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/output.done", "", "", nil, 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, parentRoute), time.Time{}))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
@@ -658,11 +650,10 @@ func TestDeliveryPlanner_PreservesTargetFailureWhenRoutedNodeDoesNotMatchTarget(
 				return []PublishDiagnosticRecipient{{ID: "unrelated-listener", Type: "node"}}
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(
+			ActiveTargetDescriptor{ID: "child-a-owner", FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
+			ActiveTargetDescriptor{ID: "child-b-owner", FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+		),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
@@ -701,11 +692,10 @@ func TestDeliveryPlanner_ExpandsTargetSetForInternalWorkflowRecipient(t *testing
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(
+			ActiveTargetDescriptor{ID: "child-a-owner", FlowInstance: "child-a/inst-1", EntityID: "ent-a"},
+			ActiveTargetDescriptor{ID: "child-b-owner", FlowInstance: "child-b/inst-1", EntityID: "ent-b"},
+		),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
@@ -774,11 +764,10 @@ func TestDeliveryPlanner_ExpandsTargetSetForSameSemanticNode(t *testing.T) {
 				return nil
 			},
 		},
-		deliveryRecipientPolicy{
-			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-				return map[agentidentity.Identity]ActiveAgentDescriptor{}, true, nil
-			},
-		},
+		testSelectedOwnerPolicy(
+			ActiveTargetDescriptor{ID: "worker-one", FlowInstance: "worker/w-001", EntityID: "worker/w-001"},
+			ActiveTargetDescriptor{ID: "worker-two", FlowInstance: "worker/w-002", EntityID: "worker/w-002"},
+		),
 	)
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
