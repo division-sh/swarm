@@ -810,7 +810,18 @@ func typedPathReferencesEntity(raw string, path paths.Path) bool {
 }
 
 func expressionReferencesEntity(expression string) bool {
-	return workflowexpr.ExpressionReferencesEntity(strings.TrimSpace(expression))
+	expression = strings.TrimSpace(expression)
+	if workflowexpr.ExpressionReferencesEntity(expression) {
+		return true
+	}
+	for _, ref := range workflowexpr.PlatformEntityReferences(expression) {
+		head, _, _ := strings.Cut(strings.TrimSpace(ref), ".")
+		switch head {
+		case "id", "current_state", "gates":
+			return true
+		}
+	}
+	return false
 }
 
 func pathReferencesEntity(path string) bool {

@@ -457,7 +457,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	t.Helper()
 	commentHandler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  `(has(entity.id) || !has(entity.id)) && payload.payload.comment.user.type != "Bot" && payload.payload.sender.type != "Bot"`,
+			Check:  `_entity.id != "" && payload.payload.comment.user.type != "Bot" && payload.payload.sender.type != "Bot"`,
 			OnFail: "discard",
 		},
 		Activity: runtimecontracts.ActivitySpec{
@@ -474,7 +474,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	}
 	createIssueHandler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  `(has(entity.id) || !has(entity.id)) && payload.payload.action == "opened"`,
+			Check:  `_entity.id != "" && payload.payload.action == "opened"`,
 			OnFail: "discard",
 		},
 		Activity: runtimecontracts.ActivitySpec{
@@ -491,7 +491,7 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 	}
 	addLabelsHandler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  `(has(entity.id) || !has(entity.id)) && payload.payload.action == "opened"`,
+			Check:  `_entity.id != "" && payload.payload.action == "opened"`,
 			OnFail: "discard",
 		},
 		Activity: runtimecontracts.ActivitySpec{

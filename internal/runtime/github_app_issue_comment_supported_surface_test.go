@@ -351,7 +351,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
-			Check:  `(has(entity.id) || !has(entity.id)) && payload.payload.comment.user.type != "Bot" && payload.payload.sender.type != "Bot"`,
+			Check:  `_entity.id != "" && payload.payload.comment.user.type != "Bot" && payload.payload.sender.type != "Bot"`,
 			OnFail: "discard",
 		},
 		Activity: runtimecontracts.ActivitySpec{

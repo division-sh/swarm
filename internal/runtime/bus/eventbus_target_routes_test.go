@@ -2573,7 +2573,7 @@ version: 1.0.0
     opco.spinup_requested:
       guard:
         id: selected_owner
-        check: "has(entity.id) || !has(entity.id)"
+        check: '_entity.id != ""'
 `,
 	}
 }

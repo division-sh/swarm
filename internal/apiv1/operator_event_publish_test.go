@@ -2207,7 +2207,7 @@ func eventPublishTargetRouteTestBundle() *runtimecontracts.WorkflowContractBundl
 		SubscribesTo:  []string{targetEvent},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			targetEvent: {
-				Guard: &runtimecontracts.GuardSpec{Check: "has(entity.id) || !has(entity.id)"},
+				Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
 			},
 		},
 	}

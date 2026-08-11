@@ -1299,7 +1299,9 @@ contract_formats:
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
             inferring ownership only from authored entity references. Selected entity evidence for an otherwise entityless
             handler is contradictory and fails before mutation; only an admitted structural current-delivery owner may supply
-            shared existing ownership. An admitted materializing owner may satisfy a later select handler in the same plan.
+            shared existing ownership. References to persisted platform entity identity, state, or gates are existing-entity
+            requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
+            An admitted materializing owner may satisfy a later select handler in the same plan.
             Handler-derived materialization MUST agree with the canonical future identity. Routing, stamped validation,
             and pipeline execution consume that same requirement owner, and pipeline consumes the persisted target variant
             directly; source-event identity, path text, descriptors, singleton fan-in, and missing-row fallback cannot repair
