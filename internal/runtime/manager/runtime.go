@@ -932,7 +932,8 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 		return summary, nil
 	}
 	if recoveryStore := am.roles.EffectsRecovery; recoveryStore != nil {
-		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, time.Now().UTC()); err != nil {
+		request := runtimeeffects.NewRecoveryRequest(time.Now().UTC(), am.executionPosture)
+		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
 			return summary, fmt.Errorf("reconcile external effect attempts: %w", err)
 		}
 	}

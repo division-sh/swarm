@@ -5960,14 +5960,19 @@ engine:
       backstop. Persisted-agent reconstruction and replacement admit the exact selected actor config before factory, route,
       generation, or registration work. Prepared-directive execution loads and admits the exact persisted directive event in
       the selected-store transaction before changing operation state. run.continue and runtime.resume preflight the complete
-      selected-store queue before changing run/runtime state or opening dispatch. Dynamic readiness admits the exact persisted
-      plan before agent, route, timer, topology, or plan-revision mutation. Standing lifecycle census covers queued delivery,
+      selected-store queue before changing run/runtime state or opening dispatch. That resume census includes every pending
+      decision-route obligation regardless of next_attempt_at; due-time eligibility belongs only to claim selection and never
+      narrows resume safety. Dynamic readiness admits the exact persisted plan before agent, route, timer, topology, or
+      plan-revision mutation. Standing lifecycle census covers queued delivery,
       active workflow timer, pending decision card, started/uncertain activity attempt, incomplete readiness plan, raw
       unprocessed pipeline event, and pending decision-route obligation as separate executable families. Selected-contract
       fork execution admits every exact frontier event before fork materialization or runtime startup. conversation.fork_chat
       admits the exact persisted source actor before idempotency, snapshot, turn, lease, heartbeat, or failure mutation. The
       central effect Controller.Authorize admits exact authority mode for every effect kind, including startup probes, before
-      authorization-store, journal, credential, or transport mutation.
+      authorization-store, journal, credential, or transport mutation. Startup external-effect recovery separately receives
+      the process posture and, inside one selected-store transaction, validates and admits the exact operation, attempt, and
+      authority-evidence mode of every retained candidate before settlement, completion/spend projection, reservation
+      deletion, author story, or run-candidate handoff. One incompatible candidate aborts the entire recovery batch.
     replay_and_fork: >
       event.replay and agent.replay preserve the original causal mode and reject a live original under mock_only before
       direct-route publication, idempotency, delivery, or audit mutation. Selected-contract and conversation fork execution
@@ -5995,7 +6000,8 @@ engine:
     proof: >
       Source-boundary ratchets forbid posture-owned live literals and profile-derived process mode. Supported proof covers
       root producers, exact source readiness, replay/fork, decision/defer, schedules/timers, activity/effect launch,
-      standing and queued-work restart on SQLite/PostgreSQL, immutable replacement, and health readback.
+      standing and queued-work restart on SQLite/PostgreSQL, immediate and future-due resume obligations, all retained
+      external-effect recovery states for generic and provider-turn effects, immutable replacement, and health readback.
   agent_session_management:
     description: The platform manages agent sessions — the lifecycle of an agent from receiving an event to completing its
       response.

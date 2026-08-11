@@ -183,7 +183,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	if _, err := runtimeeffects.BeginCompletion(nextCtx, "claude_cli", []byte("retry-generation"), nil); err == nil {
 		t.Fatal("generation-2 authority retried a generation-1 operation")
 	}
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), time.Now().UTC().Add(time.Minute)); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute))); err != nil {
 		t.Fatalf("reconcile cross-generation Claude retry evidence: %v", err)
 	}
 	var attempts, generation int

@@ -361,6 +361,50 @@ func (r ScanRequest) QueryAt(phase int) (ClaimQuery, bool) {
 	}
 }
 
+// ResumeAdmissionRequest selects the complete pending queue that can become
+// executable after a run or runtime resume. It is deliberately independent
+// from ScanRequest because resume safety is not bounded by current due time.
+type ResumeAdmissionRequest struct {
+	runID            string
+	global           bool
+	executionPosture executionposture.Posture
+}
+
+func GlobalResumeAdmissionRequest() ResumeAdmissionRequest {
+	return ResumeAdmissionRequest{global: true}
+}
+
+func RunResumeAdmissionRequest(runID string) ResumeAdmissionRequest {
+	return ResumeAdmissionRequest{runID: strings.TrimSpace(runID)}
+}
+
+func (r ResumeAdmissionRequest) WithExecutionPosture(posture executionposture.Posture) ResumeAdmissionRequest {
+	r.executionPosture = posture
+	return r
+}
+
+func (r ResumeAdmissionRequest) Validate() error {
+	if !r.executionPosture.Valid() {
+		return errors.New("pipeline resume admission execution posture is required")
+	}
+	if r.global {
+		if r.runID != "" {
+			return errors.New("global pipeline resume admission cannot select a run")
+		}
+		return nil
+	}
+	if _, err := uuid.Parse(r.runID); err != nil {
+		return fmt.Errorf("pipeline resume admission run id: %w", err)
+	}
+	return nil
+}
+
+func (r ResumeAdmissionRequest) Admit(mode executionmode.Mode) error {
+	return r.executionPosture.Admit(mode, "pipeline resume admission")
+}
+
+func (r ResumeAdmissionRequest) RunID() string { return r.runID }
+
 // Scan is an opaque, process-local continuation capability issued by one
 // selected store. Its phase boundaries, keyset position, and outstanding
 // claims remain private to that store.
@@ -546,9 +590,8 @@ type Store interface {
 	SummarizeRun(context.Context, string) (RunSummary, error)
 }
 
-// AdmissionPreflighter inspects the exact selected-store queue without
-// claiming or settling work. Transition owners consume it before reopening a
-// run or the runtime ingress gate.
-type AdmissionPreflighter interface {
-	Preflight(context.Context, ScanRequest) error
+// ResumeAdmissionPreflighter inspects every pending selected-store obligation
+// without applying claim eligibility or mutating queue state.
+type ResumeAdmissionPreflighter interface {
+	PreflightResume(context.Context, ResumeAdmissionRequest) error
 }

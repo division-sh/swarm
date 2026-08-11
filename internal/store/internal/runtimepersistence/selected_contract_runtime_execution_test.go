@@ -344,7 +344,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 			t.Fatal(err)
 		}
 	}
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(ctx, time.Now().UTC())
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(time.Now().UTC()))
 	if err != nil {
 		t.Fatalf("reconcile selected completions: %v", err)
 	}

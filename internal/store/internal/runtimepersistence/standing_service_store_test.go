@@ -18,6 +18,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -724,6 +725,7 @@ func TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation(t *
 	families := []string{
 		"event_delivery",
 		"workflow_timer",
+		"generic_schedule",
 		"decision_card",
 		"activity_attempt",
 		"runtime_readiness",
@@ -816,6 +818,13 @@ func seedStandingCensusFamily(t *testing.T, fixture authorActivityReceiptFixture
 		if err := insertWorkflowTimerDDLProofRow(ctx, fixture.db, fixture.store.(workflowTestSelectedStore), row); err != nil {
 			t.Fatalf("seed standing workflow timer: %v", err)
 		}
+	case "generic_schedule":
+		command := testRootGenericScheduleCommand(
+			t, runID, uuid.NewString(), "standing-census-"+uuid.NewString(),
+			runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
+		)
+		command.ExecutionMode = mode
+		admitGenericScheduleFixture(t, ctx, fixture.store.(runtimegenericschedule.Store), command)
 	case "decision_card":
 		seedStandingCensusDecisionCard(t, fixture, ctx, runID, mode, false, "")
 	case "activity_attempt":
@@ -941,7 +950,8 @@ func countStandingCensusFamily(t *testing.T, fixture authorActivityReceiptFixtur
 	}
 	queries := map[string]string{
 		"event_delivery":   `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id WHERE d.run_id = ` + placeholder + ` AND d.status = 'pending' AND e.execution_mode = ` + modePlaceholder,
-		"workflow_timer":   `SELECT COUNT(*) FROM timers WHERE run_id = ` + placeholder + ` AND status = 'active' AND execution_mode = ` + modePlaceholder,
+		"workflow_timer":   `SELECT COUNT(*) FROM timers WHERE run_id = ` + placeholder + ` AND task_type = 'workflow_timer' AND status = 'active' AND execution_mode = ` + modePlaceholder,
+		"generic_schedule": `SELECT COUNT(*) FROM timers WHERE run_id = ` + placeholder + ` AND task_type IN ('timer','scheduled_task','global_recurring') AND status = 'active' AND execution_mode = ` + modePlaceholder,
 		"decision_card":    `SELECT COUNT(*) FROM decision_cards WHERE run_id = ` + placeholder + ` AND status = 'pending' AND execution_mode = ` + modePlaceholder,
 		"activity_attempt": `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ` + placeholder + ` AND status = 'started' AND execution_mode = ` + modePlaceholder,
 		"runtime_readiness": `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ` + placeholder + ` AND topology_ready_at IS NULL AND ` + func() string {

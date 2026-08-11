@@ -187,7 +187,7 @@ func proveForkChatCompletionGroupCapRejection(t *testing.T, fixture forkChatComp
 func proveForkChatCompletionGroupPreparedOrphanRecovery(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "orphan-key", "prepared orphan")
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), fixture.now.Add(10*time.Minute)); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(fixture.now.Add(10*time.Minute))); err != nil {
 		t.Fatalf("recover prepared forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "abandoned", true)
@@ -240,7 +240,7 @@ func proveForkChatCompletionGroupFinalizationFailure(t *testing.T, fixture forkC
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "executing", false)
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), fixture.now.Add(10*time.Minute)); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(fixture.now.Add(10*time.Minute))); err != nil {
 		t.Fatalf("recover finalization-failed forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "outcome_uncertain", true)

@@ -302,7 +302,7 @@ type forkedEffectConsumerSurface interface {
 	HeartbeatCompletionAttempt(context.Context, runtimeeffects.Attempt, time.Time, time.Duration) error
 	MarkExternalAttemptResponseObserved(context.Context, runtimeeffects.Attempt, map[string]any, time.Time) error
 	SettleExternalAttempt(context.Context, runtimeeffects.Settlement) error
-	ReconcileExternalEffectAttempts(context.Context, time.Time) (runtimeeffects.RecoverySummary, error)
+	ReconcileExternalEffectAttempts(context.Context, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
 }
 
 func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(t *testing.T) {
@@ -351,7 +351,7 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 			}))
 
 			operationID, attemptID := seedForkedExternalEffectAttempt(t, fixture, now)
-			summary, err := surface.ReconcileExternalEffectAttempts(ctx, now.Add(time.Hour))
+			summary, err := surface.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(now.Add(time.Hour)))
 			if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
 				t.Fatalf("external-effect recovery selected frozen source = %#v, %v", summary, err)
 			}
