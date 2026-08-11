@@ -405,6 +405,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
 			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, "support")
+			if !sourceRoute.Target.ExistingEntity() || sourceRoute.Target.Route().EntityID != entityID {
+				t.Fatalf("approval execution target = %#v, want exact existing owner %s", sourceRoute.Target, entityID)
+			}
 			sourceCtx := events.WithDeliveryContext(ctx, sourceEvent.DeliveryContext())
 			sourceDelivery, err := events.NewDeliveryEvent(sourceEvent, sourceRoute)
 			if err != nil {

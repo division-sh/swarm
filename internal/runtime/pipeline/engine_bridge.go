@@ -416,7 +416,7 @@ func resolveHandlerEntityIDForFlow(
 	if err != nil {
 		return "", evt, err
 	}
-	if handlerMaterializesEntity(source, flowID, handler) {
+	if handlerExecutionEntityRequirement(source, flowID, handler).materializes() {
 		statePath := ""
 		if state != nil {
 			statePath = asString(state.Metadata["flow_path"])

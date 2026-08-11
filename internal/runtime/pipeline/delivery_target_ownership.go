@@ -131,11 +131,10 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if blueprint.FlowInstance == "" {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
 	}
-	acquisitionUsesEntity, acquisitionMaterializes, err := deliveryTargetHandlerAcquisition(req.Source, req.Handler, req.Event.Type())
+	requirement, err := deliveryTargetEntityRequirement(req.Source, req.Handler, req.Event.Type(), handler)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	usesEntity := acquisitionUsesEntity || handlerUsesEntity(req.Source, flowID, handler)
 	existing, materializing, err := matchingDeliveryTargetOwnerCandidates(blueprint, req.Candidates)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
@@ -168,11 +167,11 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if len(existing) == 1 && len(materializing) == 0 {
 		return events.NewExistingEntityTarget(existing[0])
 	}
-	if !usesEntity {
+	if requirement == handlerEntitylessSafe {
 		blueprint.EntityID = ""
 		return events.NewEntitylessReceiverTarget(blueprint)
 	}
-	if acquisitionMaterializes || handlerCanMaterializeEntity(req.Source, flowID, handler) {
+	if requirement == handlerMaterializingEntity {
 		planned, err := canonicalHandlerMaterializationTarget(req.Source, flowID, handler, req.Event, blueprint)
 		if err != nil {
 			return events.DeliveryTargetOwnership{}, err
@@ -222,14 +221,13 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	if routeFlowID := owner.Route().FlowID; routeFlowID != "" && routeFlowID != flowID {
 		return fmt.Errorf("stamped delivery target flow %q disagrees with handler flow %q", routeFlowID, flowID)
 	}
-	acquisitionUsesEntity, _, err := deliveryTargetHandlerAcquisition(source, handlerFact, evt.Type())
+	requirement, err := deliveryTargetEntityRequirement(source, handlerFact, evt.Type(), handler)
 	if err != nil {
 		return err
 	}
-	usesEntity := acquisitionUsesEntity || handlerUsesEntity(source, flowID, handler)
 	switch {
 	case owner.EntitylessReceiver():
-		if usesEntity {
+		if requirement != handlerEntitylessSafe {
 			return fmt.Errorf("entityless_receiver ownership disagrees with entity-scoped handler %s", recipient.ID())
 		}
 	case owner.MaterializingEntity():
@@ -268,6 +266,21 @@ func deliveryTargetHandlerAcquisition(source semanticview.Source, handler Delive
 	default:
 		return true, false, nil
 	}
+}
+
+func deliveryTargetEntityRequirement(source semanticview.Source, handlerFact DeliveryTargetHandler, eventType events.EventType, handler SystemNodeEventHandler) (handlerEntityRequirement, error) {
+	requirement := handlerExecutionEntityRequirement(source, handlerFact.FlowID(), handler)
+	usesEntity, materializes, err := deliveryTargetHandlerAcquisition(source, handlerFact, eventType)
+	if err != nil {
+		return handlerEntitylessSafe, err
+	}
+	if materializes {
+		return requirement.merge(handlerMaterializingEntity), nil
+	}
+	if usesEntity {
+		return requirement.merge(handlerExistingEntityRequired), nil
+	}
+	return requirement, nil
 }
 
 func matchingDeliveryTargetOwnerCandidates(blueprint events.RouteIdentity, candidates []DeliveryTargetOwnerCandidate) ([]events.RouteIdentity, []events.RouteIdentity, error) {
@@ -338,159 +351,224 @@ func ambiguousDeliveryTargetOwnerError(flowInstance string, groups ...[]events.R
 	return fmt.Errorf("receiver target owner is ambiguous for flow instance %q; candidates: %s", flowInstance, strings.Join(candidates, ", "))
 }
 
-func handlerCanMaterializeEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
-	return handlerMaterializesEntity(source, flowID, handler)
+type handlerEntityRequirement uint8
+
+const (
+	handlerEntitylessSafe handlerEntityRequirement = iota
+	handlerExistingEntityRequired
+	handlerMaterializingEntity
+)
+
+func (r handlerEntityRequirement) merge(other handlerEntityRequirement) handlerEntityRequirement {
+	if other > r {
+		return other
+	}
+	return r
 }
 
-type handlerEntityFieldClassifier func(semanticview.Source, string, SystemNodeEventHandler) bool
+func (r handlerEntityRequirement) materializes() bool { return r == handlerMaterializingEntity }
 
-// Every executable handler field has an explicit semantic disposition here.
-// Tests compare these keys with the contract type so new fields fail closed.
+type handlerEntityFieldClassifier func(semanticview.Source, string, SystemNodeEventHandler) handlerEntityRequirement
+
+// Every executable handler field has one explicit execution-semantic
+// disposition. The result owns both routing admission and engine preparation.
 var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClassifier{
-	"Action": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return actionReferencesEntity(handler.Action)
+	"Action": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return actionEntityRequirement(handler.Action)
 	},
-	"Activity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return expressionValueMapReferencesEntity(handler.Activity.Input)
+	"Activity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return activityEntityRequirement(handler.Activity)
 	},
-	"CreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return handler.CreateEntity
+	"CreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return materializingWhen(handler.CreateEntity)
 	},
-	"SelectEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return handler.SelectEntity != nil && !handler.SelectEntity.Empty()
+	"SelectEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(handler.SelectEntity != nil && !handler.SelectEntity.Empty())
 	},
-	"SelectOrCreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()
+	"SelectOrCreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return materializingWhen(handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty())
 	},
-	"Description":    noHandlerEntityUse,
-	"EvidenceTarget": noHandlerEntityUse,
-	"Emit": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return emitSpecReferencesEntity(handler.Emit)
+	"Description":    noHandlerEntityRequirement,
+	"EvidenceTarget": noHandlerEntityRequirement,
+	"Emit": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return materializingWhen(emitSpecReferencesEntity(handler.Emit))
 	},
-	"OnSuccess": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return emitSpecReferencesEntity(handler.OnSuccess.Emit)
+	"OnSuccess": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(emitSpecReferencesEntity(handler.OnSuccess.Emit))
 	},
-	"Guard": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return guardReferencesEntity(handler.Guard)
+	"Guard": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return guardEntityRequirement(handler.Guard)
 	},
-	"AdvancesTo": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return strings.TrimSpace(handler.AdvancesTo) != ""
+	"AdvancesTo": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return materializingWhen(strings.TrimSpace(handler.AdvancesTo) != "")
 	},
-	"SetsGate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return gateSpecName(handler.SetsGate) != ""
+	"SetsGate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return materializingWhen(gateSpecName(handler.SetsGate) != "")
 	},
-	"ClearGates": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return len(handler.ClearGates) != 0
+	"ClearGates": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return materializingWhen(len(handler.ClearGates) != 0)
 	},
-	"DataAccumulation": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return dataAccumulationReferencesEntity(handler.DataAccumulation)
+	"DataAccumulation": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		if workflowDataWritesEntityFields(handler.DataAccumulation, workflowEntitySchemaFields(source, flowID)) {
+			return handlerMaterializingEntity
+		}
+		return existingWhen(dataAccumulationReferencesEntity(handler.DataAccumulation))
 	},
-	"Condition": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return expressionReferencesEntity(handler.Condition)
+	"Condition": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(expressionReferencesEntity(handler.Condition))
 	},
-	"Logic": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return expressionReferencesEntity(handler.Logic)
+	"Logic": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(expressionReferencesEntity(handler.Logic))
 	},
-	"Loop": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return handler.Loop != nil
+	"Loop": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(handler.Loop != nil)
 	},
-	"OnComplete": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
-		return rulesReferenceEntity(source, flowID, handler.OnComplete)
+	"OnComplete": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return rulesEntityRequirement(source, flowID, handler.OnComplete)
 	},
-	"Rules": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
-		return rulesReferenceEntity(source, flowID, handler.Rules)
+	"Rules": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return rulesEntityRequirement(source, flowID, handler.Rules)
 	},
-	"Accumulate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return accumulateReferencesEntity(handler.Accumulate)
+	"Accumulate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(handler.Accumulate != nil)
 	},
-	"Join": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
-		return joinReferencesEntity(source, flowID, handler.Join)
+	"Join": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(handler.Join != nil)
 	},
-	"Compute": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return computeReferencesEntity(handler.Compute)
+	"Compute": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		if computeStoresEntityField(handler.Compute, workflowEntitySchemaFields(source, flowID)) {
+			return handlerMaterializingEntity
+		}
+		return existingWhen(computeReferencesEntity(handler.Compute))
 	},
-	"Query": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return queryReferencesEntity(handler.Query)
+	"Query": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(queryReferencesEntity(handler.Query))
 	},
-	"FanOut": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return fanOutReferencesEntity(handler.FanOut)
+	"FanOut": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return fanOutEntityRequirement(handler.FanOut)
 	},
-	"GroupBy": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return groupByReferencesEntity(handler.GroupBy)
+	"GroupBy": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(groupByReferencesEntity(handler.GroupBy))
 	},
-	"Filter": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return filterReferencesEntity(handler.Filter)
+	"Filter": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(filterReferencesEntity(handler.Filter))
 	},
-	"Reduce": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return reduceReferencesEntity(handler.Reduce)
+	"Reduce": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(reduceReferencesEntity(handler.Reduce))
 	},
-	"Count": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return countReferencesEntity(handler.Count)
+	"Count": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(countReferencesEntity(handler.Count))
 	},
-	"Clear": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) bool {
-		return clearReferencesEntity(handler.Clear)
+	"Clear": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
+		return existingWhen(handler.Clear != nil && len(handler.Clear.Targets) != 0)
 	},
 }
 
-type handlerRuleEntityFieldClassifier func(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) bool
+type handlerRuleEntityFieldClassifier func(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) handlerEntityRequirement
 
 var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassifier{
-	"ID":          noHandlerRuleEntityUse,
-	"Description": noHandlerRuleEntityUse,
-	"Condition": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return expressionReferencesEntity(rule.Condition)
+	"ID":          noHandlerRuleEntityRequirement,
+	"Description": noHandlerRuleEntityRequirement,
+	"Condition": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		return existingWhen(expressionReferencesEntity(rule.Condition))
 	},
-	"PolicyRow": noHandlerRuleEntityUse,
-	"AdvancesTo": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return strings.TrimSpace(rule.AdvancesTo) != ""
+	"PolicyRow": noHandlerRuleEntityRequirement,
+	"AdvancesTo": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		return materializingWhen(strings.TrimSpace(rule.AdvancesTo) != "")
 	},
-	"Emit": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return emitSpecReferencesEntity(rule.Emit)
+	"Emit": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		return materializingWhen(emitSpecReferencesEntity(rule.Emit))
 	},
-	"Action": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return actionReferencesEntity(rule.Action)
+	"Action": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		return actionEntityRequirement(rule.Action)
 	},
-	"Activity": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return expressionValueMapReferencesEntity(rule.Activity.Input)
+	"Activity": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		return activityEntityRequirement(rule.Activity)
 	},
-	"DataAccumulation": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return dataAccumulationReferencesEntity(rule.DataAccumulation)
-	},
-	"Compute": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return computeReferencesEntity(rule.Compute)
-	},
-	"FanOut": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) bool {
-		return fanOutReferencesEntity(rule.FanOut)
-	},
-}
-
-func handlerUsesEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
-	if handlerMaterializesEntity(source, flowID, handler) {
-		return true
-	}
-	for _, classify := range systemNodeEventHandlerEntityClassifiers {
-		if classify(source, flowID, handler) {
-			return true
+	"DataAccumulation": func(source semanticview.Source, flowID string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		if workflowDataWritesEntityFields(rule.DataAccumulation, workflowEntitySchemaFields(source, flowID)) {
+			return handlerMaterializingEntity
 		}
+		return existingWhen(dataAccumulationReferencesEntity(rule.DataAccumulation))
+	},
+	"Compute": func(source semanticview.Source, flowID string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		if computeStoresEntityField(rule.Compute, workflowEntitySchemaFields(source, flowID)) {
+			return handlerMaterializingEntity
+		}
+		return existingWhen(computeReferencesEntity(rule.Compute))
+	},
+	"FanOut": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+		return fanOutEntityRequirement(rule.FanOut)
+	},
+}
+
+func handlerExecutionEntityRequirement(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
+	requirement := handlerEntitylessSafe
+	for _, classify := range systemNodeEventHandlerEntityClassifiers {
+		requirement = requirement.merge(classify(source, flowID, handler))
 	}
-	return false
+	return requirement
 }
 
-func noHandlerEntityUse(semanticview.Source, string, SystemNodeEventHandler) bool { return false }
-
-func noHandlerRuleEntityUse(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) bool {
-	return false
+func noHandlerEntityRequirement(semanticview.Source, string, SystemNodeEventHandler) handlerEntityRequirement {
+	return handlerEntitylessSafe
 }
 
-func rulesReferenceEntity(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) bool {
+func noHandlerRuleEntityRequirement(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+	return handlerEntitylessSafe
+}
+
+func rulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+	requirement := handlerEntitylessSafe
 	for _, rule := range rules {
 		for _, classify := range handlerRuleEntryEntityClassifiers {
-			if classify(source, flowID, rule) {
-				return true
-			}
+			requirement = requirement.merge(classify(source, flowID, rule))
 		}
 	}
-	return false
+	return requirement
+}
+
+func existingWhen(required bool) handlerEntityRequirement {
+	if required {
+		return handlerExistingEntityRequired
+	}
+	return handlerEntitylessSafe
+}
+
+func materializingWhen(required bool) handlerEntityRequirement {
+	if required {
+		return handlerMaterializingEntity
+	}
+	return handlerEntitylessSafe
+}
+
+func actionEntityRequirement(action runtimecontracts.ActionSpec) handlerEntityRequirement {
+	if actionMaterializesEntity(action) {
+		return handlerMaterializingEntity
+	}
+	return existingWhen(actionReferencesEntity(action))
+}
+
+func activityEntityRequirement(activity runtimecontracts.ActivitySpec) handlerEntityRequirement {
+	return existingWhen((activity.Approval != nil && strings.TrimSpace(activity.Approval.Decision) != "") || expressionValueMapReferencesEntity(activity.Input))
+}
+
+func guardEntityRequirement(guard *runtimecontracts.GuardSpec) handlerEntityRequirement {
+	if guard == nil {
+		return handlerEntitylessSafe
+	}
+	failure, err := guard.FailureSpec()
+	return existingWhen((err == nil && failure.Action == runtimecontracts.GuardFailureActionKill) || guardReferencesEntity(guard))
+}
+
+func fanOutEntityRequirement(spec *runtimecontracts.FanOutSpec) handlerEntityRequirement {
+	if spec == nil {
+		return handlerEntitylessSafe
+	}
+	if emitSpecReferencesEntity(spec.Emit) {
+		return handlerMaterializingEntity
+	}
+	return existingWhen(fanOutReferencesEntity(spec))
 }
 
 func guardReferencesEntity(guard *runtimecontracts.GuardSpec) bool {
@@ -650,18 +728,6 @@ func countReferencesEntity(spec *runtimecontracts.CountSpec) bool {
 		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
 }
 
-func clearReferencesEntity(spec *runtimecontracts.ClearSpec) bool {
-	if spec == nil {
-		return false
-	}
-	for _, target := range spec.Targets {
-		if pathReferencesEntity(target) {
-			return true
-		}
-	}
-	return false
-}
-
 func computeReferencesEntity(spec *runtimecontracts.ComputeSpec) bool {
 	if spec == nil {
 		return false
@@ -717,7 +783,7 @@ func joinReferencesEntity(source semanticview.Source, flowID string, spec *runti
 	if spec.Window != nil && (typedPathReferencesEntity(spec.Window.From, spec.Window.FromPath) || typedPathReferencesEntity(spec.Window.By, spec.Window.ByPath)) {
 		return true
 	}
-	return rulesReferenceEntity(source, flowID, []runtimecontracts.HandlerRuleEntry{spec.OnComplete, spec.Timeout.Outcome})
+	return rulesEntityRequirement(source, flowID, []runtimecontracts.HandlerRuleEntry{spec.OnComplete, spec.Timeout.Outcome}) != handlerEntitylessSafe
 }
 
 func expressionValueMapReferencesEntity(values map[string]runtimecontracts.ExpressionValue) bool {

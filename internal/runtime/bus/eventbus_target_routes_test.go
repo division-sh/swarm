@@ -629,6 +629,17 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 			ID: "all", Stage: "waiting", Members: runtimecontracts.JoinMembersSpec{From: "entity.expected", By: "payload.member_id"}, Output: "computed.members", CompleteWhen: "join.received_count == join.expected_count",
 		}}},
 		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"}}},
+		{name: "payload accumulator", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
+		{name: "approval activity", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
+			Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"},
+		}}},
+		{name: "nested approval activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
+			Activity: runtimecontracts.ActivitySpec{Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
+		}}}},
+		{name: "guard kill", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"}}},
+		{name: "accumulator clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}}}},
+		{name: "pending dedup clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup"}}}},
+		{name: "unrooted entity field clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
