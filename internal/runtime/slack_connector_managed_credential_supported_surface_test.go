@@ -340,6 +340,7 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{Check: "has(entity.id) || !has(entity.id)"},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "slack_post_message",
 			Tool: "slack.post_message",

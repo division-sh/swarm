@@ -2206,7 +2206,9 @@ func eventPublishTargetRouteTestBundle() *runtimecontracts.WorkflowContractBundl
 		ExecutionType: "system_node",
 		SubscribesTo:  []string{targetEvent},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			targetEvent: {},
+			targetEvent: {
+				Guard: &runtimecontracts.GuardSpec{Check: "has(entity.id) || !has(entity.id)"},
+			},
 		},
 	}
 	operating := runtimecontracts.FlowContractView{

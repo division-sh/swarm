@@ -53,6 +53,12 @@ func testSelectedOwnerPolicy(owners ...ActiveTargetDescriptor) deliveryRecipient
 	}
 }
 
+func existingOwnerHandlerFixture() runtimecontracts.SystemNodeEventHandler {
+	return runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
+		ID: "selected_owner", Check: "has(entity.id) || !has(entity.id)",
+	}}
+}
+
 type deliveryPlannerHandlerFixture struct {
 	flowID string
 	path   string
@@ -79,7 +85,7 @@ var deliveryPlannerHandlerFixtures = map[string]deliveryPlannerHandlerFixture{
 
 func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver, policy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
 	t.Helper()
-	source := deliveryPlannerHandlerSource()
+	source := deliveryPlannerHandlerSource(policy.requireTargetOwners)
 	original := resolver.resolveRoutedSubscribers
 	resolver.resolveRoutedSubscribers = func(evt events.Event) []Subscriber {
 		routed := original(evt)
@@ -109,7 +115,7 @@ func newDeliveryPlannerWithHandlers(t testing.TB, resolver deliveryRouteResolver
 	return newDeliveryPlanner(resolver, policy, connectPlanners...)
 }
 
-func deliveryPlannerHandlerSource() semanticview.Source {
+func deliveryPlannerHandlerSource(requireEntity bool) semanticview.Source {
 	root := runtimecontracts.FlowContractView{}
 	byID := map[string]*runtimecontracts.FlowContractView{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -123,6 +129,9 @@ func deliveryPlannerHandlerSource() semanticview.Source {
 	flows := map[string]*runtimecontracts.FlowContractView{}
 	for nodeID, fixture := range deliveryPlannerHandlerFixtures {
 		handler := runtimecontracts.SystemNodeEventHandler{}
+		if requireEntity {
+			handler = existingOwnerHandlerFixture()
+		}
 		node := runtimecontracts.SystemNodeContract{
 			ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{fixture.event},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{fixture.event: handler},

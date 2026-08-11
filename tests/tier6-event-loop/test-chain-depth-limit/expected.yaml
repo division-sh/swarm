@@ -1,6 +1,8 @@
 trigger:
   event: chain.start
   payload:
+  entity_fields_before:
+    chain_marker: active
 expected:
 
   runtime_only: true

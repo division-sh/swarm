@@ -5,6 +5,9 @@ root-dispatcher:
   produces: [step.begin]
   event_handlers:
     pipeline.start:
+      guard:
+        id: selected_owner
+        check: "has(entity.id) || !has(entity.id)"
       emit: step.begin
 
 root-collector:

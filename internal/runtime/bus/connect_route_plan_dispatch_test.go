@@ -450,7 +450,10 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		}
 	} else {
 		consumer.nodes = map[string]runtimecontracts.SystemNodeContract{
-			"receiver": {ID: "receiver", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}, "work.audited": {}}},
+			"receiver": {ID: "receiver", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"work.accepted": existingOwnerHandlerFixture(),
+				"work.audited":  existingOwnerHandlerFixture(),
+			}},
 		}
 		if mixed {
 			consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
@@ -492,14 +495,14 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{From: "producer.work_ready", To: "consumer.work_audited", Adapter: "work_ready_to_audited"},
 	}
 	nodes := map[string]runtimecontracts.SystemNodeContract{
-		"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}},
-		"audit-node":  {ID: "audit-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.audited": {}}},
+		"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
+		"audit-node":  {ID: "audit-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.audited": existingOwnerHandlerFixture()}},
 	}
 	if shape == "duplicate_edge" {
 		inputs = inputs[:1]
 		connects[1] = connects[0]
 		nodes = map[string]runtimecontracts.SystemNodeContract{
-			"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": {}}},
+			"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
 		}
 	}
 	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
@@ -1266,7 +1269,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 				"consumer-node": {
 					ID: "consumer-node",
 					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-						"deploy.*": {},
+						"deploy.*": existingOwnerHandlerFixture(),
 					},
 				},
 			},
@@ -3864,7 +3867,7 @@ func connectRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) s
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
 					ID:            "consumer-node",
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": {}},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": existingOwnerHandlerFixture()},
 				},
 			},
 		},
@@ -3883,7 +3886,7 @@ func connectRoutePlanRootProducerStaticSource() semanticview.Source {
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
 					ID:            "consumer-node",
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.ready": {}},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.ready": existingOwnerHandlerFixture()},
 				},
 			},
 		},

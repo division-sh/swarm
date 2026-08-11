@@ -139,6 +139,9 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
+	if requirement == handlerEntitylessSafe && len(existing)+len(materializing) > 0 {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("entityless-safe handler has selected entity ownership evidence for flow instance %q", blueprint.FlowInstance)
+	}
 	if len(existing) == 0 && len(materializing) == 0 && req.AllowStructuralOwner && !req.StructuralOwner.Empty() {
 		structural := req.StructuralOwner.Route()
 		if structural.EntityID != "" {

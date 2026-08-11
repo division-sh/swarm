@@ -809,6 +809,7 @@ component_scaffold.spawn_requested:
   produces: [component_scaffold.spawn_requested]
   event_handlers:
     opco.product_initialization_requested:
+      advances_to: ready
       emit:
         event: component_scaffold.spawn_requested
         fields:

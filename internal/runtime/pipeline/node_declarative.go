@@ -104,9 +104,6 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 	if !ok {
 		return false, false
 	}
-	if policy.RequireEntity && workflowEventEntityID(evt) == "" {
-		return false, false
-	}
 	return policy.Consume, true
 }
 
@@ -162,9 +159,6 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 		}
 	}
 	if !ok {
-		return false, false
-	}
-	if policy.RequireEntity && workflowEventEntityID(evt) == "" {
 		return false, false
 	}
 	return policy.Consume, true

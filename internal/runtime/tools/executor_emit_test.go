@@ -1701,7 +1701,9 @@ func emitRoutePlanRootReceiverSource() semanticview.Source {
 		From: "producer.deploy_done",
 		To:   ".deploy_completed",
 	}})
-	rootHandler := runtimecontracts.SystemNodeEventHandler{}
+	rootHandler := runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{Check: "has(entity.id) || !has(entity.id)"},
+	}
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
 		Pins: runtimecontracts.FlowPins{
 			Inputs: runtimecontracts.FlowInputPins{

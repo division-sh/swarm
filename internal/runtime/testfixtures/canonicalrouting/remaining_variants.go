@@ -448,6 +448,7 @@ component_scaffold.spawn_requested:
   produces: [component_scaffold.spawn_requested]
   event_handlers:
     opco.product_initialization_requested:
+      advances_to: ready
       emit:
         event: component_scaffold.spawn_requested
         fields:
@@ -607,6 +608,8 @@ pins:
   subscribes_to: [telegram.reply_requested]
   event_handlers:
     telegram.reply_requested:
+      guard:
+        check: has(entity.conversation_reference)
       activity:
         id: telegram_send_message
         tool: telegram.send_message
@@ -712,6 +715,8 @@ connector_packs:
   subscribes_to: [telegram.reply_requested]
   event_handlers:
     telegram.reply_requested:
+      guard:
+        check: has(entity.conversation_reference)
       activity:
         id: telegram_send_message
         tool: telegram.send_message
