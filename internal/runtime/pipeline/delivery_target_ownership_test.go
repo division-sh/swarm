@@ -371,15 +371,58 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if !handlerUsesEntity(nil, "review", test.handler) {
-				t.Fatalf("handlerUsesEntity() = false, want true for %s", test.name)
+			if handlerExecutionEntityRequirement(nil, "review", test.handler) == handlerEntitylessSafe {
+				t.Fatalf("handler execution requirement = entityless-safe, want entity ownership for %s", test.name)
 			}
 		})
 	}
-	if handlerUsesEntity(nil, "review", runtimecontracts.SystemNodeEventHandler{
+	if handlerExecutionEntityRequirement(nil, "review", runtimecontracts.SystemNodeEventHandler{
 		FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
-	}) {
+	}) != handlerEntitylessSafe {
 		t.Fatal("payload-only fan out classified as entity-scoped")
+	}
+}
+
+func TestHandlerExecutionEntityRequirementOwnsDurableBehaviorCapabilities(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+		want    handlerEntityRequirement
+	}{
+		{name: "payload accumulator persists state bucket", handler: runtimecontracts.SystemNodeEventHandler{
+			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+		}, want: handlerExistingEntityRequired},
+		{name: "approval activity persists proposed effect", handler: runtimecontracts.SystemNodeEventHandler{
+			Activity: runtimecontracts.ActivitySpec{Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
+		}, want: handlerExistingEntityRequired},
+		{name: "nested approval activity persists proposed effect", handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}}}},
+		}, want: handlerExistingEntityRequired},
+		{name: "guard kill persists lifecycle transition", handler: runtimecontracts.SystemNodeEventHandler{
+			Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"},
+		}, want: handlerExistingEntityRequired},
+		{name: "accumulator clear persists state bucket mutation", handler: runtimecontracts.SystemNodeEventHandler{
+			Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}},
+		}, want: handlerExistingEntityRequired},
+		{name: "pending dedup clear persists metadata mutation", handler: runtimecontracts.SystemNodeEventHandler{
+			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup"}},
+		}, want: handlerExistingEntityRequired},
+		{name: "unrooted clear persists entity field mutation", handler: runtimecontracts.SystemNodeEventHandler{
+			Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}},
+		}, want: handlerExistingEntityRequired},
+		{name: "explicit creation may materialize", handler: runtimecontracts.SystemNodeEventHandler{
+			CreateEntity: true,
+		}, want: handlerMaterializingEntity},
+		{name: "payload-only fanout is entityless safe", handler: runtimecontracts.SystemNodeEventHandler{
+			FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
+		}, want: handlerEntitylessSafe},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := handlerExecutionEntityRequirement(nil, "review", test.handler); got != test.want {
+				t.Fatalf("handler execution requirement = %d, want %d", got, test.want)
+			}
+		})
 	}
 }
 
