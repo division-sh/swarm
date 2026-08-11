@@ -387,6 +387,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if err != nil {
 		return releaseFailure(err)
 	}
+	if err := requirePublicInputRoutePlan(ctx, routePlan); err != nil {
+		return releaseFailure(err)
+	}
 	if replayScope == runtimepipelineobligation.ScopeSubscribed {
 		resolved, changed, err := resolveCanonicalConnectRouteEvent(evt, routePlan)
 		if err != nil {

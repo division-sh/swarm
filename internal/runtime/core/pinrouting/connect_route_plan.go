@@ -1013,6 +1013,7 @@ func (m ConnectRoutePlanInstanceKeyMaterial) CanonicalValues() map[string]any {
 type CompiledConnectGraph struct {
 	source                semanticview.Source
 	plans                 []ConnectRoutePlan
+	receiverPlans         []ConnectRoutePlan
 	issues                []ConnectRoutePlanIssue
 	receiverPinCollisions []ConnectReceiverPinCollision
 }
@@ -1233,7 +1234,7 @@ func (g CompiledConnectGraph) AdmitReceiverRecipient(flowID string, eventType ev
 	}
 	seen := map[ConnectReceiverPinIdentity]struct{}{}
 	out := make([]ConnectRecipientRegistration, 0, 1)
-	for _, plan := range g.plans {
+	for _, plan := range append(append([]ConnectRoutePlan(nil), g.plans...), g.receiverPlans...) {
 		role := connectEndpointRole(ConnectEndpointRoleConsumer, plan.receiver)
 		if !role.Matches(flowID, eventType) {
 			continue
@@ -1524,13 +1525,45 @@ func CompileConnectGraph(source semanticview.Source) CompiledConnectGraph {
 		plans = append(plans, externalPlans...)
 		issues = append(issues, externalIssues...)
 	}
+	receiverPlans := lowerPublicInputReceiverPlans(source)
 	sortConnectRoutePlans(plans)
+	sortConnectRoutePlans(receiverPlans)
 	return CompiledConnectGraph{
 		source:                source,
 		plans:                 plans,
+		receiverPlans:         receiverPlans,
 		issues:                issues,
 		receiverPinCollisions: compileStaticConnectReceiverPinCollisions(source, plans),
 	}
+}
+
+// lowerPublicInputReceiverPlans supplies receiver-pin registration evidence
+// for public template inputs. These plans are intentionally excluded from the
+// executable graph: only the typed public-input admission path may select one.
+func lowerPublicInputReceiverPlans(source semanticview.Source) []ConnectRoutePlan {
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	plans := make([]ConnectRoutePlan, 0)
+	seen := make(map[ConnectReceiverPinIdentity]struct{})
+	for _, endpoint := range census.InputPins() {
+		scope, ok := source.FlowScopeByID(strings.TrimSpace(endpoint.FlowID))
+		if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		plan, issue := LowerPublicInputRoutePlan(source, endpoint)
+		if !issue.Failure.Empty() {
+			continue
+		}
+		pin := plan.ReceiverPinIdentity()
+		if pin.Empty() {
+			continue
+		}
+		if _, exists := seen[pin]; exists {
+			continue
+		}
+		seen[pin] = struct{}{}
+		plans = append(plans, plan)
+	}
+	return plans
 }
 
 func compileStaticConnectReceiverPinCollisions(source semanticview.Source, plans []ConnectRoutePlan) []ConnectReceiverPinCollision {
@@ -1730,6 +1763,39 @@ func compileConnectPlans(source semanticview.Source) ([]ConnectRoutePlan, []Conn
 	return graph.Plans(), graph.Issues()
 }
 
+// LowerPublicInputRoutePlan lowers one census-proven template input into the
+// same route plan consumed by provider ingress and authored connect delivery.
+// The returned plan carries no provider authorization; EventBus owns the
+// distinct public-admission authority required to execute it.
+func LowerPublicInputRoutePlan(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint) (ConnectRoutePlan, ConnectRoutePlanIssue) {
+	flowID := strings.TrimSpace(endpoint.FlowID)
+	pinName := strings.TrimSpace(endpoint.PinName)
+	if source == nil {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}
+	}
+	if endpoint.Kind != semanticview.EventEndpointFlowInputPin || endpoint.Direction != semanticview.EventEndpointInputPin || flowID == "" || pinName == "" {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: "public input admission requires one exact flow input endpoint"}
+	}
+	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, pinName)
+	resolvedEndpoint, ok := association.Endpoint()
+	if !ok || strings.TrimSpace(resolvedEndpoint.ID) != strings.TrimSpace(endpoint.ID) {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: association.Err().Error()}
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverFlowMissing, Detail: flowID + " is not a template flow"}
+	}
+	inputPin, ok := source.FlowInputEventPin(flowID, pinName)
+	if !ok {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureReceiverInputPinMissing, Detail: flowID + "." + pinName}
+	}
+	resolvedEvent := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
+	if resolvedEvent == "" || resolvedEvent != eventidentity.Normalize(endpoint.Event.Canonical) {
+		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Failure: ConnectFailureEventAliasAdapterInvalid, Detail: flowID + "." + pinName}
+	}
+	return lowerTargetFreeInputRoutePlan(source, scope, inputPin, nil)
+}
+
 // lowerTargetFreeInputRoutePlans lowers exact external input pins for the
 // explicitly authorized target-free event set. It reuses the same instance-key
 // materialization model as composition connect routes without inventing a
@@ -1757,44 +1823,10 @@ func lowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations [
 			if !ok {
 				continue
 			}
-			connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName()}
-			sourceEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "external", inputPin.PinName(), resolved, resolved, "", nil)
-			receiverEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, flowID, scope.Path, scope.Mode,
-				inputPin.PinName(), inputPin.EventType(), resolved, "", nil)
-			var instanceKey *ConnectRoutePlanInstanceKey
-			if receiverRequiresRuntimeResolution(scope) {
-				var issue ConnectRoutePlanIssue
-				instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution, flowID)
-				if !issue.Failure.Empty() {
-					issue.AuthoredLocation = flowID + "." + inputPin.PinName()
-					issue.sourceEndpoint = sourceEndpoint
-					issue.receiverEndpoint = receiverEndpoint
-					issue.providerOutputAuthorization = &authorization
-					issues = append(issues, issue)
-					continue
-				}
-			}
-			plan := ConnectRoutePlan{
-				authoredLocation:            flowID + "." + inputPin.PinName(),
-				source:                      sourceEndpoint,
-				receiver:                    receiverEndpoint,
-				targetKind:                  ConnectTargetKindTarget,
-				resolutionKind:              connectResolutionKind(scope, instanceKey),
-				instanceKey:                 instanceKey,
-				providerOutputAuthorization: &authorization,
-			}
-			if receiverRequiresRuntimeResolution(scope) {
-				if instanceKey == nil {
-					issues = append(issues, ConnectRoutePlanIssue{
-						Connect: connect, AuthoredLocation: plan.authoredLocation,
-						Failure: ConnectFailureReceiverResolutionMissing, Detail: flowID,
-						sourceEndpoint: sourceEndpoint, receiverEndpoint: receiverEndpoint,
-						providerOutputAuthorization: &authorization,
-					})
-					continue
-				}
-			} else {
-				plan.target = staticConnectRoute(source, flowID)
+			plan, issue := lowerTargetFreeInputRoutePlan(source, scope, inputPin, &authorization)
+			if !issue.Failure.Empty() {
+				issues = append(issues, issue)
+				continue
 			}
 			plans = append(plans, plan)
 		}
@@ -1806,6 +1838,57 @@ func lowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations [
 		return plans[i].receiver.pin.value < plans[j].receiver.pin.value
 	})
 	return plans, issues
+}
+
+func lowerTargetFreeInputRoutePlan(source semanticview.Source, scope semanticview.FlowScope, inputPin runtimecontracts.FlowInputEventPin, authorization *runtimeprovideroutput.Authorization) (ConnectRoutePlan, ConnectRoutePlanIssue) {
+	flowID := strings.TrimSpace(scope.ID)
+	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
+	connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName()}
+	sourceEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "external", inputPin.PinName(), resolved, resolved, "", nil)
+	receiverEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, flowID, scope.Path, scope.Mode,
+		inputPin.PinName(), inputPin.EventType(), resolved, "", nil)
+	var instanceKey *ConnectRoutePlanInstanceKey
+	if receiverRequiresRuntimeResolution(scope) {
+		var issue ConnectRoutePlanIssue
+		instanceKey, issue = connectResolutionInstanceKey(source, connect, inputPin, inputPin.Resolution, flowID)
+		if !issue.Failure.Empty() {
+			issue.AuthoredLocation = flowID + "." + inputPin.PinName()
+			issue.sourceEndpoint = sourceEndpoint
+			issue.receiverEndpoint = receiverEndpoint
+			issue.providerOutputAuthorization = cloneProviderOutputAuthorization(authorization)
+			return ConnectRoutePlan{}, issue
+		}
+	}
+	plan := ConnectRoutePlan{
+		authoredLocation:            flowID + "." + inputPin.PinName(),
+		source:                      sourceEndpoint,
+		receiver:                    receiverEndpoint,
+		targetKind:                  ConnectTargetKindTarget,
+		resolutionKind:              connectResolutionKind(scope, instanceKey),
+		instanceKey:                 instanceKey,
+		providerOutputAuthorization: cloneProviderOutputAuthorization(authorization),
+	}
+	if receiverRequiresRuntimeResolution(scope) {
+		if instanceKey == nil {
+			return ConnectRoutePlan{}, ConnectRoutePlanIssue{
+				Connect: connect, AuthoredLocation: plan.authoredLocation,
+				Failure: ConnectFailureReceiverResolutionMissing, Detail: flowID,
+				sourceEndpoint: sourceEndpoint, receiverEndpoint: receiverEndpoint,
+				providerOutputAuthorization: cloneProviderOutputAuthorization(authorization),
+			}
+		}
+	} else {
+		plan.target = staticConnectRoute(source, flowID)
+	}
+	return plan, ConnectRoutePlanIssue{}
+}
+
+func cloneProviderOutputAuthorization(authorization *runtimeprovideroutput.Authorization) *runtimeprovideroutput.Authorization {
+	if authorization == nil {
+		return nil
+	}
+	cloned := *authorization
+	return &cloned
 }
 
 func lowerCompositionConnectRoutePlanWithLocation(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {

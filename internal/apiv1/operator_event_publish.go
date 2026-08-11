@@ -59,7 +59,7 @@ type eventPublicationParams struct {
 	FlowInstance           string
 	TargetRoute            events.RouteIdentity
 	TargetRouteSet         bool
-	TargetRouteRequired    bool
+	PublicInputEndpoint    *semanticview.AuthoredEventEndpoint
 	RunID                  string
 	SourceEventID          string
 	IdempotencyKey         string
@@ -83,6 +83,10 @@ type eventPublicationConfig struct {
 
 type eventAcknowledgedPublisher interface {
 	PublishAcknowledged(context.Context, events.Event) error
+}
+
+type publicInputAcknowledgedPublisher interface {
+	PublishPublicInputAcknowledged(context.Context, events.Event, semanticview.AuthoredEventEndpoint) error
 }
 
 func OperatorEventPublishHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -210,7 +214,15 @@ func executeOperatorEventPublication(
 				return store.APIIdempotencyCompletion{}, err
 			}
 			params.EventName = resolvedEventName
-			params.TargetRouteRequired = eventPublicationSelectsTemplateInputEvent(selectedOpts.Source, requestedEventName, resolvedEventName)
+			if params.NewRunCreated {
+				endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
+				if err != nil {
+					return store.APIIdempotencyCompletion{}, err
+				}
+				if matched {
+					params.PublicInputEndpoint = &endpoint
+				}
+			}
 		}
 		params, err = validateEventPublication(ctx, selectedOpts, params, cfg)
 		if err != nil {
@@ -220,7 +232,7 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return store.APIIdempotencyCompletion{}, err
 		}
-		if err := publishEventPublication(ctx, selectedOpts.Events, publication, cfg); err != nil {
+		if err := publishEventPublication(ctx, selectedOpts.Events, publication, params.PublicInputEndpoint, cfg); err != nil {
 			if cfg.publishError != nil {
 				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
 			}
@@ -241,8 +253,15 @@ func executeOperatorEventPublication(
 	})
 }
 
-func publishEventPublication(ctx context.Context, publisher EventPublisher, evt events.Event, cfg eventPublicationConfig) error {
+func publishEventPublication(ctx context.Context, publisher EventPublisher, evt events.Event, publicInput *semanticview.AuthoredEventEndpoint, cfg eventPublicationConfig) error {
 	if cfg.durablePublishAck {
+		if publicInput != nil {
+			admitted, ok := publisher.(publicInputAcknowledgedPublisher)
+			if !ok || admitted == nil {
+				return errors.New("public template input event.publish requires typed public-input admission")
+			}
+			return admitted.PublishPublicInputAcknowledged(ctx, evt, *publicInput)
+		}
 		acknowledged, ok := publisher.(eventAcknowledgedPublisher)
 		if !ok || acknowledged == nil {
 			return errors.New("durable event.publish acknowledgment requires acknowledged publisher")
@@ -588,49 +607,71 @@ func enrichExistingRunEventPublicationPrimaryEntity(ctx context.Context, opts Op
 	return params, nil
 }
 
-func eventPublicationSelectsTemplateInputEvent(source semanticview.Source, requestedEventName, resolvedEventName string) bool {
+func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, requestedEventName, resolvedEventName string) (semanticview.AuthoredEventEndpoint, bool, error) {
 	if source == nil {
-		return false
+		return semanticview.AuthoredEventEndpoint{}, false, nil
 	}
 	requestedEventName = runtimeeventidentity.Normalize(requestedEventName)
 	resolvedEventName = runtimeeventidentity.Normalize(resolvedEventName)
 	if requestedEventName == "" || resolvedEventName == "" {
-		return false
+		return semanticview.AuthoredEventEndpoint{}, false, nil
 	}
 	scoped := strings.Contains(requestedEventName, "/")
 	if !scoped {
 		if _, ok := source.EventEntry(requestedEventName); ok && requestedEventName == resolvedEventName {
-			return false
+			return semanticview.AuthoredEventEndpoint{}, false, nil
 		}
 	}
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	scopes := make(map[string]semanticview.FlowScope)
 	for _, scope := range source.FlowScopes() {
-		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+		scopes[strings.TrimSpace(scope.ID)] = scope
+	}
+	candidates := make([]semanticview.AuthoredEventEndpoint, 0)
+	seen := map[string]struct{}{}
+	for _, endpoint := range census.InputPins() {
+		scope, ok := scopes[strings.TrimSpace(endpoint.FlowID)]
+		if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 			continue
 		}
-		for localEventName := range scope.Events {
-			localEventName = runtimeeventidentity.Normalize(localEventName)
-			if localEventName == "" {
-				continue
-			}
-			canonical := canonicalFlowEventName(source, scope, localEventName)
-			if canonical != resolvedEventName {
-				continue
-			}
-			if !source.FlowHasInputEvent(scope.ID, localEventName) && !source.FlowHasInputEvent(scope.ID, canonical) {
-				continue
-			}
-			if scoped {
-				if flowScopedEventNameMatches(requestedEventName, scope, localEventName, canonical) {
-					return true
-				}
-				continue
-			}
-			if localEventName == requestedEventName {
-				return true
-			}
+		localEventName := runtimeeventidentity.Normalize(endpoint.Event.Local)
+		canonical := runtimeeventidentity.Normalize(endpoint.Event.Canonical)
+		if localEventName == "" {
+			localEventName = runtimeeventidentity.Normalize(endpoint.Event.Authored)
 		}
+		if canonical != resolvedEventName {
+			continue
+		}
+		matches := localEventName == requestedEventName
+		if scoped {
+			matches = flowScopedEventNameMatches(requestedEventName, scope, localEventName, canonical)
+		}
+		if !matches {
+			continue
+		}
+		identity := strings.TrimSpace(endpoint.ID)
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		candidates = append(candidates, endpoint)
 	}
-	return false
+	if len(candidates) == 0 {
+		return semanticview.AuthoredEventEndpoint{}, false, nil
+	}
+	if len(candidates) > 1 {
+		ids := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			ids = append(ids, strings.TrimSpace(candidate.ID))
+		}
+		sort.Strings(ids)
+		return semanticview.AuthoredEventEndpoint{}, false, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
+			"event_name": requestedEventName,
+			"reason":     "ambiguous_template_input_endpoint",
+			"candidates": ids,
+		})
+	}
+	return candidates[0], true, nil
 }
 
 func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {

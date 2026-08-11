@@ -3475,6 +3475,84 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 	}
 }
 
+func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		mode           canonicalrouting.TemplateInstanceRouteMode
+		seedExisting   bool
+		wantActivation bool
+	}{
+		{name: "create", mode: canonicalrouting.TemplateInstanceRouteCreate, wantActivation: true},
+		{name: "select", mode: canonicalrouting.TemplateInstanceRouteSelect, seedExisting: true},
+		{name: "select-or-create", mode: canonicalrouting.TemplateInstanceRouteSelectOrCreate, wantActivation: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			source := connectRoutePlanTemplateInstanceSource(t, tc.mode, false)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("template route source has no contract bundle")
+			}
+			bundle.Package.Connect = nil
+			bundle.Semantics.CompositionConnects = nil
+			store := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+					targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				},
+			}
+			if tc.seedExisting {
+				store.flowInstances = []ActiveFlowInstanceDescriptor{{
+					InstanceID: "one", EntityID: eventtest.UUID("ent-public-select"),
+					FlowInstance: "consumer/one", FlowTemplate: "consumer",
+					AddressFields: map[string]string{"entity.vertical_id": "vertical-1"},
+				}}
+			}
+			eventBus, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle:            source,
+				TemplateInstanceActivator: store.Activate,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			store.bus = eventBus
+			if tc.seedExisting {
+				if err := eventBus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
+					Identity: runtimeflowidentity.DeriveRoute("consumer", "one"),
+				}); err != nil {
+					t.Fatalf("seed selected flow route: %v", err)
+				}
+			}
+
+			association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy_completed")
+			endpoint, ok := association.Endpoint()
+			if !ok {
+				t.Fatalf("resolve public input endpoint: %v", association.Err())
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(
+				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
+				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			if err := eventBus.PublishPublicInputAcknowledged(ctx, evt, endpoint); err != nil {
+				t.Fatalf("PublishPublicInputAcknowledged: %v", err)
+			}
+
+			store.mu.Lock()
+			routes := append([]events.DeliveryRoute(nil), store.routes[eventID]...)
+			store.mu.Unlock()
+			if len(routes) != 1 {
+				t.Fatalf("persisted public-input delivery routes = %#v, want one", routes)
+			}
+			if target := routes[0].Target.Normalized(); target.FlowID != "consumer" || !strings.HasPrefix(target.FlowInstance, "consumer/") {
+				t.Fatalf("public-input target = %#v, want a concrete consumer instance", target)
+			}
+			if got := len(store.activations); (got == 1) != tc.wantActivation {
+				t.Fatalf("committed activations = %d, want activation=%t", got, tc.wantActivation)
+			}
+		})
+	}
+}
+
 func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
