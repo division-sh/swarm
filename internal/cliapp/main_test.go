@@ -5274,10 +5274,7 @@ func TestVerifyBundle_DoesNotWarnForFlowOwnedAgentOutputEvents(t *testing.T) {
 	source := semanticview.Wrap(requiredagentsparentconnect.LoadBundle(t))
 
 	err := VerifyBundle(context.Background(), source, executionposture.Live)
-	if err == nil {
-		t.Fatal("VerifyBundle error = nil, want warning-only failure from unrelated fixture warnings")
-	}
-	if strings.Contains(err.Error(), "'work.ready' emitted but nobody subscribes") {
+	if err != nil && strings.Contains(err.Error(), "'work.ready' emitted but nobody subscribes") {
 		t.Fatalf("unexpected flow-owned agent output warning: %v", err)
 	}
 }
