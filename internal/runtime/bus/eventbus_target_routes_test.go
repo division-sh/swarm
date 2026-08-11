@@ -671,6 +671,40 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 	}
 }
 
+func TestEventBusRejectsSelectedEntityForEntitylessHandlerBeforePersistence(t *testing.T) {
+	const eventType = "task.started"
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwnerRoutes(events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("selected-entityless-owner"),
+	})
+	source := semanticview.Wrap(materializedTargetBundleWithHandler(
+		"review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{},
+	))
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source,
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+			return []DeliveryRouteBlueprint{{
+				Recipient: events.MustNodeDeliveryRecipient("target-node"),
+				Target:    events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"},
+				Handler:   runtimepipeline.MustDeliveryTargetHandler("review", "target-node").ForEvent(eventType),
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RunCreatingRootIngress(
+		eventID, "review/inst-1/"+eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "entityless-safe handler has selected entity ownership evidence") {
+		t.Fatalf("Publish error = %v, want selected/entityless contradiction", err)
+	}
+	if _, persisted := store.events[eventID]; persisted || len(store.routes[eventID]) != 0 {
+		t.Fatalf("failed publish persisted event/routes: event=%t routes=%#v", persisted, store.routes[eventID])
+	}
+}
+
 func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *testing.T) {
 	const eventType = "worker/work.started"
 	eventID := uuid.NewString()
@@ -691,8 +725,10 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(materializedTargetBundle("worker", "target-node", "work.started")),
-		RouteTable:     rt,
+		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
+			"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+		)),
+		RouteTable: rt,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{targetBlueprint}, nil
 		},
@@ -1805,13 +1841,13 @@ func TestEventBusPublish_WildcardStaticServiceNodePersistsRouteBeforeInternalCar
 	componentFlow := runtimecontracts.FlowContractView{
 		Path: "component-scaffold", Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"component-node": {ID: "component-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": {}}},
+			"component-node": {ID: "component-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
 		},
 	}
 	repositoryFlow := runtimecontracts.FlowContractView{
 		Path: "repo-scaffold", Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"repo-scaffold-node": {ID: "repo-scaffold-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": {}}},
+			"repo-scaffold-node": {ID: "repo-scaffold-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{componentFlow, repositoryFlow}}
@@ -2198,8 +2234,6 @@ func TestEventBusPublish_NodeProducedSameFlowOutputPersistsNodeDelivery(t *testi
 
 func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	consumerOwner := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: eventtest.UUID("parent-connect-consumer-owner")}
-	store.setTargetOwnerRoutes(consumerOwner)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		canonicalrouting.RepoRoot(t),
 		canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect),
@@ -2234,8 +2268,8 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 	want := plan.DeliveryRoutes[0]
 	target := want.Target.Route()
 	if !want.Recipient.IsNode() || want.Recipient.ID() != "consumer-node" ||
-		target.FlowID != "consumer" || target.FlowInstance != "consumer" || target.EntityID == "" {
-		t.Fatalf("parent-connect route = %#v, want singular static consumer identity", want)
+		target.FlowID != "consumer" || target.FlowInstance != "consumer" || target.EntityID != "" || !want.Target.EntitylessReceiver() {
+		t.Fatalf("parent-connect route = %#v, want singular entityless static consumer identity", want)
 	}
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -2536,7 +2570,10 @@ version: 1.0.0
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
   event_handlers:
-    opco.spinup_requested: {}
+    opco.spinup_requested:
+      guard:
+        id: selected_owner
+        check: "has(entity.id) || !has(entity.id)"
 `,
 	}
 }
@@ -2560,7 +2597,7 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"thing.created"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.created": {},
+					"thing.created": existingOwnerHandlerFixture(),
 				},
 			},
 		},
@@ -2643,7 +2680,7 @@ func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"opco.product_initialization_requested"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"opco.product_initialization_requested": {},
+					"opco.product_initialization_requested": existingOwnerHandlerFixture(),
 				},
 			},
 		},
@@ -2687,8 +2724,8 @@ func routedCallbackTemplateBundle() *runtimecontracts.WorkflowContractBundle {
 					"repo_scaffold.repo_commit_failed",
 				},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"repo_scaffold.repo_commit_succeeded": {},
-					"repo_scaffold.repo_commit_failed":    {},
+					"repo_scaffold.repo_commit_succeeded": existingOwnerHandlerFixture(),
+					"repo_scaffold.repo_commit_failed":    existingOwnerHandlerFixture(),
 				},
 			},
 		},
@@ -2720,7 +2757,7 @@ func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"thing.reviewed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.reviewed": {},
+					"thing.reviewed": existingOwnerHandlerFixture(),
 				},
 			},
 		},
@@ -2752,7 +2789,7 @@ func routedNodeStaticChildBundle() *runtimecontracts.WorkflowContractBundle {
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"child.start"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"child.start": {},
+					"child.start": existingOwnerHandlerFixture(),
 				},
 			},
 		},

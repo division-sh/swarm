@@ -425,7 +425,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 					ID: "controller", Subscriptions: []events.EventType{"timer-proof/timer.cancel"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-						"timer-proof/timer.cancel": {Consume: true, RequireEntity: true},
+						"timer-proof/timer.cancel": {Consume: true},
 					},
 				}},
 			}

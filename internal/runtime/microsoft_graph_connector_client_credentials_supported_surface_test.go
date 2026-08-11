@@ -344,6 +344,7 @@ func microsoftGraphClientCredentialsRecord(baseURL, accessToken string, expiresA
 func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{Check: "has(entity.id) || !has(entity.id)"},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "microsoft_graph_send_mail",
 			Tool: "microsoft_graph.send_mail",

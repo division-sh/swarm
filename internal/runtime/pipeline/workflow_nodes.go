@@ -17,7 +17,6 @@ import (
 
 type WorkflowEventPolicy struct {
 	Consume           bool
-	RequireEntity     bool
 	VisibleDownstream bool
 }
 
@@ -98,7 +97,7 @@ func workflowNodePolicyForDelivery(ctx context.Context, source semanticview.Sour
 			return policy, true, nil
 		}
 	}
-	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey, strings.TrimSpace(resolved.Handler.AdvancesTo) != ""), true, nil
+	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey), true, nil
 }
 
 func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
@@ -455,13 +454,12 @@ func buildWorkflowNodePolicies(source semanticview.Source, nodeID string, subscr
 			subscribed[name] = struct{}{}
 		}
 	}
-	transitionTriggers := workflowNodeTransitionTriggers(source, nodeID)
 	policies := make(map[string]WorkflowEventPolicy, len(allowed))
 	for eventType := range allowed {
 		if _, ok := subscribed[eventType]; !ok {
 			continue
 		}
-		policy := deriveWorkflowEventPolicy(source, eventType, transitionTriggers[eventType])
+		policy := deriveWorkflowEventPolicy(source, eventType)
 		policies[eventType] = policy
 	}
 	if len(policies) == 0 {
@@ -552,47 +550,15 @@ func workflowNodeExternalEventType(source semanticview.Source, nodeID, eventType
 	return source.ResolveNodeEventReference(nodeID, eventType)
 }
 
-func workflowNodeTransitionTriggers(source semanticview.Source, nodeID string) map[string]bool {
-	out := make(map[string]bool)
-	if source == nil {
-		return out
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	for _, transition := range source.WorkflowTransitions() {
-		if strings.TrimSpace(transition.Node) != nodeID {
-			continue
-		}
-		trigger := strings.TrimSpace(transition.Trigger)
-		if trigger != "" {
-			out[trigger] = true
-		}
-	}
-	for _, transition := range source.DerivedHandlerTransitions() {
-		if strings.TrimSpace(transition.NodeID) != nodeID {
-			continue
-		}
-		if strings.TrimSpace(transition.AdvancesTo) == "" {
-			continue
-		}
-		trigger := strings.TrimSpace(transition.EventType)
-		if trigger != "" {
-			out[trigger] = true
-		}
-	}
-	return out
-}
-
-func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, drivesTransition bool) WorkflowEventPolicy {
+func deriveWorkflowEventPolicy(source semanticview.Source, eventType string) WorkflowEventPolicy {
 	eventType = strings.TrimSpace(eventType)
 	entry, ok := source.EventEntry(eventType)
 	if !ok {
-		return WorkflowEventPolicy{RequireEntity: drivesTransition}
+		return WorkflowEventPolicy{}
 	}
-	requireEntity := drivesTransition
 	consume, visible := deriveWorkflowEventDelivery(entry)
 	return WorkflowEventPolicy{
 		Consume:           consume,
-		RequireEntity:     requireEntity,
 		VisibleDownstream: visible,
 	}
 }
@@ -678,9 +644,6 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			}
 		}
 		if ok {
-			if policy.RequireEntity && workflowEventEntityID(evt) == "" {
-				continue
-			}
 			return policy.Consume, true, nil
 		}
 	}

@@ -283,6 +283,7 @@ const telegramConnectorSupportedSurfaceNodeID = "telegram-responder"
 func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{Check: "has(entity.id) || !has(entity.id)"},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "telegram_send_message",
 			Tool: "telegram.send_message",

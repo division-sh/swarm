@@ -7,6 +7,9 @@ router:
 
   event_handlers:
     validate.requested:
+      guard:
+        id: selected_owner
+        check: "has(entity.id) || !has(entity.id)"
       emit: child/validate.start
     validation.done:
       guard:

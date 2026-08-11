@@ -165,18 +165,14 @@ func assertSealedFlowPackageConnectPlan(t *testing.T, source semanticview.Source
 func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.Source) {
 	t.Helper()
 
-	consumerOwner := eventtest.UUID("sealed-consumer-owner")
-	store := &sealedFlowPackageRouteStore{targetOwners: []runtimebus.ActiveTargetDescriptor{{
-		ID: "sealed-consumer", FlowInstance: "consumer", EntityID: consumerOwner,
-	}}}
+	store := &sealedFlowPackageRouteStore{}
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
-		EntityID:     consumerOwner,
 	}),
 	}
 	producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
