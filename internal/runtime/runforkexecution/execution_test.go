@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -1988,7 +1989,7 @@ func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabil
 	t.Fatalf("selected Claude %s surface omitted web_search: %#v", authorityKind, surface)
 }
 
-func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *testing.T) {
+func TestSelectedContractForkManagedPreflightUsesExactProviderPromptAndExecutesEligibleMCPToolCall(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := runForkTestContext(t)
 	container := buildSelectedForkProofContainer(t, ctx, db)
@@ -1998,7 +1999,8 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 		LLMBackend:        llmselection.BackendClaudeCLI,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
-	if err := manager.SpawnAgent(selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health", Model: llmselection.ModelAliasRegular})); err != nil {
+	agentCfg := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health", Model: llmselection.ModelAliasRegular})
+	if err := manager.SpawnAgent(agentCfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	executor := &selectedForkStartupProbeExecutor{}
@@ -2023,7 +2025,8 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	if err != nil {
 		t.Fatalf("resolve selected-fork llm profile: %v", err)
 	}
-	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, selectedForkStartupRuntime{})
+	var startupPrompts []string
+	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, selectedForkStartupRuntime{prompts: &startupPrompts})
 	if err != nil {
 		t.Fatalf("build selected-fork runtime set: %v", err)
 	}
@@ -2053,6 +2056,17 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	}
 	if !slices.Equal(executor.executed, []string{"health_check"}) {
 		t.Fatalf("selected-fork startup tools/call executions = %#v, want [health_check]", executor.executed)
+	}
+	expectedPrompt, err := agentCfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble selected-fork expected provider prompt: %v", err)
+	}
+	expectedText, err := expectedPrompt.Text()
+	if err != nil {
+		t.Fatalf("render selected-fork expected provider prompt: %v", err)
+	}
+	if !slices.Equal(startupPrompts, []string{expectedText}) {
+		t.Fatalf("selected-fork startup prompts = %#v, want exact canonical prompt %q", startupPrompts, expectedText)
 	}
 	if len(surfaceIDs) != 1 {
 		t.Fatalf("selected-fork startup surfaces = %#v, want one", surfaceIDs)
@@ -2124,13 +2138,17 @@ type selectedForkStartupVisibleSurfaceProbe struct{}
 
 type selectedForkStartupRuntime struct {
 	runtimellm.NoopRuntime
+	prompts *[]string
 }
 
 func (selectedForkStartupRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.ClaudeCLIProviderContract()
 }
 
-func (selectedForkStartupRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Response, error) {
+func (r selectedForkStartupRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Response, error) {
+	if r.prompts != nil {
+		*r.prompts = append(*r.prompts, systemPrompt)
+	}
 	return selectedForkStartupVisibleSurfaceProbe{}.ProbeStartupVisibleToolSurface(ctx, actor, systemPrompt, tools)
 }
 

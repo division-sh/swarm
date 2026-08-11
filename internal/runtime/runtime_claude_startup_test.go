@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -292,13 +293,15 @@ func startupProbeCapabilitySet(names []string, source map[string]toolcapabilitie
 }
 
 type startupVisibleSurfaceProbeStub struct {
-	resp  *llm.Response
-	err   error
-	calls []string
+	resp    *llm.Response
+	err     error
+	calls   []string
+	prompts []string
 }
 
-func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, _ string, _ []llm.ToolDefinition) (*llm.Response, error) {
+func (s *startupVisibleSurfaceProbeStub) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, systemPrompt string, _ []llm.ToolDefinition) (*llm.Response, error) {
 	s.calls = append(s.calls, strings.TrimSpace(actor.ID))
+	s.prompts = append(s.prompts, systemPrompt)
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -461,16 +464,17 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForRecover
 	}
 }
 
-func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *testing.T) {
+func TestValidateClaudeMCPToolsForManagedAgents_StartupPromptMatchesCanonicalNormalAgentAssembly(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	agentCfg := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
 		Config:        json.RawMessage(`{}`),
-	})); err != nil {
+	})
+	if err := manager.SpawnAgent(agentCfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -485,6 +489,17 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesRealFilteredTransport(t *tes
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
 		t.Fatalf("probe calls = %#v, want CLI startup proof before MCP runtime proof", probe.calls)
+	}
+	expectedPrompt, err := agentCfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble expected startup prompt: %v", err)
+	}
+	expectedText, err := expectedPrompt.Text()
+	if err != nil {
+		t.Fatalf("render expected startup prompt: %v", err)
+	}
+	if !slices.Equal(probe.prompts, []string{expectedText}) {
+		t.Fatalf("startup provider prompts = %#v, want exact canonical prompt %q", probe.prompts, expectedText)
 	}
 	if !slices.Equal(exec.executed, []string{"health_check"}) {
 		t.Fatalf("executed = %#v, want health_check tools/call smoke", exec.executed)

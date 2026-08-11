@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -436,9 +437,13 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 		agentCtx = managedcapabilities.WithContext(agentCtx, surface)
 		agentCtx = runtimeeffects.WithAuthority(agentCtx, effectAuthority)
 		agentCtx = runtimeeffects.WithController(agentCtx, authority.EffectController)
-		systemPrompt, err := agentCfg.DerivedSystemPrompt()
+		providerPrompt, err := agentCfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
 		if err != nil {
 			return nil, fmt.Errorf("resolve startup prompt for agent %s: %w", agentID, err)
+		}
+		systemPrompt, err := providerPrompt.Text()
+		if err != nil {
+			return nil, fmt.Errorf("render startup prompt for agent %s: %w", agentID, err)
 		}
 		probeResp, err := startupProbe.ProbeStartupVisibleToolSurface(agentCtx, agentCfg, systemPrompt, sessionTools)
 		if err != nil {

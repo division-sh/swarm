@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -51,11 +52,14 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		subs = append(subs, events.EventType(s))
 	}
 
-	systemPrompt, err := cfg.DerivedSystemPrompt()
+	providerPrompt, err := cfg.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		return nil, err
 	}
-	systemPrompt = appendPromptPostamble(systemPrompt)
+	systemPrompt, err := providerPrompt.Text()
+	if err != nil {
+		return nil, err
+	}
 
 	maxTurns := 100
 	if cfg.MaxTurnsPerTask > 0 {
@@ -188,34 +192,6 @@ func (a *LLMAgent) applyTurnToolDefinitions(ctx context.Context) {
 	if a.conversation.Session != nil {
 		a.conversation.Session.Tools = tools
 	}
-}
-
-const promptEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nContracts: /opt/swarm/contracts (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
-
-func appendPromptPostamble(prompt string) string {
-	if strings.TrimSpace(prompt) == "" {
-		return ""
-	}
-	if promptHasEnvironmentPostambleContract(prompt) {
-		return prompt
-	}
-	return prompt + "\n\n" + promptEnvironmentPostamble
-}
-
-func promptHasEnvironmentPostambleContract(prompt string) bool {
-	for _, required := range []string{
-		"Workspace: /workspace (read-write logical path)",
-		"Reference data: /data (read-only logical path)",
-		"Contracts: /opt/swarm/contracts (read-only logical path)",
-		"Docker-backed command execution exposes these as OS paths",
-		"Trusted host bash is full host-user shell execution from the workspace backing directory",
-		"absolute path availability follows the host deployment namespace and OS permissions",
-	} {
-		if !strings.Contains(prompt, required) {
-			return false
-		}
-	}
-	return true
 }
 
 func (a *LLMAgent) prepareConversationForInvocation(evt events.Event) {

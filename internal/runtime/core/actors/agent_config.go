@@ -117,6 +117,13 @@ func (cfg AgentConfig) DerivedSystemPrompt() (string, error) {
 	return cfg.Prompt.Text(cfg.Intent, cfg.Criteria)
 }
 
+func (cfg AgentConfig) ProviderPrompt(environment runtimeagentintent.EnvironmentContext) (runtimeagentintent.ProviderPrompt, error) {
+	if err := cfg.ValidateIntentCarrier(); err != nil {
+		return runtimeagentintent.ProviderPrompt{}, err
+	}
+	return runtimeagentintent.AssembleProviderPrompt(cfg.Intent, cfg.Criteria, cfg.Prompt, environment)
+}
+
 func ValidateNoAuthoredSystemPrompt(raw json.RawMessage) error {
 	if len(raw) == 0 {
 		return nil
