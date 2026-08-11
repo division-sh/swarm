@@ -210,7 +210,7 @@ func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing
 		factoryCalls++
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{ExecutionPosture: executionposture.Live})
-	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: executionmode.Live, ID: "restart-live", Role: "worker"}); err != nil {
+	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ExecutionMode: executionmode.Live, ID: "restart-live", Role: "worker"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	before := factoryCalls
