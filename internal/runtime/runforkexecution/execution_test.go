@@ -523,7 +523,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
@@ -533,6 +533,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 			loaded.Source,
 			contractsRoot,
 		),
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -698,6 +699,81 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
+}
+
+func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterialization(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx := runForkTestContext(t)
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
+	loader := ContractBundleSourceLoader{
+		RepoRoot:         repoRoot,
+		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
+		Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
+		ContractsRoot: contractsRoot,
+	})
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loaded.BundleSourceFact)
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loaded.BundleSourceFact.BundleHash())
+	if err != nil {
+		t.Fatalf("resolve source scope: %v", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, sourceScope)
+	descriptors, err := swaruntime.AuthorActivityEventDescriptors(loaded.Source)
+	if err != nil {
+		t.Fatalf("project source descriptors: %v", err)
+	}
+	lease, err := pg.RegisterAuthorActivityEventCatalog(sourceScope, descriptors)
+	if err != nil {
+		t.Fatalf("register source descriptors: %v", err)
+	}
+	t.Cleanup(lease.Release)
+
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	at := time.Unix(1700002201, 0).UTC()
+	seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
+		t,
+		db,
+		sourceRunID,
+		entityID,
+		sourceEventID,
+		"item.received",
+		at,
+		executionmode.Live,
+		selectedExecutionEntitylessNodeRoute("source-only-node"),
+		nil,
+		loaded.BundleSourceFact,
+	)
+	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
+
+	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		SourceRunID:         sourceRunID,
+		At:                  sourceEventID,
+		ConfirmSourceFreeze: true,
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader:        loader,
+		ContractSelection: runforkadmission.SelectedContractSelection(
+			loaded.Source,
+			contractsRoot,
+		),
+		AgentRuntime: SelectedContractAgentRuntimeOptions{
+			ExecutionPosture: executionposture.MockOnly,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "mock_only") {
+		t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want exact live source-mode rejection", result, err)
+	}
+	if result.Materialization.ForkRunID != "" {
+		t.Fatalf("rejected result materialization = %#v, want none", result.Materialization)
+	}
+	assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t, ctx, db, sourceRunID)
 }
 
 func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *testing.T) {

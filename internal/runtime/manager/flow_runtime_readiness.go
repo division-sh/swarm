@@ -209,6 +209,9 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
 	}
+	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
 	if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, occurredAt); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
 	}
@@ -300,6 +303,9 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		)
 		if err != nil {
 			return fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
+		}
+		if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
+			return err
 		}
 		changed, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
 		if err != nil {
@@ -680,6 +686,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}
 	plan, err := readiness.Plan.Normalized()
 	if err != nil {
+		return err
+	}
+	if err := am.executionPosture.Admit(plan.ExecutionMode, "dynamic flow runtime readiness topology reconciliation"); err != nil {
 		return err
 	}
 	currentCoordinate, err := dynamicFlowRuntimeReadinessPlanCoordinate(plan)

@@ -168,7 +168,7 @@ func seedForkedFlowInstance(t *testing.T, fixture *forkedConsumerTestBackend, in
 
 type forkedDirectiveConsumerSurface interface {
 	ReserveDirectiveOperation(context.Context, agentcontrol.ReserveDirectiveOperationRequest) (agentcontrol.DirectiveOperationReservation, error)
-	AdmitDirectiveExecution(context.Context, string, string, time.Time, time.Duration) (agentcontrol.DirectiveOperation, error)
+	AdmitDirectiveExecution(context.Context, agentcontrol.DirectiveExecutionAdmissionRequest) (agentcontrol.DirectiveExecutionAdmission, error)
 	RenewDirectiveExecutionLease(context.Context, string, string, time.Time, time.Duration) error
 	RecordDirectiveExecuted(context.Context, string, string, json.RawMessage, time.Time) (agentcontrol.DirectiveOperation, error)
 	FinalizeDirectiveSuccess(context.Context, string, time.Time, time.Duration) (agentcontrol.DirectiveOperation, error)
@@ -200,7 +200,10 @@ func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing
 
 			operationID, ownerID := uuid.NewString(), uuid.NewString()
 			seedForkedDirectiveOperation(t, fixture, operationID, ownerID, now)
-			_, err = surface.AdmitDirectiveExecution(ctx, operationID, ownerID, now, time.Minute)
+			_, err = surface.AdmitDirectiveExecution(ctx, agentcontrol.DirectiveExecutionAdmissionRequest{
+				OperationID: operationID, OwnerID: ownerID, Now: now, Lease: time.Minute,
+				ExecutionPosture: executionposture.Live,
+			})
 			requireForkedSourceRefusal(t, "admit directive", err)
 			requireForkedSourceRefusal(t, "renew directive", surface.RenewDirectiveExecutionLease(ctx, operationID, ownerID, now, time.Minute))
 			_, err = surface.RecordDirectiveExecuted(ctx, operationID, ownerID, json.RawMessage(`{"ok":true}`), now)

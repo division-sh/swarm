@@ -12,6 +12,7 @@ import (
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -26,6 +27,7 @@ type ConversationForkReadStore interface {
 
 type ConversationForkLifecycleStore interface {
 	CreateOperatorConversationFork(context.Context, runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error)
+	AdmitOperatorConversationForkChat(context.Context, string, executionposture.Posture) error
 	PrepareOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error)
 	HeartbeatOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepared, time.Time) error
 	RecordOperatorConversationForkChat(context.Context, runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error)
@@ -182,6 +184,9 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Conversa
 	if err != nil {
 		return nil, err
 	}
+	if err := opts.Lifecycle.AdmitOperatorConversationForkChat(ctx, forkID, opts.ExecutionPosture); err != nil {
+		return nil, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
+	}
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
@@ -196,7 +201,7 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Conversa
 		}
 		prepared, err := opts.Lifecycle.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
 			ForkID: forkID, Message: message, Method: req.Method, ActorTokenID: req.ActorTokenID,
-			RequestHash: req.RequestHash, IdempotencyKey: idempotencyKey, Now: now,
+			RequestHash: req.RequestHash, IdempotencyKey: idempotencyKey, Now: now, ExecutionPosture: opts.ExecutionPosture,
 		})
 		if err != nil {
 			return apiidempotency.Completion{}, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})

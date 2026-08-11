@@ -104,6 +104,7 @@ type Store interface {
 }
 
 type QueueReleaser interface {
+	PreflightRunQueue(context.Context, string) error
 	ReleaseRunQueue(context.Context, string, int) (runtimepipelineobligation.SweepResult, error)
 }
 
@@ -199,6 +200,11 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 		return TransitionResult{}, fmt.Errorf("run control owner is not configured")
 	}
 	req = c.normalize(req)
+	if c.queue != nil {
+		if err := c.queue.PreflightRunQueue(ctx, req.RunID); err != nil {
+			return TransitionResult{}, err
+		}
+	}
 	state, err := c.store.ContinueRunControl(ctx, req)
 	if err != nil {
 		return TransitionResult{}, err

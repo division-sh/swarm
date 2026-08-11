@@ -130,11 +130,12 @@ type BundleDeleteHandlerOptions struct {
 }
 
 type ConversationForkHandlerOptions struct {
-	Now         func() time.Time
-	Reads       ConversationForkReadStore
-	Lifecycle   ConversationForkLifecycleStore
-	Chat        ForkChatExecutor
-	Idempotency APIIdempotencyStore
+	Now              func() time.Time
+	Reads            ConversationForkReadStore
+	Lifecycle        ConversationForkLifecycleStore
+	Chat             ForkChatExecutor
+	Idempotency      APIIdempotencyStore
+	ExecutionPosture executionposture.Posture
 }
 
 type DecisionCardHandlerOptions struct {

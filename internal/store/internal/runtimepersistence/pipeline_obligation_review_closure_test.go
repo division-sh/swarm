@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -139,6 +140,85 @@ func TestMockOnlyPipelineScanRejectsPersistedLiveWorkBeforeClaimOnSQLiteAndPostg
 			}
 			if err := owner.CloseScan(ctx, live); err != nil {
 				t.Fatalf("close live scan: %v", err)
+			}
+		})
+	}
+}
+
+func TestMockOnlyPipelinePreflightRejectsLiveQueuesWithoutClaimOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		for _, family := range []string{"raw_event", "decision_route"} {
+			t.Run(backend.name+"/"+family, func(t *testing.T) {
+				fixture := backend.open(t)
+				selected := fixture.store.(pipelineObligationParityStore)
+				owner := selected.PipelineObligations()
+				preflighter, ok := owner.(runtimepipelineobligation.AdmissionPreflighter)
+				if !ok {
+					t.Fatalf("pipeline owner %T has no admission preflight", owner)
+				}
+				ctx := testAuthorActivityContext()
+				runID := uuid.NewString()
+				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
+				if family == "decision_route" {
+					insertProducerIdentityDecisionObligation(t, fixture, ctx, eventID, runID, time.Now().UTC().Add(-time.Minute))
+				}
+
+				request := runtimepipelineobligation.RunScanRequest(runID)
+				if err := preflighter.Preflight(ctx, request.WithExecutionPosture(executionposture.MockOnly)); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+					t.Fatalf("mock_only preflight error = %v, want live-work rejection", err)
+				}
+				count, _, _ := readExactPipelineReceipt(t, ctx, fixture, eventID)
+				if count != 0 {
+					t.Fatalf("pipeline receipts after rejected preflight = %d, want zero", count)
+				}
+				if family == "decision_route" && readDecisionRouteStatus(t, ctx, fixture, eventID) != "pending" {
+					t.Fatalf("decision route changed after rejected preflight")
+				}
+				if err := preflighter.Preflight(ctx, request.WithExecutionPosture(executionposture.Live)); err != nil {
+					t.Fatalf("live preflight: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestMockOnlyPipelinePreflightAdmitsExactMockQueueWithoutClaimOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(pipelineObligationParityStore)
+			preflighter := selected.PipelineObligations().(runtimepipelineobligation.AdmissionPreflighter)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			entityID := uuid.NewString()
+			event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
+				uuid.NewString(), "test.mock_queue", "runtime", "", []byte(`{}`), 0, runID,
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventtest.RootRoutingSource(entityID),
+				time.Now().UTC().Add(-time.Minute), executionmode.Mock,
+			)
+			if err := commitSemanticEventFixture(ctx, selected, event); err != nil {
+				t.Fatalf("commit mock queue event: %v", err)
+			}
+			if err := preflighter.Preflight(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.MockOnly)); err != nil {
+				t.Fatalf("mock_only preflight rejected exact mock queue: %v", err)
+			}
+			count, _, _ := readExactPipelineReceipt(t, ctx, fixture, event.ID())
+			if count != 0 {
+				t.Fatalf("mock queue preflight wrote %d receipts, want zero", count)
 			}
 		})
 	}

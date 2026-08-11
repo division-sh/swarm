@@ -19,6 +19,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
@@ -176,6 +177,54 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 				t.Fatalf("recovery side effects: agents=%d route_queries=%d pipeline_sweeps=%d, want none", am.Count(), bus.routeListQueries, bus.pipelineSweeps)
 			}
 		})
+	}
+}
+
+func TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction(t *testing.T) {
+	store := &recoveryTestStore{agents: []PersistedAgent{{Config: models.AgentConfig{
+		ExecutionMode: executionmode.Live, ID: "persisted-live", Role: "worker",
+		Identity: managerScopedRuntimeAgentIdentity(
+			"persisted-live", "test://recovery/persisted-live", "review", "inst-live", "review/inst-live",
+		),
+		FlowPath: "review/inst-live",
+	}, Status: "active", StartedAt: time.Now().UTC()}}}
+	bus := &recoveryTestBus{}
+	factoryCalls := 0
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+		factoryCalls++
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{ExecutionPosture: executionposture.MockOnly}, store)
+
+	if _, err := am.HydrateForStartup(testAuthorActivityContext(context.Background())); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+		t.Fatalf("HydrateForStartup error = %v, want live-agent rejection", err)
+	}
+	if factoryCalls != 0 || am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {
+		t.Fatalf("startup mutations factory=%d agents=%d route_queries=%d sweeps=%d, want zero", factoryCalls, am.Count(), bus.routeListQueries, bus.pipelineSweeps)
+	}
+}
+
+func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing.T) {
+	bus := &recoveryTestBus{}
+	factoryCalls := 0
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+		factoryCalls++
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{ExecutionPosture: executionposture.Live})
+	if err := am.SpawnAgent(models.AgentConfig{ExecutionMode: executionmode.Live, ID: "restart-live", Role: "worker"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	before := factoryCalls
+	current, ok := testExecutionSnapshot(t, am, "restart-live", "")
+	if !ok {
+		t.Fatal("live agent execution snapshot is missing")
+	}
+	am.executionPosture = executionposture.MockOnly
+	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: "restart-live"}); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+		t.Fatalf("Restart error = %v, want live-agent rejection", err)
+	}
+	after, ok := testExecutionSnapshot(t, am, "restart-live", "")
+	if !ok || factoryCalls != before || after.Config.ExecutionMode != current.Config.ExecutionMode {
+		t.Fatalf("restart mutated execution ok=%v factory=%d/%d mode=%q/%q", ok, factoryCalls, before, after.Config.ExecutionMode, current.Config.ExecutionMode)
 	}
 }
 

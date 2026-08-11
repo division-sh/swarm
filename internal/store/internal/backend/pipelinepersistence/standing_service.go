@@ -755,8 +755,22 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 		UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
 			WHERE run_id = ? AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
 			AND json_extract(plan, '$.execution_mode') = 'live'
+		UNION ALL SELECT 1 FROM events e
+			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
+				AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
+			WHERE e.run_id = ? AND e.execution_mode = 'live' AND receipt.event_id IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM decision_card_route_obligations route
+				WHERE route.event_id = e.event_id AND route.status <> 'completed'
+			)
+			AND ` + sqliteDiagnosticDirectReplayExclusionSQL("e") + `
+		UNION ALL SELECT 1 FROM decision_card_route_obligations route
+			JOIN events e ON e.event_id = route.event_id
+			WHERE route.run_id = ? AND route.status = 'pending' AND e.execution_mode = 'live'
 	)`
-	args := []any{runID, runID, runID, runID, runID}
+	args := []any{runID, runID, runID, runID, runID, runID}
+	args = append(args, diagnosticDirectReplayEventArgs()...)
+	args = append(args, runID)
 	if !s.isSQLite() {
 		query = `SELECT EXISTS (
 			SELECT 1 FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id
@@ -767,8 +781,21 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 			UNION ALL SELECT 1 FROM flow_instance_runtime_readiness
 				WHERE run_id = $1::uuid AND (topology_ready_at IS NULL OR creation_event_emitted_at IS NULL)
 				AND plan->>'execution_mode' = 'live'
+			UNION ALL SELECT 1 FROM events e
+				LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id
+					AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
+				WHERE e.run_id = $1::uuid AND e.execution_mode = 'live' AND receipt.event_id IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM decision_card_route_obligations route
+					WHERE route.event_id = e.event_id AND route.status <> 'completed'
+				)
+				AND ` + postgresDiagnosticDirectReplayExclusionSQL("e", 2) + `
+			UNION ALL SELECT 1 FROM decision_card_route_obligations route
+				JOIN events e ON e.event_id = route.event_id
+				WHERE route.run_id = $1::uuid AND route.status = 'pending' AND e.execution_mode = 'live'
 		)`
 		args = []any{runID}
+		args = append(args, diagnosticDirectReplayEventArgs()...)
 	}
 	var blocked bool
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&blocked); err != nil {

@@ -31,6 +31,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -2558,6 +2559,36 @@ func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *test
 	}
 	if len(restartBus.published) != 1 {
 		t.Fatalf("creation events after repeated startup recovery = %d, want one", len(restartBus.published))
+	}
+}
+
+func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	agents := &flowActivationTestStore{failAgentID: "writer"}
+	firstBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	first := newFlowActivationManager(t, firstBus, instances, agents)
+	bundle := testFlowBundleWithTwoAgents("task.started")
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	ctx := testAuthorActivityContext(context.Background())
+	if err := activateFlowInstanceForTest(first, ctx, req); err == nil {
+		t.Fatal("activation succeeded across injected partial agent failure")
+	}
+	baselineAgents := len(agents.upserts)
+
+	agents.failAgentID = ""
+	restartBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	restarted := newFlowActivationManager(t, restartBus, instances, agents)
+	restarted.executionPosture = executionposture.MockOnly
+	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+		t.Fatalf("readiness reconciliation error = %v, want live-plan rejection", err)
+	}
+	if len(agents.upserts) != baselineAgents || len(restartBus.addedPaths) != 0 || len(restartBus.published) != 0 || len(instances.armedEntries) != 0 {
+		t.Fatalf("readiness mutations agents=%d/%d routes=%d events=%d timers=%d", len(agents.upserts), baselineAgents, len(restartBus.addedPaths), len(restartBus.published), len(instances.armedEntries))
+	}
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || !readiness.Pending() || readiness.Plan.ExecutionMode != executionmode.Live {
+		t.Fatalf("readiness after rejection = %#v found=%v err=%v", readiness, found, err)
 	}
 }
 

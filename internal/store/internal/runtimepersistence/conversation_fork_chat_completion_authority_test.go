@@ -11,6 +11,7 @@ import (
 
 	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -23,10 +24,64 @@ type forkChatCompletionAuthorityStore interface {
 	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
 	CreateOperatorConversationFork(context.Context, runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error)
+	AdmitOperatorConversationForkChat(context.Context, string, executionposture.Posture) error
 	PrepareOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error)
 	HeartbeatOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepared, time.Time) error
 	RecordOperatorConversationForkChat(context.Context, runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error)
 	FailOperatorConversationForkChat(context.Context, runfork.ConversationForkChatFailureRequest) error
+}
+
+func TestConversationForkChatAdmitsExactSourceActorModeBeforeMutation(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		for _, test := range []struct {
+			name      string
+			mode      string
+			wantError bool
+		}{
+			{name: "live_rejected", mode: "live", wantError: true},
+			{name: "mock_admitted", mode: "mock"},
+		} {
+			test := test
+			t.Run(backend+"/"+test.name, func(t *testing.T) {
+				fixture := newForkChatCompletionAuthorityFixture(t, backend == "sqlite")
+				query := `UPDATE agents SET llm_backend = ?, runtime_descriptor = ? WHERE agent_id = ?`
+				if !fixture.sqlite {
+					query = `UPDATE agents SET llm_backend = $1, runtime_descriptor = $2::jsonb WHERE agent_id = $3`
+				}
+				backend := "claude_cli"
+				descriptor := `{"type":"stub","execution_mode":"live"}`
+				if test.mode == "mock" {
+					backend = "mock"
+					descriptor = `{"type":"stub","execution_mode":"mock","mock":{"kind":"python","module":"mock.py"}}`
+				}
+				if _, err := fixture.db.ExecContext(testAuthorActivityContext(), query, backend, descriptor, fixture.source.agentID); err != nil {
+					t.Fatalf("set source actor mode: %v", err)
+				}
+
+				err := fixture.store.AdmitOperatorConversationForkChat(testAuthorActivityContext(), fixture.fork.ForkID, executionposture.MockOnly)
+				if test.wantError && err == nil {
+					t.Fatal("mock_only admitted live conversation-fork source actor")
+				}
+				if !test.wantError && err != nil {
+					t.Fatalf("mock_only rejected mock conversation-fork source actor: %v", err)
+				}
+				for _, table := range []string{"conversation_fork_snapshots", "conversation_fork_turns"} {
+					placeholder := "?"
+					if !fixture.sqlite {
+						placeholder = "$1::uuid"
+					}
+					var count int
+					if err := fixture.db.QueryRowContext(testAuthorActivityContext(), `SELECT COUNT(*) FROM `+table+` WHERE fork_id = `+placeholder, fixture.fork.ForkID).Scan(&count); err != nil {
+						t.Fatalf("count %s after admission: %v", table, err)
+					}
+					if count != 0 {
+						t.Fatalf("admission created %d %s rows", count, table)
+					}
+				}
+			})
+		}
+	}
 }
 
 type forkChatCompletionAuthorityFixture struct {

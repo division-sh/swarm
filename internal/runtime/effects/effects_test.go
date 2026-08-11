@@ -462,6 +462,42 @@ func TestMockOnlyPostureRejectsLiveExternalEffectBeforeAuthorization(t *testing.
 	}
 }
 
+func TestMockOnlyPostureRejectsLiveStartupProbeBeforeAuthorization(t *testing.T) {
+	probe := &effectStoreProbe{}
+	probeID := uuid.NewString()
+	executionAuthorityID := uuid.NewString()
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorIdentity: effectLifecycleToken(t, 1, "startup-agent", 1).Identity,
+		RuntimeMode:   "task", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude_cli",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: executionAuthorityID,
+			StartupOwnerID: "startup-owner", StartupGeneration: 1,
+		},
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build startup capability surface: %v", err)
+	}
+	authority := Authority{
+		Kind: AuthorityStartupProbe, ID: probeID, ExecutionOwner: "startup-owner",
+		LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1, ExecutionMode: ExecutionModeLive,
+		StartupProbe: StartupProbeAuthority{
+			ProbeID: probeID, StartupAuthorityID: uuid.NewString(), StartupStateVersion: 1,
+			ActorID: surface.ActorID, ExecutionKind: string(managedcapabilities.ExecutionNormalAgent), ExecutionAuthorityID: executionAuthorityID,
+		},
+	}
+	ctx := WithAuthority(context.Background(), authority)
+	ctx = WithController(ctx, NewController(probe).WithExecutionPosture(executionposture.MockOnly))
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	if _, err := BeginStartupProbe(ctx, "claude_cli_startup_probe", []byte("probe"), nil); err == nil {
+		t.Fatal("mock_only posture admitted a live startup probe")
+	}
+	if len(probe.authorizations) != 0 || probe.launches != 0 {
+		t.Fatalf("live startup probe reached authorization=%d launch=%d, want zero", len(probe.authorizations), probe.launches)
+	}
+}
+
 func managedEffectTestContext(t testing.TB, ctx context.Context, agentID string) context.Context {
 	t.Helper()
 	ctx = WithExecutionMode(ctx, ExecutionModeLive)

@@ -16,15 +16,22 @@ import (
 )
 
 type transitionFailurePublisher struct {
-	publishErr error
-	release    runtimepipelineobligation.SweepResult
-	releaseErr error
-	events     []events.Event
+	publishErr     error
+	preflightErr   error
+	preflightCalls int
+	release        runtimepipelineobligation.SweepResult
+	releaseErr     error
+	events         []events.Event
 }
 
 func (p *transitionFailurePublisher) Publish(_ context.Context, event events.Event) error {
 	p.events = append(p.events, event)
 	return p.publishErr
+}
+
+func (p *transitionFailurePublisher) PreflightRuntimeIngressQueue(context.Context) error {
+	p.preflightCalls++
+	return p.preflightErr
 }
 
 func (p *transitionFailurePublisher) ReleaseRuntimeIngressQueue(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
@@ -96,5 +103,26 @@ func TestTransitionPostCommitFailuresRemainCallerSuccess(t *testing.T) {
 		t.Fatalf("QueueableIngressPaused after resume: %v", err)
 	} else if paused {
 		t.Fatal("runtime ingress paused = true, want false after committed resume")
+	}
+}
+
+func TestResumePreflightsQueueBeforeRuntimeStateMutation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	publisher := &transitionFailurePublisher{}
+	controller := NewController(nil, publisher, Options{ExecutionPosture: executionposture.MockOnly, Now: func() time.Time { return now }})
+	if _, err := controller.Pause(ctx, TransitionRequest{Now: now}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	publisher.preflightErr = errors.New("live queue rejected")
+	if _, err := controller.Resume(ctx, TransitionRequest{Now: now.Add(time.Second)}); !errors.Is(err, publisher.preflightErr) {
+		t.Fatalf("Resume error = %v, want preflight rejection", err)
+	}
+	state, err := controller.ensureState(ctx, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if state.Status != StatusPaused || publisher.preflightCalls != 1 || len(publisher.events) != 1 {
+		t.Fatalf("status=%s preflights=%d events=%d, want paused/1/1", state.Status, publisher.preflightCalls, len(publisher.events))
 	}
 }
