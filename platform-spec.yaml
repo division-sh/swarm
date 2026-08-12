@@ -4595,7 +4595,9 @@ engine:
       Authors express independently addressable parallel work as child/template flow instances with statically declared
       managed agents, typed event routing, and accumulation/join ownership. Contained fan-out may use declarative handler
       primitives when no independently addressable agent lifecycle is required.
-    retired_model: System nodes or agents spawning arbitrary agents at runtime through `agent_hire`.
+    retired_model: >
+      The provider-facing `agent_hire`, `agent_fire`, and `agent_reconfigure` tools are unsupported. Contracts that name
+      them fail lexical admission and runtime calls cannot resolve them. There is no compatibility or migration path.
     not_in_scope: Cross-machine distribution remains unsupported.
     addressing: Parallel child/template work is addressed by normal typed flow-instance identity and routing. There is no
       ephemeral dynamic-agent shard address space.
@@ -6327,10 +6329,10 @@ engine:
               before admission or construction. The persistence projection accepts only an already-resolved backend and never
               invents a configured default from authored intent or an empty descriptor. Native-tool admission runs only after
               this resolution and construction uses that same resolved actor/runtime pair.
-            dynamic_authority_rule: >
-              `agent_hire` and `agent_reconfigure` are retired for every execution mode and fail before input decoding or
-              manager lookup. Mock-causal execution also cannot invoke the distinct supported `agent_fire` action to mutate
-              live runtime agent state. Delayed work does not mint fresh authority: generic
+            agent_lifecycle_authority_rule: >
+              Managed agents are declarative residents of their flow instance. Flow termination and contract-readiness
+              reconciliation own agent teardown. Agents cannot independently terminate other declared agents. Operator
+              run/flow cancellation remains a separate operational capability. Delayed work does not mint fresh authority: generic
               schedules, join schedules, and authored workflow timer activations persist the exact causal execution_mode and
               copy it unchanged into every fired event, including after selected-store restore. Initial-entry timers consume
               the activation's exact execution mode. Dynamic-flow readiness persists that mode as immutable activation
@@ -6338,8 +6340,7 @@ engine:
               preserves it, and a newly declared first initial timer consumes it instead of the administrative reconciliation
               context. True boot-owned schedules use the process posture's root mode rather than a hardcoded live mode.
               Schedule/timer/readiness admission, wakeup, and claim reject persisted live authority under mock_only before
-              mutation and never rewrite it. Live-causal dynamic agent mutations remain subject
-              to ordinary delegation and lifecycle checks until the family is retired.
+              mutation and never rewrite it.
             native_capability_rule: >
               Exact mock selection waives provider-native capability admission because no provider-native process can run;
               authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
@@ -8337,7 +8338,6 @@ permissions_model:
   workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
     permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.'
   permissions:
-  - agent_fire
   - approve_spend
   - configure_routing
   - create_flow_instance
@@ -8361,25 +8361,15 @@ permissions_model:
         rule: Caller and target must be in the same flow instance. No further constraint.
       cross_flow: Not supported. agent_message delivery is rejected if target is in a different flow instance. Cross-flow communication
         uses events (emit + subscribe).
-    management:
-      description: agent_fire target constraints. Dynamic hire and reconfigure are retired before permission evaluation.
-      scope: Same flow instance, target below caller in manager_fallback chain.
-      rules:
-      - Caller and target must be in the same flow instance.
-      - Target's manager_fallback chain must include the caller. (A can manage B if B.manager_fallback == A, or B.manager_fallback.manager_fallback
-        == A, etc.)
-      - An agent cannot manage itself.
-      - An agent cannot manage its own manager_fallback ancestor.
     routing:
-      description: configure_routing target constraints.
-      scope: Self + manageable agents (same rules as management scope).
+      description: configure_routing is reserved authored vocabulary and has no generic runtime tool or dynamic-agent authority implementation.
+      scope: No provider-callable runtime scope is defined.
       rules:
-      - Caller can modify routes for itself.
-      - Caller can modify routes for any agent it can manage (per management scope).
-      - Caller cannot modify routes for agents outside its flow instance.
+      - Authored vocabulary does not grant authority to mutate declared agent topology.
+      - A future routing capability requires its own canonical owner and specification before runtime admission.
     manager_fallback_semantics:
       description: manager_fallback is an escalation path, not a messaging or management grant. It determines where dead-lettered
-        agent sessions route to and defines the management hierarchy. It does NOT grant the fallback target messaging access
+        agent sessions route to and defines the escalation chain. It does NOT grant the fallback target messaging access
         to the agent, and it does NOT allow messaging across flow boundaries even when the fallback target is in a different
         flow.
       cross_flow_fallback: When manager_fallback references an agent in a parent flow (e.g., a child flow agent falls back to
@@ -8427,13 +8417,6 @@ tool_model:
       ship a Go handler for each of these. Any tool not on this list MUST NOT have a Go handler in the generic runtime.
     tools:
       agent_message: Send a message to another agent. Auto-granted to all agents (universal tool).
-      agent_fire: Terminate an agent session. Requires agent_fire permission.
-      agent_hire: >-
-        RETIRED rejection-only internal entry retained pending physical family deletion under issue 2110. It is not
-        provider-visible and fails before decoding, permission evaluation, manager lookup, runtime selection, or mutation.
-      agent_reconfigure: >-
-        RETIRED rejection-only internal entry retained pending physical family deletion under issue 2110. It is not
-        provider-visible and fails before decoding, permission evaluation, manager lookup, runtime selection, or mutation.
       create_entity: Create a new entity row in entity_state. Legacy trusted runtime-internal compatibility surface; not
         provider-visible or callable for normal agents.
       get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
@@ -8468,8 +8451,8 @@ tool_model:
     planned_tools:
       description: Tools planned for future platform versions. Not yet implemented. The permission may exist (as an authorization
         gate) before the tool does.
-      configure_routing: Add, remove, or modify event routing rules at runtime. The configure_routing permission exists and gates
-        this capability. The agent-callable tool is not yet implemented. Planned for v1.5.
+      configure_routing: Add, remove, or modify event routing rules at runtime. The configure_routing permission is reserved
+        metadata and grants no current runtime authority. The agent-callable tool is not implemented. Planned for v1.5.
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
     entity_tool_schemas:
@@ -10148,10 +10131,19 @@ agent_intent_model:
     rule: All retired authored/config forms teaching-reject or are absent. No compatibility, migration, fallback, or second
       source owner exists; old persisted stores are unsupported.
   dynamic_mutation_boundary:
+    retired_exact_names:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
     rule: >
-      `agent_hire` and `agent_reconfigure` reject unconditionally before decoding, normalization, authorization, lookup,
-      persistence, runtime selection, or mutation. They do not accept raw system_prompt or the canonical intent union.
-      Physical deletion of the broader dynamic family remains #2110. `agent_fire` is a distinct supported lifecycle action.
+      These exact provider-facing names are retired at lexical admission and absent from runtime inventories, handlers,
+      dispatch, permissions, authority, and manager facades. Internal lifecycle facts with different exact names are not
+      aliases. No warning, compatibility handler, migration, deprecated stub, or alternate topology owner exists.
+    replacement_model:
+    - Managed agents are declarative residents of their flow instance.
+    - Flow termination and contract-readiness reconciliation own agent teardown.
+    - Agents cannot independently terminate other declared agents.
+    - Operator run/flow cancellation remains a separate operational capability.
   operator_forkchat_boundary: Operator selected-fork conversation chat is an explicit sandbox and never becomes a managed
     agent intent declaration, artifact, or persistence source.
 flow_model:
@@ -15873,17 +15865,12 @@ agent_identity_model:
     final_matrix_dependency: >
       #1025 must treat duplicate agent slugs across live bundles as unsupported unless a later #977 implementation child
       promotes UUID-internal identity and proves bundle-scoped lookup across all affected surfaces.
-  management_authority:
-    fire: >
-      agent_fire may perform a pre-read authorization only as fail-fast validation. The exact current target configuration
-      and actor authority must be revalidated after the target lifecycle operation is serialized and immediately before
-      teardown persistence. The same commit hook snapshots the exact current edge from the canonical mutable authority graph
-      and removes it before persistence; declaration fallback is not reconstructed as a concrete edge. A lifecycle or
-      subordinate-session persistence failure restores that exact prior graph snapshot before returning.
-      A queued fire authorized from a replaced or temporarily applied mapping cannot terminate the target, and a successful
-      fire cannot leave a live managed-parent edge for the terminated child. Post-persistence authority cleanup, pre-read-only
-      authorization, and mutation without compensation are forbidden.
-    reconfigure: Dynamic agent reconfiguration is retired and never reaches management-authority planning or mutation.
+  declared_agent_lifecycle_authority:
+    owner: flow lifecycle and contract-readiness reconciliation
+    rule: >
+      Declared-agent configuration and teardown occur only as consequences of admitted source reconciliation, flow
+      termination, or separately owned operator run/flow cancellation. Provider-facing agents have no generic topology
+      mutation authority and manager_fallback remains an escalation path rather than a lifecycle grant.
   uuid_internal_migration_target:
     tracker: '#977'
     status: staged_parent_only_not_current_runtime_behavior

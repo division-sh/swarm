@@ -1,11 +1,5 @@
 package tools
 
-import (
-	"context"
-
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-)
-
 func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 	handlers := map[string]ToolHandler{}
 	e.registerAgentHandlers(handlers)
@@ -20,15 +14,6 @@ func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 func (e *Executor) registerAgentHandlers(handlers map[string]ToolHandler) {
 	handlers["agent_message"] = e.execAgentMessage
 	handlers["schedule"] = e.execSchedule
-	handlers["agent_hire"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execAgentHire(ctx, actor, input)
-	}
-	handlers["agent_fire"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execAgentFire(ctx, actor, input)
-	}
-	handlers["agent_reconfigure"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execAgentReconfigure(ctx, actor, input)
-	}
 }
 
 func (e *Executor) registerMailboxHandlers(handlers map[string]ToolHandler) {

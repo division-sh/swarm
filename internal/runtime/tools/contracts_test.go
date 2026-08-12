@@ -70,12 +70,10 @@ func TestContractDefinitionsForSource_DoesNotExposeCreateFlowInstance(t *testing
 	}
 }
 
-func TestContractDefinitionsForSource_DoesNotExposeInternalOrRetiredMutationTools(t *testing.T) {
+func TestContractDefinitionsForSource_DoesNotExposeInternalRoutingStub(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"configure_routing": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("deprecated runtime stub should stay hidden"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
-			"agent_hire":        runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("retired mutation should stay hidden"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
-			"agent_reconfigure": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("retired mutation should stay hidden"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	}
 
@@ -85,7 +83,7 @@ func TestContractDefinitionsForSource_DoesNotExposeInternalOrRetiredMutationTool
 	}
 	for _, def := range defs {
 		switch def.Name {
-		case "configure_routing", "agent_hire", "agent_reconfigure":
+		case "configure_routing":
 			t.Fatalf("%s should not be exposed as an agent tool definition", def.Name)
 		}
 	}

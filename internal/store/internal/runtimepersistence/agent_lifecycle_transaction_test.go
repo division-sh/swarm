@@ -3,7 +3,6 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -11,12 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -29,22 +25,6 @@ type lifecycleSubordinateStore interface {
 	runtimesessions.Registry
 }
 
-type lifecycleOccurrenceStore interface {
-	lifecycleSubordinateStore
-	runtimemanager.ManagerPersistence
-}
-
-type lifecycleOccurrenceAgent struct{ id string }
-
-func (a lifecycleOccurrenceAgent) ID() string { return a.id }
-func (lifecycleOccurrenceAgent) Type() string { return "generic" }
-func (lifecycleOccurrenceAgent) Subscriptions() []events.EventType {
-	return nil
-}
-func (lifecycleOccurrenceAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
-	return nil, nil
-}
-
 func TestLifecycleSubordinateTransactionSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	proveLifecycleSubordinateTransaction(t, store, store.backend.ConstructionHandle(), true)
@@ -55,299 +35,12 @@ func TestLifecycleSubordinateTransactionPostgres(t *testing.T) {
 	proveLifecycleSubordinateTransaction(t, admitTestPostgresStore(t, db), db, false)
 }
 
-func TestLifecycleReconfigureOccurrenceIdentitySQLite(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveLifecycleReconfigureOccurrenceIdentity(t, store, store.backend.ConstructionHandle(), true)
-}
-
-func TestLifecycleReconfigureOccurrenceIdentityPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	proveLifecycleReconfigureOccurrenceIdentity(t, admitTestPostgresStore(t, db), db, false)
-}
-
-func TestLifecycleConcurrentPartialReconfigureSQLite(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveLifecycleConcurrentPartialReconfigure(t, store, store.backend.ConstructionHandle(), true)
-}
-
-func TestLifecycleConcurrentPartialReconfigurePostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	proveLifecycleConcurrentPartialReconfigure(t, admitTestPostgresStore(t, db), db, false)
-}
-
-func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOccurrenceStore, db *sql.DB, sqlite bool) {
-	t.Helper()
-	firstBuildEntered := make(chan struct{}, 1)
-	releaseFirstBuild := make(chan struct{})
-	secondBuildEntered := make(chan struct{}, 1)
-	releaseSecondBuild := make(chan struct{})
-	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		if cfg.ID == "concurrent-partial-reconfigure-agent" {
-			switch {
-			case cfg.Memory == agentmemory.Authored(false) && len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-a":
-				firstBuildEntered <- struct{}{}
-				<-releaseFirstBuild
-			case len(cfg.Tools) == 1 && cfg.Tools[0] == "tool-b":
-				secondBuildEntered <- struct{}{}
-				<-releaseSecondBuild
-			}
-		}
-		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{
-		ExecutionPosture: executionposture.Live,
-		BaseContext:      testAuthorActivityContext(), LifecycleStore: store, Sessions: store,
-		ReceiverExecution: eventreceiver.NormalExecution(),
-	}, store)
-	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "concurrent-partial-reconfigure-agent",
-		Identity:      testAgentIdentity(t, "concurrent-partial-reconfigure-agent", "support/serialized"),
-		Role:          "worker",
-		Type:          "sonnet",
-		Model:         "regular",
-		FlowID:        "global",
-		Memory:        agentmemory.Authored(true),
-		FlowPath:      "support/serialized",
-		Tools:         []string{"tool-a"},
-	})
-	if err := manager.SpawnAgent(cfg); err != nil {
-		t.Fatalf("spawn agent: %v", err)
-	}
-	agents, err := store.LoadAgents(testAuthorActivityContext())
-	if err != nil || len(agents) != 1 {
-		t.Fatalf("load spawned agent: agents=%#v err=%v", agents, err)
-	}
-	initialGeneration := agents[0].LifecycleGeneration
-	sessionID := uuid.NewString()
-	runID := uuid.NewString()
-	seedLifecycleRun(t, db, sqlite, runID)
-	seedLifecycleSessionForPartialReconfigure(t, db, sqlite, sessionID, runID, cfg.ID, cfg.CanonicalFlowPath())
-
-	firstErr := make(chan error, 1)
-	go func() {
-		_, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil)
-		firstErr <- err
-	}()
-	select {
-	case <-firstBuildEntered:
-	case err := <-firstErr:
-		t.Fatalf("disable-memory reconfigure failed before build: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("disable-memory reconfigure did not enter the build")
-	}
-	secondStarted := make(chan struct{})
-	secondErr := make(chan error, 1)
-	go func() {
-		close(secondStarted)
-		_, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}, nil)
-		secondErr <- err
-	}()
-	<-secondStarted
-	secondBuiltBeforeFirstCommit := false
-	select {
-	case <-secondBuildEntered:
-		secondBuiltBeforeFirstCommit = true
-	case <-time.After(500 * time.Millisecond):
-	}
-	close(releaseFirstBuild)
-	if err := <-firstErr; err != nil {
-		t.Fatalf("disable-memory reconfigure: %v", err)
-	}
-	if !secondBuiltBeforeFirstCommit {
-		select {
-		case <-secondBuildEntered:
-		case err := <-secondErr:
-			t.Fatalf("tools reconfigure failed before build: %v", err)
-		case <-time.After(5 * time.Second):
-			t.Fatal("tools reconfigure did not enter the build after the first commit")
-		}
-	}
-	close(releaseSecondBuild)
-	if err := <-secondErr; err != nil {
-		t.Fatalf("tools reconfigure: %v", err)
-	}
-	if secondBuiltBeforeFirstCommit {
-		t.Fatal("disjoint partial patch was built before the prior reconfigure committed and projected")
-	}
-
-	agents, err = store.LoadAgents(testAuthorActivityContext())
-	if err != nil || len(agents) != 1 {
-		t.Fatalf("load reconfigured agent: agents=%#v err=%v", agents, err)
-	}
-	got := agents[0]
-	if got.Config.Memory != agentmemory.Authored(false) || len(got.Config.Tools) != 1 || got.Config.Tools[0] != "tool-b" {
-		t.Fatalf("final durable config = memory:%+v tools:%v, want authored false + tool-b", got.Config.Memory, got.Config.Tools)
-	}
-	if got.LifecycleGeneration != initialGeneration+2 {
-		t.Fatalf("final durable generation = %d, want %d", got.LifecycleGeneration, initialGeneration+2)
-	}
-	assertLifecyclePartialReconfigureSession(t, db, sqlite, sessionID)
-	assertLifecyclePartialReconfigureOutcomes(t, db, sqlite, cfg.ID, sessionID)
-}
-
 func seedLifecycleRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 	t.Helper()
 	if sqlite {
 		requireRunningSQLiteRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
 	} else {
 		requireRunningPostgresRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
-	}
-}
-
-func seedLifecycleSessionForPartialReconfigure(t *testing.T, db *sql.DB, sqlite bool, sessionID, runID, agentID, flowInstance string) {
-	t.Helper()
-	now := time.Now().UTC()
-	fields, err := testAgentIdentity(t, agentID, flowInstance).StorageFields()
-	if err != nil {
-		t.Fatalf("seed lifecycle session identity: %v", err)
-	}
-	query := `INSERT INTO agent_sessions (
-		session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-		agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-		memory_enabled, memory_source, conversation, runtime_state, status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', '{}', 'active', ?, ?)`
-	args := []any{
-		sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		now, now,
-	}
-	if !sqlite {
-		query = `INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source, conversation, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '[]'::jsonb, '{}'::jsonb, 'active', $10, $10)`
-		args = []any{
-			sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			now,
-		}
-	}
-	if _, err := db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
-		t.Fatalf("seed lifecycle session: %v", err)
-	}
-}
-
-func assertLifecyclePartialReconfigureSession(t *testing.T, db *sql.DB, sqlite bool, sessionID string) {
-	t.Helper()
-	query := `SELECT status, COALESCE(successor_session_id, '') FROM agent_sessions WHERE session_id = ?`
-	if !sqlite {
-		query = `SELECT status, COALESCE(successor_session_id::text, '') FROM agent_sessions WHERE session_id = $1::uuid`
-	}
-	var status, successor string
-	if err := db.QueryRowContext(testAuthorActivityContext(), query, sessionID).Scan(&status, &successor); err != nil {
-		t.Fatalf("load predecessor session: %v", err)
-	}
-	if status != "terminated" || successor != "" {
-		t.Fatalf("predecessor session status=%q successor=%q, want terminated without successor", status, successor)
-	}
-}
-
-func assertLifecyclePartialReconfigureOutcomes(t *testing.T, db *sql.DB, sqlite bool, agentID, sessionID string) {
-	t.Helper()
-	query := `SELECT result FROM agent_lifecycle_operations WHERE agent_id = ? AND operation_kind = 'reconfigure' ORDER BY expected_generation`
-	if !sqlite {
-		query = `SELECT result::text FROM agent_lifecycle_operations WHERE agent_id = $1 AND operation_kind = 'reconfigure' ORDER BY expected_generation`
-	}
-	rows, err := db.QueryContext(testAuthorActivityContext(), query, agentID)
-	if err != nil {
-		t.Fatalf("query reconfigure outcomes: %v", err)
-	}
-	defer rows.Close()
-	results := make([]runtimemanager.AgentLifecycleTransitionResult, 0, 2)
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			t.Fatalf("scan reconfigure outcome: %v", err)
-		}
-		var result runtimemanager.AgentLifecycleTransitionResult
-		if err := json.Unmarshal([]byte(raw), &result); err != nil {
-			t.Fatalf("decode reconfigure outcome: %v", err)
-		}
-		results = append(results, result)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate reconfigure outcomes: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("reconfigure outcomes = %#v, want two serialized decisions", results)
-	}
-	first, second := results[0].Subordinate, results[1].Subordinate
-	if first.Action != runtimesessions.LifecycleMutationTerminateCurrentSet || len(first.Sessions) != 1 || first.Sessions[0].PreviousSessionID != sessionID || first.Sessions[0].SuccessorSessionID != "" {
-		t.Fatalf("first subordinate outcome = %#v, want exact predecessor termination", first)
-	}
-	if second.Action != runtimesessions.LifecycleMutationNone || len(second.Sessions) != 0 {
-		t.Fatalf("second subordinate outcome = %#v, want memory-disabled no-op", second)
-	}
-}
-
-func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOccurrenceStore, db *sql.DB, sqlite bool) {
-	t.Helper()
-	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{
-		ExecutionPosture: executionposture.Live,
-		BaseContext:      testAuthorActivityContext(), LifecycleStore: store, Sessions: store,
-		ReceiverExecution: eventreceiver.NormalExecution(),
-	}, store)
-	cfg := withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "reconfigure-occurrence-agent",
-		Identity:      testAgentIdentity(t, "reconfigure-occurrence-agent", "support/occurrence"),
-		Role:          "worker",
-		Type:          "sonnet",
-		Model:         "regular",
-		FlowID:        "global",
-		Memory:        agentmemory.Authored(true),
-		FlowPath:      "support/occurrence",
-	})
-	if err := manager.SpawnAgent(cfg); err != nil {
-		t.Fatalf("spawn agent: %v", err)
-	}
-	agents, err := store.LoadAgents(testAuthorActivityContext())
-	if err != nil || len(agents) != 1 {
-		t.Fatalf("load spawned agent: agents=%#v err=%v", agents, err)
-	}
-	initialGeneration := agents[0].LifecycleGeneration
-	for i, tool := range []string{"tool-a", "tool-b", "tool-a", "tool-b"} {
-		if _, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{tool}}, nil); err != nil {
-			t.Fatalf("reconfigure occurrence %d (%s): %v", i+1, tool, err)
-		}
-		agents, err = store.LoadAgents(testAuthorActivityContext())
-		if err != nil || len(agents) != 1 {
-			t.Fatalf("load occurrence %d: agents=%#v err=%v", i+1, agents, err)
-		}
-		if got, want := agents[0].LifecycleGeneration, initialGeneration+uint64(i)+1; got != want {
-			t.Fatalf("occurrence %d generation = %d, want %d", i+1, got, want)
-		}
-	}
-	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
-
-	if _, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}, nil); err != nil {
-		t.Fatalf("same-current reconfigure: %v", err)
-	}
-	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
-	agents, err = store.LoadAgents(testAuthorActivityContext())
-	if err != nil || len(agents) != 1 {
-		t.Fatalf("load same-current agent: agents=%#v err=%v", agents, err)
-	}
-	if got, want := agents[0].LifecycleGeneration, initialGeneration+4; got != want {
-		t.Fatalf("same-current generation = %d, want %d", got, want)
-	}
-}
-
-func assertLifecycleReconfigureOperationCount(t *testing.T, db *sql.DB, sqlite bool, agentID string, want int) {
-	t.Helper()
-	query := `SELECT COUNT(*), COUNT(DISTINCT operation_id) FROM agent_lifecycle_operations WHERE agent_id = ? AND operation_kind = 'reconfigure'`
-	if !sqlite {
-		query = `SELECT COUNT(*), COUNT(DISTINCT operation_id) FROM agent_lifecycle_operations WHERE agent_id = $1 AND operation_kind = 'reconfigure'`
-	}
-	var count, distinct int
-	if err := db.QueryRowContext(testAuthorActivityContext(), query, agentID).Scan(&count, &distinct); err != nil {
-		t.Fatalf("count reconfigure operations: %v", err)
-	}
-	if count != want || distinct != want {
-		t.Fatalf("reconfigure operations count=%d distinct=%d, want %d distinct occurrences", count, distinct, want)
 	}
 }
 

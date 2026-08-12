@@ -47,12 +47,6 @@ func (allowHumanTaskAuthority) ProducerEventsForRole(string) []string {
 func (allowHumanTaskAuthority) HasMessageAuthority(actor, target models.AgentConfig) bool {
 	return false
 }
-func (allowHumanTaskAuthority) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
-	return nil
-}
-func (allowHumanTaskAuthority) AuthorizeManagement(actor, target models.AgentConfig) error {
-	return nil
-}
 func (allowHumanTaskAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	return nil
 }

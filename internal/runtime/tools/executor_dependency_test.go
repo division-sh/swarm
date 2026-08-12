@@ -18,11 +18,7 @@ func (allowMailboxAuthority) ProducerEventsForRole(string) []string {
 	return nil
 }
 func (allowMailboxAuthority) HasMessageAuthority(actor, target models.AgentConfig) bool { return false }
-func (allowMailboxAuthority) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
-	return nil
-}
-func (allowMailboxAuthority) AuthorizeManagement(actor, target models.AgentConfig) error { return nil }
-func (allowMailboxAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error        { return nil }
+func (allowMailboxAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error       { return nil }
 
 type mailboxStoreStub struct {
 	last MailboxItem

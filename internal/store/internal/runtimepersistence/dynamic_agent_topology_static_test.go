@@ -57,8 +57,8 @@ func TestAgentTopologyMutationProductionConsumersStatic(t *testing.T) {
 	}
 
 	managerCalls, _ := inspectAgentTopologyProductionPackage(t, filepath.Join(repoRootForRuntimeWriterGuard(t), "internal", "runtime", "manager"))
-	if got := managerCalls["UpsertAgent"]; got != 4 {
-		t.Fatalf("production UpsertAgent calls in manager = %d, want four classified fallback/panic consumers", got)
+	if got := managerCalls["UpsertAgent"]; got != 3 {
+		t.Fatalf("production UpsertAgent calls in manager = %d, want three classified lifecycle/fallback consumers", got)
 	}
 }
 

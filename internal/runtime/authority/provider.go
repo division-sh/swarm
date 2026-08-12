@@ -14,16 +14,7 @@ type Provider interface {
 	ProducerRoles() []string
 	ProducerEventsForRole(role string) []string
 	HasMessageAuthority(actor, target models.AgentConfig) bool
-	AuthorizeRouting(actor, target models.AgentConfig, status string) error
-	AuthorizeManagement(actor, target models.AgentConfig) error
 	AuthorizeMailboxSend(actor models.AgentConfig) error
-}
-
-type graphMutableProvider interface {
-	UpsertManagedAgent(identity, parent agentidentity.Identity) error
-	ValidateManagedAgent(identity, parent agentidentity.Identity) error
-	RemoveManagedAgent(identity agentidentity.Identity) error
-	ManagedAgentParent(identity agentidentity.Identity) (agentidentity.Identity, bool, error)
 }
 
 type noopProvider struct{}
@@ -42,14 +33,6 @@ func (noopProvider) ProducerEventsForRole(string) []string { return nil }
 func (noopProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
 	same, err := SameAgent(actor, target)
 	return err == nil && same
-}
-
-func (noopProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
-	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_routing", map[string]any{"dependency": "routing_authority_provider"})
-}
-
-func (noopProvider) AuthorizeManagement(actor, target models.AgentConfig) error {
-	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_management", map[string]any{"dependency": "management_authority_provider"})
 }
 
 func (noopProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
@@ -79,36 +62,4 @@ func SameAgent(actor, target models.AgentConfig) (bool, error) {
 		return false, fmt.Errorf("target concrete identity: %w", err)
 	}
 	return agentidentity.Equal(actorIdentity, targetIdentity)
-}
-
-func UpsertManagedAgent(provider Provider, identity, parent agentidentity.Identity) error {
-	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
-		return mutable.UpsertManagedAgent(identity, parent)
-	}
-	return nil
-}
-
-// ValidateManagedAgent checks a proposed projection without mutating the
-// process-local authority graph. Canonical lifecycle persistence remains the
-// mutation owner; callers use this only to reject structurally invalid work
-// before committing that lifecycle transition.
-func ValidateManagedAgent(provider Provider, identity, parent agentidentity.Identity) error {
-	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
-		return mutable.ValidateManagedAgent(identity, parent)
-	}
-	return nil
-}
-
-func RemoveManagedAgent(provider Provider, identity agentidentity.Identity) error {
-	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
-		return mutable.RemoveManagedAgent(identity)
-	}
-	return nil
-}
-
-func ManagedAgentParent(provider Provider, identity agentidentity.Identity) (agentidentity.Identity, bool, error) {
-	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
-		return mutable.ManagedAgentParent(identity)
-	}
-	return agentidentity.Identity{}, false, nil
 }

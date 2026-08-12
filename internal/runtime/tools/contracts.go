@@ -21,9 +21,6 @@ type builtinToolDraft struct {
 var supportedRuntimeToolNames = map[string]struct{}{
 	"agent_message":      {},
 	"schedule":           {},
-	"agent_hire":         {},
-	"agent_fire":         {},
-	"agent_reconfigure":  {},
 	"get_entity":         {},
 	"save_entity_field":  {},
 	"create_entity":      {},

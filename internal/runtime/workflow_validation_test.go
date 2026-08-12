@@ -145,6 +145,69 @@ func testRuntimeWorkflowValidationBundle() *runtimecontracts.WorkflowContractBun
 	return bundle
 }
 
+func TestRetiredDynamicAgentToolsFailClosedAtVerifyAndBoot(t *testing.T) {
+	for _, name := range []string{"agent_hire", "agent_fire", "agent_reconfigure"} {
+		for _, manifestation := range []struct {
+			name      string
+			configure func(*runtimecontracts.WorkflowContractBundle)
+		}{
+			{
+				name: "agent_reference",
+				configure: func(bundle *runtimecontracts.WorkflowContractBundle) {
+					bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+						"worker": {ID: "worker", Tools: []string{name}},
+					}
+				},
+			},
+			{
+				name: "http_tool_entry",
+				configure: func(bundle *runtimecontracts.WorkflowContractBundle) {
+					bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+						name: runtimecontracts.MustToolSchemaEntry(
+							runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+							runtimecontracts.WithToolSchemas(
+								runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+								runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+							),
+							runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid"}),
+						),
+					}
+				},
+			},
+		} {
+			t.Run(name+"/"+manifestation.name, func(t *testing.T) {
+				bundle := testRuntimeWorkflowValidationBundle()
+				manifestation.configure(bundle)
+				source := semanticview.Wrap(bundle)
+
+				_, err := ValidateWorkflowContractSurface(
+					testAuthorActivityContext(context.Background()),
+					source,
+					DefaultWorkflowContractValidationOptions(nil, executionposture.Live),
+				)
+				assertRetiredDynamicAgentToolSurfaceError(t, "verify", name, err)
+
+				_, _, err = ensureWorkflowBootWiring(RuntimeOptions{
+					WorkflowModule: semanticOnlyWorkflowRuntime{source: source},
+				}, workflowValidationTestProfile(t), executionposture.Live)
+				assertRetiredDynamicAgentToolSurfaceError(t, "boot", name, err)
+			})
+		}
+	}
+}
+
+func assertRetiredDynamicAgentToolSurfaceError(t testing.TB, surface, name string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s admitted retired tool %s", surface, name)
+	}
+	for _, want := range []string{name, "RETIRED", "agents.yaml", "flow lifecycle/readiness", "typed fan-out"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s error = %v, want %q", surface, err, want)
+		}
+	}
+}
+
 func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")

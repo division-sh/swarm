@@ -37,7 +37,7 @@ func TestIdentityKeepsNameProvenanceSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeCreated, err := RuntimeName("reviewer", "agent_hire")
+	runtimeCreated, err := RuntimeName("reviewer", "runtime_spawn")
 	if err != nil {
 		t.Fatal(err)
 	}

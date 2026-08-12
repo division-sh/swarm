@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -230,7 +231,7 @@ func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfi
 
 func runtimeToolHiddenFromAgents(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "configure_routing", "agent_hire", "agent_reconfigure":
+	case "configure_routing":
 		return true
 	default:
 		return false
@@ -238,6 +239,9 @@ func runtimeToolHiddenFromAgents(name string) bool {
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
+	if retired := ValidateRetiredDynamicAgentToolReferences(source); len(retired) > 0 {
+		return nil, errors.Join(retired...)
+	}
 	entries, err := builtinExecutionTools(source, nil)
 	if err != nil {
 		return nil, err
