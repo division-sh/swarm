@@ -1,0 +1,4 @@
+worker_state:
+  work_id:
+    type: text
+    _unused_reason: receiver instance identity

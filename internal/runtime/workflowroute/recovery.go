@@ -13,6 +13,7 @@ type RecoveryReader interface {
 
 type RecoveryRecord struct {
 	WorkflowName string
+	EntityID     string
 	Config       json.RawMessage
 }
 

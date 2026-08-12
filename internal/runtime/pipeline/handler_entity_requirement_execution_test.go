@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -94,6 +96,70 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 	}
 }
 
+func TestEntitylessDeclarativeEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgres(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bus := &recordingPipelineBus{}
+			pc := newDurablePipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module:              staticSemanticWorkflowModule{source: handlerEntityRequirementExecutionSource()},
+				Persistence:         workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			instancePath := "review/entityless-" + uuid.NewString()
+			evt := handlerTestRootIngress(
+				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
+				handlerTestWorkflowEnvelope("review", instancePath, ""), time.Now().UTC(),
+			)
+			dialect := authoractivityfixture.DialectPostgres
+			if store.isSQLite() {
+				dialect = authoractivityfixture.DialectSQLite
+			}
+			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
+			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient("node-a"),
+				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+					FlowID: "review", FlowInstance: instancePath,
+				}),
+			})
+
+			outcome, err := newCoordinatorHandlerExecutionEngine(pc, "node-a").ExecuteHandlerSteps(
+				deliveryCtx,
+				runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "work.emitted"}},
+				evt,
+				"work.ready",
+			)
+			if err != nil {
+				t.Fatalf("execute entityless declarative handler: %v", err)
+			}
+			if outcome == nil || !outcome.Handled {
+				t.Fatalf("entityless declarative outcome = %#v, want handled", outcome)
+			}
+			if bus.outboxCount() != 1 || bus.outboxIntent(0).Event.Type() != events.EventType("work.emitted") {
+				t.Fatalf("entityless durable publications = %#v, want one work.emitted event", bus.outboxIntents)
+			}
+
+			assertCount := func(label, sqliteQuery, postgresQuery string, args ...any) {
+				t.Helper()
+				query := postgresQuery
+				if store.isSQLite() {
+					query = sqliteQuery
+				}
+				var count int
+				if err := store.testDB().QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+					t.Fatalf("count %s: %v", label, err)
+				}
+				if count != 0 {
+					t.Fatalf("%s rows = %d, want 0 after entityless declarative execution", label, count)
+				}
+			}
+			assertCount("entity_state", "SELECT COUNT(*) FROM entity_state WHERE run_id = ?", "SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid", runID)
+			assertCount("flow_instances", "SELECT COUNT(*) FROM flow_instances WHERE instance_id = ?", "SELECT COUNT(*) FROM flow_instances WHERE instance_id = $1", instancePath)
+		})
+	}
+}
+
 func openHandlerEntityRequirementStore(t *testing.T, backend string) (*sql.DB, *workflowInstanceStore) {
 	t.Helper()
 	if backend == "sqlite" {
@@ -164,8 +230,9 @@ func executeExistingOwnerBehavior(
 
 func handlerEntityRequirementExecutionSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
-		Path:  "review",
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: "template"},
+		Path:   "review",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: "template"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.emitted": {}},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name: "review", Mode: "template", InitialState: "active",
 			States: []string{"active", "killed"}, TerminalStates: []string{"killed"},

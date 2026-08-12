@@ -467,6 +467,7 @@ func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInst
 		if canonicalRoute != "" {
 			instance.StorageRef = canonicalRoute
 			instance.InstanceID = runtimeflowidentity.LogicalInstanceID(canonicalRoute)
+			instance.Metadata["flow_path"] = canonicalRoute
 			instance.Metadata["instance_id"] = instance.InstanceID
 		}
 	}

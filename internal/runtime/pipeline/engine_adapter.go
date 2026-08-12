@@ -177,7 +177,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			return runtimeengine.CommittedEngineMutation{}, err
 		}
 		if deactivation := committed.PostCommit.FlowDeactivation; deactivation != nil {
-			if err := o.state.coordinator.maybeDeactivateTerminalFlowInstance(ctx, deactivation.Route, deactivation.EntityID, deactivation.NextState); err != nil {
+			if err := o.state.coordinator.maybeDeactivateTerminalFlowInstance(ctx, deactivation.Route, identity.NormalizeEntityID(deactivation.EntityID), deactivation.NextState); err != nil {
 				return runtimeengine.CommittedEngineMutation{}, err
 			}
 		}
@@ -240,8 +240,11 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 }
 
 func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation, target events.DeliveryTargetOwnership) (runtimeengine.CommittedEngineMutation, error) {
-	if mutation.Address.EntityID.String() != "" || mutation.Address.Route.InstancePath != target.Route().FlowInstance {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation disagrees with stamped receiver target")
+	if entityID := mutation.Address.EntityID.String(); entityID != "" {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation carries entity identity %q", entityID)
+	}
+	if instancePath := mutation.Address.Route.InstancePath; instancePath != target.Route().FlowInstance {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation route %q disagrees with stamped receiver route %q", instancePath, target.Route().FlowInstance)
 	}
 	if len(mutation.LifecycleEffects) > 0 || len(mutation.EmitPrerequisites.Fields) > 0 {
 		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation cannot carry state or lifecycle prerequisites")
@@ -525,6 +528,9 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 			return runtimeengine.StateSnapshot{}, false, err
 		}
 		if ok {
+			if _, err := requireWorkflowInstanceIdentity(address.Route, entityID, instance); err != nil {
+				return runtimeengine.StateSnapshot{}, false, fmt.Errorf("validate engine state identity: %w", err)
+			}
 			carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), strings.TrimSpace(instance.WorkflowName), instance.Metadata), instance.StateBuckets)
 			if err != nil {
 				return runtimeengine.StateSnapshot{}, false, err
@@ -546,7 +552,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	state, err := r.coordinator.currentWorkflowState(ctx, address.Route, entityID.String())
+	state, err := r.coordinator.currentWorkflowState(ctx, address.Route, entityID)
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
@@ -1231,13 +1237,13 @@ func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[
 	}
 }
 
-func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, route runtimeflowidentity.Route, entityID, nextState string) error {
+func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, nextState string) error {
 	if pc == nil || pc.instanceDeactivator == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
 	nextState = strings.TrimSpace(nextState)
-	entityID = strings.TrimSpace(entityID)
-	if nextState == "" || entityID == "" {
+	entityID = identity.NormalizeEntityID(entityID.String())
+	if nextState == "" || entityID.IsZero() {
 		return nil
 	}
 	if !route.Valid() {
@@ -1251,16 +1257,16 @@ func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.C
 	if templateID == "" || !pc.isTerminalFlowState(templateID, nextState) {
 		return nil
 	}
+	instanceIdentity, err := requireWorkflowInstanceIdentity(route, entityID, instance)
+	if err != nil {
+		return fmt.Errorf("validate terminal workflow instance owner: %w", err)
+	}
 	source := pc.SemanticSource()
 	if source != nil {
 		schema, ok := source.FlowSchemaByID(templateID)
 		if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
 			return nil
 		}
-	}
-	instanceIdentity := workflowInstanceIdentity(source, instance)
-	if !instanceIdentity.HasStoredPath {
-		return nil
 	}
 	return pc.instanceDeactivator(ctx, FlowInstanceDeactivationRequest{
 		ContractBundle: source,
@@ -1338,7 +1344,11 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 		}
 	}
 	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
-	targetScope := workflowInstanceScopeKey(source, instance)
+	targetRoute, err := workflowInstanceRouteForPersisted(source, instance)
+	if err != nil {
+		return false
+	}
+	targetScope := targetRoute.ScopeKey
 	if ownerScope == "" || targetScope == "" {
 		return false
 	}

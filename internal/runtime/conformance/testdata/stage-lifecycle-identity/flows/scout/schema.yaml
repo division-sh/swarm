@@ -1,0 +1,42 @@
+name: scout
+mode: singleton
+stages:
+  collecting:
+    initial: true
+  review:
+    timers:
+      - id: review_timeout
+        after: 10m
+        advances_to: timed_out
+    gate:
+      decision: approve_scout
+      title: Approve scout batch
+      outcomes:
+        approve:
+          label: Approve
+          advances_to: awaiting
+  awaiting: {}
+  complete:
+    terminal: true
+  timed_out:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - name: setup
+        event: scout.setup
+        source: external
+      - name: member_done
+        event: scout.member.done
+        source: external
+        resolution:
+          mode: fan-in
+          aggregation: barrier
+          window: payload.batch_id
+          dedup_by: payload.member_id
+          singleton: scout
+        carries:
+          member_id: {from: payload.member_id, type: text}
+          batch_id: {from: payload.batch_id, type: text}
+  outputs:
+    events: []

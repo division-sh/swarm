@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -25,7 +26,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			name: "sqlite",
 			setup: func(t *testing.T) (*sql.DB, *workflowInstanceStore) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				return db, newTestSQLiteWorkflowInstanceStore(db)
+				return db, newSQLiteWorkflowInstanceStoreForTest(t, db)
 			},
 			bind: "?",
 			json: "?",
@@ -47,9 +48,13 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			db, store := tc.setup(t)
+			ctx := testAuthorActivityContext(t, context.Background())
+			runID := uuid.NewString()
+			ensurePipelineTestRun(t, store, runID)
 			scopeKey := "route-recovery-" + uuid.NewString()
 			instanceID := "inst-1"
 			instancePath := scopeKey + "/" + instanceID
+			entityID := uuid.NewString()
 			parentEntityID := uuid.NewString()
 			route := runtimeflowidentity.StoredRoute(scopeKey, instanceID, instancePath)
 			config := map[string]any{
@@ -74,19 +79,25 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			} else {
 				insert += "$2, $3, " + tc.json + ", $5, " + tc.now + ")"
 			}
-			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), insert, instancePath, "review", "template", string(configRaw), "active"); err != nil {
+			if _, err := db.ExecContext(ctx, insert, instancePath, "review", "template", string(configRaw), "active"); err != nil {
 				t.Fatalf("seed active flow instance: %v", err)
 			}
-
-			projection, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(t, context.Background()), route)
+			entityInsert := "INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES (?, ?, ?, 'active')"
+			if tc.name == "postgres" {
+				entityInsert = "INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, $3, 'active')"
+			}
+			if _, err := db.ExecContext(ctx, entityInsert, runID, entityID, instancePath); err != nil {
+				t.Fatalf("seed active flow entity: %v", err)
+			}
+			projection, err := store.LoadRouteRecoveryProjection(ctx, route)
 			if err != nil {
 				t.Fatalf("LoadRouteRecoveryProjection without run context: %v", err)
 			}
 			if got := projection.Identity.Route(); got != route {
 				t.Fatalf("projection route = %#v, want %#v", got, route)
 			}
-			if got := projection.Identity.EntityID; got != runtimeflowidentity.EntityID(instancePath) {
-				t.Fatalf("projection entity_id = %q, want deterministic id for %q", got, instancePath)
+			if got := projection.Identity.EntityID; got != entityID {
+				t.Fatalf("projection entity_id = %q, want persisted entity %q", got, entityID)
 			}
 			if got := projection.Identity.ParentRoute; got.FlowID != "parent" || got.FlowInstance != "parent/root" || got.EntityID != parentEntityID {
 				t.Fatalf("projection parent route = %#v, want complete persisted parent", got)
@@ -95,7 +106,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				t.Fatalf("projection config vertical_id = %q, want vertical-1", got)
 			}
 			projection.Config["vertical_id"] = "mutated"
-			again, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(t, context.Background()), route)
+			again, err := store.LoadRouteRecoveryProjection(ctx, route)
 			if err != nil {
 				t.Fatalf("reload route recovery projection: %v", err)
 			}
@@ -103,11 +114,74 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 				t.Fatalf("persisted config aliased returned projection: got %q", got)
 			}
 
+			historicalRunID := uuid.NewString()
+			ensurePipelineTestRun(t, store, historicalRunID)
+			if _, err := db.ExecContext(ctx, entityInsert, historicalRunID, entityID, instancePath); err != nil {
+				t.Fatalf("seed same owner in another run: %v", err)
+			}
+			if _, err := store.LoadRouteRecoveryProjection(ctx, route); err != nil {
+				t.Fatalf("same canonical owner across runs must remain unambiguous: %v", err)
+			}
+			transitionWorkflowActivationRunForTest(t, store, ctx, historicalRunID, runtimerunlifecycle.StateCancelled)
+			statusQuery := "SELECT status FROM runs WHERE run_id = ?"
+			if tc.name == "postgres" {
+				statusQuery = "SELECT status FROM runs WHERE run_id = $1::uuid"
+			}
+			var historicalStatus string
+			if err := db.QueryRowContext(ctx, statusQuery, historicalRunID).Scan(&historicalStatus); err != nil {
+				t.Fatalf("load retired historical run status: %v", err)
+			}
+			if historicalStatus != string(runtimerunlifecycle.StateCancelled) {
+				t.Fatalf("historical run status = %q, want cancelled", historicalStatus)
+			}
+			retiredEntityID := uuid.NewString()
+			if _, err := db.ExecContext(ctx, entityInsert, historicalRunID, retiredEntityID, instancePath); err != nil {
+				t.Fatalf("seed retired route owner: %v", err)
+			}
+			projection, err = store.LoadRouteRecoveryProjection(ctx, route)
+			if err != nil {
+				t.Fatalf("recover current owner with retired predecessor: %v", err)
+			}
+			if projection.Identity.EntityID != entityID {
+				t.Fatalf("recovered entity_id = %q, want current owner %q instead of retired owner %q", projection.Identity.EntityID, entityID, retiredEntityID)
+			}
+
 			t.Run("route identity mismatch", func(t *testing.T) {
-				mismatched := runtimeflowidentity.StoredRoute("wrong-scope", instanceID, instancePath)
-				_, err := store.LoadRouteRecoveryProjection(testAuthorActivityContext(t, context.Background()), mismatched)
-				if err == nil || !strings.Contains(err.Error(), "identity mismatch") {
-					t.Fatalf("mismatched route error = %v, want identity mismatch", err)
+				mismatched := runtimeflowidentity.StoredRoute(scopeKey, "wrong-instance", instancePath)
+				_, err := store.LoadRouteRecoveryProjection(ctx, mismatched)
+				if err == nil || !strings.Contains(err.Error(), "disagrees with requested route") {
+					t.Fatalf("mismatched route error = %v, want exact-route mismatch", err)
+				}
+			})
+
+			t.Run("missing or ambiguous entity owner", func(t *testing.T) {
+				deleteEntity := "DELETE FROM entity_state WHERE flow_instance = ?"
+				if tc.name == "postgres" {
+					deleteEntity = "DELETE FROM entity_state WHERE flow_instance = $1"
+				}
+				if _, err := db.ExecContext(ctx, deleteEntity, instancePath); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.LoadRouteRecoveryProjection(ctx, route); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+					t.Fatalf("missing owner error = %v", err)
+				}
+				if _, err := db.ExecContext(ctx, entityInsert, runID, entityID, instancePath); err != nil {
+					t.Fatal(err)
+				}
+				ambiguousRunID := uuid.NewString()
+				ensurePipelineTestRun(t, store, ambiguousRunID)
+				transitionWorkflowActivationRunForTest(t, store, ctx, ambiguousRunID, runtimerunlifecycle.StatePaused)
+				if _, err := db.ExecContext(ctx, entityInsert, ambiguousRunID, uuid.NewString(), instancePath); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.LoadRouteRecoveryProjection(ctx, route); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
+					t.Fatalf("ambiguous owner error = %v", err)
+				}
+				if _, err := db.ExecContext(ctx, deleteEntity, instancePath); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, entityInsert, runID, entityID, instancePath); err != nil {
+					t.Fatal(err)
 				}
 			})
 
