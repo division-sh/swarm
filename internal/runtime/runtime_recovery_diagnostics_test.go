@@ -19,6 +19,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -434,7 +435,7 @@ func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurr
 	return errors.New("unexpected readiness creation completion")
 }
 
-func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtimeflowidentity.Route, time.Time) error {
+func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtimeflowidentity.Route, identity.EntityID, time.Time) error {
 	return errors.New("unexpected readiness termination")
 }
 

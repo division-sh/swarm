@@ -7,6 +7,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *testing.T) {
@@ -134,69 +136,15 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 	}
 }
 
-func TestWorkflowInstanceCoordinates_SeparateStaticScopeFromGenericStorageRef(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
-
-	instance := WorkflowInstance{
-		WorkflowName: "child",
-		StorageRef:   "22222222-2222-2222-2222-222222222222",
-		Metadata: map[string]any{
-			"storage_ref": "22222222-2222-2222-2222-222222222222",
-		},
-	}
-
-	if got := workflowInstanceScopeKey(source, instance); got != "child" {
-		t.Fatalf("workflowInstanceScopeKey(static child) = %q, want child", got)
-	}
-	if got := workflowInstancePath(source, instance); got != "child" {
-		t.Fatalf("workflowInstancePath(static child) = %q, want child", got)
-	}
-}
-
-func TestWorkflowInstanceCoordinates_KeepNestedInstancePathDistinctFromScope(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-
-	instance := WorkflowInstance{
-		WorkflowName: "grandchild",
-		Metadata: map[string]any{
-			"flow_path": "child/grandchild/inst-1",
-		},
-	}
-
-	if got := workflowInstanceScopeKey(source, instance); got != "child/grandchild" {
-		t.Fatalf("workflowInstanceScopeKey(nested) = %q, want child/grandchild", got)
-	}
-	if got := workflowInstancePath(source, instance); got != "child/grandchild/inst-1" {
-		t.Fatalf("workflowInstancePath(nested) = %q, want child/grandchild/inst-1", got)
-	}
-}
-
-func TestWorkflowInstanceCoordinates_DeriveNestedStaticScopeWithoutTruncation(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-
-	instance := WorkflowInstance{
-		WorkflowName: "grandchild",
-	}
-	identity := StoredFlowInstance(source, instance)
-
-	if identity.ScopeKey != "child/grandchild" {
-		t.Fatalf("StoredFlowInstance(static nested).ScopeKey = %q, want child/grandchild", identity.ScopeKey)
-	}
-	if identity.InstancePath != "child/grandchild" {
-		t.Fatalf("StoredFlowInstance(static nested).InstancePath = %q, want child/grandchild", identity.InstancePath)
-	}
-	if identity.HasStoredPath {
-		t.Fatal("StoredFlowInstance(static nested).HasStoredPath = true, want derived path")
-	}
-}
-
 func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 
 	instance := WorkflowInstance{
 		WorkflowName: "grandchild",
+		StorageRef:   "child/grandchild/inst-1",
 		Metadata: map[string]any{
-			"flow_path": "child/grandchild/inst-1",
+			"flow_path":   "child/grandchild/inst-1",
+			"instance_id": "inst-1",
 		},
 	}
 
@@ -205,6 +153,64 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	}
 	if !workflowInstanceOwnedByFlow(source, instance, "grandchild") {
 		t.Fatal("expected grandchild to own child/grandchild/inst-1")
+	}
+}
+
+func TestWorkflowInstanceRouteForPersistedUsesAuthoredNestedSingletonScope(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	instance := WorkflowInstance{
+		WorkflowName: "grandchild",
+		StorageRef:   "child/grandchild",
+		Metadata: map[string]any{
+			"flow_path":   "child/grandchild",
+			"instance_id": "grandchild",
+		},
+	}
+
+	route, err := workflowInstanceRouteForPersisted(source, instance)
+	if err != nil {
+		t.Fatalf("persisted nested singleton route: %v", err)
+	}
+	want := runtimeflowidentity.StoredRoute("child/grandchild", "grandchild", "child/grandchild")
+	if route != want {
+		t.Fatalf("persisted nested singleton route = %#v, want %#v", route, want)
+	}
+}
+
+func TestRequireWorkflowInstanceIdentityRejectsMissingAndMismatchedFacts(t *testing.T) {
+	route := runtimeflowidentity.RouteForInstancePath("review/instance-1")
+	entityID := identity.NormalizeEntityID("11111111-1111-4111-8111-111111111111")
+	valid := WorkflowInstance{
+		StorageRef: "review/instance-1",
+		InstanceID: "instance-1",
+		Metadata: map[string]any{
+			"flow_path":   "review/instance-1",
+			"instance_id": "instance-1",
+			"entity_id":   entityID.String(),
+		},
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, valid); err != nil {
+		t.Fatalf("exact identity rejected: %v", err)
+	}
+
+	missing := valid
+	missing.Metadata = cloneStringAnyMap(valid.Metadata)
+	delete(missing.Metadata, "entity_id")
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, missing); err == nil || !strings.Contains(err.Error(), "missing entity_id") {
+		t.Fatalf("missing entity error = %v", err)
+	}
+
+	mismatch := valid
+	mismatch.Metadata = cloneStringAnyMap(valid.Metadata)
+	mismatch.Metadata["entity_id"] = "22222222-2222-4222-8222-222222222222"
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, mismatch); err == nil || !strings.Contains(err.Error(), "disagrees with requested entity") {
+		t.Fatalf("mismatched entity error = %v", err)
+	}
+
+	wrongRoute := valid
+	wrongRoute.StorageRef = "review/instance-2"
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, wrongRoute); err == nil || !strings.Contains(err.Error(), "disagrees") {
+		t.Fatalf("mismatched route error = %v", err)
 	}
 }
 

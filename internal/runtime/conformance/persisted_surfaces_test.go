@@ -1722,8 +1722,10 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
-			"entity_id": entityID,
-			"status":    "closed",
+			"entity_id":   entityID,
+			"flow_path":   "mutation-flow",
+			"instance_id": "mutation-flow",
+			"status":      "closed",
 			"gates": map[string]any{
 				"g_done": true,
 			},

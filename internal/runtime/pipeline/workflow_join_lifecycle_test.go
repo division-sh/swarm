@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -144,7 +145,7 @@ func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T
 				t.Fatal(err)
 			}
 			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(
-				route, entityID, uuid.NewString(), "order.accepted", executionmode.Mock, enteredAt, &transition,
+				route, identity.NormalizeEntityID(entityID), uuid.NewString(), "order.accepted", executionmode.Mock, enteredAt, &transition,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -413,7 +414,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(testWorkflowInstanceRoute(path), entityID, uuid.NewString(), "approval.completed", executionmode.Live, transitionAt, &transition)
+			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(testWorkflowInstanceRoute(path), identity.NormalizeEntityID(entityID), uuid.NewString(), "approval.completed", executionmode.Live, transitionAt, &transition)
 			if err != nil {
 				t.Fatal(err)
 			}

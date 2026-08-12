@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -117,7 +117,7 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 				item.CurrentState = "changed"
 				return nil
 			}))
-			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testWorkflowInstanceRoute(storageRef), fixture.frozenAt))
+			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testWorkflowInstanceRoute(storageRef), identity.NormalizeEntityID(entityID), fixture.frozenAt))
 
 			after, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
 			if err != nil || len(after) != 0 {

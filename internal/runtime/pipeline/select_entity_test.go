@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -372,7 +373,8 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected terminated budget entity to exist")
 	}
-	if err := pc.workflowStore.MarkTerminated(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route(), time.Now().UTC()); err != nil {
+	terminatedIdentity := DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated")
+	if err := pc.workflowStore.MarkTerminated(ctx, terminatedIdentity.Route(), identity.NormalizeEntityID(terminatedIdentity.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 
