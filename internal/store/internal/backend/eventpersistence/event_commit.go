@@ -3,6 +3,7 @@ package eventpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 )
 
@@ -222,23 +224,10 @@ func commitPublication(
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	command runtimebus.PublicationCommand,
 ) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
+	var err error
+	ctx, err = publicationCommitContext(ctx, command)
+	if err != nil {
 		return runtimebus.CommittedPublication{}, err
-	}
-	if command.HasAuthorScope {
-		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
-	}
-	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
-	if command.HasAuthorDescriptor {
-		scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
-		if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
-			return runtimebus.CommittedPublication{}, fmt.Errorf("publication author descriptor requires exact bundle scope")
-		}
-		var err error
-		ctx, err = runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, command.AuthorDescriptor)
-		if err != nil {
-			return runtimebus.CommittedPublication{}, err
-		}
 	}
 	_, postgres := store.(*EventPostgresOwner)
 	result, err := withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
@@ -257,6 +246,109 @@ func commitPublication(
 		return runtimebus.CommittedPublication{}, fmt.Errorf("validate committed publication: %w", err)
 	}
 	return result, nil
+}
+
+func publicationCommitContext(ctx context.Context, command runtimebus.PublicationCommand) (context.Context, error) {
+	if err := command.Validate(); err != nil {
+		return ctx, err
+	}
+	if command.HasAuthorScope {
+		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
+	}
+	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
+	if !command.HasAuthorDescriptor {
+		return ctx, nil
+	}
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
+		return ctx, fmt.Errorf("publication author descriptor requires exact bundle scope")
+	}
+	return runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, command.AuthorDescriptor)
+}
+
+func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {
+	if err := command.Validate(); err != nil {
+		return result, err
+	}
+	if strings.TrimSpace(command.Idempotency.IdempotencyKey) == "" {
+		result.Publication, err = s.CommitPublication(ctx, command.Publication)
+		result.Completion = command.Completion
+		return result, err
+	}
+	lease, err := storeapiidempotency.AcquirePostgresRequest(ctx, s.apiIdempotency, command.Idempotency)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if releaseErr := lease.Release(ctx); releaseErr != nil {
+			result = runtimebus.CommittedAPIEventPublication{}
+			err = errors.Join(err, fmt.Errorf("release API event publication idempotency authority: %w", releaseErr))
+		}
+	}()
+	if completion, replay := lease.Replay(); replay {
+		return runtimebus.CommittedAPIEventPublication{Completion: completion, Replay: true}, nil
+	}
+	ctx, err = publicationCommitContext(ctx, command.Publication)
+	if err != nil {
+		return result, err
+	}
+	result.Completion = command.Completion
+	result.Publication, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
+		committed := runtimebus.CommittedPublication{}
+		err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var commitErr error
+			committed, commitErr = commitPublicationTx(txctx, tx, story, s, true, command.Publication, handoff)
+			if commitErr != nil {
+				return commitErr
+			}
+			return storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, command.Completion)
+		})
+		return committed, err
+	})
+	if err != nil {
+		return runtimebus.CommittedAPIEventPublication{}, err
+	}
+	return result, result.Validate()
+}
+
+func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {
+	if err := command.Validate(); err != nil {
+		return result, err
+	}
+	if strings.TrimSpace(command.Idempotency.IdempotencyKey) == "" {
+		result.Publication, err = s.CommitPublication(ctx, command.Publication)
+		result.Completion = command.Completion
+		return result, err
+	}
+	lease, err := storeapiidempotency.AcquireSQLiteRequest(ctx, s.apiIdempotency, command.Idempotency)
+	if err != nil {
+		return result, err
+	}
+	defer lease.Release()
+	if completion, replay := lease.Replay(); replay {
+		return runtimebus.CommittedAPIEventPublication{Completion: completion, Replay: true}, nil
+	}
+	ctx, err = publicationCommitContext(ctx, command.Publication)
+	if err != nil {
+		return result, err
+	}
+	result.Completion = command.Completion
+	result.Publication, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
+		committed := runtimebus.CommittedPublication{}
+		err := s.runPrivateAuthorActivityMutation(ctx, "sqlite API event publication commit", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var commitErr error
+			committed, commitErr = commitPublicationTx(txctx, tx, story, s, false, command.Publication, handoff)
+			if commitErr != nil {
+				return commitErr
+			}
+			return storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, command.Completion)
+		})
+		return committed, err
+	})
+	if err != nil {
+		return runtimebus.CommittedAPIEventPublication{}, err
+	}
+	return result, result.Validate()
 }
 
 func commitPublicationTx(

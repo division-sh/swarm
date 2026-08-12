@@ -192,7 +192,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts)
+	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +411,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, store.now)
+	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, store.now)
 	if err != nil {
 		return nil, err
 	}

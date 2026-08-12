@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -34,6 +35,55 @@ type EventStore interface {
 // commit evidence; no callback or transaction capability crosses this port.
 type CommitPublicationOwner interface {
 	CommitPublication(context.Context, PublicationCommand) (CommittedPublication, error)
+}
+
+// APIEventPublicationCommitOwner owns the event.publish-specific atomic
+// operation. The selected store commits publication facts and the deterministic
+// API completion together without exposing its transaction to the API layer.
+type APIEventPublicationCommitOwner interface {
+	CommitAPIEventPublication(context.Context, APIEventPublicationCommand) (CommittedAPIEventPublication, error)
+}
+
+type APIEventPublicationCommand struct {
+	Publication PublicationCommand
+	Idempotency apiidempotency.Request
+	Completion  apiidempotency.Completion
+}
+
+func (c APIEventPublicationCommand) Validate() error {
+	if err := c.Publication.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.Idempotency.Method) != "event.publish" {
+		return fmt.Errorf("API event publication requires event.publish idempotency authority")
+	}
+	if strings.TrimSpace(c.Completion.ResourceID) != strings.TrimSpace(c.Publication.Commit.Event.ID()) {
+		return fmt.Errorf("API event publication completion resource does not match the publication event")
+	}
+	if len(c.Completion.Response) == 0 {
+		return fmt.Errorf("API event publication completion response is required")
+	}
+	if strings.TrimSpace(c.Idempotency.IdempotencyKey) != "" &&
+		(strings.TrimSpace(c.Idempotency.ActorTokenID) == "" || strings.TrimSpace(c.Idempotency.RequestHash) == "") {
+		return fmt.Errorf("API event publication actor token and request hash are required for idempotency")
+	}
+	return nil
+}
+
+type CommittedAPIEventPublication struct {
+	Publication CommittedPublication
+	Completion  apiidempotency.Completion
+	Replay      bool
+}
+
+func (r CommittedAPIEventPublication) Validate() error {
+	if strings.TrimSpace(r.Completion.ResourceID) == "" || len(r.Completion.Response) == 0 {
+		return fmt.Errorf("committed API event publication completion is incomplete")
+	}
+	if r.Replay {
+		return nil
+	}
+	return r.Publication.Validate()
 }
 
 type FlowInstanceActivationCommand struct {

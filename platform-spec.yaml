@@ -5360,6 +5360,7 @@ engine:
         promoted_first_slice_by: '#1414'
         typed_entrypoint_owners:
         - runtimebus.CommitPublishOwner with sealed CommitPublish plans and named event operations for selected event publication and declared initial facts
+        - runtimebus.APIEventPublicationCommitOwner for keyed event.publish lookup/replay plus atomic prepared publication and deterministic API-completion persistence
         - internal/runtime/deliverylifecycle.Store for executable delivery admission, fenced claims, settlement, terminalization, and typed readback
         - runtimepipeline.PipelineCoordinator named closed operations backed by private workflow persistence transactions
         - internal/runtime/pipeline.WorkflowPersistence as the opaque construction owner of the private selected-backend workflow transaction executor
@@ -5549,7 +5550,7 @@ engine:
       - WorkflowPersistence is constructed from a complete closed operation owner and fails closed when any required operation is absent. EventBus, PipelineCoordinator, manager, and other runtime consumers receive only named closed operations and must not receive or invoke a generic mutation callback.
       - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.
       - Typed post-commit evidence is consumed only after the selected mutation boundary releases its process-local write serialization lock; executable callback slices are not transaction authority.
-      - SQLite API idempotency callback execution must stay outside the idempotency row write transaction; failed callbacks must not persist completion.
+      - SQLite generic API idempotency callback execution must stay outside the idempotency row write transaction; failed callbacks must not persist completion. `event.publish` does not wrap an arbitrary callback in that transaction: its typed selected-store operation performs the same short keyed lookup/serialization, then commits the already prepared publication facts and deterministic completion in the publication owner's private transaction.
       - A runtime operation never asks whether an ambient transaction exists. Cross-domain atomic work is one named selected-store operation; invoking another named mutation cannot implicitly join or reuse its transaction.
       - Schema/bootstrap, bundle catalog, destructive reset, preservation cleanup, fork-specific mutation/recovery, and read-only projections remain separate concepts unless independently gated.
       consumers:
@@ -5557,7 +5558,7 @@ engine:
       - runtimepipeline.WorkflowPersistence construction from the complete closed selected-store workflow operation owner
       - PostgresStore and SQLiteRuntimeStore named runtime operations for the declared row families
     - name: event_append_and_run_lifecycle_rows
-      owner: events.AdmittedEvent plus runtimebus.CommitPublishOwner and named selected-fork/runtime-log event operations
+      owner: events.AdmittedEvent plus runtimebus.CommitPublishOwner, runtimebus.APIEventPublicationCommitOwner, and named selected-fork/runtime-log event operations
       sqlite_owner: internal/store.SQLiteRuntimeStore sealed event commit operations
       postgres_owner: internal/store.PostgresStore sealed event commit operations
       excludes:
@@ -5713,9 +5714,9 @@ engine:
       - broader startup recovery/replay policy outside the rows explicitly terminalized by serve abandon
       - production multi-writer SQLite semantics
     - name: api_idempotency_rows
-      owner: internal/apiidempotency Store contract backed by private selected-store owners
-      sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency
-      postgres_owner: internal/store.PostgresStore.WithAPIIdempotency
+      owner: internal/apiidempotency Store contract backed by private selected-store owners; runtimebus.APIEventPublicationCommitOwner is the exact event.publish cross-domain operation
+      sqlite_owner: internal/store.SQLiteRuntimeStore.WithAPIIdempotency plus its private typed API-event publication operation
+      postgres_owner: internal/store.PostgresStore.WithAPIIdempotency plus its private typed API-event publication operation
       promoted_by: '#1214'
       scope: >
         API idempotency owns replay, conflict detection, and completion persistence for mutating v1 API calls. SQLite
@@ -5728,6 +5729,13 @@ engine:
         A terminal release failure clears success from the current response and fails closed. If completion persistence committed
         before that release failure, the durable completion remains canonical and the next same-key request replays it without
         re-executing the callback. Callback or publish failure before completion persistence must leave no idempotency completion.
+
+        `event.publish` is the bounded exception to split generic callback/publication ownership. It consumes the same keyed
+        lookup, conflict, replay, and serialization owner, but one typed selected-store operation commits the prepared run,
+        lifecycle, route, event, delivery, replay-scope, and deterministic API completion facts in the publication owner's
+        private transaction. It exposes no transaction or callback capability. Failure at any publication or completion
+        write leaves none of those request-owned facts, and retry cannot create a second publication before one durable
+        completion exists. Generic `WithAPIIdempotency` semantics for every other mutating method remain unchanged.
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
     - name: runtime_session_registry_rows
@@ -11800,7 +11808,7 @@ flow_model:
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
         implementation_slice_2207:
           status: merge_bearing_runtime_behavior
-          canonical_code_owner: internal/apiv1.resolveEventPublicationTemplateInputEndpoint plus internal/runtime/bus.publicInputAdmission over internal/runtime/core/pinrouting.ConnectRoutePlan
+          canonical_code_owner: internal/apiv1.resolveEventPublicationTemplateInputEndpoint plus internal/runtime/bus.publicInputAdmission over internal/runtime/core/pinrouting.ConnectRoutePlan plus runtimebus.APIEventPublicationCommitOwner
           rule: |
             Create-new `/v1/rpc event.publish` may admit one exact authored template-flow input pin as a public input.
             Endpoint resolution is census-backed and preserves authored root event-catalog authority: an unscoped event
@@ -11810,11 +11818,15 @@ flow_model:
 
             The selected endpoint compiles to one `ConnectRoutePlan` and executes under a typed EventBus public-input
             authority that is distinct from provider-output authorization. The canonical plan owns template create, select,
-            or select-or-create lifecycle resolution and the selected delivery routes. Ambiguous or missing endpoints,
+            or select-or-create lifecycle resolution and the selected delivery routes. Endpoint resolution returns one typed
+            ordinary-root/static, exact-template-input, or invalid-template decision. Once template ownership is selected,
+            a missing, ambiguous, or invalid exact input is terminal and cannot fall through to ordinary publication.
+            Ambiguous or missing endpoints,
             design-locked or invalid resolution, target failure, noncanonical route ownership, and zero durable deliveries
             fail closed before acknowledgment. Run, flow-instance, entity, route, event, delivery, replay-scope, and API
-            idempotency completion mutation is one selected-store transaction; any lifecycle, materialization, delivery, or
-            commit failure leaves no partial public-input publication facts.
+            idempotency completion mutation is one typed selected-store API-event publication transaction; any lifecycle,
+            materialization, delivery, replay-scope, completion, or commit failure leaves no partial public-input publication
+            facts. The operation preserves #1214 short keyed lookup/serialization and does not alter generic callback ownership.
           consumes:
           - authored root event catalog and authored endpoint census
           - effective provider-trigger schema imports without provider-output authority
@@ -11826,9 +11838,10 @@ flow_model:
           proof_obligations:
           - authored root without a root input pin retains precedence over a colliding template input
           - imported normalized provider schema plus an exact template input remains eligible for typed public admission
+          - scoped and unscoped template-owned events without an exact input reject before lower-precedence publication
           - create, select, and select-or-create modes consume the same canonical lifecycle owner
           - the complete public rejection matrix fails before acknowledgment
-          - SQLite and PostgreSQL late-failure proofs leave zero run, instance, entity, route, event, delivery, or idempotency residue
+          - SQLite and PostgreSQL faults at delivery insertion, replay-scope insertion after delivery, and API completion insertion after complete publication leave zero exact run, instance, entity, route, event, delivery, replay-scope, or idempotency residue
           does_not_close:
           - provider ingress activation, signing, and provider-output authority
           - automatic scenario derivation tracked by the S6 workstream
@@ -30192,10 +30205,13 @@ api_specification:
         \ template-flow input pin may be admitted through typed public-input authority. Authored root event-catalog ownership\
         \ takes precedence even when the root has no input pin; effective provider-trigger schema imports are visibility facts,\
         \ not authored-root or provider-output authority. The exact template endpoint must lower through the canonical ConnectRoutePlan\
-        \ and template create/select/select-or-create lifecycle owner. Ambiguous or missing endpoints, invalid or design-locked\
-        \ resolution, target failure, noncanonical route ownership, and zero durable deliveries fail closed. Run, template instance,\
-        \ entity, route, event, delivery, replay-scope, and API idempotency completion writes commit in one selected-store transaction\
-        \ or leave no residue. Existing-run publication must preflight\
+        \ and template create/select/select-or-create lifecycle owner. Endpoint resolution returns one typed ordinary-root/static,\
+        \ exact-template-input, or invalid-template decision. Once template ownership is selected, a missing, ambiguous, or invalid\
+        \ exact input fails closed and cannot fall through to ordinary publication. Invalid or design-locked resolution, target\
+        \ failure, noncanonical route ownership, and zero durable deliveries also fail closed. Run, template instance, entity, route,\
+        \ event, delivery, replay-scope, and deterministic API idempotency completion writes commit through one typed selected-store\
+        \ API-event publication transaction or leave no residue. The operation preserves the generic #1214 short keyed lookup/lock\
+        \ contract and does not execute an arbitrary idempotency callback inside the publication transaction. Existing-run publication must preflight\
         \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
         \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
         \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\

@@ -13,6 +13,10 @@ import (
 const (
 	flowMaterializationFailureFunction = "test_fail_event_delivery_after_flow_materialization"
 	flowMaterializationFailureTrigger  = "test_event_delivery_after_flow_materialization"
+	replayScopeFailureFunction         = "test_fail_replay_scope_after_delivery"
+	replayScopeFailureTrigger          = "test_replay_scope_after_delivery"
+	apiCompletionFailureFunction       = "test_fail_api_completion_after_publication"
+	apiCompletionFailureTrigger        = "test_api_completion_after_publication"
 )
 
 type EventCorruptionClaim struct {
@@ -205,6 +209,130 @@ func InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(
 	t.Cleanup(func() {
 		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+flowMaterializationFailureTrigger)
 	})
+}
+
+func InstallPostgresReplayScopeFailureAfterDelivery(t testing.TB, ctx context.Context, db *sql.DB, claim EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	quotedTemplate := requireEventFailureClaim(t, claim, flowTemplate)
+	functionSQL := fmt.Sprintf(`
+		CREATE FUNCTION %s() RETURNS trigger AS $$
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM events WHERE event_id = NEW.event_id) THEN
+				RAISE EXCEPTION 'replay-scope failure injection reached before event persistence';
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = NEW.event_id) THEN
+				RAISE EXCEPTION 'replay-scope failure injection reached before delivery persistence';
+			END IF;
+			IF NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
+			   NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
+			   NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) THEN
+				RAISE EXCEPTION 'replay-scope failure injection reached before lifecycle persistence';
+			END IF;
+			RAISE EXCEPTION 'injected committed replay-scope persistence failure';
+		END;
+		$$ LANGUAGE plpgsql
+	`, replayScopeFailureFunction, quotedTemplate, quotedTemplate, quotedTemplate)
+	if _, err := db.ExecContext(ctx, functionSQL); err != nil {
+		t.Fatalf("install replay-scope failure function for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON committed_replay_scopes FOR EACH ROW EXECUTE FUNCTION %s()`, replayScopeFailureTrigger, replayScopeFailureFunction)); err != nil {
+		t.Fatalf("install replay-scope failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+replayScopeFailureTrigger+" ON committed_replay_scopes")
+		_, _ = db.ExecContext(context.Background(), "DROP FUNCTION IF EXISTS "+replayScopeFailureFunction+"()")
+	})
+}
+
+func InstallSQLiteReplayScopeFailureAfterDelivery(t testing.TB, ctx context.Context, db *sql.DB, claim EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	quotedTemplate := requireEventFailureClaim(t, claim, flowTemplate)
+	triggerSQL := fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE INSERT ON committed_replay_scopes BEGIN
+			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id = NEW.event_id)
+				THEN RAISE(ABORT, 'replay-scope failure injection reached before event persistence') END;
+			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = NEW.event_id)
+				THEN RAISE(ABORT, 'replay-scope failure injection reached before delivery persistence') END;
+			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
+				NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
+				NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s'))
+				THEN RAISE(ABORT, 'replay-scope failure injection reached before lifecycle persistence') END;
+			SELECT RAISE(ABORT, 'injected committed replay-scope persistence failure');
+		END
+	`, replayScopeFailureTrigger, quotedTemplate, quotedTemplate, quotedTemplate)
+	if _, err := db.ExecContext(ctx, triggerSQL); err != nil {
+		t.Fatalf("install SQLite replay-scope failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+replayScopeFailureTrigger)
+	})
+}
+
+func InstallPostgresAPICompletionFailureAfterPublication(t testing.TB, ctx context.Context, db *sql.DB, claim EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	quotedTemplate := requireEventFailureClaim(t, claim, flowTemplate)
+	functionSQL := fmt.Sprintf(`
+		CREATE FUNCTION %s() RETURNS trigger AS $$
+		DECLARE publication_event UUID;
+		BEGIN
+			publication_event := NEW.resource_id::uuid;
+			IF NOT EXISTS (SELECT 1 FROM events WHERE event_id = publication_event) OR
+			   NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = publication_event) OR
+			   NOT EXISTS (SELECT 1 FROM committed_replay_scopes WHERE event_id = publication_event) OR
+			   NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
+			   NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
+			   NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) THEN
+				RAISE EXCEPTION 'API completion failure injection reached before complete publication persistence';
+			END IF;
+			RAISE EXCEPTION 'injected API idempotency completion persistence failure';
+		END;
+		$$ LANGUAGE plpgsql
+	`, apiCompletionFailureFunction, quotedTemplate, quotedTemplate, quotedTemplate)
+	if _, err := db.ExecContext(ctx, functionSQL); err != nil {
+		t.Fatalf("install API completion failure function for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON api_idempotency FOR EACH ROW WHEN (NEW.method = 'event.publish') EXECUTE FUNCTION %s()`, apiCompletionFailureTrigger, apiCompletionFailureFunction)); err != nil {
+		t.Fatalf("install API completion failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+apiCompletionFailureTrigger+" ON api_idempotency")
+		_, _ = db.ExecContext(context.Background(), "DROP FUNCTION IF EXISTS "+apiCompletionFailureFunction+"()")
+	})
+}
+
+func InstallSQLiteAPICompletionFailureAfterPublication(t testing.TB, ctx context.Context, db *sql.DB, claim EventCorruptionClaim, flowTemplate string) {
+	t.Helper()
+	quotedTemplate := requireEventFailureClaim(t, claim, flowTemplate)
+	triggerSQL := fmt.Sprintf(`
+		CREATE TRIGGER %s BEFORE INSERT ON api_idempotency WHEN NEW.method = 'event.publish' BEGIN
+			SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id = NEW.resource_id) OR
+				NOT EXISTS (SELECT 1 FROM event_deliveries WHERE event_id = NEW.resource_id) OR
+				NOT EXISTS (SELECT 1 FROM committed_replay_scopes WHERE event_id = NEW.resource_id) OR
+				NOT EXISTS (SELECT 1 FROM flow_instances WHERE flow_template = '%s') OR
+				NOT EXISTS (SELECT 1 FROM entity_state WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')) OR
+				NOT EXISTS (SELECT 1 FROM routing_rules WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s'))
+				THEN RAISE(ABORT, 'API completion failure injection reached before complete publication persistence') END;
+			SELECT RAISE(ABORT, 'injected API idempotency completion persistence failure');
+		END
+	`, apiCompletionFailureTrigger, quotedTemplate, quotedTemplate, quotedTemplate)
+	if _, err := db.ExecContext(ctx, triggerSQL); err != nil {
+		t.Fatalf("install SQLite API completion failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+apiCompletionFailureTrigger)
+	})
+}
+
+func requireEventFailureClaim(t testing.TB, claim EventCorruptionClaim, flowTemplate string) string {
+	t.Helper()
+	if strings.TrimSpace(claim.Invariant) == "" || strings.TrimSpace(claim.Reason) == "" {
+		t.Fatal("event failure injection requires an invariant and reason")
+	}
+	flowTemplate = strings.TrimSpace(flowTemplate)
+	if flowTemplate == "" {
+		t.Fatal("event failure injection requires a flow template")
+	}
+	return strings.ReplaceAll(flowTemplate, "'", "''")
 }
 
 func eventCorruptionStatement(t testing.TB, dialect authoractivityfixture.Dialect, claim EventCorruptionClaim, sqliteStatement, postgresStatement string) string {

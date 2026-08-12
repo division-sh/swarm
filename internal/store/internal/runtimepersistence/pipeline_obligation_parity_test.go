@@ -664,6 +664,7 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 		"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": true,
 		"internal/runtime/destructivereset/cleanup_catalog.go":                                                true,
 		"internal/store/internal/backend/runforkrevision/revision.go":                                         true,
+		"internal/store/testsql/event.go":                                                                     true,
 	}
 	var failures []string
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {

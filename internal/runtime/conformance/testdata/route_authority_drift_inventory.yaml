@@ -362,8 +362,11 @@ seam_families:
       authority, event_deliveries as durable authority, runtime callback
       context normalization, public readback as projection, and replay/redelivery
       boundaries. #2207 adds authored-root-versus-effective-schema precedence
-      for public template-input admission through ConnectRoutePlan. openrpc.json
-      is the generated public projection of that authority, not a second owner.
+      plus a typed ordinary/template/invalid endpoint decision for public
+      template-input admission through ConnectRoutePlan. Once template ownership
+      is selected, a missing or ambiguous exact input is invalid and cannot fall
+      through to ordinary publication. openrpc.json is the generated public
+      projection of that authority, not a second owner.
   - id: event_context_inputs
     layer: event_context
     classification: canonical_owner
