@@ -15,9 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -2154,7 +2156,7 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSo
 }
 
 func TestRuntimeProjectSupervisorPublishesSchemaOnlyProviderTriggerImport(t *testing.T) {
-	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	projectRoot := writeGeneratedTelegramScenarioFixture(t, "http://127.0.0.1:1")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(projectRoot, "package.yaml"), `
 name: schema-only-provider-trigger-replacement
 version: "1.0.0"
@@ -2169,15 +2171,26 @@ flows:
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
 	}
+	stores, err := buildStores(context.Background(), storebackend.Selection{
+		Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "replacement.sqlite"),
+	}, &config.Config{})
+	if err != nil {
+		t.Fatalf("build SQLite stores: %v", err)
+	}
+	t.Cleanup(func() { _ = stores.facade().closeWithError() })
+	cfg := &config.Config{}
+	cfg.Runtime.ExecutionPosture = executionposture.Live
 	candidateCatalog := testProviderTriggerCatalog(t)
-	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		effectiveSource, err := runtimepkg.SourceWithProviderTriggerEvents(deps.Options.WorkflowModule.SemanticSource(), deps.Options.ProviderTriggerCatalog)
-		if err != nil {
-			return nil, err
-		}
-		deps.Options.WorkflowModule = stubWorkflowModule{source: effectiveSource}
-		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(ctx context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		deps.Options.LLMRuntime = runtimellm.NoopRuntime{}
+		deps.Options.DisablePersistentStartupRecovery = true
+		return runtimepkg.NewRuntime(ctx, deps)
 	})
+	supervisor.stores = stores
+	supervisor.cfg = cfg
+	supervisor.runtimeInstanceID = "11111111-1111-4111-8111-111111111111"
+	supervisor.processWorkOwner = newSupervisorTestProcessOwner(t)
+	supervisor.initStateStores = initializeStateStores
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != projectRoot {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
@@ -2185,12 +2198,15 @@ flows:
 		return module, bundle, nil
 	}
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
-	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
-	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 
 	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
 		t.Fatalf("OpenProject: %v", err)
 	}
+	defer func() {
+		if _, closeErr := supervisor.CloseProject(context.Background()); closeErr != nil {
+			t.Errorf("CloseProject: %v", closeErr)
+		}
+	}()
 	source := supervisor.CurrentSource()
 	generation := requireProviderTriggerEventSource(t, source, "inbound.telegram.text_message")
 	if !generation.Equal(candidateCatalog.Generation()) {
@@ -2202,6 +2218,84 @@ flows:
 	provenance := source.SemanticCapabilities().ProviderTriggerEventProvenance()
 	if len(provenance) != 1 || provenance[0].PackID != "provider.telegram" || !provenance[0].Generation.Equal(candidateCatalog.Generation()) {
 		t.Fatalf("schema-only replacement provenance = %#v", provenance)
+	}
+
+	supervisor.mu.RLock()
+	replacementFact := supervisor.currentBundleSourceFact
+	replacementIdentity := supervisor.currentBundleIdentity
+	supervisor.mu.RUnlock()
+	replacementRuntime := supervisor.CurrentRuntime()
+	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailabilityStore, runtimepkg.BundleContext{
+		BundleSourceFact: replacementFact,
+		BundleIdentity:   replacementIdentity,
+		Source:           source,
+		ContractsRoot:    projectRoot,
+		PlatformSpecPath: cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		Runtime:          replacementRuntime,
+		WorkOwner:        replacementRuntime.WorkOccurrence(),
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	supervisor.SetRuntimeContextManager(manager, replacementFact, replacementIdentity)
+
+	publication := apiv1.EventPublicationOptions{
+		ExecutionPosture: replacementRuntime.ExecutionPosture,
+		Idempotency:      stores.IdempotencyStore,
+		Events:           replacementRuntime.Bus,
+		Acknowledged:     replacementRuntime.Bus,
+		RecipientPlans:   replacementRuntime.Bus,
+		BundleSource:     replacementRuntime.Bus,
+		Runs:             stores.RunReadStore,
+		Entities:         stores.EntityReadStore,
+		Observability:    stores.ObservabilityStore,
+		RunBundleContext: stores.RunBundleContextStore,
+		RuntimeContexts:  manager,
+		Source:           source,
+		Bundle:           replacementIdentity,
+	}
+	handler, err := apiv1.NewHandler(apiv1.Options{
+		PlatformSpecPath: cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken},
+		ProcessWorkOwner: supervisor.processWorkOwner,
+		Handlers:         apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
+	})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	published := requireServedEventPublishRPCResult(t, server.URL+"/v1/rpc", map[string]any{
+		"bundle_hash": replacementFact.BundleHash(),
+		"event_name":  "inbound.telegram.text_message",
+		"payload": map[string]any{
+			"conversation_reference": "chat-42", "external_account_reference": "account-42",
+			"provider_message_reference": 1, "text": "replacement proof",
+		},
+		"idempotency_key": "schema-only-replacement-publication",
+	})
+	if !published.NewRunCreated || published.EventID == "" || published.RunID == "" {
+		t.Fatalf("replacement event.publish result = %#v, want a durable new run and event", published)
+	}
+	var persisted operatorread.OperatorEventFull
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		persisted, err = stores.ObservabilityStore.LoadOperatorEvent(context.Background(), published.EventID)
+		if err == nil && len(persisted.Deliveries) == 1 && persisted.Deliveries[0].Status == "delivered" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("replacement event %s did not reach one durable delivered route: event=%#v err=%v", published.EventID, persisted, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(persisted.Deliveries) != 1 {
+		t.Fatalf("replacement event deliveries = %#v, want one exact template delivery", persisted.Deliveries)
+	}
+	delivery := persisted.Deliveries[0]
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != "telegram-input-observer" ||
+		delivery.Target.FlowID != "telegram-chat" || !strings.HasPrefix(delivery.Target.FlowInstance, "telegram-chat/") || delivery.Target.EntityID == "" {
+		t.Fatalf("replacement event delivery = %#v, want exact telegram-chat template target", delivery)
 	}
 }
 

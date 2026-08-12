@@ -163,6 +163,50 @@ func InstallPostgresEventDeliveryFailureAfterFlowMaterialization(
 	})
 }
 
+// InstallSQLiteEventDeliveryFailureAfterFlowMaterialization is the SQLite
+// counterpart to InstallPostgresEventDeliveryFailureAfterFlowMaterialization.
+func InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	claim EventCorruptionClaim,
+	flowTemplate string,
+) {
+	t.Helper()
+	if strings.TrimSpace(claim.Invariant) == "" || strings.TrimSpace(claim.Reason) == "" {
+		t.Fatal("event delivery failure injection requires an invariant and reason")
+	}
+	flowTemplate = strings.TrimSpace(flowTemplate)
+	if flowTemplate == "" {
+		t.Fatal("event delivery failure injection requires a flow template")
+	}
+	quotedTemplate := strings.ReplaceAll(flowTemplate, "'", "''")
+	triggerSQL := fmt.Sprintf(`
+		CREATE TRIGGER %s
+		BEFORE INSERT ON event_deliveries
+		BEGIN
+			SELECT CASE WHEN NOT EXISTS (
+				SELECT 1 FROM flow_instances WHERE flow_template = '%s'
+			) THEN RAISE(ABORT, 'event delivery failure injection reached before flow instance materialization') END;
+			SELECT CASE WHEN NOT EXISTS (
+				SELECT 1 FROM entity_state
+				WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')
+			) THEN RAISE(ABORT, 'event delivery failure injection reached before entity materialization') END;
+			SELECT CASE WHEN NOT EXISTS (
+				SELECT 1 FROM routing_rules
+				WHERE flow_instance IN (SELECT instance_id FROM flow_instances WHERE flow_template = '%s')
+			) THEN RAISE(ABORT, 'event delivery failure injection reached before route materialization') END;
+			SELECT RAISE(ABORT, 'injected delivery route persistence failure');
+		END
+	`, flowMaterializationFailureTrigger, quotedTemplate, quotedTemplate, quotedTemplate)
+	if _, err := db.ExecContext(ctx, triggerSQL); err != nil {
+		t.Fatalf("install SQLite event delivery failure trigger for %s (%s): %v", claim.Invariant, claim.Reason, err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DROP TRIGGER IF EXISTS "+flowMaterializationFailureTrigger)
+	})
+}
+
 func eventCorruptionStatement(t testing.TB, dialect authoractivityfixture.Dialect, claim EventCorruptionClaim, sqliteStatement, postgresStatement string) string {
 	t.Helper()
 	if strings.TrimSpace(claim.Invariant) == "" || strings.TrimSpace(claim.Reason) == "" {

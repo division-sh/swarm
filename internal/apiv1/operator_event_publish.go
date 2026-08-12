@@ -622,6 +622,9 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 	scoped := strings.Contains(requestedEventName, "/")
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	if !scoped {
+		if _, authored := source.AuthoredEventEntries()[requestedEventName]; authored {
+			return semanticview.AuthoredEventEndpoint{}, false, nil
+		}
 		for _, endpoint := range census.InputPins() {
 			if strings.TrimSpace(endpoint.FlowID) == "" && runtimeeventidentity.Normalize(endpoint.Event.Canonical) == resolvedEventName {
 				return semanticview.AuthoredEventEndpoint{}, false, nil

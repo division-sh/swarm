@@ -11806,6 +11806,40 @@ flow_model:
           - singular target, target_set fanout, and reply metadata are covered
           - arbitrary business-field descriptor targets remain hard-invalid under #2087
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
+        implementation_slice_2207:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/apiv1.resolveEventPublicationTemplateInputEndpoint plus internal/runtime/bus.publicInputAdmission over internal/runtime/core/pinrouting.ConnectRoutePlan
+          rule: |
+            Create-new `/v1/rpc event.publish` may admit one exact authored template-flow input pin as a public input.
+            Endpoint resolution is census-backed and preserves authored root event-catalog authority: an unscoped event
+            authored by the root remains ordinary root publication even when a template input resolves to the same canonical
+            identity. Effective schemas imported from verified provider-trigger packs are visibility facts, not authored root
+            ownership, and therefore may validate and resolve an exact template input without granting provider admission.
+
+            The selected endpoint compiles to one `ConnectRoutePlan` and executes under a typed EventBus public-input
+            authority that is distinct from provider-output authorization. The canonical plan owns template create, select,
+            or select-or-create lifecycle resolution and the selected delivery routes. Ambiguous or missing endpoints,
+            design-locked or invalid resolution, target failure, noncanonical route ownership, and zero durable deliveries
+            fail closed before acknowledgment. Run, flow-instance, entity, route, event, delivery, replay-scope, and API
+            idempotency completion mutation is one selected-store transaction; any lifecycle, materialization, delivery, or
+            commit failure leaves no partial public-input publication facts.
+          consumes:
+          - authored root event catalog and authored endpoint census
+          - effective provider-trigger schema imports without provider-output authority
+          - exact template input pins and their typed instance-resolution declarations
+          - canonical ConnectRoutePlan and selected-store publication transaction
+          produces:
+          - one exact concrete template target for an admitted public input
+          - durable event and delivery rows committed with the selected template lifecycle facts
+          proof_obligations:
+          - authored root without a root input pin retains precedence over a colliding template input
+          - imported normalized provider schema plus an exact template input remains eligible for typed public admission
+          - create, select, and select-or-create modes consume the same canonical lifecycle owner
+          - the complete public rejection matrix fails before acknowledgment
+          - SQLite and PostgreSQL late-failure proofs leave zero run, instance, entity, route, event, delivery, or idempotency residue
+          does_not_close:
+          - provider ingress activation, signing, and provider-output authority
+          - automatic scenario derivation tracked by the S6 workstream
         implementation_slice_1474:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.RoutePlan via CheckPublishRecipientPlan and Publish, consumed by internal/runtime/tools.Executor.handleEmitTool
@@ -30167,7 +30201,14 @@ api_specification:
       description: "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into\
         \ the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger,\
         \ and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing\
-        \ or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. Existing-run publication must preflight\
+        \ or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. For create-new publication, an exact authored\
+        \ template-flow input pin may be admitted through typed public-input authority. Authored root event-catalog ownership\
+        \ takes precedence even when the root has no input pin; effective provider-trigger schema imports are visibility facts,\
+        \ not authored-root or provider-output authority. The exact template endpoint must lower through the canonical ConnectRoutePlan\
+        \ and template create/select/select-or-create lifecycle owner. Ambiguous or missing endpoints, invalid or design-locked\
+        \ resolution, target failure, noncanonical route ownership, and zero durable deliveries fail closed. Run, template instance,\
+        \ entity, route, event, delivery, replay-scope, and API idempotency completion writes commit in one selected-store transaction\
+        \ or leave no residue. Existing-run publication must preflight\
         \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
         \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
         \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\

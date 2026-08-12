@@ -3791,6 +3791,119 @@ func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
 	}
 }
 
+func TestPublicInputAdmissionFailsClosedNegativeMatrix(t *testing.T) {
+	validSource := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
+	validAssociation := semanticview.BuildAuthoredEventEndpointCensus(validSource).ResolveDeclaredInputEndpoint("consumer", "deploy_completed")
+	validEndpoint, ok := validAssociation.Endpoint()
+	if !ok {
+		t.Fatalf("resolve valid public input endpoint: %v", validAssociation.Err())
+	}
+
+	tests := []struct {
+		name string
+		run  func(*testing.T) error
+		want string
+	}{
+		{
+			name: "missing exact endpoint",
+			run: func(*testing.T) error {
+				_, err := newPublicInputAdmission(validSource, semanticview.AuthoredEventEndpoint{})
+				return err
+			},
+			want: "receiver_input_pin_missing",
+		},
+		{
+			name: "ambiguous exact endpoint",
+			run: func(t *testing.T) error {
+				ambiguousSource := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
+				bundle, ok := semanticview.Bundle(ambiguousSource)
+				if !ok {
+					t.Fatal("ambiguous public input source has no bundle")
+				}
+				pins := bundle.Semantics.FlowInputEventPins["consumer"]
+				if len(pins) != 1 {
+					t.Fatalf("consumer input pins = %#v, want one", pins)
+				}
+				duplicate := pins[0]
+				duplicate.Event = "deploy.alternate"
+				bundle.Semantics.FlowInputEventPins["consumer"] = append(pins, duplicate)
+				_, err := newPublicInputAdmission(ambiguousSource, validEndpoint)
+				return err
+			},
+			want: "ambiguous",
+		},
+		{
+			name: "unsupported non-template receiver",
+			run: func(t *testing.T) error {
+				staticSource := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+					id: "consumer", mode: "static",
+					inputs: []runtimecontracts.FlowInputEventPin{{Name: "deploy_completed", Event: "deploy.completed"}},
+				}}, nil))
+				association := semanticview.BuildAuthoredEventEndpointCensus(staticSource).ResolveDeclaredInputEndpoint("consumer", "deploy_completed")
+				endpoint, ok := association.Endpoint()
+				if !ok {
+					t.Fatalf("resolve static input endpoint: %v", association.Err())
+				}
+				_, err := newPublicInputAdmission(staticSource, endpoint)
+				return err
+			},
+			want: "receiver_flow_missing",
+		},
+		{
+			name: "runtime target failure",
+			run: func(t *testing.T) error {
+				source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
+				store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
+				eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstanceActivator: store.Activate})
+				if err != nil {
+					t.Fatalf("NewEventBusWithOptions: %v", err)
+				}
+				store.bus = eventBus
+				association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy_completed")
+				endpoint, ok := association.Endpoint()
+				if !ok {
+					t.Fatalf("resolve select input endpoint: %v", association.Err())
+				}
+				evt := eventtest.RunCreatingRootIngress(
+					uuid.NewString(), events.EventType(endpoint.Event.Canonical), "operator-api", "",
+					json.RawMessage(`{"vertical_id":"missing"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+				)
+				return eventBus.PublishPublicInputAcknowledged(testAuthorActivityContext(context.Background()), evt, endpoint)
+			},
+			want: "not routable",
+		},
+		{
+			name: "noncanonical route owner",
+			run: func(*testing.T) error {
+				admission := publicInputAdmission{endpointID: validEndpoint.ID, flowID: validEndpoint.FlowID, pinName: validEndpoint.PinName, eventType: events.EventType(validEndpoint.Event.Canonical)}
+				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), events.EventType(validEndpoint.Event.Canonical), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
+				plan.MarkLowerPrecedenceRouteProduction(routeIntentProducerAgentPolicy)
+				return requirePublicInputRoutePlan(withPublicInputAdmission(context.Background(), admission), plan)
+			},
+			want: "canonical connect route owner",
+		},
+		{
+			name: "zero durable deliveries",
+			run: func(*testing.T) error {
+				admission := publicInputAdmission{endpointID: validEndpoint.ID, flowID: validEndpoint.FlowID, pinName: validEndpoint.PinName, eventType: events.EventType(validEndpoint.Event.Canonical)}
+				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), events.EventType(validEndpoint.Event.Canonical), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
+				plan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
+				return requirePublicInputRoutePlan(withPublicInputAdmission(context.Background(), admission), plan)
+			},
+			want: "zero durable deliveries",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(t)
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), tc.want) {
+				t.Fatalf("public input rejection error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
