@@ -67,6 +67,7 @@ search_dimensions:
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/public_input_admission.go
       - internal/runtime/bus/route_plan.go
       - internal/apispec/platform_spec_composition_routing_test.go
     canonical_layer: route_plan_authority
@@ -416,6 +417,7 @@ seam_families:
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/public_input_admission.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation_test.go

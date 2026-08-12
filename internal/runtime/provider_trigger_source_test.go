@@ -47,6 +47,147 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 	}
 }
 
+func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutActivation(t *testing.T) {
+	source, catalog := schemaOnlyTelegramDeclarationSource(t)
+	wrapper, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	const eventName = "inbound.telegram.text_message"
+	entry, ok := wrapper.EventEntry(eventName)
+	if !ok || entry.Source != "provider_trigger_pack_normalized" {
+		t.Fatalf("normalized event entry = (%#v, %v)", entry, ok)
+	}
+	if _, authored := wrapper.AuthoredEventEntries()[eventName]; authored {
+		t.Fatal("schema-only pack event was misclassified as authored")
+	}
+	projectVisible := false
+	for _, scope := range wrapper.ProjectScopes() {
+		if _, exists := scope.Events[eventName]; exists {
+			projectVisible = true
+		}
+	}
+	if !projectVisible {
+		t.Fatal("schema-only pack event is not visible in its declaring project scope")
+	}
+	if authorizations := wrapper.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations(); len(authorizations) != 0 {
+		t.Fatalf("schema-only import granted provider-output authorization: %#v", authorizations)
+	}
+	if targets, err := ResolveStandingTargetDeclarations(wrapper, catalog); err != nil || len(targets) != 0 {
+		t.Fatalf("schema-only import standing targets = (%#v, %v), want none", targets, err)
+	}
+	if subjects, err := EffectiveStandingIngressCapabilitySubjects(wrapper, catalog); err != nil || len(subjects) != 0 {
+		t.Fatalf("schema-only import effective ingress subjects = (%#v, %v), want none", subjects, err)
+	}
+	graph := runtimepinrouting.CompileConnectGraph(wrapper)
+	if plans := graph.Plans(); len(plans) != 0 {
+		t.Fatalf("schema-only import created executable provider route plans: %#v", plans)
+	}
+	composed, ok := wrapper.(providerTriggerEventSource)
+	if !ok {
+		t.Fatalf("effective source = %T, want providerTriggerEventSource", wrapper)
+	}
+	owner := composed.owners[eventName]
+	if owner.provider != "telegram" || owner.event != eventName || owner.kind != providertriggers.OutputKindNormalized ||
+		owner.identity.ID != "provider.telegram" || owner.identity.Version == "" || owner.identity.ManifestHash == "" ||
+		owner.identity.Provenance == "" || !owner.generation.Equal(catalog.Generation()) {
+		t.Fatalf("schema provenance = %#v, generation=%s", owner, owner.generation.Diagnostic())
+	}
+	provenance := wrapper.SemanticCapabilities().ProviderTriggerEventProvenance()
+	if len(provenance) != 1 || provenance[0].Provider != "telegram" || provenance[0].Event != eventName ||
+		provenance[0].Kind != "normalized" || provenance[0].PackID != "provider.telegram" ||
+		provenance[0].PackVersion == "" || provenance[0].ManifestHash == "" || provenance[0].SourceProvenance == "" ||
+		!provenance[0].Generation.Equal(catalog.Generation()) || len(provenance[0].ProjectScopes) != 1 {
+		t.Fatalf("provider trigger provenance readback = %#v", provenance)
+	}
+}
+
+func TestSourceWithProviderTriggerEventsRejectsInvalidSchemaOnlyDeclarations(t *testing.T) {
+	tests := []struct {
+		name    string
+		imports []runtimecontracts.ProviderTriggerEventImport
+		catalog bool
+		want    string
+	}{
+		{
+			name: "duplicate",
+			imports: []runtimecontracts.ProviderTriggerEventImport{
+				{Provider: "telegram", Event: "inbound.telegram.text_message"},
+				{Provider: "telegram", Event: "inbound.telegram.text_message"},
+			},
+			catalog: true,
+			want:    `duplicates provider "telegram" event "inbound.telegram.text_message"`,
+		},
+		{
+			name:    "unknown provider",
+			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegramm", Event: "inbound.telegram.text_message"}},
+			catalog: true,
+			want:    `references unknown provider "telegramm"; available providers: telegram`,
+		},
+		{
+			name:    "unknown event",
+			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: "inbound.telegram.message"}},
+			catalog: true,
+			want:    `references unknown event "inbound.telegram.message" for provider "telegram"`,
+		},
+		{
+			name:    "raw event",
+			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: "inbound.telegram"}},
+			catalog: true,
+			want:    `event "inbound.telegram" is a raw provider event`,
+		},
+		{
+			name:    "catalog unavailable",
+			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: "inbound.telegram.text_message"}},
+			want:    "requires a verified provider-trigger catalog",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source, catalog := schemaOnlyTelegramDeclarationSource(t)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok || len(bundle.PackageTree) == 0 {
+				t.Fatal("fixture package tree missing")
+			}
+			bundle.PackageTree[0].Manifest.ProviderTriggerEvents.Imports = append([]runtimecontracts.ProviderTriggerEventImport(nil), test.imports...)
+			if !test.catalog {
+				catalog = nil
+			}
+			_, err := SourceWithProviderTriggerEvents(source, catalog)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("SourceWithProviderTriggerEvents error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestSourceWithProviderTriggerEventsDeduplicatesMatchingImportAndIngress(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || len(bundle.PackageTree) == 0 {
+		t.Fatal("fixture package tree missing")
+	}
+	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{
+		{Provider: "telegram", Event: "inbound.telegram.text_message"},
+	}}
+	wrapper, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	composed := wrapper.(providerTriggerEventSource)
+	if _, ok := composed.imported["inbound.telegram.text_message"]; !ok {
+		t.Fatal("matching explicit and ingress declarations lost normalized schema")
+	}
+	authorizations := wrapper.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations()
+	seen := map[string]int{}
+	for _, authorization := range authorizations {
+		seen[authorization.Event()]++
+	}
+	if len(authorizations) != 2 || seen["inbound.telegram.text_message"] != 1 || seen["inbound.telegram.callback_action"] != 1 {
+		t.Fatalf("ingress authorization = %#v, want one authorization per normalized pack event", authorizations)
+	}
+}
+
 func TestImportedProviderEventReadbacksAreMutationIsolated(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
@@ -115,6 +256,24 @@ func TestSourceWithProviderTriggerEventsRejectsLocalPackEventRedeclaration(t *te
 	_, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err == nil || !strings.Contains(err.Error(), "collision between events.yaml and trigger pack provider.telegram") || !strings.Contains(err.Error(), "describe pack") {
 		t.Fatalf("collision error = %v", err)
+	}
+}
+
+func TestProviderTriggerCatalogRejectsDifferentPackEventOwnership(t *testing.T) {
+	_, catalog := schemaOnlyTelegramDeclarationSource(t)
+	telegram, ok := catalog.EntryByProvider("telegram")
+	if !ok {
+		t.Fatal("Telegram catalog entry missing")
+	}
+	competing := telegram
+	competing.Identity.ID = "provider.telegram_alt"
+	competing.Identity.ManifestHash = "sha256:" + strings.Repeat("c", 64)
+	competing.Identity.Provenance = "test:provider.telegram_alt"
+	competing.Source = "test competing pack provider.telegram_alt"
+	_, err := providertriggers.NewCatalogSnapshot(telegram, competing)
+	if err == nil || !strings.Contains(err.Error(), `duplicate provider trigger manifest for "telegram"`) ||
+		!strings.Contains(err.Error(), "test competing pack provider.telegram_alt") {
+		t.Fatalf("cross-pack collision error = %v", err)
 	}
 }
 
@@ -231,6 +390,34 @@ func TestSourceWithProviderTriggerEventsRebuildsOnCatalogGenerationChange(t *tes
 	}
 }
 
+func TestSchemaOnlyProviderTriggerImportRebuildsOnCatalogGenerationChange(t *testing.T) {
+	source, catalog := schemaOnlyTelegramDeclarationSource(t)
+	first, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("first SourceWithProviderTriggerEvents: %v", err)
+	}
+	entry, ok := catalog.EntryByProvider("telegram")
+	if !ok {
+		t.Fatal("Telegram catalog entry missing")
+	}
+	entry.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
+	changed, err := providertriggers.NewCatalogSnapshot(entry)
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	second, err := SourceWithProviderTriggerEvents(first, changed)
+	if err != nil {
+		t.Fatalf("reload SourceWithProviderTriggerEvents: %v", err)
+	}
+	provenance := second.SemanticCapabilities().ProviderTriggerEventProvenance()
+	if len(provenance) != 1 || provenance[0].ManifestHash != entry.Identity.ManifestHash || !provenance[0].Generation.Equal(changed.Generation()) {
+		t.Fatalf("reloaded schema-only provenance = %#v", provenance)
+	}
+	if authorizations := second.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations(); len(authorizations) != 0 {
+		t.Fatalf("reloaded schema-only import granted provider authority: %#v", authorizations)
+	}
+}
+
 func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
 	imported, err := SourceWithProviderTriggerEvents(source, catalog)
@@ -255,4 +442,32 @@ func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *te
 	if len(authorized) == 0 {
 		t.Fatal("target-free provider authority hidden through overlay")
 	}
+}
+
+func schemaOnlyTelegramDeclarationSource(t testing.TB) (semanticview.Source, *providertriggers.CatalogSnapshot) {
+	t.Helper()
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || len(bundle.PackageTree) == 0 {
+		t.Fatal("fixture package tree missing")
+	}
+	for packageIndex := range bundle.PackageTree {
+		pkg := &bundle.PackageTree[packageIndex]
+		for flowIndex := range pkg.Manifest.Flows {
+			pkg.Manifest.Flows[flowIndex].Ingress = nil
+			pkg.Manifest.Flows[flowIndex].Activation = ""
+			pkg.Manifest.Flows[flowIndex].Mode = runtimecontracts.FlowModeTemplate
+		}
+	}
+	if flow, exists := bundle.FlowViewByID("coordinator"); exists {
+		flow.Schema.Mode = runtimecontracts.FlowModeTemplate
+	}
+	if schema, exists := bundle.FlowSchemas["coordinator"]; exists {
+		schema.Mode = runtimecontracts.FlowModeTemplate
+		bundle.FlowSchemas["coordinator"] = schema
+	}
+	bundle.PackageTree[0].Manifest.ProviderTriggerEvents = runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{
+		{Provider: "telegram", Event: "inbound.telegram.text_message"},
+	}}
+	return source, catalog
 }

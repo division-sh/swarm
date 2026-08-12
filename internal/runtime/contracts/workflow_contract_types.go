@@ -1143,24 +1143,25 @@ type FlowContractPaths struct {
 	PolicyFile   string
 }
 type ProjectPackageDocument struct {
-	Name            string               `yaml:"name"`
-	Version         string               `yaml:"version"`
-	PlatformVersion string               `yaml:"platform_version"`
-	Author          string               `yaml:"author"`
-	Description     string               `yaml:"description"`
-	Keywords        []string             `yaml:"keywords"`
-	License         string               `yaml:"license"`
-	Repository      string               `yaml:"repository"`
-	Extra           map[string]string    `yaml:"extra"`
-	Requires        FlowPackageRequires  `yaml:"requires"`
-	Flows           []ProjectFlowRef     `yaml:"flows"`
-	Packages        []ProjectPackageRef  `yaml:"packages"`
-	Children        []ProjectPackageRef  `yaml:"children"`
-	Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
-	Connect         []FlowPackageConnect `yaml:"connect"`
-	ConnectorPacks  ConnectorPackImports `yaml:"connector_packs"`
-	Handoffs        []ProjectHandoff     `yaml:"handoffs"`
-	EntitySchema    EntitySchema         `yaml:"entity_schema"`
+	Name                  string                      `yaml:"name"`
+	Version               string                      `yaml:"version"`
+	PlatformVersion       string                      `yaml:"platform_version"`
+	Author                string                      `yaml:"author"`
+	Description           string                      `yaml:"description"`
+	Keywords              []string                    `yaml:"keywords"`
+	License               string                      `yaml:"license"`
+	Repository            string                      `yaml:"repository"`
+	Extra                 map[string]string           `yaml:"extra"`
+	Requires              FlowPackageRequires         `yaml:"requires"`
+	Flows                 []ProjectFlowRef            `yaml:"flows"`
+	Packages              []ProjectPackageRef         `yaml:"packages"`
+	Children              []ProjectPackageRef         `yaml:"children"`
+	Subpackages           []ProjectPackageRef         `yaml:"subpackages"`
+	Connect               []FlowPackageConnect        `yaml:"connect"`
+	ConnectorPacks        ConnectorPackImports        `yaml:"connector_packs"`
+	ProviderTriggerEvents ProviderTriggerEventImports `yaml:"provider_trigger_events"`
+	Handoffs              []ProjectHandoff            `yaml:"handoffs"`
+	EntitySchema          EntitySchema                `yaml:"entity_schema"`
 }
 
 type ConnectorPackImports struct {
@@ -1170,6 +1171,15 @@ type ConnectorPackImports struct {
 type ConnectorPackImport struct {
 	Provider string `yaml:"provider"`
 	Tool     string `yaml:"tool"`
+}
+
+type ProviderTriggerEventImports struct {
+	Imports []ProviderTriggerEventImport `yaml:"imports"`
+}
+
+type ProviderTriggerEventImport struct {
+	Provider string `yaml:"provider"`
+	Event    string `yaml:"event"`
 }
 
 type TypeCatalogDocument struct {

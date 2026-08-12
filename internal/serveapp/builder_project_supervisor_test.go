@@ -2153,6 +2153,58 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSo
 	}
 }
 
+func TestRuntimeProjectSupervisorPublishesSchemaOnlyProviderTriggerImport(t *testing.T) {
+	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(projectRoot, "package.yaml"), `
+name: schema-only-provider-trigger-replacement
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+provider_trigger_events:
+  imports:
+    - {provider: telegram, event: inbound.telegram.text_message}
+flows:
+  - {id: telegram-chat, flow: telegram-chat, mode: template}
+`)
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	if err != nil {
+		t.Fatalf("NewSwarmWorkflowModule: %v", err)
+	}
+	candidateCatalog := testProviderTriggerCatalog(t)
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		effectiveSource, err := runtimepkg.SourceWithProviderTriggerEvents(deps.Options.WorkflowModule.SemanticSource(), deps.Options.ProviderTriggerCatalog)
+		if err != nil {
+			return nil, err
+		}
+		deps.Options.WorkflowModule = stubWorkflowModule{source: effectiveSource}
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
+	})
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+		if contractsRoot != projectRoot {
+			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
+		}
+		return module, bundle, nil
+	}
+	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+
+	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	source := supervisor.CurrentSource()
+	generation := requireProviderTriggerEventSource(t, source, "inbound.telegram.text_message")
+	if !generation.Equal(candidateCatalog.Generation()) {
+		t.Fatalf("schema-only replacement generation = %s, want %s", generation.Diagnostic(), candidateCatalog.Generation().Diagnostic())
+	}
+	if authorizations := source.SemanticCapabilities().ProviderTriggerTargetFreeAuthorizations(); len(authorizations) != 0 {
+		t.Fatalf("schema-only replacement granted provider authorization: %#v", authorizations)
+	}
+	provenance := source.SemanticCapabilities().ProviderTriggerEventProvenance()
+	if len(provenance) != 1 || provenance[0].PackID != "provider.telegram" || !provenance[0].Generation.Equal(candidateCatalog.Generation()) {
+		t.Fatalf("schema-only replacement provenance = %#v", provenance)
+	}
+}
+
 func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailures(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
 	cases := []struct {

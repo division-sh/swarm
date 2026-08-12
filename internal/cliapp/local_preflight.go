@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -262,6 +263,11 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 			}
 		}
 		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, message, remediation)
+		return nil, "", false
+	}
+	source, err = runtime.SourceWithProviderTriggerEvents(source, req.ProviderTriggerCatalog)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_event_import_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider_trigger_events imports or the configured provider-trigger packs")
 		return nil, "", false
 	}
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)

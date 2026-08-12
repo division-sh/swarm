@@ -20,23 +20,24 @@ var builtinWave1ScalarTypes = map[string]struct{}{
 }
 
 var projectPackageDocumentFields = map[string]struct{}{
-	"name":             {},
-	"version":          {},
-	"platform_version": {},
-	"author":           {},
-	"description":      {},
-	"keywords":         {},
-	"license":          {},
-	"repository":       {},
-	"extra":            {},
-	"requires":         {},
-	"flows":            {},
-	"packages":         {},
-	"children":         {},
-	"subpackages":      {},
-	"connect":          {},
-	"connector_packs":  {},
-	"handoffs":         {},
+	"name":                    {},
+	"version":                 {},
+	"platform_version":        {},
+	"author":                  {},
+	"description":             {},
+	"keywords":                {},
+	"license":                 {},
+	"repository":              {},
+	"extra":                   {},
+	"requires":                {},
+	"flows":                   {},
+	"packages":                {},
+	"children":                {},
+	"subpackages":             {},
+	"connect":                 {},
+	"connector_packs":         {},
+	"provider_trigger_events": {},
+	"handoffs":                {},
 }
 
 var projectFlowRefFields = map[string]struct{}{
@@ -91,19 +92,20 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		Name            string               `yaml:"name"`
-		Version         string               `yaml:"version"`
-		PlatformVersion string               `yaml:"platform_version"`
-		Author          string               `yaml:"author"`
-		Description     string               `yaml:"description"`
-		Requires        FlowPackageRequires  `yaml:"requires"`
-		Flows           []ProjectFlowRef     `yaml:"flows"`
-		Packages        []ProjectPackageRef  `yaml:"packages"`
-		Children        []ProjectPackageRef  `yaml:"children"`
-		Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
-		Connect         []FlowPackageConnect `yaml:"connect"`
-		ConnectorPacks  ConnectorPackImports `yaml:"connector_packs"`
-		Handoffs        []ProjectHandoff     `yaml:"handoffs"`
+		Name                  string                      `yaml:"name"`
+		Version               string                      `yaml:"version"`
+		PlatformVersion       string                      `yaml:"platform_version"`
+		Author                string                      `yaml:"author"`
+		Description           string                      `yaml:"description"`
+		Requires              FlowPackageRequires         `yaml:"requires"`
+		Flows                 []ProjectFlowRef            `yaml:"flows"`
+		Packages              []ProjectPackageRef         `yaml:"packages"`
+		Children              []ProjectPackageRef         `yaml:"children"`
+		Subpackages           []ProjectPackageRef         `yaml:"subpackages"`
+		Connect               []FlowPackageConnect        `yaml:"connect"`
+		ConnectorPacks        ConnectorPackImports        `yaml:"connector_packs"`
+		ProviderTriggerEvents ProviderTriggerEventImports `yaml:"provider_trigger_events"`
+		Handoffs              []ProjectHandoff            `yaml:"handoffs"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -125,23 +127,24 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = ProjectPackageDocument{
-		Name:            aux.Name,
-		Version:         aux.Version,
-		PlatformVersion: aux.PlatformVersion,
-		Author:          aux.Author,
-		Description:     aux.Description,
-		Keywords:        keywords,
-		License:         license,
-		Repository:      repository,
-		Extra:           extra,
-		Requires:        aux.Requires.normalized(),
-		Flows:           append([]ProjectFlowRef(nil), aux.Flows...),
-		Packages:        append([]ProjectPackageRef(nil), aux.Packages...),
-		Children:        append([]ProjectPackageRef(nil), aux.Children...),
-		Subpackages:     append([]ProjectPackageRef(nil), aux.Subpackages...),
-		Connect:         cloneFlowPackageConnects(aux.Connect),
-		ConnectorPacks:  aux.ConnectorPacks.normalized(),
-		Handoffs:        append([]ProjectHandoff(nil), aux.Handoffs...),
+		Name:                  aux.Name,
+		Version:               aux.Version,
+		PlatformVersion:       aux.PlatformVersion,
+		Author:                aux.Author,
+		Description:           aux.Description,
+		Keywords:              keywords,
+		License:               license,
+		Repository:            repository,
+		Extra:                 extra,
+		Requires:              aux.Requires.normalized(),
+		Flows:                 append([]ProjectFlowRef(nil), aux.Flows...),
+		Packages:              append([]ProjectPackageRef(nil), aux.Packages...),
+		Children:              append([]ProjectPackageRef(nil), aux.Children...),
+		Subpackages:           append([]ProjectPackageRef(nil), aux.Subpackages...),
+		Connect:               cloneFlowPackageConnects(aux.Connect),
+		ConnectorPacks:        aux.ConnectorPacks.normalized(),
+		ProviderTriggerEvents: aux.ProviderTriggerEvents.normalized(),
+		Handoffs:              append([]ProjectHandoff(nil), aux.Handoffs...),
 	}
 	return nil
 }
@@ -331,6 +334,15 @@ var connectorPackFieldOptions = map[string]struct{}{
 var connectorPackImportFieldOptions = map[string]struct{}{
 	"provider": {},
 	"tool":     {},
+}
+
+var providerTriggerEventFieldOptions = map[string]struct{}{
+	"imports": {},
+}
+
+var providerTriggerEventImportFieldOptions = map[string]struct{}{
+	"provider": {},
+	"event":    {},
 }
 
 var flowPackageRequiresPolicyFieldOptions = map[string]struct{}{
@@ -546,6 +558,91 @@ func (i ConnectorPackImport) normalized() ConnectorPackImport {
 	return ConnectorPackImport{
 		Provider: normalizeConnectorPackToken(i.Provider),
 		Tool:     strings.TrimSpace(i.Tool),
+	}
+}
+
+func (p *ProviderTriggerEventImports) UnmarshalYAML(node *yaml.Node) error {
+	if p == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*p = ProviderTriggerEventImports{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("provider_trigger_events must be a mapping")
+	}
+	var out ProviderTriggerEventImports
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "imports":
+			if err := value.Decode(&out.Imports); err != nil {
+				return fmt.Errorf("provider_trigger_events.imports: %w", err)
+			}
+		default:
+			return NewUndefinedFieldDiagnostic("provider_trigger_events", key, providerTriggerEventFieldOptions)
+		}
+	}
+	*p = out.normalized()
+	return nil
+}
+
+func (i *ProviderTriggerEventImport) UnmarshalYAML(node *yaml.Node) error {
+	if i == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		return fmt.Errorf("provider_trigger_events.imports entries must declare provider and event")
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("provider_trigger_events.imports entries must be mappings")
+	}
+	var out ProviderTriggerEventImport
+	for j := 0; j+1 < len(node.Content); j += 2 {
+		key := strings.TrimSpace(node.Content[j].Value)
+		value := node.Content[j+1]
+		switch key {
+		case "":
+			continue
+		case "provider":
+			if err := value.Decode(&out.Provider); err != nil {
+				return fmt.Errorf("provider: %w", err)
+			}
+		case "event":
+			if err := value.Decode(&out.Event); err != nil {
+				return fmt.Errorf("event: %w", err)
+			}
+		default:
+			return NewUndefinedFieldDiagnostic("provider_trigger_events.imports", key, providerTriggerEventImportFieldOptions)
+		}
+	}
+	out = out.normalized()
+	if out.Provider == "" {
+		return fmt.Errorf("provider_trigger_events.imports provider is required")
+	}
+	if out.Event == "" {
+		return fmt.Errorf("provider_trigger_events.imports event is required")
+	}
+	*i = out
+	return nil
+}
+
+func (p ProviderTriggerEventImports) normalized() ProviderTriggerEventImports {
+	out := ProviderTriggerEventImports{Imports: make([]ProviderTriggerEventImport, len(p.Imports))}
+	for index, item := range p.Imports {
+		out.Imports[index] = item.normalized()
+	}
+	return out
+}
+
+func (i ProviderTriggerEventImport) normalized() ProviderTriggerEventImport {
+	return ProviderTriggerEventImport{
+		Provider: normalizeConnectorPackToken(i.Provider),
+		Event:    strings.TrimSpace(i.Event),
 	}
 }
 

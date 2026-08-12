@@ -181,6 +181,27 @@ type providerTriggerCapabilities struct {
 	base       Source
 	generation triggergeneration.Generation
 	targetFree []runtimeprovideroutput.Authorization
+	provenance []ProviderTriggerEventProvenance
+}
+
+type ProviderTriggerEventProvenance struct {
+	Provider         string
+	Event            string
+	Kind             string
+	PackID           string
+	PackVersion      string
+	ManifestHash     string
+	SourceProvenance string
+	Generation       triggergeneration.Generation
+	ProjectScopes    []string
+}
+
+func (p ProviderTriggerEventProvenance) Valid() bool {
+	return strings.TrimSpace(p.Provider) != "" && strings.TrimSpace(p.Event) != "" &&
+		(strings.TrimSpace(p.Kind) == "raw" || strings.TrimSpace(p.Kind) == "normalized") &&
+		strings.TrimSpace(p.PackID) != "" && strings.TrimSpace(p.PackVersion) != "" &&
+		strings.TrimSpace(p.ManifestHash) != "" && strings.TrimSpace(p.SourceProvenance) != "" &&
+		p.Generation.Valid()
 }
 
 type connectorPackCapabilities struct {
@@ -230,6 +251,45 @@ func (c Capabilities) ProviderTriggerTargetFreeAuthorizations() []runtimeprovide
 	}
 	out := make([]runtimeprovideroutput.Authorization, len(c.providerTrigger.targetFree))
 	copy(out, c.providerTrigger.targetFree)
+	return out
+}
+
+func (c Capabilities) WithProviderTriggerEventProvenance(provenance []ProviderTriggerEventProvenance) Capabilities {
+	out := c
+	if out.providerTrigger == nil {
+		return out
+	}
+	providerTrigger := *out.providerTrigger
+	items := make([]ProviderTriggerEventProvenance, len(provenance))
+	for index, item := range provenance {
+		item.Provider = strings.TrimSpace(item.Provider)
+		item.Event = strings.TrimSpace(item.Event)
+		item.Kind = strings.TrimSpace(item.Kind)
+		item.PackID = strings.TrimSpace(item.PackID)
+		item.PackVersion = strings.TrimSpace(item.PackVersion)
+		item.ManifestHash = strings.TrimSpace(item.ManifestHash)
+		item.SourceProvenance = strings.TrimSpace(item.SourceProvenance)
+		item.ProjectScopes = append([]string(nil), item.ProjectScopes...)
+		if !item.Valid() || !item.Generation.Equal(providerTrigger.generation) {
+			out.providerTrigger = nil
+			return out
+		}
+		items[index] = item
+	}
+	providerTrigger.provenance = items
+	out.providerTrigger = &providerTrigger
+	return out
+}
+
+func (c Capabilities) ProviderTriggerEventProvenance() []ProviderTriggerEventProvenance {
+	if c.providerTrigger == nil {
+		return nil
+	}
+	out := make([]ProviderTriggerEventProvenance, len(c.providerTrigger.provenance))
+	for index, item := range c.providerTrigger.provenance {
+		item.ProjectScopes = append([]string(nil), item.ProjectScopes...)
+		out[index] = item
+	}
 	return out
 }
 
