@@ -215,8 +215,8 @@ func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
 	}
 	assertMockProjection(t, "spawn", artifact, map[string]models.AgentConfig{base.ID: base}, base.ID)
 
-	if _, err := am.ReconfigureAgentTarget(base.ID, "", models.AgentConfig{Tools: []string{"schedule"}}, nil); err != nil {
-		t.Fatalf("ReconfigureAgentTarget: %v", err)
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, base.ID, "", models.AgentConfig{Tools: []string{"schedule"}}); err != nil {
+		t.Fatalf("lifecycle reconfigure: %v", err)
 	}
 	reconfigured, err := am.ResolveAgentConfig(base.ID, "")
 	if err != nil {
@@ -284,12 +284,16 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	accepted, err := manager.ReconfigureAgentTarget("backend-patch-agent", "", models.AgentConfig{LLMBackend: llmselection.BackendAnthropic}, nil)
+	err := reconfigureAgentThroughLifecycleForTest(t, manager, "backend-patch-agent", "", models.AgentConfig{LLMBackend: llmselection.BackendAnthropic})
 	if err != nil {
-		t.Fatalf("ReconfigureAgentTarget(matching backend): %v", err)
+		t.Fatalf("lifecycle reconfigure (matching backend): %v", err)
 	}
-	if accepted.CurrentConfig.LLMBackend != llmselection.BackendAnthropic || accepted.CurrentConfig.ResolvedLLMBackend != llmselection.BackendAnthropic {
-		t.Fatalf("accepted authored/resolved backend = %q/%q", accepted.CurrentConfig.LLMBackend, accepted.CurrentConfig.ResolvedLLMBackend)
+	accepted, err := manager.ResolveAgentConfig("backend-patch-agent", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig(accepted): %v", err)
+	}
+	if accepted.LLMBackend != llmselection.BackendAnthropic || accepted.ResolvedLLMBackend != llmselection.BackendAnthropic {
+		t.Fatalf("accepted authored/resolved backend = %q/%q", accepted.LLMBackend, accepted.ResolvedLLMBackend)
 	}
 	persistedCount := len(store.records)
 	if persistedCount < 2 {
@@ -300,9 +304,9 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 		t.Fatalf("persisted authored/resolved backend = %q/%q", lastPersisted.LLMBackend, lastPersisted.ResolvedLLMBackend)
 	}
 
-	_, err = manager.ReconfigureAgentTarget("backend-patch-agent", "", models.AgentConfig{LLMBackend: llmselection.BackendOpenAIResponses}, nil)
+	err = reconfigureAgentThroughLifecycleForTest(t, manager, "backend-patch-agent", "", models.AgentConfig{LLMBackend: llmselection.BackendOpenAIResponses})
 	if err == nil || !strings.Contains(err.Error(), "conflicts with configured runtime backend") {
-		t.Fatalf("ReconfigureAgentTarget(conflicting backend) error = %v", err)
+		t.Fatalf("lifecycle reconfigure (conflicting backend) error = %v", err)
 	}
 	if len(store.records) != persistedCount {
 		t.Fatalf("conflicting patch persisted %d new record(s)", len(store.records)-persistedCount)
@@ -311,8 +315,8 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 	if resolveErr != nil {
 		t.Fatalf("ResolveAgentConfig: %v", resolveErr)
 	}
-	if !reflect.DeepEqual(current, accepted.CurrentConfig) {
-		t.Fatalf("current config changed after rejected patch\n got: %#v\nwant: %#v", current, accepted.CurrentConfig)
+	if !reflect.DeepEqual(current, accepted) {
+		t.Fatalf("current config changed after rejected patch\n got: %#v\nwant: %#v", current, accepted)
 	}
 }
 

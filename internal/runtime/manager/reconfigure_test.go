@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -41,99 +40,6 @@ func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions
 	return lease
 }
 
-func TestReconfigureAgent_ReturnsExactCommittedTransitionEvidence(t *testing.T) {
-	bus := newProjectionTestBus()
-	am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
-		return reconfigureTestAgent{id: cfg.ID}, nil
-	})
-	const flowPath = "review/inst-1"
-	oldParent := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "old-parent", FlowPath: flowPath})
-	newParent := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "new-parent", FlowPath: flowPath})
-	target := managerTestAgentConfig(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "worker",
-		FlowPath:      flowPath,
-		ParentAgent:   oldParent.ID,
-	})
-	for _, cfg := range []models.AgentConfig{oldParent, newParent, target} {
-		if err := am.SpawnAgent(cfg); err != nil {
-			t.Fatalf("SpawnAgent(%s): %v", cfg.ID, err)
-		}
-	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
-	am.Run(managedExecutionTestContext(t, runCtx))
-	oldRoute, ok := bus.current(target.ID)
-	if !ok {
-		t.Fatal("target route is absent before reconfigure")
-	}
-	expected, err := am.ResolveAgentConfig(target.ID, flowPath)
-	if err != nil {
-		t.Fatalf("resolve expected target: %v", err)
-	}
-
-	result, err := am.ReconfigureAgentTarget(target.ID, flowPath, models.AgentConfig{
-		ParentAgent: newParent.ID,
-	}, &expected)
-	if err != nil {
-		t.Fatalf("ReconfigureAgentTarget: %v", err)
-	}
-	if !result.Transitioned {
-		t.Fatal("reconfigure did not report a committed transition")
-	}
-	if result.PreviousConfig.ParentAgent != oldParent.ID {
-		t.Fatalf("previous parent = %q, want %q", result.PreviousConfig.ParentAgent, oldParent.ID)
-	}
-	if result.CurrentConfig.ParentAgent != newParent.ID {
-		t.Fatalf("current parent = %q, want %q", result.CurrentConfig.ParentAgent, newParent.ID)
-	}
-	visible, err := am.ResolveAgentConfig(target.ID, flowPath)
-	if err != nil {
-		t.Fatalf("ResolveAgentConfig after reconfigure: %v", err)
-	}
-	if visible.ParentAgent != newParent.ID {
-		t.Fatalf("visible parent after reconfigure = %q, want %q", visible.ParentAgent, newParent.ID)
-	}
-	newRoute, ok := bus.current(target.ID)
-	if !ok || newRoute.token == oldRoute.token {
-		t.Fatalf("visible route after reconfigure = %+v, want successor after %+v", newRoute.token, oldRoute.token)
-	}
-}
-
-func TestReconfigureAgent_ExpectedConfigDriftLeavesProjectionUnchanged(t *testing.T) {
-	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
-		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{})
-	cfg := managerTestAgentConfig(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "worker",
-		FlowPath:      "review/inst-1",
-		Tools:         []string{"tool-old"},
-	})
-	if err := am.SpawnAgent(cfg); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
-	stale := cfg
-	stale.Tools = []string{"tool-stale"}
-	_, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
-		Tools: []string{"tool-new"},
-	}, &stale)
-	if err == nil || !strings.Contains(err.Error(), "agent_config_changed") {
-		t.Fatalf("ReconfigureAgentTarget error = %v, want agent_config_changed", err)
-	}
-	visible, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
-	if err != nil {
-		t.Fatalf("ResolveAgentConfig after rejected handoff: %v", err)
-	}
-	if !reflect.DeepEqual(visible.Tools, cfg.Tools) {
-		t.Fatalf("visible tools after rejected handoff = %v, want %v", visible.Tools, cfg.Tools)
-	}
-	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
-		t.Fatalf("generation after rejected handoff = %d, want %d", got, beforeGeneration)
-	}
-}
-
 func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
@@ -149,19 +55,15 @@ func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) 
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
-	expected, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
-	if err != nil {
-		t.Fatalf("resolve expected target: %v", err)
-	}
 	persistenceErr := errors.New("injected reconfigure persistence failure")
 	probe.mu.Lock()
 	probe.failNext = persistenceErr
 	probe.mu.Unlock()
-	_, err = am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
+	err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{
 		Tools: []string{"tool-new"},
-	}, &expected)
+	})
 	if !errors.Is(err, persistenceErr) {
-		t.Fatalf("ReconfigureAgentTarget error = %v, want %v", err, persistenceErr)
+		t.Fatalf("lifecycle reconfigure error = %v, want %v", err, persistenceErr)
 	}
 	visible, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
 	if err != nil {
@@ -204,7 +106,7 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
 
-	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
 		t.Fatalf("ReconfigureAgent(same current): %v", err)
 	}
 
@@ -235,7 +137,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}, nil); err != nil {
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}); err != nil {
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
 	rec, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
@@ -258,7 +160,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil); err != nil {
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}); err != nil {
 		t.Fatalf("ReconfigureAgent(memory false): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok {
@@ -283,14 +185,14 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}, nil); err != nil {
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}); err != nil {
 		t.Fatalf("ReconfigureAgent(memory true): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok || len(registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))) != 0 {
 		t.Fatal("enabling memory revived or synthesized prior state")
 	}
 	lease := acquireReconfigureMemory(t, am, registry, models.AgentConfig{ExecutionMode: "live", ID: cfg.ID, FlowPath: cfg.FlowPath})
-	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}); err != nil {
 		t.Fatalf("ReconfigureAgent(omitted memory): %v", err)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)

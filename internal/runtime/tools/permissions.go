@@ -11,7 +11,6 @@ import (
 )
 
 var defaultPlatformPermissions = []string{
-	"agent_fire",
 	"approve_spend",
 	"configure_routing",
 	"create_flow_instance",
@@ -23,7 +22,6 @@ var defaultPlatformPermissions = []string{
 }
 
 var toolPermissionRequirements = map[string]string{
-	"agent_fire":         "agent_fire",
 	"configure_routing":  "configure_routing",
 	"human_task_request": "human_task_request",
 	"schedule":           "schedule",
@@ -53,7 +51,7 @@ func ResolveAgentPermissions(source semanticview.Source, flowID string, entry ru
 func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 	agents := scopedAgentEntries(source)
 	known := knownPermissionNames(source)
-	errs := make([]error, 0)
+	errs := ValidateRetiredDynamicAgentToolReferences(source)
 	for _, agent := range agents {
 		policy := agent.policy
 		if len(policy.Values) == 0 && source != nil {
@@ -70,6 +68,9 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 			Permissions: perms,
 		}
 		for _, perm := range perms {
+			if IsRetiredDynamicAgentToolName(perm) {
+				continue
+			}
 			if _, ok := known[perm]; ok {
 				continue
 			}
@@ -77,6 +78,9 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 		}
 		for _, toolName := range agent.entry.ConfiguredTools() {
 			toolName = strings.TrimSpace(toolName)
+			if IsRetiredDynamicAgentToolName(toolName) {
+				continue
+			}
 			requiredPerm, ok := toolPermissionRequirements[toolName]
 			if !ok {
 				continue

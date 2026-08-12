@@ -381,9 +381,6 @@ func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
 	name = normalizeNativeToolName(strings.TrimSpace(name))
-	if err := retiredDynamicAgentMutationError(name); err != nil {
-		return nil, err
-	}
 	actor, ok := ActorFromContext(ctx)
 	if !ok {
 		err := failures.New(failures.ClassInternalFailure, "tool_actor_context_missing", "tool-executor", "execute.context", map[string]any{"tool": strings.TrimSpace(name)})
@@ -417,22 +414,10 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 }
 
 func (e *Executor) validateRuntimeToolInput(actor models.AgentConfig, name string, input any) error {
-	if err := retiredDynamicAgentMutationError(name); err != nil {
-		return err
-	}
 	if e.validator == nil {
 		return nil
 	}
 	return e.validator.Validate(&actor, name, input)
-}
-
-func retiredDynamicAgentMutationError(name string) error {
-	switch name {
-	case "agent_hire", "agent_reconfigure":
-		return fmt.Errorf("RETIRED: %s is unsupported; managed agents and their intent must be declared in agents.yaml", name)
-	default:
-		return nil
-	}
 }
 
 func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
@@ -476,7 +461,6 @@ func payloadHasLegacyOnlyProps(payload map[string]any, schema map[string]any) bo
 func toolAllowsLegacySubsetFallback(name string) bool {
 	switch strings.TrimSpace(name) {
 	case "agent_message",
-		"agent_fire",
 		"mailbox_send":
 		return true
 	default:
@@ -740,22 +724,6 @@ func (e *Executor) ExecScheduleDirect(actor models.AgentConfig, input any) (any,
 	return e.execSchedule(context.Background(), actor, input)
 }
 
-func (e *Executor) ExecConfigureRoutingDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execConfigureRouting(context.Background(), actor, input)
-}
-
-func (e *Executor) ExecAgentHireDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentHire(context.Background(), actor, input)
-}
-
-func (e *Executor) ExecAgentFireDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentFire(context.Background(), actor, input)
-}
-
-func (e *Executor) ExecAgentReconfigureDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentReconfigure(context.Background(), actor, input)
-}
-
 func (e *Executor) ExecMailboxSendDirect(actor models.AgentConfig, input any) (any, error) {
 	return e.execMailboxSend(context.Background(), actor, input)
 }
@@ -766,25 +734,6 @@ func (e *Executor) ExecMailboxSendDirectContext(ctx context.Context, actor model
 
 func (e *Executor) ExecHumanTaskRequestDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execHumanTaskRequest(ctx, actor, input)
-}
-
-func authorizeRouting(provider runtimeauthority.Provider, actor, target models.AgentConfig, status string) error {
-	return runtimeauthority.ProviderOrNoop(provider).AuthorizeRouting(actor, target, status)
-}
-
-func authorizeManage(provider runtimeauthority.Provider, actor, target models.AgentConfig, manager Manager) error {
-	_ = manager
-	if !runtimeauthority.SameFlowInstance(actor, target) {
-		return failures.New(failures.ClassAuthorizationDenied, "agent_management_cross_flow_forbidden", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID})
-	}
-	same, err := runtimeauthority.SameAgent(actor, target)
-	if err != nil && !target.Identity.IsZero() {
-		return failures.New(failures.ClassAuthorizationDenied, "agent_management_identity_invalid", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID, "reason": err.Error()})
-	}
-	if err == nil && same {
-		return failures.New(failures.ClassAuthorizationDenied, "agent_self_management_forbidden", "tool-executor", "authorize_manage", map[string]any{"action": "agent_manage", "actor_id": actor.ID, "target_agent_id": target.ID})
-	}
-	return runtimeauthority.ProviderOrNoop(provider).AuthorizeManagement(actor, target)
 }
 
 func authorizeMailboxSend(provider runtimeauthority.Provider, actor models.AgentConfig) error {

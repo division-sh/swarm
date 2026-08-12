@@ -47,10 +47,10 @@ func TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator(t *testing.
 		t.Fatalf("SpawnAgent setup: %v", err)
 	}
 
-	_, err := am.ReconfigureAgentTarget("worker-1", "", models.AgentConfig{
+	err := reconfigureAgentThroughLifecycleForTest(t, am, "worker-1", "", models.AgentConfig{
 		ExecutionMode: "live",
 		NativeTools:   models.NativeToolConfig{FileIO: true},
-	}, nil)
+	})
 	if err == nil || !strings.Contains(err.Error(), "native tool admission failed: native tool denied") {
 		t.Fatalf("ReconfigureAgent error = %v, want native tool admission failure", err)
 	}

@@ -1071,25 +1071,17 @@ func TestAgentIdentityModelPromotesConcreteRouteIdentity(t *testing.T) {
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "fail closed before API readiness")
 	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add duplicate-slug support")
 
-	management := mustMappingValue(t, identity, "management_authority")
-	fire := mappingValue(management, "fire")
+	lifecycle := mustMappingValue(t, identity, "declared_agent_lifecycle_authority")
+	assertScalarContains(t, mappingValue(lifecycle, "owner"), "flow lifecycle")
+	rule := mappingValue(lifecycle, "rule")
 	for _, fragment := range []string{
-		"pre-read authorization only as fail-fast validation",
-		"revalidated after the target lifecycle operation is serialized",
-		"snapshots the exact current edge from the canonical mutable authority graph",
-		"declaration fallback is not reconstructed as a concrete edge",
-		"persistence failure restores that exact prior graph snapshot",
-		"queued fire authorized from a replaced or temporarily applied mapping cannot terminate",
-		"Post-persistence authority cleanup",
+		"admitted source reconciliation",
+		"flow termination",
+		"operator run/flow cancellation",
+		"no generic topology mutation authority",
+		"manager_fallback remains an escalation path",
 	} {
-		assertScalarContains(t, fire, fragment)
-	}
-	reconfigure := mappingValue(management, "reconfigure")
-	for _, fragment := range []string{
-		"Dynamic agent reconfiguration is retired",
-		"never reaches management-authority planning or mutation",
-	} {
-		assertScalarContains(t, reconfigure, fragment)
+		assertScalarContains(t, rule, fragment)
 	}
 
 	eventSchema := mustMappingValue(t, mustMappingValue(t, root, "contract_formats"), "event_schema")

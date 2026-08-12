@@ -50,10 +50,6 @@ func canonicalRuntimeToolInput(name string, input any) any {
 				payload["message"] = "runtime_tool"
 			}
 		}
-	case "agent_fire":
-		if strings.TrimSpace(asString(payload["reason"])) == "" {
-			payload["reason"] = "runtime_tool"
-		}
 	case "mailbox_send":
 		if mailboxType, err := NormalizeMailboxType(asString(payload["type"])); err == nil && mailboxType != "" {
 			payload["type"] = mailboxType

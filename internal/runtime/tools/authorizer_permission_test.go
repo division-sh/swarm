@@ -12,25 +12,6 @@ import (
 )
 
 func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
-	t.Run("agent fire allowed with permission", func(t *testing.T) {
-		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "ops-1",
-			Permissions:   []string{"agent_fire"},
-		}, "agent_fire")
-		if err != nil {
-			t.Fatalf("expected agent_fire to be allowed: %v", err)
-		}
-	})
-
-	t.Run("agent fire denied without permission", func(t *testing.T) {
-		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            "ops-2",
-		}, "agent_fire")
-		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
-	})
-
 	t.Run("schedule allowed with permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
 			ExecutionMode: "live",
@@ -108,7 +89,7 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 			"permission_bundles": {
 				Value: map[string]any{
 					"ops": map[string]any{
-						"permissions": []any{"agent_fire", "schedule"},
+						"permissions": []any{"human_task_request", "schedule"},
 					},
 				},
 			},
@@ -116,12 +97,12 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 	})
 	perms, err := ResolveAgentPermissions(source, "", runtimecontracts.AgentRegistryEntry{
 		PermissionsBundle: "ops",
-		Permissions:       []string{"agent_fire", "schedule"},
+		Permissions:       []string{"human_task_request", "schedule"},
 	})
 	if err != nil {
 		t.Fatalf("ResolveAgentPermissions: %v", err)
 	}
-	want := []string{"agent_fire", "schedule"}
+	want := []string{"human_task_request", "schedule"}
 	if len(perms) != len(want) {
 		t.Fatalf("expected %v, got %v", want, perms)
 	}
@@ -141,7 +122,7 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 			"permission_bundles": {
 				Value: map[string]any{
 					"ops": map[string]any{
-						"permissions": []any{"agent_fire"},
+						"permissions": []any{"schedule"},
 					},
 				},
 			},
@@ -150,13 +131,13 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 			"invalid-agent": {
 				ID:    "invalid-agent",
 				Role:  "operator",
-				Tools: []string{"agent_fire"},
+				Tools: []string{"schedule"},
 			},
 			"valid-agent": {
 				ID:                "valid-agent",
 				Role:              "operator",
 				PermissionsBundle: "ops",
-				Tools:             []string{"agent_fire"},
+				Tools:             []string{"schedule"},
 			},
 		},
 	})
@@ -168,7 +149,7 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 	if len(errs) != 1 {
 		t.Fatalf("expected exactly one validation error, got %d: %v", len(errs), errs)
 	}
-	if !strings.Contains(errs[0].Error(), `agent invalid-agent declares tool agent_fire without required permission "agent_fire"`) {
+	if !strings.Contains(errs[0].Error(), `agent invalid-agent declares tool schedule without required permission "schedule"`) {
 		t.Fatalf("unexpected validation error: %v", errs[0])
 	}
 }

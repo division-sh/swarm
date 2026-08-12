@@ -230,7 +230,7 @@ func toolDefinitionsForActor(source semanticview.Source, actor models.AgentConfi
 
 func runtimeToolHiddenFromAgents(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "configure_routing", "agent_hire", "agent_reconfigure":
+	case "configure_routing":
 		return true
 	default:
 		return false
