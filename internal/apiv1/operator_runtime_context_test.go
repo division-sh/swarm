@@ -75,6 +75,37 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	}
 }
 
+func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext(t *testing.T) {
+	fixture := newOperatorRuntimeContextFixture(t)
+	handler := fixture.handler(t)
+	selected := runtimebustest.Subscribe(t, fixture.busB, "scan-orchestrator", events.EventType("triage.requested"))
+	defer runtimebustest.Unsubscribe(fixture.busB, "scan-orchestrator")
+	body := eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"replay-after-unload"}`, "", "idem-context-replay-after-unload")
+
+	first := rpcCall(t, handler, body)
+	if first.Error != nil {
+		t.Fatalf("first event.publish error = %#v", first.Error)
+	}
+	firstEventID := stringValue(t, asMap(t, first.Result)["event_id"], "event_id")
+	requireAPIV1RuntimeBusEventID(t, selected, firstEventID, "selected context delivery before unload")
+
+	deactivated := fixture.manager.DeactivateBundleHash(runtimeContextTestBundleHashB, "idempotency replay proof")
+	if !deactivated.Found || !deactivated.Changed || deactivated.ShutdownErr != nil {
+		t.Fatalf("deactivate selected runtime = %#v", deactivated)
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("event.publish replay after runtime unload error = %#v", replay.Error)
+	}
+	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != firstEventID {
+		t.Fatalf("event.publish replay event_id = %q, want stored %q", replayEventID, firstEventID)
+	}
+	if got := countEventsByName(t, fixture.db, "triage.requested"); got != 1 {
+		t.Fatalf("triage.requested count after replay = %d, want 1", got)
+	}
+}
+
 func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)

@@ -1271,6 +1271,10 @@ type mutatingProbeEventPublisher struct {
 	missingRecipients       []string
 }
 
+func (p *mutatingProbeEventPublisher) LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, nil
+}
+
 func (p *mutatingProbeEventPublisher) Publish(_ context.Context, evt events.Event) error {
 	if p.publishErr != nil {
 		return p.publishErr

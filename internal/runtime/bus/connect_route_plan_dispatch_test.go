@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -81,6 +82,30 @@ type connectRoutePlanStaleSnapshotStore struct {
 	*connectRoutePlanLifecycleStore
 	mutations int
 	mutating  bool
+}
+
+type apiEventPublicationMemoryStore struct {
+	*connectRoutePlanLifecycleStore
+	completion apiidempotency.Completion
+}
+
+func (s *apiEventPublicationMemoryStore) LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	if len(s.completion.Response) == 0 {
+		return apiidempotency.Completion{}, false, nil
+	}
+	return s.completion, true, nil
+}
+
+func (s *apiEventPublicationMemoryStore) CommitAPIEventPublication(ctx context.Context, command APIEventPublicationCommand) (CommittedAPIEventPublication, error) {
+	if len(s.completion.Response) > 0 {
+		return CommittedAPIEventPublication{Completion: s.completion, Replay: true}, nil
+	}
+	publication, err := s.CommitPublication(ctx, command.Publication)
+	if err != nil {
+		return CommittedAPIEventPublication{}, err
+	}
+	s.completion = command.Completion
+	return CommittedAPIEventPublication{Publication: publication, Completion: command.Completion}, nil
 }
 
 func (s *connectRoutePlanDescriptorStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
@@ -3786,6 +3811,71 @@ func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
 			}
 			if got := len(store.activations); (got == 1) != tc.wantActivation {
 				t.Fatalf("committed activations = %d, want activation=%t", got, tc.wantActivation)
+			}
+		})
+	}
+}
+
+func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		failFinalization bool
+	}{
+		{name: "activation finalization", failFinalization: true},
+		{name: "dispatch admission"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("template route source has no contract bundle")
+			}
+			bundle.Package.Connect = nil
+			bundle.Semantics.CompositionConnects = nil
+			lifecycleStore := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()},
+			}
+			selected := &apiEventPublicationMemoryStore{connectRoutePlanLifecycleStore: lifecycleStore}
+			activationOwner := newTestFlowInstanceActivationOwner(lifecycleStore.Activate)
+			var finalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer = activationOwner
+			if test.failFinalization {
+				finalizer = runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(context.Context, runtimepipeline.CommittedFlowInstanceActivation) error {
+					return errors.New("simulated local activation finalization failure")
+				})
+			}
+			eventBus, err := newScopedTestEventBus(selected, EventBusOptions{
+				ContractBundle:            source,
+				TemplateInstanceActivator: lifecycleStore.Activate,
+				TemplateInstancePlanner:   activationOwner,
+				FlowActivationFinalizer:   finalizer,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			lifecycleStore.bus = eventBus
+			association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy_completed")
+			endpoint, ok := association.Endpoint()
+			if !ok {
+				t.Fatalf("resolve public input endpoint: %v", association.Err())
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(
+				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
+				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
+			committed, replay, err := eventBus.PublishAPIEventAcknowledged(ctx, evt, &endpoint, apiidempotency.Request{
+				Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "post-commit-" + strings.ReplaceAll(test.name, " ", "-"), RequestHash: "request-hash",
+			}, completion)
+			if err != nil {
+				t.Fatalf("PublishAPIEventAcknowledged after committed completion: %v", err)
+			}
+			if replay || committed.ResourceID != eventID {
+				t.Fatalf("committed API publication = %#v replay=%t, want new completion for %s", committed, replay, eventID)
+			}
+			if selected.completion.ResourceID != eventID {
+				t.Fatalf("stored API completion = %#v, want %s", selected.completion, eventID)
 			}
 		})
 	}

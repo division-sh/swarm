@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -264,6 +265,44 @@ func publicationCommitContext(ctx context.Context, command runtimebus.Publicatio
 		return ctx, fmt.Errorf("publication author descriptor requires exact bundle scope")
 	}
 	return runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, command.AuthorDescriptor)
+}
+
+func (s *EventPostgresOwner) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (completion apiidempotency.Completion, replay bool, err error) {
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return apiidempotency.Completion{}, false, nil
+	}
+	if strings.TrimSpace(request.Method) != "event.publish" {
+		return apiidempotency.Completion{}, false, fmt.Errorf("API event publication lookup requires event.publish idempotency authority")
+	}
+	lease, err := storeapiidempotency.AcquirePostgresRequest(ctx, s.apiIdempotency, request)
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	defer func() {
+		if releaseErr := lease.Release(ctx); releaseErr != nil {
+			completion = apiidempotency.Completion{}
+			replay = false
+			err = errors.Join(err, fmt.Errorf("release API event publication lookup authority: %w", releaseErr))
+		}
+	}()
+	completion, replay = lease.Replay()
+	return completion, replay, nil
+}
+
+func (s *EventSQLiteOwner) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return apiidempotency.Completion{}, false, nil
+	}
+	if strings.TrimSpace(request.Method) != "event.publish" {
+		return apiidempotency.Completion{}, false, fmt.Errorf("API event publication lookup requires event.publish idempotency authority")
+	}
+	lease, err := storeapiidempotency.AcquireSQLiteRequest(ctx, s.apiIdempotency, request)
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	defer lease.Release()
+	completion, replay := lease.Replay()
+	return completion, replay, nil
 }
 
 func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {

@@ -41,6 +41,7 @@ type CommitPublicationOwner interface {
 // operation. The selected store commits publication facts and the deterministic
 // API completion together without exposing its transaction to the API layer.
 type APIEventPublicationCommitOwner interface {
+	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
 	CommitAPIEventPublication(context.Context, APIEventPublicationCommand) (CommittedAPIEventPublication, error)
 }
 

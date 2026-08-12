@@ -1313,44 +1313,69 @@ func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscop
 }
 
 func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedencePublication(t *testing.T) {
-	for _, eventName := range []string{"review.requested", "operating/review.requested"} {
-		eventName := eventName
-		t.Run(strings.ReplaceAll(eventName, "/", "_"), func(t *testing.T) {
+	type fixture struct {
+		store canonicalEventPublishProofStore
+		db    *sql.DB
+	}
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T, context.Context) fixture
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T, ctx context.Context) fixture {
+				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				return fixture{store: selected, db: storetest.DatabaseForTest(selected)}
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T, _ context.Context) fixture {
+				_, db, _ := testutil.StartPostgres(t)
+				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
-			selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-			db := storetest.Database(selected)
-			bundle := eventPublishTemplateInputTestBundle("review.requested", false)
-			bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Mode: "template"}
-			bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
-			consumer := runtimecontracts.SystemNodeContract{
-				ID: "lower-precedence-consumer", ExecutionType: "system_node",
-				SubscribesTo:  []string{"review.requested"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": {}},
-			}
-			bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{consumer.ID: consumer}
-			source := semanticview.Wrap(bundle)
-			bus, err := newScopedAPITestEventBus(t, selected, runStartTestEventBusOptions(source))
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
-			response := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, eventName, `{"topic":"must reject"}`, "operator-test", "idem-missing-template-pin-"+strings.ReplaceAll(eventName, "/", "-")))
-			if response.Error == nil {
-				t.Fatal("event.publish error = nil")
-			}
-			data := asMap(t, response.Error.Data)
-			if data["code"] != EventNotDeclaredCode {
-				t.Fatalf("event.publish data = %#v, want %s", data, EventNotDeclaredCode)
-			}
-			details := asMap(t, data["details"])
-			if details["reason"] != "missing_template_input_endpoint" {
-				t.Fatalf("event.publish details = %#v, want missing_template_input_endpoint", details)
-			}
-			if got := countAllEventRows(t, db); got != 0 {
-				t.Fatalf("event rows after missing template input = %d, want 0", got)
-			}
-			if got := countAPIIdempotencyRows(t, db); got != 0 {
-				t.Fatalf("API idempotency rows after missing template input = %d, want 0", got)
+			f := backend.open(t, ctx)
+			for _, eventName := range []string{"review.requested", "operating/review.requested"} {
+				eventName := eventName
+				t.Run(strings.ReplaceAll(eventName, "/", "_"), func(t *testing.T) {
+					bundle := eventPublishTemplateInputTestBundle("review.requested", false)
+					bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Mode: "template"}
+					bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
+					consumer := runtimecontracts.SystemNodeContract{
+						ID: "lower-precedence-consumer", ExecutionType: "system_node",
+						SubscribesTo:  []string{"review.requested"},
+						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": {}},
+					}
+					bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{consumer.ID: consumer}
+					source := semanticview.Wrap(bundle)
+					bus, err := newScopedAPITestEventBus(t, f.store, runStartTestEventBusOptions(source))
+					if err != nil {
+						t.Fatalf("NewEventBusWithOptions: %v", err)
+					}
+					handler := eventPublishTestHandlerWithStores(t, f.store, f.store, f.store, bus, source)
+					response := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, eventName, `{"topic":"must reject"}`, "operator-test", "idem-missing-template-pin-"+strings.ReplaceAll(eventName, "/", "-")))
+					if response.Error == nil {
+						t.Fatal("event.publish error = nil")
+					}
+					data := asMap(t, response.Error.Data)
+					if data["code"] != EventNotDeclaredCode {
+						t.Fatalf("event.publish data = %#v, want %s", data, EventNotDeclaredCode)
+					}
+					details := asMap(t, data["details"])
+					if details["reason"] != "missing_template_input_endpoint" {
+						t.Fatalf("event.publish details = %#v, want missing_template_input_endpoint", details)
+					}
+					if got := countAllEventRows(t, f.db); got != 0 {
+						t.Fatalf("event rows after missing template input = %d, want 0", got)
+					}
+					if got := countAPIIdempotencyRows(t, f.db); got != 0 {
+						t.Fatalf("API idempotency rows after missing template input = %d, want 0", got)
+					}
+				})
 			}
 		})
 	}
@@ -2058,6 +2083,10 @@ type publicInputPublishProbe struct {
 	*runtimebus.EventBus
 	publicInputCalls int
 	endpoint         semanticview.AuthoredEventEndpoint
+}
+
+func (p *publicInputPublishProbe) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return p.EventBus.LookupAPIEventPublication(ctx, request)
 }
 
 func (p *publicInputPublishProbe) PublishPublicInputAcknowledged(ctx context.Context, evt events.Event, endpoint semanticview.AuthoredEventEndpoint) error {

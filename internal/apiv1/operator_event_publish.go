@@ -93,6 +93,7 @@ type publicInputAcknowledgedPublisher interface {
 }
 
 type apiEventAcknowledgedPublisher interface {
+	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
 	PublishAPIEventAcknowledged(context.Context, events.Event, *semanticview.AuthoredEventEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error)
 }
 
@@ -207,6 +208,16 @@ func executeOperatorEventPublication(
 		RequestHash:    req.RequestHash,
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
+	}
+	if cfg.atomicAPICompletion {
+		publisher, ok := opts.Acknowledged.(apiEventAcknowledgedPublisher)
+		if !ok || publisher == nil {
+			return apiidempotency.Completion{}, false, errors.New("event.publish requires atomic selected-store publication and API completion")
+		}
+		completion, replay, err := publisher.LookupAPIEventPublication(ctx, idempotency)
+		if err != nil || replay {
+			return completion, replay, err
+		}
 	}
 	atomicReplay := false
 	execute := func(ctx context.Context) (apiidempotency.Completion, error) {
