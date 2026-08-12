@@ -26,9 +26,17 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 		localIDCounts[declaration.LocalID]++
 	}
 	for _, declaration := range declarations {
-		agentID := declaration.Label(localIDCounts[declaration.LocalID] > 1)
+		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			failures = append(failures, err.Error())
+			continue
+		}
+		agentID := namePlan.AgentID
+		if localIDCounts[declaration.LocalID] > 1 {
+			agentID += " (" + declaration.Label(true) + ")"
+		}
 		entry := declaration.Entry
-		actor := nativeToolAgentConfig(declaration.LocalID, entry)
+		actor := nativeToolAgentConfig(namePlan.AgentID, namePlan.EffectiveRole(entry), entry)
 		if !actor.NativeTools.Any() {
 			continue
 		}
@@ -45,12 +53,8 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			continue
 		}
 		actor = resolved.Actor
-		if owner, ok := semanticview.ScopedAgentDeclarationOwner(source, declaration); ok {
-			name, err := runtimeagentidentity.DeclaredName(actor.ID, owner)
-			if err != nil {
-				failures = append(failures, err.Error())
-				continue
-			}
+		name, err := namePlan.Materialize()
+		if err == nil {
 			route := runtimeagentidentity.RootRoute()
 			flowID := strings.TrimSpace(declaration.OwnerFlowID)
 			flowPath := ""
@@ -74,8 +78,8 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			actor.FlowID = flowID
 			actor.FlowPath = flowPath
 			actor.NormalizeRuntimeDescriptor()
-		} else if strings.TrimSpace(declaration.ScopeKind) != "" {
-			failures = append(failures, fmt.Sprintf("agent %s has no unique scoped declaration owner", strings.TrimSpace(agentID)))
+		} else {
+			failures = append(failures, err.Error())
 			continue
 		}
 		if err := ValidateNativeToolAgentAdmission(ctx, actor, NativeToolAdmissionOptions{

@@ -438,6 +438,7 @@ func (s workspaceLookupStub) ListRuntimeWorkspaceContainers(context.Context, str
 }
 
 func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) {
+	const owner = "test://workspace/ops/worker"
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
@@ -452,6 +453,14 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 	manager.SetConfig(cfg)
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				owner: {Kind: "agent", FlowID: "ops", LocalID: "worker", Full: owner},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				owner: {Kind: "agent", FlowID: "ops", LocalID: "worker", Full: owner},
+			},
+		},
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
 				Value: map[string]any{
@@ -460,15 +469,16 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 			},
 		}},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"worker": {Role: "worker", WorkspaceClass: "shared_flow"},
+			"worker": {ID: "worker-1", Role: "worker", WorkspaceClass: "shared_flow"},
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{{
 				Paths: runtimecontracts.FlowContractPaths{ID: "ops", Flow: "ops"},
 				Path:  "ops",
 				Agents: map[string]runtimecontracts.AgentRegistryEntry{
-					"worker": {Role: "worker", WorkspaceClass: "shared_flow"},
+					"worker": {ID: "worker-1", Role: "worker", WorkspaceClass: "shared_flow"},
 				},
+				AgentURIs: map[string]string{"worker": owner},
 			}}},
 			ByID: map[string]*runtimecontracts.FlowContractView{},
 		},
@@ -491,7 +501,7 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-1",
-		Identity:      runtimeagentidentitytest.Declared(t, "worker-1", "test/agents.yaml", "ops", "instance-1", "ops/instance-1"),
+		Identity:      runtimeagentidentitytest.Declared(t, "worker-1", owner, "ops", "instance-1", "ops/instance-1"),
 		Role:          "worker",
 		FlowPath:      "ops/instance-1",
 	})

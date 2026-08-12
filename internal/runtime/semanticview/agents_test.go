@@ -8,6 +8,7 @@ import (
 )
 
 func TestResolveAgentRegistryEntryRoleFallbackUsesFlowID(t *testing.T) {
+	const owner = "test://semanticview/flows/support/agents/flow-responder"
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			ID:   "support",
@@ -20,8 +21,13 @@ func TestResolveAgentRegistryEntryRoleFallbackUsesFlowID(t *testing.T) {
 				Role: "responder",
 			},
 		},
+		AgentURIs: map[string]string{"flow-responder": owner},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{owner: {Kind: "agent", FlowID: "support", LocalID: "flow-responder", Full: owner}},
+			ByURI:  map[string]runtimecontracts.ContractURIRef{owner: {Kind: "agent", FlowID: "support", LocalID: "flow-responder", Full: owner}},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &flow,
 			ByID: map[string]*runtimecontracts.FlowContractView{

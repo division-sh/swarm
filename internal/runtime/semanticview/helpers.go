@@ -190,27 +190,6 @@ func policyOwnerPackageKey(packageKey string) string {
 	return "package:" + packageKey
 }
 
-func FindAgentEntry(source Source, agentID, role string) (runtimecontracts.AgentRegistryEntry, bool) {
-	if source == nil {
-		return runtimecontracts.AgentRegistryEntry{}, false
-	}
-	agentID = strings.TrimSpace(agentID)
-	role = strings.TrimSpace(role)
-	if agentID != "" {
-		if entry, ok := source.AgentEntries()[agentID]; ok {
-			return entry, true
-		}
-	}
-	if role != "" {
-		for _, entry := range source.AgentEntries() {
-			if strings.EqualFold(strings.TrimSpace(entry.Role), role) || strings.EqualFold(strings.TrimSpace(entry.ID), role) {
-				return entry, true
-			}
-		}
-	}
-	return runtimecontracts.AgentRegistryEntry{}, false
-}
-
 func splitPolicyKey(key string) (string, string) {
 	key = strings.TrimSpace(key)
 	if idx := strings.IndexByte(key, '.'); idx >= 0 {

@@ -41,6 +41,76 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 	}
 }
 
+func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(t *testing.T) {
+	omittedOwner := "test://connect/packages/first/worker"
+	literalOwner := "test://connect/packages/second/worker"
+	omittedEntry := runtimecontracts.AgentRegistryEntry{}
+	literalEntry := runtimecontracts.AgentRegistryEntry{
+		ID:             "public-worker",
+		AuthoredFields: map[string]bool{"id": true},
+	}
+	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+			omittedOwner: {Kind: "agent", LocalID: "worker", Full: omittedOwner},
+			literalOwner: {Kind: "agent", LocalID: "worker", Full: literalOwner},
+		}},
+	})
+	source := staticConnectAgentScopeSource{
+		Source: base,
+		projects: []semanticview.ProjectScope{
+			{
+				Key: "packages/first", OwningFlowID: "support",
+				Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": omittedEntry},
+				AgentURIs: map[string]string{"worker": omittedOwner},
+			},
+			{
+				Key: "packages/second", OwningFlowID: "support",
+				Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": literalEntry},
+				AgentURIs: map[string]string{"worker": literalOwner},
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		name       string
+		packageKey string
+		publicID   string
+		owner      string
+	}{
+		{name: "omitted id", packageKey: "packages/first", publicID: "worker", owner: omittedOwner},
+		{name: "literal override", packageKey: "packages/second", publicID: "public-worker", owner: literalOwner},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			endpoint := semanticview.AuthoredEventEndpoint{
+				Kind:         semanticview.EventEndpointAgent,
+				PackageKey:   tc.packageKey,
+				FlowID:       "support",
+				AgentLocalID: "worker",
+				AgentID:      tc.publicID,
+			}
+			route, ok := staticConnectReceiverDeliveryRoute(source, endpoint, events.RouteIdentity{})
+			if !ok {
+				t.Fatal("static connect receiver route was omitted")
+			}
+			if got := route.Recipient.ID(); got != tc.publicID {
+				t.Fatalf("recipient id = %q, want %q", got, tc.publicID)
+			}
+			if got := route.AgentIdentity.Name.Owner; got != tc.owner {
+				t.Fatalf("identity owner = %q, want %q", got, tc.owner)
+			}
+		})
+	}
+}
+
+type staticConnectAgentScopeSource struct {
+	semanticview.Source
+	projects []semanticview.ProjectScope
+}
+
+func (s staticConnectAgentScopeSource) ProjectScopes() []semanticview.ProjectScope {
+	return append([]semanticview.ProjectScope(nil), s.projects...)
+}
+
 func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {
 	source := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "producer", "producer", runtimecontracts.FlowModeStatic, "work_ready", "work.ready", "producer/work.ready", "", nil)
 	plan := func(pin, event string) ConnectRoutePlan {

@@ -126,7 +126,7 @@ func entityJSONPathSegments(path string) ([]string, error) {
 }
 
 func enforceEntityWriteOwnership(ctx context.Context, store EntityPersistence, source semanticview.Source, actor models.AgentConfig, entityID string, logger runtimeToolLogSink) error {
-	flowRoot := actorFlowOwnershipRoot(source, actor.ID)
+	flowRoot := actorFlowOwnershipRoot(source, actor)
 	if flowRoot == "" || store == nil {
 		return nil
 	}
@@ -178,16 +178,15 @@ func enforceEntityWriteOwnership(ctx context.Context, store EntityPersistence, s
 	return denial
 }
 
-func actorFlowOwnershipRoot(source semanticview.Source, actorID string) string {
-	actorID = strings.TrimSpace(actorID)
-	if source == nil || actorID == "" {
+func actorFlowOwnershipRoot(source semanticview.Source, actor models.AgentConfig) string {
+	if source == nil || strings.TrimSpace(actor.ID) == "" {
 		return ""
 	}
-	contractSource, ok := source.AgentContractSource(actorID)
+	projection, ok := semanticview.ResolveAgentContractProjection(source, actor)
 	if !ok {
 		return ""
 	}
-	flowID := strings.TrimSpace(contractSource.FlowID)
+	flowID := strings.TrimSpace(projection.OwnerFlowID)
 	if flowID == "" {
 		return ""
 	}
@@ -215,7 +214,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	if flowInstance == "" {
 		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.flow_instance", map[string]any{"field": "flow_instance"})
 	}
-	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	contract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
 		contract, ok = entityruntime.ResolveForFlowInstance(source, flowInstance)
 	}

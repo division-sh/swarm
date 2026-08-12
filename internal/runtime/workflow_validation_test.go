@@ -13,6 +13,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -224,7 +225,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 					"agent-1": {ID: "agent-1", Tools: []string{"missing_tool"}},
 				}
-				return semanticview.Wrap(bundle)
+				return semanticviewtest.WrapRootAgents(bundle)
 			}(),
 			wantErr: false,
 		},
@@ -235,7 +236,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
 				}
-				return semanticview.Wrap(bundle)
+				return semanticviewtest.WrapRootAgents(bundle)
 			}(),
 			errContains: "'missing.event' emitted but no schema in events.yaml",
 			wantErr:     true,
@@ -956,7 +957,7 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err != nil {
@@ -987,7 +988,7 @@ func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t 
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err == nil || !strings.Contains(err.Error(), "generated_tool_schema_closure") {
@@ -1028,7 +1029,7 @@ func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToo
 			},
 		},
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
 	if err != nil {

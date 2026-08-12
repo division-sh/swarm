@@ -206,6 +206,7 @@ type checkerContext struct {
 }
 
 var bootCheckRegistry = []Check{
+	{ID: "declared_agent_name_valid", Severity: SeverityHardInvalidity, Run: checkDeclaredAgentNameValid},
 	{ID: "event_metadata_authority", Severity: SeverityHardInvalidity, Run: checkEventMetadataAuthority},
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
 	{ID: semanticview.TypedPubSubFailureAuthorizationAmbiguous, Severity: SeverityHardInvalidity, Run: checkTypedPubSubAuthorization},
@@ -284,6 +285,22 @@ var bootCheckRegistry = []Check{
 	{ID: "select_entity_validation", Severity: "error", Run: checkSelectEntityValidation},
 	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
 	{ID: "flow_data_access_validation", Severity: "error", Run: checkFlowDataAccessValidation},
+}
+
+func checkDeclaredAgentNameValid(c *checkerContext) []Finding {
+	if c == nil || c.source == nil {
+		return nil
+	}
+	if _, err := semanticview.AgentNamePlans(c.source); err != nil {
+		return []Finding{{
+			CheckID:     "declared_agent_name_valid",
+			Severity:    SeverityHardInvalidity,
+			Message:     err.Error(),
+			Location:    "agents",
+			Remediation: stableHardInvalidityRemediation["declared_agent_name_valid"],
+		}}
+	}
+	return nil
 }
 
 var supplementalChecks = []Check{
@@ -1547,38 +1564,32 @@ func mergedAgentPermissionWarnings(source semanticview.Source) []permissionWarni
 	if source == nil {
 		return nil
 	}
-	agents := source.AgentEntries()
-	ids := make([]string, 0, len(agents))
-	for agentID := range agents {
-		agentID = strings.TrimSpace(agentID)
-		if agentID != "" {
-			ids = append(ids, agentID)
+	declarations := semanticview.AgentDeclarations(source)
+	out := make([]permissionWarning, 0, len(declarations))
+	for _, declaration := range declarations {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			out = append(out, permissionWarning{Message: err.Error()})
+			continue
 		}
-	}
-	sort.Strings(ids)
-	out := make([]permissionWarning, 0, len(ids))
-	for _, agentID := range ids {
-		agent := agents[agentID]
-		flowID := ""
-		if sourceInfo, ok := source.AgentContractSource(agentID); ok {
-			flowID = strings.TrimSpace(sourceInfo.FlowID)
-		}
-		scopeLabel := validationFlowLabel(flowID)
-		policy := source.ResolvedPolicyForFlow(flowID)
-		out = append(out, agentPermissionWarningsLocal(source, scopeLabel, agentID, agent, policy)...)
+		scopeLabel := validationFlowLabel(plan.OwnerFlowID)
+		policy := source.ResolvedPolicyForFlow(plan.OwnerFlowID)
+		out = append(out, agentPermissionWarningsLocal(source, scopeLabel, plan.AgentID, declaration, policy)...)
 	}
 	return out
 }
 
-func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentID string, agent runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) []permissionWarning {
+func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentID string, declaration semanticview.AgentDeclaration, policy runtimecontracts.PolicyDocument) []permissionWarning {
 	if source == nil {
 		return nil
 	}
+	agent := declaration.Entry
 	perms, err := resolvedAgentPermissionsLocal(agent, policy)
 	if err != nil {
 		return []permissionWarning{{Message: fmt.Sprintf("%s/%s permissions resolution failed: %v", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), err)}}
 	}
 	permSet := stringSet(perms)
+	projection, projected := semanticview.ScopedAgentContractProjection(source, declaration)
 	tools := agent.ConfiguredTools()
 	out := make([]permissionWarning, 0, len(tools))
 	for _, toolID := range tools {
@@ -1586,7 +1597,10 @@ func agentPermissionWarningsLocal(source semanticview.Source, scopeLabel, agentI
 		if toolID == "" {
 			continue
 		}
-		entry, _ := source.ToolEntryForAgent(agentID, toolID)
+		if !projected {
+			continue
+		}
+		entry, _ := projection.ToolEntry(toolID)
 		required := entry.Permission().String()
 		if required == "" {
 			continue

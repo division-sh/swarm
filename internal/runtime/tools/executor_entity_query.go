@@ -22,7 +22,7 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, err
 	}
-	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
+	schema, err := entityToolSchemaForReadTarget(source, actor, payload)
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_search_entities.schema", entityReadTargetFailureAttributes(payload), err)
 	}
@@ -67,7 +67,7 @@ func (e *Executor) execSearchEntities(ctx context.Context, actor models.AgentCon
 	if err != nil {
 		return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "exec_search_entities.materialize", nil, err)
 	}
-	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
+	rows = filterEntityReadRowsForActor(source, actor, rows)
 	total := len(rows)
 	if offset >= len(rows) {
 		rows = []map[string]any{}
@@ -89,7 +89,7 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	if err != nil {
 		return nil, err
 	}
-	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
+	schema, err := entityToolSchemaForReadTarget(source, actor, payload)
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_entities.schema", entityReadTargetFailureAttributes(payload), err)
 	}
@@ -106,7 +106,7 @@ func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConf
 	if err != nil {
 		return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "exec_query_entities.materialize", nil, err)
 	}
-	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
+	rows = filterEntityReadRowsForActor(source, actor, rows)
 	filterExpression := strings.TrimSpace(asString(payload["filter"]))
 	filtered, err := filterEntityStateRowsCEL(filterExpression, rows, schema)
 	if err != nil {
@@ -137,7 +137,7 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 	if err != nil {
 		return nil, err
 	}
-	schema, err := entityToolSchemaForReadTarget(source, actor.ID, payload)
+	schema, err := entityToolSchemaForReadTarget(source, actor, payload)
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_query_metrics.schema", entityReadTargetFailureAttributes(payload), err)
 	}
@@ -173,7 +173,7 @@ func (e *Executor) execQueryMetrics(ctx context.Context, actor models.AgentConfi
 	if err != nil {
 		return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "exec_query_metrics.materialize", nil, err)
 	}
-	rows = filterEntityReadRowsForActor(source, actor.ID, rows)
+	rows = filterEntityReadRowsForActor(source, actor, rows)
 	filterExpression := strings.TrimSpace(asString(payload["filter"]))
 	filtered, err := filterEntityStateRowsCEL(filterExpression, rows, schema)
 	if err != nil {

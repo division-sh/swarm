@@ -307,13 +307,25 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	if !ok || bundle == nil {
 		return View{}, fmt.Errorf("authoring view requires a workflow contract bundle source")
 	}
+	agentNames, err := authoringAgentNames(source)
+	if err != nil {
+		return View{}, err
+	}
+	root, err := buildRoot(bundle, agentNames)
+	if err != nil {
+		return View{}, err
+	}
+	flows, err := buildFlows(source, bundle, agentNames)
+	if err != nil {
+		return View{}, err
+	}
 	view := View{
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		ContractsRoot:   strings.TrimSpace(bundle.Paths.ContractsRoot),
 		SourceAuthority: "projection_only_existing_contract_owners",
-		Root:            buildRoot(bundle),
-		Flows:           buildFlows(source, bundle),
+		Root:            root,
+		Flows:           flows,
 		ApprovalPoints:  buildApprovalPoints(bundle),
 		RoutingTopology: BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
 		Diagnostics:     buildDiagnostics(bundle, opts.BootReport),
@@ -335,6 +347,30 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		view.StageGraphs = buildStageGraphs(source, bundle)
 	}
 	return view, nil
+}
+
+type authoringAgentNameKey struct {
+	scopeKind string
+	scopeID   string
+	localID   string
+}
+
+func authoringAgentNames(source semanticview.Source) (map[authoringAgentNameKey]string, error) {
+	plans, err := semanticview.AgentNamePlans(source)
+	if err != nil {
+		return nil, fmt.Errorf("authoring agent names: %w", err)
+	}
+	out := make(map[authoringAgentNameKey]string, len(plans))
+	for _, plan := range plans {
+		scopeKind := plan.ScopeKind
+		scopeID := plan.ScopeID
+		if strings.TrimSpace(scopeKind) == "" {
+			scopeKind = "project"
+			scopeID = "."
+		}
+		out[authoringAgentNameKey{scopeKind: scopeKind, scopeID: scopeID, localID: plan.LocalID}] = plan.AgentID
+	}
+	return out, nil
 }
 
 func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []ApprovalPointView {
@@ -389,8 +425,12 @@ func BuildRoutingTopologyWithReport(source semanticview.Source, bundle *runtimec
 	return routingtopology.WithIssues(topology, issues...)
 }
 
-func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
-	rootAgents, rootAgentsFile := rootAgentViewEntries(bundle)
+func buildRoot(bundle *runtimecontracts.WorkflowContractBundle, agentNames map[authoringAgentNameKey]string) (RootView, error) {
+	rootAgents, rootAgentsFile, rootScopeID := rootAgentViewEntries(bundle)
+	agents, err := agentViews(rootAgents, rootAgentsFile, "project", rootScopeID, agentNames)
+	if err != nil {
+		return RootView{}, err
+	}
 	out := RootView{
 		SourceFiles: RootSourceFiles{
 			Schema:   strings.TrimSpace(bundle.Paths.RootSchemaFile),
@@ -398,7 +438,7 @@ func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
 			Package:  strings.TrimSpace(bundle.Paths.ProjectPackageFile),
 			Agents:   strings.TrimSpace(bundle.Paths.ProjectAgentsFile),
 		},
-		Agents: agentViews(rootAgents, rootAgentsFile),
+		Agents: agents,
 	}
 	if bundle.RootSchema != nil {
 		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), bundle.Paths.RootSchemaFile, bundle.Paths.ProjectAgentsFile)
@@ -408,18 +448,18 @@ func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
 		declared = strings.TrimSpace(bundle.RootSchema.Entity)
 	}
 	if declared == "" && len(bundle.RootEntities) == 0 {
-		return out
+		return out, nil
 	}
 	primary, err := bundle.ResolveRootPrimaryEntity()
 	if err != nil {
 		out.PrimaryEntityError = err.Error()
-		return out
+		return out, nil
 	}
 	out.PrimaryEntity = primaryEntityView(primary, bundle.Paths.RootEntitiesFile)
-	return out
+	return out, nil
 }
 
-func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []FlowView {
+func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, agentNames map[authoringAgentNameKey]string) ([]FlowView, error) {
 	opsByFlow := containedOperationsByFlow(source, bundle)
 	refsByFlow := packageFlowRefsByID(bundle)
 	views := bundle.FlowViews()
@@ -427,12 +467,16 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 	for _, flow := range views {
 		flowID := strings.TrimSpace(flow.Paths.ID)
 		schema := flow.Schema
+		agents, err := agentViews(flow.Agents, flow.Paths.AgentsFile, "flow", flowID, agentNames)
+		if err != nil {
+			return nil, err
+		}
 		item := FlowView{
 			ID:          flowID,
 			Path:        strings.Trim(strings.TrimSpace(flow.Path), "/"),
 			Mode:        strings.TrimSpace(schema.Mode),
 			SourceFiles: flowSourceFiles(bundle, flow),
-			Agents:      agentViews(flow.Agents, flow.Paths.AgentsFile),
+			Agents:      agents,
 			RequiredAgents: requiredAgentsView(
 				schema,
 				bundle.FlowRequiredAgentFacts(flowID),
@@ -482,7 +526,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		item.ContainedOperations = opsByFlow[flowID]
 		out = append(out, item)
 	}
-	return out
+	return out, nil
 }
 
 func standingIngressProviderView(provider runtimecontracts.ProjectFlowIngressProvider) StandingIngressProviderView {
@@ -880,26 +924,26 @@ func authoringStringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func rootAgentViewEntries(bundle *runtimecontracts.WorkflowContractBundle) (map[string]runtimecontracts.AgentRegistryEntry, string) {
+func rootAgentViewEntries(bundle *runtimecontracts.WorkflowContractBundle) (map[string]runtimecontracts.AgentRegistryEntry, string, string) {
 	if bundle == nil {
-		return nil, ""
+		return nil, "", ""
 	}
 	for _, view := range bundle.ProjectViews() {
 		if strings.TrimSpace(view.Paths.ParentKey) == "" && view.Paths.Depth == 0 {
-			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile)
+			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile), strings.TrimSpace(view.Paths.Key)
 		}
 	}
 	for _, view := range bundle.ProjectViews() {
 		if strings.TrimSpace(view.Paths.ParentKey) == "" {
-			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile)
+			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile), strings.TrimSpace(view.Paths.Key)
 		}
 	}
-	return bundle.AgentEntries(), strings.TrimSpace(bundle.Paths.ProjectAgentsFile)
+	return bundle.AgentEntries(), strings.TrimSpace(bundle.Paths.ProjectAgentsFile), "."
 }
 
-func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFile string) []AgentView {
+func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFile, scopeKind, scopeID string, names map[authoringAgentNameKey]string) ([]AgentView, error) {
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	ids := make([]string, 0, len(entries))
 	for id := range entries {
@@ -911,6 +955,10 @@ func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFi
 	out := make([]AgentView, 0, len(ids))
 	for _, id := range ids {
 		entry := runtimecontracts.EffectiveAgentRegistryEntry(id, entries[id])
+		publicName := strings.TrimSpace(names[authoringAgentNameKey{scopeKind: strings.TrimSpace(scopeKind), scopeID: strings.TrimSpace(scopeID), localID: id}])
+		if publicName == "" {
+			return nil, fmt.Errorf("authoring agent %s %s/%s has no canonical declared-name plan", strings.TrimSpace(scopeKind), strings.TrimSpace(scopeID), id)
+		}
 		fields := map[string]AgentFieldView{}
 		addAgentField(fields, entry, "type", entry.Type)
 		addAgentField(fields, entry, "model", entry.Model)
@@ -920,12 +968,12 @@ func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFi
 		addAgentField(fields, entry, "workspace_class", entry.WorkspaceClass)
 		addAgentField(fields, entry, "manager_fallback", entry.ManagerFallback)
 		out = append(out, AgentView{
-			ID:         id,
+			ID:         publicName,
 			SourceFile: strings.TrimSpace(sourceFile),
 			Fields:     fields,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func addAgentField(fields map[string]AgentFieldView, entry runtimecontracts.AgentRegistryEntry, name string, value any) {

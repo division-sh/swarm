@@ -106,7 +106,9 @@ func normalizeAgentRegistryEntries(entries map[string]AgentRegistryEntry, source
 		return map[string]AgentRegistryEntry{}, nil
 	}
 	out := make(map[string]AgentRegistryEntry, len(entries))
-	for key, entry := range entries {
+	effectiveOwners := make(map[string]string, len(entries))
+	for _, key := range sortedContractKeys(entries) {
+		entry := entries[key]
 		trimmedKey := strings.TrimSpace(key)
 		if trimmedKey == "" {
 			continue
@@ -115,13 +117,20 @@ func normalizeAgentRegistryEntries(entries map[string]AgentRegistryEntry, source
 			return nil, err
 		}
 		effective := EffectiveAgentRegistryEntry(trimmedKey, entry)
-		if strings.Contains(strings.TrimSpace(effective.ID), "{instance_id}") {
+		effectiveID, err := DeclaredAgentID(trimmedKey, effective)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", strings.TrimSpace(sourceFile), err)
+		}
+		if previous, exists := effectiveOwners[effectiveID]; exists {
 			return nil, fmt.Errorf(
-				"%s agent %q: agent IDs are declaration identities and cannot interpolate {instance_id}; remove the interpolation because the runtime carries flow-instance identity separately",
+				"%s agents %q and %q derive the same effective agent id %q; use distinct declaration map keys or literal id overrides",
 				strings.TrimSpace(sourceFile),
+				previous,
 				trimmedKey,
+				effectiveID,
 			)
 		}
+		effectiveOwners[effectiveID] = trimmedKey
 		out[trimmedKey] = effective
 	}
 	return out, nil
@@ -183,7 +192,7 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 			func(view *FlowContractView, path string) { view.Path = path },
 			func(view *FlowContractView, uri string) { view.URI = uri },
 			func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
-			func(view *FlowContractView) string { return strings.Trim(strings.TrimSpace(view.Path), "/") },
+			flowTreeDeclarationPath,
 			func(view *FlowContractView) map[string]SystemNodeContract { return view.Nodes },
 			func(view *FlowContractView) map[string]AgentRegistryEntry { return view.Agents },
 			func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
@@ -264,7 +273,7 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 		func(view *FlowContractView, path string) { view.Path = path },
 		func(view *FlowContractView, uri string) { view.URI = uri },
 		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
-		func(view *FlowContractView) string { return strings.Trim(strings.TrimSpace(view.Path), "/") },
+		flowTreeDeclarationPath,
 		nodeEntries,
 		func(view *FlowContractView) map[string]AgentRegistryEntry { return view.Agents },
 		eventEntries,
@@ -287,6 +296,24 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 	bundle.URIRegistry = registry
 	return nil
 }
+
+func flowTreeDeclarationPath(view *FlowContractView) string {
+	if view == nil {
+		return ""
+	}
+	packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
+	if strings.TrimSpace(view.Paths.ID) == "" && packageKey != "" && packageKey != "." {
+		return packageKey
+	}
+	if path := strings.Trim(strings.TrimSpace(view.Path), "/"); path != "" {
+		return path
+	}
+	if packageKey == "." {
+		return ""
+	}
+	return packageKey
+}
+
 func materializeFlowTree(node *flowmodel.BuildNode[FlowContractView]) FlowContractView {
 	return flowmodel.Materialize(
 		node,

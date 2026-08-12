@@ -299,8 +299,12 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 		}
 	}
 	if source != nil && strings.TrimSpace(actor.ID) != "" {
+		projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
 		for name := range candidates {
-			entry, ok := source.ToolEntryForAgent(strings.TrimSpace(actor.ID), strings.TrimSpace(name))
+			if !projected {
+				continue
+			}
+			entry, ok := projection.ToolEntry(name)
 			if !ok {
 				continue
 			}

@@ -498,8 +498,12 @@ func participantExistsLocal(source semanticview.Source, participant string) bool
 	if _, ok := source.NodeEntries()[participant]; ok {
 		return true
 	}
-	for _, agent := range source.AgentEntries() {
-		if strings.TrimSpace(agent.ID) == participant || strings.TrimSpace(agent.Role) == participant {
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			continue
+		}
+		if plan.AgentID == participant || strings.TrimSpace(declaration.Entry.Role) == participant {
 			return true
 		}
 	}

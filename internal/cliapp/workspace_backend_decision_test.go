@@ -128,7 +128,7 @@ func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decision, err := DecideWorkspaceBackend(tt.preference, tt.cfg, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Agents: tt.agents}))
+			decision, err := DecideWorkspaceBackend(tt.preference, tt.cfg, workspaceBackendTestSource(tt.agents))
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("DecideWorkspaceBackend error = %v, want containing %q", err, tt.wantErr)
@@ -183,9 +183,7 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			preference := WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend", PreferenceExplicit: true, AllowExecOnHost: true}
-			decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": tt.agent},
-			}))
+			decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{"worker": tt.agent}))
 			if err == nil {
 				t.Fatal("DecideWorkspaceBackend unexpectedly accepted claude_cli host execution")
 			}
@@ -216,11 +214,9 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.T) {
 	mocked := testWorkspaceBackendMockPerformance()
 	t.Run("fully mocked bundle keeps ordinary host workspace lifecycle", func(t *testing.T) {
-		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Agents: map[string]runtimecontracts.AgentRegistryEntry{
-				"alpha": {ID: "alpha", Mock: mocked},
-				"beta":  {ID: "beta", Mock: mocked},
-			},
+		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
+			"alpha": {ID: "alpha", Mock: mocked},
+			"beta":  {ID: "beta", Mock: mocked},
 		}))
 		if err != nil {
 			t.Fatalf("DecideWorkspaceBackend: %v", err)
@@ -238,11 +234,9 @@ func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.
 
 	t.Run("mixed bundle refuses host and names only unmocked Claude agent", func(t *testing.T) {
 		preference := WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true}
-		decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Agents: map[string]runtimecontracts.AgentRegistryEntry{
-				"mocked-worker": {ID: "mocked-worker", Mock: mocked},
-				"live-worker":   {ID: "live-worker"},
-			},
+		decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
+			"mocked-worker": {ID: "mocked-worker", Mock: mocked},
+			"live-worker":   {ID: "live-worker"},
 		}))
 		if err == nil {
 			t.Fatal("DecideWorkspaceBackend unexpectedly admitted mixed claude_cli bundle on host")
@@ -265,10 +259,8 @@ func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.
 	})
 
 	t.Run("mock does not waive independently declared native execution", func(t *testing.T) {
-		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Agents: map[string]runtimecontracts.AgentRegistryEntry{
-				"worker": {ID: "worker", Mock: mocked, NativeTools: map[string]any{"bash": true}},
-			},
+		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), workspaceBackendTestSource(map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": {ID: "worker", Mock: mocked, NativeTools: map[string]any{"bash": true}},
 		}))
 		if err != nil {
 			t.Fatalf("DecideWorkspaceBackend: %v", err)
@@ -404,7 +396,7 @@ func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendOpenAIResponses), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Agents: tt.agents}))
+			decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendOpenAIResponses), workspaceBackendTestSource(tt.agents))
 			if err != nil {
 				t.Fatalf("DecideWorkspaceBackend: %v", err)
 			}
@@ -425,6 +417,12 @@ func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass
 			}
 		})
 	}
+}
+
+func workspaceBackendTestSource(agents map[string]runtimecontracts.AgentRegistryEntry) semanticview.Source {
+	bundle := &runtimecontracts.WorkflowContractBundle{Agents: agents}
+	addTestAgentOwners(bundle)
+	return semanticview.Wrap(bundle)
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {

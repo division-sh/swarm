@@ -9,14 +9,20 @@ import (
 )
 
 func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {
+	const owner = "test://manager/flows/ops/agents/worker"
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "ops", Flow: "ops"},
 		Path:  "ops",
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {Role: "worker", ManagerFallback: "control-injected"},
 		},
+		AgentURIs: map[string]string{"worker": owner},
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{owner: {Kind: "agent", FlowID: "ops", LocalID: "worker", Full: owner}},
+			ByURI:  map[string]runtimecontracts.ContractURIRef{owner: {Kind: "agent", FlowID: "ops", LocalID: "worker", Full: owner}},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}},
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -26,7 +32,7 @@ func TestDefaultManagerAgentID_UsesInjectedSemanticSource(t *testing.T) {
 	})
 	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{SemanticSource: source})
 
-	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker"})
+	got := am.defaultManagerAgentID(runtimeactors.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker", FlowID: "ops"})
 	if got != "control-injected" {
 		t.Fatalf("defaultManagerAgentID = %q, want control-injected", got)
 	}

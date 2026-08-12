@@ -5,7 +5,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -184,33 +183,21 @@ func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.Ag
 	if source == nil {
 		return agentFlowDataDeclaration{}, false
 	}
-	actorID := strings.TrimSpace(actor.ID)
-	if actorID == "" {
+	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
+	if !ok || strings.TrimSpace(declaration.OwnerFlowID) == "" {
 		return agentFlowDataDeclaration{}, false
 	}
-	var matches []agentFlowDataDeclaration
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
-			continue
-		}
-		for _, logicalID := range sortedAgentIDs(scope.Agents) {
-			entry := scope.Agents[logicalID]
-			if !agentIdentityMatches(logicalID, entry.ID, actorID) {
-				continue
-			}
-			matches = append(matches, agentFlowDataDeclaration{
-				LogicalID: strings.TrimSpace(logicalID),
-				Entry:     entry,
-				FlowID:    flowID,
-				Scope:     scope,
-			})
-		}
-	}
-	if len(matches) != 1 {
+	flowID := strings.TrimSpace(declaration.OwnerFlowID)
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
 		return agentFlowDataDeclaration{}, false
 	}
-	return matches[0], true
+	return agentFlowDataDeclaration{
+		LogicalID: strings.TrimSpace(declaration.LocalID),
+		Entry:     declaration.Entry,
+		FlowID:    flowID,
+		Scope:     scope,
+	}, true
 }
 
 func resolveUnderDataRoot(dataDir, filename string) (string, error) {
@@ -300,55 +287,3 @@ func scopedLabel(scopeLabel, localID string) string {
 func FlowDataAccessFromEntry(entry runtimecontracts.AgentRegistryEntry) []string {
 	return NormalizeAccessList(entry.FlowDataAccess)
 }
-
-func sortedAgentIDs(agents map[string]runtimecontracts.AgentRegistryEntry) []string {
-	ids := make([]string, 0, len(agents))
-	for id := range agents {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func agentIdentityMatches(logicalID, declaredID, actorID string) bool {
-	logicalID = strings.TrimSpace(logicalID)
-	declaredID = strings.TrimSpace(declaredID)
-	actorID = strings.TrimSpace(actorID)
-	if actorID == "" {
-		return false
-	}
-	if logicalID != "" && logicalID == actorID {
-		return true
-	}
-	if declaredID == "" {
-		return false
-	}
-	if declaredID == actorID {
-		return true
-	}
-	matched, err := regexp.MatchString(flowDataTemplateMatchPattern(declaredID), actorID)
-	return err == nil && matched
-}
-
-func flowDataTemplateMatchPattern(template string) string {
-	matches := flowDataTemplateFieldPattern.FindAllStringIndex(template, -1)
-	if len(matches) == 0 {
-		return "^" + regexp.QuoteMeta(template) + "$"
-	}
-	var builder strings.Builder
-	builder.WriteString("^")
-	last := 0
-	for _, match := range matches {
-		builder.WriteString(regexp.QuoteMeta(template[last:match[0]]))
-		builder.WriteString(".+")
-		last = match[1]
-	}
-	builder.WriteString(regexp.QuoteMeta(template[last:]))
-	builder.WriteString("$")
-	return builder.String()
-}
-
-var flowDataTemplateFieldPattern = regexp.MustCompile(`\{[^{}]+\}`)

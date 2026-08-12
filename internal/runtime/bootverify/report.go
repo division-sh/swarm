@@ -49,6 +49,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"contained_state_operation_compliance":    "Fix contained state operations so they target declared contained-state fields through supported syntax.",
 	"credential_key_exists":                   "Configure the required credential or fix access to the credential store used by verifier credential checks.",
 	"data_accumulation_expression_validation": "Fix the data_accumulation expression so it references declared fields and uses supported CEL syntax.",
+	"declared_agent_name_valid":               "Give every agent declaration one scoped URI owner and one non-empty literal public name, or remove the invalid declaration.",
 	"dialect_compliance":                      "Replace the unsupported contract dialect form with the promoted platform-spec shape or remove it.",
 	"emit_field_expression_validation":        "Fix the emit field expression so it references declared fields and uses supported CEL syntax.",
 	"entity_write_target_compliance":          "Update the entity write target to a declared writable entity field or remove the invalid write.",

@@ -20,7 +20,6 @@ const (
 	ChildFlowID            = "account"
 	ChildInputPin          = "account_notify_requested"
 	canonicalAccountAgents = `account-worker:
-  id: account-worker
   type: generic
   role: account_worker
   intent: prompts/account-worker.md
@@ -45,6 +44,7 @@ type Options struct {
 	ProducerBroadcast           bool
 	ObjectMembership            bool
 	UndeclaredPayloadMembership bool
+	ExplicitAgentName           bool
 	AgentTopologyRevision       int
 	AutoEmitOnCreate            bool
 	AutoEmitEventRevision       int
@@ -233,6 +233,9 @@ retired:
 `)
 	default:
 		t.Fatalf("unsupported agent topology revision %d", opts.AgentTopologyRevision)
+	}
+	if opts.ExplicitAgentName {
+		replaceFile(t, accountAgents, "account-worker:\n", "account-worker:\n  id: account-handler\n")
 	}
 	return root
 }

@@ -332,8 +332,8 @@ func emitActorFlowID(source semanticview.Source, actor models.AgentConfig, flowI
 	if source == nil {
 		return ""
 	}
-	if agentSource, ok := source.AgentContractSource(actor.ID); ok {
-		if flowID := strings.TrimSpace(agentSource.FlowID); flowID != "" {
+	if projection, ok := semanticview.ResolveAgentContractProjection(source, actor); ok {
+		if flowID := strings.TrimSpace(projection.OwnerFlowID); flowID != "" {
 			return flowID
 		}
 	}

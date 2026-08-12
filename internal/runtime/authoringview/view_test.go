@@ -293,6 +293,7 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 			},
 		},
 	}
+	addAuthoringViewAgentOwners(bundle)
 	view := mustBuild(t, semanticview.Wrap(bundle), nil)
 
 	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
@@ -622,6 +623,7 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 			},
 		},
 	}
+	addAuthoringViewAgentOwners(bundle)
 
 	view := mustBuild(t, semanticview.Wrap(bundle), nil)
 
@@ -642,6 +644,34 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	assertDefaultedAgentField(t, flowAgent, "memory_source", agentmemory.SourcePlatformDefault)
 	assertDefaultedAgentField(t, flowAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
 	assertDefaultedAgentField(t, flowAgent, "workspace_class", "")
+}
+
+func TestBuildRendersEffectivePublicAgentNameInsteadOfLocalCoordinate(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "public-worker", Model: "regular"},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"local-worker": {Kind: "agent", LocalID: "local-worker", Full: "swarm-test://local-worker"},
+			},
+		},
+	}
+	view := mustBuild(t, semanticview.Wrap(bundle), nil)
+	if len(view.Root.Agents) != 1 || view.Root.Agents[0].ID != "public-worker" {
+		t.Fatalf("root agents = %#v, want effective public-worker readback", view.Root.Agents)
+	}
+}
+
+func addAuthoringViewAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {
+	bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{
+		"root-agent": {
+			Kind: "agent", LocalID: "root-agent", Full: "swarm-test://root-agent",
+		},
+		"analysis/analyzer": {
+			Kind: "agent", FlowID: "analysis", LocalID: "analyzer", Path: "analysis", Full: "swarm-test://analysis/analyzer",
+		},
+	}
 }
 
 func assertDefaultedAgentField(t testing.TB, agent AgentView, field string, want any) {

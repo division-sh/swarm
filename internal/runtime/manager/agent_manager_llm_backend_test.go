@@ -135,7 +135,29 @@ func TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact(t *testing.T) {
 
 func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testing.T) {
 	artifact := capturedMockAlternative()
+	staticFlow := runtimecontracts.FlowContractView{
+		Path:  "static-support",
+		Paths: runtimecontracts.FlowContractPaths{ID: "static-support", Flow: "static-support"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"static-worker": managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{ID: "static-worker"}),
+		},
+	}
+	templateFlow := runtimecontracts.FlowContractView{
+		Path:  "template-support",
+		Paths: runtimecontracts.FlowContractPaths{ID: "template-support", Flow: "template-support"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "template-worker"}),
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{staticFlow, templateFlow}}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"static-support":   &root.Children[0],
+				"template-support": &root.Children[1],
+			},
+		},
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"static-support/static-worker": {
@@ -149,13 +171,13 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 			},
 		},
 	})
-	staticCfg, err := buildStaticFlowAgentConfig(source, "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
+	staticCfg, err := buildStaticFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "static-support", "static-worker"), "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
 		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
 	}), nil)
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
-	instantiatedCfg, err := buildFlowAgentConfig(source, "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
+	instantiatedCfg, err := buildFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
 		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.PlatformDefault(), Mock: artifact,
 	}), map[string]string{"instance_id": "inst-1"}, nil, nil)
 	if err != nil {

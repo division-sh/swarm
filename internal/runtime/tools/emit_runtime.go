@@ -208,7 +208,9 @@ func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []err
 	}
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	var errs []error
-	for _, actor := range providerSchemaValidationActors(source) {
+	actors, actorErrs := providerSchemaValidationActors(source)
+	errs = append(errs, actorErrs...)
+	for _, actor := range actors {
 		validatedTools := map[string]struct{}{}
 		for _, tool := range registry.GenerateEmitToolsForActor(actor, nil) {
 			validatedTools[tool.Name] = struct{}{}
@@ -238,11 +240,12 @@ func ValidateGeneratedEmitToolSchemasForSource(source semanticview.Source) []err
 	return errs
 }
 
-func providerSchemaValidationActors(source semanticview.Source) []models.AgentConfig {
+func providerSchemaValidationActors(source semanticview.Source) ([]models.AgentConfig, []error) {
 	if source == nil {
-		return nil
+		return nil, nil
 	}
 	var actors []models.AgentConfig
+	var errs []error
 	seen := map[string]struct{}{}
 	appendActor := func(actor models.AgentConfig) {
 		key := strings.Join([]string{
@@ -260,56 +263,18 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 		seen[key] = struct{}{}
 		actors = append(actors, actor)
 	}
-	for _, scope := range source.ProjectScopes() {
-		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
-			entry := scope.Agents[id]
-			proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{
-				AgentID:         id,
-				ProjectScopeKey: scope.Key,
-			})
-			appendActor(models.AgentConfig{
-				ID:              strings.TrimSpace(id),
-				Type:            strings.TrimSpace(entry.Type),
-				Role:            strings.TrimSpace(entry.Role),
-				FlowID:          strings.TrimSpace(proof.OwningFlowID),
-				Model:           strings.TrimSpace(entry.Model),
-				Memory:          entry.MemoryPlan,
-				MaxTurnsPerTask: entry.MaxTurnsPerTask,
-				Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
-				EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
-				Criteria:        UniqueNonEmpty(entry.Criteria),
-				Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
-				Permissions:     UniqueNonEmpty(entry.Permissions),
-				FlowPath:        strings.Trim(strings.TrimSpace(proof.FlowPath), "/"),
-			})
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
-	}
-	for _, scope := range source.FlowScopes() {
-		for _, id := range sortedEmitSchemaAgentIDs(scope.Agents) {
-			entry := scope.Agents[id]
-			appendActor(models.AgentConfig{
-				ID:              strings.TrimSpace(id),
-				Type:            strings.TrimSpace(entry.Type),
-				Role:            strings.TrimSpace(entry.Role),
-				FlowID:          strings.TrimSpace(scope.ID),
-				Model:           strings.TrimSpace(entry.Model),
-				Memory:          entry.MemoryPlan,
-				MaxTurnsPerTask: entry.MaxTurnsPerTask,
-				Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
-				EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
-				Criteria:        UniqueNonEmpty(entry.Criteria),
-				Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
-				Permissions:     UniqueNonEmpty(entry.Permissions),
-				FlowPath:        strings.Trim(strings.TrimSpace(scope.Path), "/"),
-			})
-		}
-	}
-	for _, id := range sortedEmitSchemaAgentIDs(source.AgentEntries()) {
-		entry := source.AgentEntries()[id]
+		entry := declaration.Entry
 		appendActor(models.AgentConfig{
-			ID:              strings.TrimSpace(id),
+			ID:              plan.AgentID,
 			Type:            strings.TrimSpace(entry.Type),
-			Role:            strings.TrimSpace(entry.Role),
+			Role:            plan.EffectiveRole(entry),
+			FlowID:          plan.OwnerFlowID,
 			Model:           strings.TrimSpace(entry.Model),
 			Memory:          entry.MemoryPlan,
 			MaxTurnsPerTask: entry.MaxTurnsPerTask,
@@ -318,21 +283,10 @@ func providerSchemaValidationActors(source semanticview.Source) []models.AgentCo
 			Criteria:        UniqueNonEmpty(entry.Criteria),
 			Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
 			Permissions:     UniqueNonEmpty(entry.Permissions),
+			FlowPath:        strings.Trim(strings.TrimSpace(source.FlowPath(plan.OwnerFlowID)), "/"),
 		})
 	}
-	return actors
-}
-
-func sortedEmitSchemaAgentIDs(agents map[string]runtimecontracts.AgentRegistryEntry) []string {
-	ids := make([]string, 0, len(agents))
-	for id := range agents {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	return ids
+	return actors, errs
 }
 
 func (r *EmitRegistry) EventSchemaSnapshot() map[string]EmitSchema {

@@ -551,6 +551,45 @@ func TestPopulateScopedURIs_RegistersKindsByFlowScope(t *testing.T) {
 	}
 }
 
+func TestPopulateScopedURIs_SeparatesProjectScopedDeclarationsWithTheSameLocalID(t *testing.T) {
+	type projectNode struct {
+		Path      string
+		Agents    map[string]struct{}
+		AgentURIs map[string]string
+	}
+	registry := &URIRegistry{
+		Agents: map[string]URIRef{},
+		ByURI:  map[string]URIRef{},
+	}
+	register := func(path string) projectNode {
+		node := projectNode{Path: path, Agents: map[string]struct{}{"worker": {}}}
+		PopulateScopedURIs(
+			&node,
+			registry,
+			func(*projectNode) string { return "" },
+			func(node *projectNode) string { return node.Path },
+			func(*projectNode) map[string]struct{} { return nil },
+			func(node *projectNode) map[string]struct{} { return node.Agents },
+			func(*projectNode) map[string]struct{} { return nil },
+			func(*projectNode) *map[string]string { return nil },
+			func(node *projectNode) *map[string]string { return &node.AgentURIs },
+			func(*projectNode) *map[string]string { return nil },
+		)
+		return node
+	}
+
+	left := register("packages/left")
+	right := register("packages/right")
+	if left.AgentURIs["worker"] == right.AgentURIs["worker"] {
+		t.Fatalf("project declaration URIs collapsed: left=%q right=%q", left.AgentURIs["worker"], right.AgentURIs["worker"])
+	}
+	for _, key := range []string{"packages/left/worker", "packages/right/worker"} {
+		if _, ok := registry.Agents[key]; !ok {
+			t.Fatalf("agent registry missing project-scoped coordinate %q: %#v", key, registry.Agents)
+		}
+	}
+}
+
 func TestIndexAndPopulateScopedURIs_AssignsTreeAndScopedURIs(t *testing.T) {
 	type scopedTreeNode struct {
 		ID        string

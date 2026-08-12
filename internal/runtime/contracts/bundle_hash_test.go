@@ -776,7 +776,7 @@ func bundleHashTestBundleWithIntent(t *testing.T, root, platform, coordinate str
 	return bundle
 }
 
-func TestBundleCatalogAgentProjectionPreservesScopedDuplicateLogicalIDs(t *testing.T) {
+func TestBundleCatalogAgentProjectionRendersEffectiveNamesForScopedDuplicateCoordinates(t *testing.T) {
 	rootIntent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.worker.intent", "root intent")
 	if err != nil {
 		t.Fatal(err)
@@ -787,7 +787,7 @@ func TestBundleCatalogAgentProjectionPreservesScopedDuplicateLogicalIDs(t *testi
 	}
 	flow := FlowContractView{
 		Paths:  FlowContractPaths{ID: "review", Flow: "review", AgentsFile: "/contracts/flows/review/agents.yaml"},
-		Agents: map[string]AgentRegistryEntry{"worker": {ID: "worker", ResolvedIntent: flowIntent}},
+		Agents: map[string]AgentRegistryEntry{"worker": {ID: "review-worker", ResolvedIntent: flowIntent}},
 	}
 	bundle := &WorkflowContractBundle{
 		projectContracts: map[string]ProjectContractView{
@@ -799,14 +799,17 @@ func TestBundleCatalogAgentProjectionPreservesScopedDuplicateLogicalIDs(t *testi
 		FlowTree: FlowTree{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
 	}
 
-	projected := bundleCatalogAgentsJSON(bundle)
+	projected, err := bundleCatalogAgentsJSON(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(projected) != 2 {
 		t.Fatalf("catalog agents = %#v, want both scoped worker declarations", projected)
 	}
 	first := projected[0].(map[string]any)
 	second := projected[1].(map[string]any)
-	if first["agent_id"] != "worker" || second["agent_id"] != "worker" {
-		t.Fatalf("catalog agent ids = %#v, want duplicate logical ids preserved", projected)
+	if first["agent_id"] != "worker" || second["agent_id"] != "review-worker" {
+		t.Fatalf("catalog agent ids = %#v, want scoped effective names worker and review-worker", projected)
 	}
 	seen := map[string]string{}
 	for _, raw := range projected {

@@ -93,6 +93,10 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 	if err != nil {
 		return BundleCatalogProjection{}, err
 	}
+	agents, err := bundleCatalogAgentsJSON(bundle)
+	if err != nil {
+		return BundleCatalogProjection{}, err
+	}
 	parsed := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
 		"package":            bundleCatalogPackageJSON(bundle.Package),
@@ -101,7 +105,7 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 			"version": strings.TrimSpace(bundle.Semantics.Version),
 		},
 		"files":  bundleCatalogFilesJSON(files),
-		"agents": bundleCatalogAgentsJSON(bundle),
+		"agents": agents,
 	}
 	metadata := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
@@ -256,13 +260,17 @@ func packageExtraJSON(extra map[string]string) map[string]string {
 	return out
 }
 
-func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) []any {
+func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) ([]any, error) {
 	records := bundleAgentRecords(bundle)
 	out := make([]any, 0, len(records))
 	for _, record := range records {
 		entry := record.Entry
+		agentID, err := DeclaredAgentID(record.LogicalID, entry)
+		if err != nil {
+			return nil, fmt.Errorf("project bundle catalog agent %q: %w", record.LogicalID, err)
+		}
 		def := map[string]any{
-			"agent_id": record.LogicalID,
+			"agent_id": agentID,
 		}
 		addStringField(def, "role", entry.Role)
 		addStringField(def, "type", firstNonEmpty(entry.Type, entry.NodeType))
@@ -280,7 +288,7 @@ func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) []any {
 		addStringListField(def, "tools", entry.ConfiguredTools())
 		out = append(out, def)
 	}
-	return out
+	return out, nil
 }
 
 func addStringField(values map[string]any, key, value string) {

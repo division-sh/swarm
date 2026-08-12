@@ -40,6 +40,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -2353,7 +2354,7 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"worker": {ID: "worker"},
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 	module := stubWorkflowModule{source: source}
 	cfg := testWorkspaceBackendConfig(llmselection.BackendClaudeCLI)
 	supervisor := newRuntimeProjectSupervisor(

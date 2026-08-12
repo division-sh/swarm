@@ -2,7 +2,6 @@ package tools
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -49,9 +48,9 @@ func ResolveAgentPermissions(source semanticview.Source, flowID string, entry ru
 }
 
 func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
-	agents := scopedAgentEntries(source)
+	agents, errs := scopedAgentEntries(source)
 	known := knownPermissionNames(source)
-	errs := ValidateRetiredDynamicAgentToolReferences(source)
+	errs = append(errs, ValidateRetiredDynamicAgentToolReferences(source)...)
 	for _, agent := range agents {
 		policy := agent.policy
 		if len(policy.Values) == 0 && source != nil {
@@ -64,7 +63,7 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 		}
 		cfg := models.AgentConfig{
 			ID:          agent.id,
-			Role:        strings.TrimSpace(agent.entry.Role),
+			Role:        agent.role,
 			Permissions: perms,
 		}
 		for _, perm := range perms {
@@ -96,44 +95,33 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 
 type scopedAgentEntry struct {
 	id     string
+	role   string
 	flowID string
 	entry  runtimecontracts.AgentRegistryEntry
 	policy runtimecontracts.PolicyDocument
 }
 
-func scopedAgentEntries(source semanticview.Source) []scopedAgentEntry {
+func scopedAgentEntries(source semanticview.Source) ([]scopedAgentEntry, []error) {
 	if source == nil {
-		return nil
+		return nil, nil
 	}
 	entries := make([]scopedAgentEntry, 0)
-	for _, id := range sortedAgentIDs(source.AgentEntries()) {
-		flowID := ""
-		if sourceInfo, ok := source.AgentContractSource(id); ok {
-			flowID = strings.TrimSpace(sourceInfo.FlowID)
+	var errs []error
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
 		entries = append(entries, scopedAgentEntry{
-			id:     id,
-			flowID: flowID,
-			entry:  source.AgentEntries()[id],
-			policy: source.ResolvedPolicyForFlow(flowID),
+			id:     plan.AgentID,
+			role:   plan.EffectiveRole(declaration.Entry),
+			flowID: plan.OwnerFlowID,
+			entry:  declaration.Entry,
+			policy: source.ResolvedPolicyForFlow(plan.OwnerFlowID),
 		})
 	}
-	return entries
-}
-
-func sortedAgentIDs(entries map[string]runtimecontracts.AgentRegistryEntry) []string {
-	if len(entries) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(entries))
-	for id := range entries {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			ids = append(ids, id)
-		}
-	}
-	sort.Strings(ids)
-	return ids
+	return entries, errs
 }
 
 func resolveAgentPermissionsFromPolicy(entry runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) ([]string, error) {

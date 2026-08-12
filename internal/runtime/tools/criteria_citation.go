@@ -78,42 +78,14 @@ func criteriaRefsForActor(source semanticview.Source, actor models.AgentConfig) 
 }
 
 func criteriaAgentContractDeclaration(source semanticview.Source, actor models.AgentConfig) (runtimecontracts.AgentRegistryEntry, string, bool) {
-	actorID := strings.TrimSpace(actor.ID)
-	if source == nil || actorID == "" {
+	if source == nil {
 		return runtimecontracts.AgentRegistryEntry{}, "", false
 	}
-	type match struct {
-		entry  runtimecontracts.AgentRegistryEntry
-		flowID string
-	}
-	matches := []match{}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
-			continue
-		}
-		for _, logicalID := range sortedAgentIDs(scope.Agents) {
-			entry := scope.Agents[logicalID]
-			if !criteriaAgentIdentityMatches(logicalID, entry.ID, actorID) {
-				continue
-			}
-			matches = append(matches, match{entry: entry, flowID: flowID})
-		}
-	}
-	if len(matches) != 1 {
+	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
+	if !ok || strings.TrimSpace(declaration.OwnerFlowID) == "" {
 		return runtimecontracts.AgentRegistryEntry{}, "", false
 	}
-	return matches[0].entry, matches[0].flowID, true
-}
-
-func criteriaAgentIdentityMatches(logicalID, declaredID, actorID string) bool {
-	logicalID = strings.TrimSpace(logicalID)
-	declaredID = strings.TrimSpace(declaredID)
-	actorID = strings.TrimSpace(actorID)
-	if actorID == "" {
-		return false
-	}
-	return logicalID == actorID || declaredID == actorID
+	return declaration.Entry, strings.TrimSpace(declaration.OwnerFlowID), true
 }
 
 func criteriaCitationIDs(value any) ([]string, error) {

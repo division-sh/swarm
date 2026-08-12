@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -79,6 +80,34 @@ func EffectiveAgentRegistryEntry(logicalID string, entry AgentRegistryEntry) Age
 	}
 
 	return effective
+}
+
+// DeclaredAgentID derives the public agent name from one authored declaration.
+// Scoped ownership is added by semanticview before the name becomes runtime identity.
+func DeclaredAgentID(logicalID string, entry AgentRegistryEntry) (string, error) {
+	logicalID = strings.TrimSpace(logicalID)
+	if logicalID == "" {
+		return "", fmt.Errorf("agent declaration map key is required")
+	}
+	authoredID := entry.AuthoredFields["id"]
+	agentID := strings.TrimSpace(entry.ID)
+	if authoredID && agentID == "" {
+		return "", fmt.Errorf(
+			"agent %q id is authored but empty; omit id to use the map key, or author a non-empty literal id",
+			logicalID,
+		)
+	}
+	if strings.ContainsAny(agentID, "{}") {
+		return "", fmt.Errorf(
+			"agent %q id %q contains interpolation; move the discriminator to instance.by because agent identity is declaration x instance route",
+			logicalID,
+			agentID,
+		)
+	}
+	if agentID == "" {
+		return logicalID, nil
+	}
+	return agentID, nil
 }
 
 func (e AgentRegistryEntry) EffectiveSourceForField(field string) string {

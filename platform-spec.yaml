@@ -301,11 +301,14 @@ contract_formats:
     flow_namespace: Non-authorable. Derived from the flow path relative to root. A flow at flows/intake/ gets namespace "intake".
       Root flow gets empty namespace. Public schema.yaml namespace override fields, including namespace, namespace_prefix,
       and namespace_rule, are not accepted.
-    agent_id: 'Optional. If omitted, the YAML map key IS the agent ID. agents.yaml uses map keys as canonical identifiers:
-      {"classifier-agent": {model: regular, ...}} means agent_id = "classifier-agent". Explicit id field overrides the
-      map key if present, but this is discouraged. Under agent_identity_model.current_supported_posture this authored
-      slug is also the current public/runtime agent_id and must be unique across live loaded/boot-pinned bundles until
-      the #977 UUID-internal migration is separately promoted and implemented.'
+    agent_id: 'Optional presence-aware literal public name. If omitted, the YAML map key derives agent_id:
+      {"classifier-agent": {model: regular, ...}} means agent_id = "classifier-agent". If id is present, it MUST be
+      a non-empty literal; empty, whitespace, null, bare, tilde, and any interpolation form hard-fail loading. Business
+      discriminators belong in instance.by because concrete identity is declaration x flow route. The declaration map
+      key remains the scoped URI/lookup coordinate even when a literal id overrides the public name. Effective public
+      names MUST be unique within one declaration scope. Under agent_identity_model.current_supported_posture this
+      effective name is the public/runtime agent_id and must be unique across live loaded/boot-pinned bundles until the
+      #977 UUID-internal migration is separately promoted and implemented.'
     agent_emit_events: Optional. If omitted, defaults to empty list []. An agent that only observes (subscribes but never
       emits) may omit emit_events entirely.
   file_layout:
@@ -4568,7 +4571,9 @@ engine:
     process:
     - 1. For each flow in the flat list (from walker), construct its instance path.
     - '2. For each node in flow''s nodes.yaml: register with URI {root}://{instance_path}/{node_id}'
-    - '3. For each agent in flow''s agents.yaml: register with URI {root}://{instance_path}/{agent_id}'
+    - '3. For each agent in flow''s agents.yaml: register its declaration with URI {root}://{instance_path}/{agent_local_id},
+      where agent_local_id is the YAML map key. A literal id override changes only the effective public agent_id and never
+      the declaration URI segment.'
     - '4. For each event in flow''s events.yaml: register with URI {root}://{instance_path}/{event_name}'
     - '5. For each tool in flow''s tools.yaml: register as shared (tools are not URI-scoped)'
     - '6. For each policy key in flow''s policy.yaml: register scoped to flow instance'
@@ -15830,9 +15835,21 @@ agent_identity_model:
     workspace, recovery, or control identity.
   concepts:
     agent_name:
-      source: agents.yaml map key or explicit id field after contract loading
+      source: One presence-aware scoped AgentDeclaration plan derives a non-empty literal effective name from the agents.yaml
+        map key or an explicitly present literal id field, then materializes one declared agentidentity.Name with the
+        declaration owner URI.
       current_public_name: agent_id
-      role: Human-authored or runtime-created operator-facing name with explicit provenance and owner.
+      declaration_coordinate: The YAML map key and scoped owner URI remain the authoring/lookup coordinate; an explicit
+        id never rewrites the URI.
+      invalid_authored_forms: [empty, whitespace_only, null, bare, tilde, interpolation]
+      collision_rule: Two declarations in one scope MUST NOT derive the same effective public name.
+      role: Human-authored or runtime-created operator-facing name with explicit provenance and owner. Runtime, routing,
+        activation, verification, diagnostics, catalog, tool, authority, timer, and lookup consumers MUST consume the
+        typed plan/materialized name rather than reconstructing from wire ID or map keys.
+      runtime_role_projection: 'A declaration-derived runtime actor role is the explicit agents.yaml role when present;
+        otherwise it is the declaration effective public agent_id. Static activation, template activation, authority,
+        emit-schema, native-tool, and permission projections MUST consume this same value. This does not change
+        required_agents fulfillment: required-agent sockets remain bound to the scoped agents.yaml map key.'
     concrete_live_identity:
       source: agent name provenance plus explicit present-or-root route
       role: Durable composite primary key, runtime map key, EventBus target key, delivery/session/timer/workspace owner,

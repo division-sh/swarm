@@ -321,6 +321,18 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_CriteriaCitationsSelectActorScopeForSharedEffectiveName(t *testing.T) {
+	exec, bus, actor := criteriaCitationEmitTestExecutor(t)
+	if _, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", map[string]any{
+		"cite": "FX-HARD-01",
+	}); err != nil {
+		t.Fatalf("handleEmitTool: %v", err)
+	}
+	if bus.count != 1 {
+		t.Fatalf("publish count = %d, want 1", bus.count)
+	}
+}
+
 func criteriaCitationEmitTestExecutor(t testing.TB) (*Executor, *publishBusCapture, models.AgentConfig) {
 	return criteriaCitationEmitTestExecutorWithAgent(t, runtimecontracts.AgentRegistryEntry{
 		ID:         "cto-agent",
@@ -381,12 +393,31 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 			},
 		},
 	}
-	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	otherFlow := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "other-validation", Flow: "other-validation"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Path:   "other-validation",
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"cto-agent": {Role: "other-cto", Criteria: []string{"other_criteria"}},
+		},
+	}
+	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow, otherFlow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"validation": &root.Children[0],
+				"validation":       &root.Children[0],
+				"other-validation": &root.Children[1],
+			},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"validation/cto-agent":       {Kind: "agent", FlowID: "validation", LocalID: "cto-agent", Path: "validation", Full: "swarm-test://validation/cto-agent"},
+				"other-validation/cto-agent": {Kind: "agent", FlowID: "other-validation", LocalID: "cto-agent", Path: "other-validation", Full: "swarm-test://other-validation/cto-agent"},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				"swarm-test://validation/cto-agent":       {Kind: "agent", FlowID: "validation", LocalID: "cto-agent", Path: "validation", Full: "swarm-test://validation/cto-agent"},
+				"swarm-test://other-validation/cto-agent": {Kind: "agent", FlowID: "other-validation", LocalID: "cto-agent", Path: "other-validation", Full: "swarm-test://other-validation/cto-agent"},
 			},
 		},
 	}

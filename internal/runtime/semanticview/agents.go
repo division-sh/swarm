@@ -1,48 +1,87 @@
 package semanticview
 
 import (
-	"regexp"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
-type agentRecord struct {
-	logicalID string
-	entry     runtimecontracts.AgentRegistryEntry
-	flowID    string
-}
-
 func ResolveAgentRegistryEntry(source Source, cfg models.AgentConfig) (string, runtimecontracts.AgentRegistryEntry, bool) {
-	if source == nil {
+	declaration, ok := ResolveAgentDeclaration(source, cfg)
+	if !ok {
 		return "", runtimecontracts.AgentRegistryEntry{}, false
 	}
-	if matched := resolveAgentRegistryByID(source, strings.TrimSpace(cfg.ID)); matched != "" {
-		for _, record := range agentRecords(source) {
-			if strings.TrimSpace(record.logicalID) == matched {
-				return matched, record.entry, true
-			}
+	return strings.TrimSpace(declaration.LocalID), declaration.Entry, true
+}
+
+// ResolveAgentDeclaration returns the exact scoped declaration owned by a
+// runtime actor. Effective public names are only unique within a scope, so the
+// scope must remain attached throughout selection.
+func ResolveAgentDeclaration(source Source, cfg models.AgentConfig) (AgentDeclaration, bool) {
+	if source == nil {
+		return AgentDeclaration{}, false
+	}
+	agentID := strings.TrimSpace(cfg.ID)
+	flowID := strings.TrimSpace(cfg.FlowID)
+	name := cfg.Identity.Name.Normalize()
+	if name.Source == agentidentity.NameSourceDeclared {
+		if err := name.Validate(); err != nil || (agentID != "" && agentID != name.AgentID) {
+			return AgentDeclaration{}, false
 		}
-		return "", runtimecontracts.AgentRegistryEntry{}, false
+		if declaration, ok := resolveAgentDeclarationByName(source, flowID, name.AgentID, name.Owner); ok {
+			return declaration, true
+		}
+		return AgentDeclaration{}, false
+	}
+	if declaration, ok := resolveAgentDeclarationByID(source, flowID, agentID); ok {
+		return declaration, true
+	}
+	if agentID != "" && retiredLocalAgentAlias(source, flowID, agentID) {
+		return AgentDeclaration{}, false
 	}
 
 	role := canonicalLookupValue(cfg.Role)
 	if role == "" {
-		return "", runtimecontracts.AgentRegistryEntry{}, false
+		return AgentDeclaration{}, false
 	}
-	flowID := canonicalLookupValue(cfg.FlowID)
-	for _, record := range agentRecords(source) {
-		if canonicalLookupValue(record.entry.Role) != role {
+	var matched AgentDeclaration
+	for _, declaration := range AgentDeclarations(source) {
+		plan, err := ScopedAgentNamePlan(source, declaration)
+		if err != nil || canonicalLookupValue(plan.EffectiveRole(declaration.Entry)) != role {
 			continue
 		}
-		if flowID != "" && canonicalLookupValue(record.flowID) != flowID {
+		if !agentDeclarationMatchesFlow(declaration, flowID) {
 			continue
 		}
-		return strings.TrimSpace(record.logicalID), record.entry, true
+		if strings.TrimSpace(matched.LocalID) != "" {
+			return AgentDeclaration{}, false
+		}
+		matched = declaration
 	}
-	return "", runtimecontracts.AgentRegistryEntry{}, false
+	if strings.TrimSpace(matched.LocalID) == "" {
+		return AgentDeclaration{}, false
+	}
+	return matched, true
+}
+
+func retiredLocalAgentAlias(source Source, flowID, candidate string) bool {
+	flowID = strings.TrimSpace(flowID)
+	candidate = strings.TrimSpace(candidate)
+	for _, declaration := range AgentDeclarations(source) {
+		if strings.TrimSpace(declaration.LocalID) != candidate {
+			continue
+		}
+		if flowID != "" && strings.TrimSpace(declaration.OwnerFlowID) != flowID {
+			continue
+		}
+		plan, err := ScopedAgentNamePlan(source, declaration)
+		if err == nil && plan.AgentID != candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func AgentDeclarationOwner(source Source, flowID, logicalID string) (string, bool) {
@@ -56,9 +95,6 @@ func ScopedAgentDeclarationOwner(source Source, declaration AgentDeclaration) (s
 			strings.TrimSpace(candidate.ScopeID) != strings.TrimSpace(declaration.ScopeID) ||
 			strings.TrimSpace(candidate.LocalID) != strings.TrimSpace(declaration.LocalID) {
 			continue
-		}
-		if strings.TrimSpace(candidate.ScopeKind) != "" && strings.TrimSpace(candidate.OwnerURI) == "" {
-			return "", false
 		}
 		ownerURI := strings.TrimSpace(candidate.OwnerURI)
 		for _, other := range declarations {
@@ -166,75 +202,65 @@ func projectAgentRefOwnedByFlow(source Source, ref runtimecontracts.ContractURIR
 	return matchingRefs == 1
 }
 
-func resolveAgentRegistryByID(source Source, agentID string) string {
+func resolveAgentDeclarationByName(source Source, flowID, agentID, ownerURI string) (AgentDeclaration, bool) {
+	flowID = strings.TrimSpace(flowID)
+	agentID = strings.TrimSpace(agentID)
+	ownerURI = strings.TrimSpace(ownerURI)
+	if source == nil || agentID == "" || ownerURI == "" {
+		return AgentDeclaration{}, false
+	}
+	var matched AgentDeclaration
+	for _, declaration := range AgentDeclarations(source) {
+		if !agentDeclarationMatchesFlow(declaration, flowID) {
+			continue
+		}
+		plan, err := ScopedAgentNamePlan(source, declaration)
+		if err != nil || plan.AgentID != agentID || plan.OwnerURI != ownerURI {
+			continue
+		}
+		if strings.TrimSpace(matched.LocalID) != "" {
+			return AgentDeclaration{}, false
+		}
+		matched = declaration
+	}
+	if strings.TrimSpace(matched.LocalID) == "" {
+		return AgentDeclaration{}, false
+	}
+	return matched, true
+}
+
+func resolveAgentDeclarationByID(source Source, flowID, agentID string) (AgentDeclaration, bool) {
+	flowID = strings.TrimSpace(flowID)
 	agentID = strings.TrimSpace(agentID)
 	if source == nil || agentID == "" {
-		return ""
+		return AgentDeclaration{}, false
 	}
-	for _, record := range agentRecords(source) {
-		if strings.TrimSpace(record.logicalID) == agentID || registryIDMatches(record.entry.ID, agentID) {
-			return strings.TrimSpace(record.logicalID)
+	var matched AgentDeclaration
+	for _, declaration := range AgentDeclarations(source) {
+		if !agentDeclarationMatchesFlow(declaration, flowID) {
+			continue
 		}
+		plan, err := ScopedAgentNamePlan(source, declaration)
+		if err != nil || plan.AgentID != agentID {
+			continue
+		}
+		if strings.TrimSpace(matched.LocalID) != "" {
+			return AgentDeclaration{}, false
+		}
+		matched = declaration
 	}
-	return ""
+	if strings.TrimSpace(matched.LocalID) == "" {
+		return AgentDeclaration{}, false
+	}
+	return matched, true
 }
 
-func agentRecords(source Source) []agentRecord {
-	if source == nil {
-		return nil
-	}
-	projectScopes := source.ProjectScopes()
-	flowScopes := source.FlowScopes()
-	records := make([]agentRecord, 0, len(projectScopes)+len(flowScopes))
-	for _, scope := range projectScopes {
-		for _, logicalID := range sortedKeys(scope.Agents) {
-			records = append(records, agentRecord{
-				logicalID: logicalID,
-				entry:     scope.Agents[logicalID],
-			})
-		}
-	}
-	for _, scope := range flowScopes {
-		for _, logicalID := range sortedKeys(scope.Agents) {
-			records = append(records, agentRecord{
-				logicalID: logicalID,
-				entry:     scope.Agents[logicalID],
-				flowID:    strings.TrimSpace(scope.ID),
-			})
-		}
-	}
-	return records
-}
-
-func registryIDMatches(template, candidate string) bool {
-	template = strings.TrimSpace(template)
-	candidate = strings.TrimSpace(candidate)
-	if template == "" || candidate == "" {
-		return false
-	}
-	if template == candidate {
+func agentDeclarationMatchesFlow(declaration AgentDeclaration, flowID string) bool {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
 		return true
 	}
-	matched, err := regexp.MatchString(templateMatchPattern(template), candidate)
-	return err == nil && matched
-}
-
-func templateMatchPattern(template string) string {
-	matches := promptTemplateFieldPattern.FindAllStringIndex(template, -1)
-	if len(matches) == 0 {
-		return "^" + regexp.QuoteMeta(template) + "$"
-	}
-	var builder strings.Builder
-	builder.WriteString("^")
-	last := 0
-	for _, match := range matches {
-		builder.WriteString(regexp.QuoteMeta(template[last:match[0]]))
-		builder.WriteString(".+")
-		last = match[1]
-	}
-	builder.WriteString(regexp.QuoteMeta(template[last:]))
-	builder.WriteString("$")
-	return builder.String()
+	return strings.TrimSpace(declaration.OwnerFlowID) == flowID
 }
 
 func canonicalLookupValue(value string) string {
@@ -242,23 +268,3 @@ func canonicalLookupValue(value string) string {
 	value = strings.ReplaceAll(value, "_", "-")
 	return value
 }
-
-func sortedKeys[V any](m map[string]V) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			keys = append(keys, key)
-		}
-	}
-	if len(keys) == 0 {
-		return nil
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-var promptTemplateFieldPattern = regexp.MustCompile(`\{[^{}]+\}`)

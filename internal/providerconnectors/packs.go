@@ -535,14 +535,6 @@ func (s connectorPackSource) ProjectScopes() []semanticview.ProjectScope {
 	return out
 }
 
-func (s connectorPackSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
-	if tool, ok := s.Source.ToolEntryForAgent(agentID, toolID); ok {
-		return tool, true
-	}
-	tool, ok := s.importedTools[strings.TrimSpace(toolID)]
-	return tool, ok
-}
-
 func (s connectorPackSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	out := cloneConnectorEventCatalog(s.Source.ResolvedEventCatalog())
 	for eventType, entry := range s.generatedActivityEventEntries() {

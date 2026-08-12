@@ -60,7 +60,7 @@ func actorHasEntityContract(source semanticview.Source, actor models.AgentConfig
 	if source == nil || strings.TrimSpace(actor.ID) == "" {
 		return false
 	}
-	_, ok := entityruntime.ResolveForActor(source, actor.ID)
+	_, ok := entityruntime.ResolveForActor(source, actor)
 	return ok
 }
 
@@ -315,7 +315,7 @@ func roleScopedToolNamePart(raw string) string {
 }
 
 func roleScopedEntityToolSpecForActor(source semanticview.Source, actor models.AgentConfig, toolName string) (roleScopedEntityToolSpec, entityruntime.Contract, bool) {
-	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	contract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
 		return roleScopedEntityToolSpec{}, entityruntime.Contract{}, false
 	}
@@ -331,7 +331,7 @@ func (e *Executor) RoleScopedEntityToolNamesForActor(actor models.AgentConfig) m
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	contract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
 		return nil
 	}
@@ -360,7 +360,7 @@ func roleScopedEntityToolsEligibleForCurrentTurn(ctx context.Context, store Enti
 	if store == nil || source == nil {
 		return false
 	}
-	contract, ok := entityruntime.ResolveForActor(source, actor.ID)
+	contract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
 		return false
 	}

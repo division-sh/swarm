@@ -107,11 +107,13 @@ func eventMetadataInternalActorNames(source semanticview.Source) eventMetadataNa
 			names.add(id, fmt.Sprintf("system node %s", id))
 		}
 	}
-	for agentKey, agent := range source.AgentEntries() {
-		agentKey = strings.TrimSpace(agentKey)
-		names.add(agentKey, fmt.Sprintf("agent %s", agentKey))
-		names.add(agent.ID, fmt.Sprintf("agent %s", strings.TrimSpace(agent.ID)))
-		names.add(agent.Role, fmt.Sprintf("agent role %s", strings.TrimSpace(agent.Role)))
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			continue
+		}
+		names.add(plan.AgentID, fmt.Sprintf("agent %s", plan.AgentID))
+		names.add(declaration.Entry.Role, fmt.Sprintf("agent role %s", strings.TrimSpace(declaration.Entry.Role)))
 	}
 	for _, required := range source.RequiredAgents() {
 		names.add(required.Role, fmt.Sprintf("required agent role %s", strings.TrimSpace(required.Role)))
@@ -245,7 +247,7 @@ func eventMetadataAddEndpointRole(source semanticview.Source, names eventMetadat
 		if endpoint.Direction == semanticview.EventEndpointProducer {
 			role = "emit_events"
 		}
-		eventMetadataAddAgentRole(names, endpoint.AgentID, source.AgentEntries()[endpoint.AgentID], role)
+		eventMetadataAddAgentRole(names, endpoint.AgentID, endpoint.Role, role)
 	case semanticview.EventEndpointRequiredAgentRole:
 		role := "subscribes_to"
 		if endpoint.Direction == semanticview.EventEndpointProducer {
@@ -280,15 +282,14 @@ func eventMetadataAddNodeRole(names eventMetadataNameIndex, nodeKey string, node
 	}
 }
 
-func eventMetadataAddAgentRole(names eventMetadataNameIndex, agentKey string, agent runtimecontracts.AgentRegistryEntry, role string) {
+func eventMetadataAddAgentRole(names eventMetadataNameIndex, agentKey, agentRole, role string) {
 	agentKey = strings.TrimSpace(agentKey)
 	role = strings.TrimSpace(role)
 	if role == "" {
 		role = "topology"
 	}
 	names.add(agentKey, fmt.Sprintf("agent %s %s", agentKey, role))
-	names.add(agent.ID, fmt.Sprintf("agent %s %s", strings.TrimSpace(agent.ID), role))
-	names.add(agent.Role, fmt.Sprintf("agent role %s %s", strings.TrimSpace(agent.Role), role))
+	names.add(agentRole, fmt.Sprintf("agent role %s %s", strings.TrimSpace(agentRole), role))
 }
 
 func eventMetadataAddFlowRole(names eventMetadataNameIndex, flowID, pinName, role string) {

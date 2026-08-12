@@ -410,9 +410,6 @@ func (s bundleSource) RuntimeEventOwners(eventType string) []string {
 func (s bundleSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
 	return s.bundle.NodeContractSource(nodeID)
 }
-func (s bundleSource) AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool) {
-	return s.bundle.AgentContractSource(agentID)
-}
 func (s bundleSource) ResolveNodeEventReference(nodeID, eventType string) string {
 	return s.bundle.ResolveNodeEventReference(nodeID, eventType)
 }
@@ -446,9 +443,6 @@ func (s bundleSource) EventEntry(eventType string) (runtimecontracts.EventCatalo
 }
 func (s bundleSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	return s.bundle.ToolEntries()
-}
-func (s bundleSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
-	return s.bundle.ToolEntryForAgent(agentID, toolID)
 }
 func (s bundleSource) AuthoredResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.AuthoredResolvedEventCatalog()

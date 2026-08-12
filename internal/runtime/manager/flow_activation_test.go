@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -2863,7 +2864,7 @@ func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *tes
 	}
 }
 
-func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *testing.T) {
+func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
@@ -2882,27 +2883,12 @@ func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *
 		"instance_id":        "wrong-config-instance",
 		"template_id":        "wrong-config-template",
 	}
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
-		t.Fatalf("ActivateFlowInstance: %v", err)
+	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	if err == nil || !strings.Contains(err.Error(), "contains interpolation") || !strings.Contains(err.Error(), "instance.by") {
+		t.Fatalf("ActivateFlowInstance error = %v, want agent-name interpolation teaching error", err)
 	}
-	if _, ok := testAgentConfig(t, am, "reviewer-review/inst-1", ""); !ok {
-		t.Fatalf("expected flow agent rendered with built-in flow_instance_path, configs=%#v", am.ListAgentConfigs())
-	}
-	if len(bus.addedRouteRequests) != 1 {
-		t.Fatalf("route materialization requests = %#v, want one", bus.addedRouteRequests)
-	}
-	vars := bus.addedRouteRequests[0].ActivationVariables
-	if got := vars["flow_instance_path"]; got != "review/inst-1" {
-		t.Fatalf("route activation variable flow_instance_path = %q, want review/inst-1", got)
-	}
-	if got := vars["flow_scope_key"]; got != "review" {
-		t.Fatalf("route activation variable flow_scope_key = %q, want review", got)
-	}
-	if got := vars["instance_id"]; got != "inst-1" {
-		t.Fatalf("route activation variable instance_id = %q, want inst-1", got)
-	}
-	if got := vars["template_id"]; got != "review" {
-		t.Fatalf("route activation variable template_id = %q, want review", got)
+	if len(bus.addedRouteRequests) != 0 || len(am.ListAgentConfigs()) != 0 {
+		t.Fatalf("rejected interpolation mutated activation: routes=%#v agents=%#v", bus.addedRouteRequests, am.ListAgentConfigs())
 	}
 }
 
@@ -3646,8 +3632,10 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 }
 
 func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t *testing.T) {
+	source := semanticview.Wrap(testNestedFlowBundle())
 	cfg, err := buildFlowAgentConfig(
-		semanticview.Wrap(testNestedFlowBundle()),
+		source,
+		managerTestFlowAgentNamePlan(t, source, "grandchild", "worker"),
 		"grandchild",
 		"inst-1",
 		"ent-1",
@@ -3668,6 +3656,47 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t 
 	}
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "child/grandchild/inst-1/micro.started" {
 		t.Fatalf("subscriptions = %#v, want [child/grandchild/inst-1/micro.started]", cfg.Subscriptions)
+	}
+}
+
+func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *testing.T) {
+	bundle := testFlowBundle("")
+	review := bundle.FlowTree.ByID["review"]
+	entry := review.Agents["reviewer"]
+	entry.ID = "public-reviewer"
+	entry.Role = ""
+	review.Agents["reviewer"] = entry
+	bundle.FlowTree.Root.Children[0] = *review
+	source := semanticview.Wrap(bundle)
+	namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
+
+	staticCfg, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, staticFlowLocalEventSet(review.Agents))
+	if err != nil {
+		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
+	}
+	templateCfg, err := buildFlowAgentConfig(
+		source,
+		namePlan,
+		"review",
+		"inst-1",
+		"ent-1",
+		"review/inst-1",
+		"reviewer",
+		entry,
+		nil,
+		staticFlowLocalEventSet(review.Agents),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildFlowAgentConfig: %v", err)
+	}
+	for _, cfg := range []models.AgentConfig{staticCfg, templateCfg} {
+		if cfg.ID != "public-reviewer" || cfg.Role != "public-reviewer" {
+			t.Fatalf("materialized actor = id %q role %q, want effective public role", cfg.ID, cfg.Role)
+		}
+		if err := runtimeauthority.NewSourceProvider(source).AuthorizeMailboxSend(cfg); err != nil {
+			t.Fatalf("materialized actor mailbox authority: %v", err)
+		}
 	}
 }
 
@@ -3725,6 +3754,72 @@ func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *test
 	}
 }
 
+func TestStaticAgentMaterializationKeepsDistinctProjectAndFlowDeclarationsWithSharedLocalID(t *testing.T) {
+	projectOwner := "test://agent-name/packages/support-extension/worker"
+	flowOwner := "test://agent-name/flows/support/worker"
+	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+		projectOwner: {Kind: "agent", LocalID: "worker", Full: projectOwner},
+		flowOwner:    {Kind: "agent", FlowID: "support", LocalID: "worker", Full: flowOwner},
+	}}})
+	projectEntry := managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "project-worker", Role: "project-worker"})
+	flowEntry := managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "flow-worker", Role: "flow-worker"})
+	source := managerScopedAgentSource{
+		Source: base,
+		projects: []semanticview.ProjectScope{{
+			Key: "packages/support-extension", OwningFlowID: "support",
+			Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": projectEntry},
+			AgentURIs: map[string]string{"worker": projectOwner},
+		}},
+		flows: []semanticview.FlowScope{{
+			ID: "support", Path: "support", PackageKey: "flows/support", Mode: "static",
+			Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": flowEntry},
+			AgentURIs: map[string]string{"worker": flowOwner},
+		}},
+	}
+
+	records, err := StaticAgentMaterializationRecords(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, record := range records {
+		got[record.Config.ID] = record.Config.Identity.Name.Owner
+	}
+	if len(got) != 2 || got["project-worker"] != projectOwner || got["flow-worker"] != flowOwner {
+		t.Fatalf("materialized owners = %#v, want both exact declarations", got)
+	}
+}
+
+type managerScopedAgentSource struct {
+	semanticview.Source
+	projects []semanticview.ProjectScope
+	flows    []semanticview.FlowScope
+}
+
+func (s managerScopedAgentSource) ProjectScopes() []semanticview.ProjectScope {
+	return append([]semanticview.ProjectScope(nil), s.projects...)
+}
+
+func (s managerScopedAgentSource) FlowScopes() []semanticview.FlowScope {
+	return append([]semanticview.FlowScope(nil), s.flows...)
+}
+
+func (s managerScopedAgentSource) FlowScopeByID(flowID string) (semanticview.FlowScope, bool) {
+	for _, scope := range s.flows {
+		if strings.TrimSpace(scope.ID) == strings.TrimSpace(flowID) {
+			return scope, true
+		}
+	}
+	return semanticview.FlowScope{}, false
+}
+
+func (s managerScopedAgentSource) FlowPath(flowID string) string {
+	if scope, ok := s.FlowScopeByID(flowID); ok {
+		return scope.Path
+	}
+	return ""
+}
+
 func TestEnsureStaticFlowRequiredAgentsInfersFromOmittedRequiredAgents(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	store := &flowActivationTestStore{}
@@ -3760,7 +3855,7 @@ func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing
 			Subscriptions: []string{"analysis.requested"},
 			EmitEvents:    []string{"analysis.done"},
 		},
-	}, []runtimecontracts.FlowRequiredAgent{{
+	}, nil, []runtimecontracts.FlowRequiredAgent{{
 		Role:         "worker",
 		SubscribesTo: []string{"analysis.requested"},
 		Emits:        []string{"analysis.done"},
@@ -3774,7 +3869,7 @@ func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing
 func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"test-agent": {
@@ -3791,7 +3886,8 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 				"ops-flow": "ops-flow",
 			},
 		},
-	})
+	}
+	source := semanticview.Wrap(bundle)
 
 	rootAgents := map[string]runtimecontracts.AgentRegistryEntry{
 		"test-agent": managerTestAgentEntry("test-agent", runtimecontracts.AgentRegistryEntry{
@@ -3802,7 +3898,13 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 			EmitEvents:    []string{"task.completed"},
 		}),
 	}
-	if err := am.ensureStaticAgentsForScope(testAuthorActivityContext(context.Background()), source, "", "", rootAgents); err != nil {
+	bundle.Agents = rootAgents
+	rootPlan := managerTestAgentNamePlan(t, source, "", "test-agent")
+	rootRecords, err := staticAgentsForScope(source, "", "", rootAgents, map[string]semanticview.AgentNamePlan{"test-agent": rootPlan})
+	if err != nil {
+		t.Fatalf("staticAgentsForScope(root): %v", err)
+	}
+	if err := am.spawnStaticAgentRecords(testAuthorActivityContext(context.Background()), rootRecords); err != nil {
 		t.Fatalf("ensureStaticAgentsForScope(root): %v", err)
 	}
 	flowAgents := map[string]runtimecontracts.AgentRegistryEntry{
@@ -3814,7 +3916,21 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 			EmitEvents:    []string{"work.completed"},
 		}),
 	}
-	if err := am.ensureStaticAgentsForScope(testAuthorActivityContext(context.Background()), source, "ops-flow", "ops-flow", flowAgents); err != nil {
+	flow := &runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "ops-flow"},
+		Path:   "ops-flow",
+		Agents: flowAgents,
+	}
+	bundle.FlowTree = runtimecontracts.FlowTree{
+		Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{*flow}},
+		ByID: map[string]*runtimecontracts.FlowContractView{"ops-flow": flow},
+	}
+	flowPlan := managerTestFlowAgentNamePlan(t, source, "ops-flow", "operator")
+	flowRecords, err := staticAgentsForScope(source, "ops-flow", "ops-flow", flowAgents, map[string]semanticview.AgentNamePlan{"operator": flowPlan})
+	if err != nil {
+		t.Fatalf("staticAgentsForScope(flow): %v", err)
+	}
+	if err := am.spawnStaticAgentRecords(testAuthorActivityContext(context.Background()), flowRecords); err != nil {
 		t.Fatalf("ensureStaticAgentsForScope(flow): %v", err)
 	}
 
@@ -3857,8 +3973,8 @@ func TestEnsureStaticAgents_PackageBackedFlowOwnedAgentsCarryCanonicalFlowPath(t
 	if captured[0].FlowID != "support" {
 		t.Fatalf("FlowID = %q, want support", captured[0].FlowID)
 	}
-	if captured[0].ID != "backend-{vertical_id}" {
-		t.Fatalf("ID = %q, want backend-{vertical_id}", captured[0].ID)
+	if captured[0].ID != "backend" {
+		t.Fatalf("ID = %q, want backend", captured[0].ID)
 	}
 	if len(store.upserts) != 1 || store.upserts[0].Config.FlowPath != "support" {
 		t.Fatalf("persisted agents = %#v, want support flow path", store.upserts)
@@ -3887,8 +4003,8 @@ func TestEnsureStaticAgents_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t
 	if captured[0].FlowID != "support" {
 		t.Fatalf("FlowID = %q, want support", captured[0].FlowID)
 	}
-	if captured[0].ID != "backend-{vertical_id}" {
-		t.Fatalf("ID = %q, want backend-{vertical_id}", captured[0].ID)
+	if captured[0].ID != "backend" {
+		t.Fatalf("ID = %q, want backend", captured[0].ID)
 	}
 }
 
@@ -3947,7 +4063,6 @@ support/item.created:
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
-  id: backend-{vertical_id}
   type: generic
   role: backend
   intent: {inline: "Handle backend work for this flow instance."}
@@ -4011,7 +4126,6 @@ flows: []
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `
 backend:
-  id: backend-{vertical_id}
   type: generic
   role: backend
   intent: {inline: "Handle backend work for this flow instance."}
@@ -4038,9 +4152,46 @@ func writeFlowActivationFixtureFile(t *testing.T, path, contents string) {
 	}
 }
 
+func managerTestFlowAgentNamePlan(t *testing.T, source semanticview.Source, flowID, logicalID string) semanticview.AgentNamePlan {
+	t.Helper()
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		t.Fatalf("flow scope %q not found", flowID)
+	}
+	plan, err := semanticview.FlowAgentNamePlan(source, scope, logicalID)
+	if err != nil {
+		t.Fatalf("flow scope %q agent %q name plan: %v", flowID, logicalID, err)
+	}
+	return plan
+}
+
+func managerTestAgentNamePlan(t *testing.T, source semanticview.Source, ownerFlowID, logicalID string) semanticview.AgentNamePlan {
+	t.Helper()
+	var matched semanticview.AgentNamePlan
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		if strings.TrimSpace(declaration.LocalID) != strings.TrimSpace(logicalID) || strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(ownerFlowID) {
+			continue
+		}
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			t.Fatalf("agent %q name plan: %v", logicalID, err)
+		}
+		if matched.LocalID != "" {
+			t.Fatalf("agent %q resolved multiple test name plans", logicalID)
+		}
+		matched = plan
+	}
+	if matched.LocalID == "" {
+		t.Fatalf("agent %q name plan not found", logicalID)
+	}
+	return matched
+}
+
 func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(""))
 	cfg, err := buildFlowAgentConfig(
-		semanticview.Wrap(testFlowBundle("")),
+		source,
+		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
 		"inst-1",
 		"ent-1",
@@ -4077,8 +4228,10 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 }
 
 func TestBuildFlowAgentConfigRejectsPayloadDerivedNestedSystemPromptBeforeMaterialization(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(""))
 	_, err := buildFlowAgentConfig(
-		semanticview.Wrap(testFlowBundle("")),
+		source,
+		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
 		"inst-1",
 		"ent-1",
@@ -4103,10 +4256,11 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
 			entry := managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}})
-			if _, err := buildStaticFlowAgentConfig(source, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
+			if _, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
 			}
-			if _, err := buildFlowAgentConfig(source, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
+			if _, err := buildFlowAgentConfig(source, namePlan, "review", "inst-1", "ent-1", "review/inst-1", "reviewer", entry, nil, map[string]struct{}{"task.started": {}}, nil); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("buildFlowAgentConfig error = %v, want admission rejection", err)
 			}
 		})
@@ -4117,6 +4271,7 @@ func TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance(t *
 	source := semanticview.Wrap(testFlowBundle(""))
 	cfg, err := buildFlowAgentConfig(
 		source,
+		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
 		"inst-1",
 		"ent-1",
@@ -4147,7 +4302,7 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 		t.Fatal("static_support flow scope missing")
 	}
 	staticEntry := staticScope.Agents["worker"]
-	staticCfg, err := buildStaticFlowAgentConfig(source, "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSet(staticScope.Agents))
+	staticCfg, err := buildStaticFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "static_support", "worker"), "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSet(staticScope.Agents))
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
@@ -4160,6 +4315,7 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 	templateEntry := templateScope.Agents["worker"]
 	templateCfg, err := buildFlowAgentConfig(
 		source,
+		managerTestFlowAgentNamePlan(t, source, "template_support", "worker"),
 		"template_support",
 		"inst-1",
 		"entity-1",

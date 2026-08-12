@@ -1,5 +1,4 @@
 account-worker:
-  id: account-worker
   type: generic
   role: account_worker
   intent: prompts/account-worker.md

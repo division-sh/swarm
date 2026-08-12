@@ -214,11 +214,11 @@ func validateWebSearchCredential(ctx context.Context, source semanticview.Source
 	return nil
 }
 
-func nativeToolAgentConfig(agentID string, entry runtimecontracts.AgentRegistryEntry) models.AgentConfig {
+func nativeToolAgentConfig(agentID, role string, entry runtimecontracts.AgentRegistryEntry) models.AgentConfig {
 	cfg := models.AgentConfig{
-		ID:              coalesce(strings.TrimSpace(entry.ID), strings.TrimSpace(agentID)),
+		ID:              strings.TrimSpace(agentID),
 		Type:            strings.TrimSpace(entry.Type),
-		Role:            strings.TrimSpace(entry.Role),
+		Role:            strings.TrimSpace(role),
 		Model:           strings.TrimSpace(entry.Model),
 		Memory:          entry.MemoryPlan,
 		Mock:            entry.Mock,

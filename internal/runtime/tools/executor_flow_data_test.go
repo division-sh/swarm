@@ -8,7 +8,9 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -135,7 +137,7 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
 }
 
-func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {
+func TestExecutorReadFlowDataSelectsActorScopeForSharedEffectiveName(t *testing.T) {
 	source, root := loadFlowDataToolSource(t)
 	if err := os.MkdirAll(filepath.Join(root, "flows", "other", "data"), 0o755); err != nil {
 		t.Fatalf("mkdir other data: %v", err)
@@ -156,8 +158,29 @@ func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {
 	if !ok {
 		t.Fatalf("result type = %T, want map[string]any", out)
 	}
-	if got := strings.TrimSpace(asString(result["content"])); got != "blocked: true" {
-		t.Fatalf("content = %q, want support-flow contract-owned data root", got)
+	if got := strings.TrimSpace(asString(result["content"])); got != "blocked: other-flow" {
+		t.Fatalf("content = %q, want other-flow contract-owned data root", got)
+	}
+}
+
+func TestPackageBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *testing.T) {
+	source, _ := loadFlowDataToolSource(t)
+	actor := flowDataActor()
+	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
+	if !ok || declaration.ScopeKind != "project" || declaration.OwnerFlowID != "support" {
+		t.Fatalf("package-backed declaration = %#v ok %v", declaration, ok)
+	}
+	filenames := flowdata.AllowedFilenames(source, actor)
+	if len(filenames) != 1 || filenames[0] != "exclusions.yaml" {
+		t.Fatalf("flow-data filenames = %#v", filenames)
+	}
+	entry, flowID, ok := criteriaAgentContractDeclaration(source, actor)
+	if !ok || flowID != "support" || entry.Role != "factory_cto" {
+		t.Fatalf("criteria declaration = entry %#v flow %q ok %v", entry, flowID, ok)
+	}
+	entity, ok := entityruntime.ResolveForActor(source, actor)
+	if !ok || entity.FlowID != "support" || entity.EntityType != "support_state" {
+		t.Fatalf("entity contract = %#v ok %v", entity, ok)
 	}
 }
 
@@ -202,7 +225,7 @@ func TestExecutorReadFlowDataRequiresWorkflowSource(t *testing.T) {
 func flowDataActor() models.AgentConfig {
 	return models.AgentConfig{
 		ExecutionMode:  "live",
-		ID:             "factory-cto",
+		ID:             "public-factory-cto",
 		Role:           "factory_cto",
 		FlowID:         "support",
 		FlowPath:       "support",
@@ -235,18 +258,28 @@ flows:
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), "support_state:\n  support_id: string\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 factory-cto:
-  id: factory-cto
+  id: public-factory-cto
   role: factory_cto
   intent: {inline: "Read only the flow data declared by this contract."}
 `+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "package.yaml"), "name: other\nversion: \"1.0.0\"\nflows: []\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "schema.yaml"), "name: other\nmode: static\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "agents.yaml"), "{}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "entities.yaml"), "other_state:\n  other_id: string\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "agents.yaml"), `
+factory-cto:
+  id: public-factory-cto
+  role: other_factory_cto
+  intent: {inline: "Read only the other flow data declared by this contract."}
+`+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "events.yaml"), "{}\n")
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "data", "exclusions.yaml"), "blocked: other-flow\n")
 
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

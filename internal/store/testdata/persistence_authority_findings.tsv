@@ -2060,7 +2060,6 @@ typed-process-local	interface-method	typed	internal/runtime/runtime_claude_start
 typed-process-local	interface-method	typed	internal/runtime/runtime_claude_startup.go	claudeStartupToolSource	method:ToolDefinitionsForActor	func(github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) []github.com/division-sh/swarm/internal/runtime/llm.ToolDefinition
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:ActionInstructionByID	func(id string) (github.com/division-sh/swarm/internal/runtime/core/registry.ActionInstruction, bool)
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:ActionInstructions	func() []github.com/division-sh/swarm/internal/runtime/core/registry.ActionInstruction
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:AgentContractSource	func(agentID string) (github.com/division-sh/swarm/internal/runtime/contracts.ContractItemSource, bool)
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:AgentEntries	func() map[string]github.com/division-sh/swarm/internal/runtime/contracts.AgentRegistryEntry
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:AuthoredEventEntries	func() map[string]github.com/division-sh/swarm/internal/runtime/contracts.EventCatalogEntry
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:AuthoredResolvedEventCatalog	func() map[string]github.com/division-sh/swarm/internal/runtime/contracts.EventCatalogEntry
@@ -2108,7 +2107,6 @@ typed-process-local	interface-method	typed	internal/runtime/semanticview/source.
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:RuntimeEventOwners	func(eventType string) []string
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:SemanticCapabilities	func() github.com/division-sh/swarm/internal/runtime/semanticview.Capabilities
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:ToolEntries	func() map[string]github.com/division-sh/swarm/internal/runtime/contracts.ToolSchemaEntry
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:ToolEntryForAgent	func(agentID string, toolID string) (github.com/division-sh/swarm/internal/runtime/contracts.ToolSchemaEntry, bool)
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WorkflowEntitySchema	func() github.com/division-sh/swarm/internal/runtime/contracts.EntitySchema
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WorkflowGateForStage	func(flowID string, stage string) (github.com/division-sh/swarm/internal/runtime/contracts.WorkflowGatePlan, bool)
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:WorkflowGates	func() []github.com/division-sh/swarm/internal/runtime/contracts.WorkflowGatePlan

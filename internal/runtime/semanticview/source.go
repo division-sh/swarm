@@ -57,7 +57,6 @@ type Source interface {
 	DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic
 	RuntimeEventOwners(eventType string) []string
 	NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool)
-	AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool)
 	ResolveNodeEventReference(nodeID, eventType string) string
 	NodeRuntimeSubscriptions(nodeID string) []string
 	NodeHandlerSubscriptions(nodeID string) []string
@@ -69,6 +68,5 @@ type Source interface {
 	EventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool)
 	ToolEntries() map[string]runtimecontracts.ToolSchemaEntry
-	ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool)
 	AuthoredResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry
 }

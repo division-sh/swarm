@@ -1873,8 +1873,8 @@ func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint sem
 			Handler: MustConnectReceiverHandler(flowID, nodeID),
 		}, true
 	case semanticview.EventEndpointAgent:
-		logicalID := strings.TrimSpace(endpoint.AgentID)
-		agentID, owner, ok := staticConnectReceiverAgent(source, endpoint.FlowID, logicalID)
+		logicalID := strings.TrimSpace(endpoint.AgentLocalID)
+		agentID, owner, ok := staticConnectReceiverAgent(source, endpoint, logicalID)
 		if !ok {
 			return ConnectDeliveryRoute{}, false
 		}
@@ -1903,20 +1903,30 @@ func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint sem
 	}
 }
 
-func staticConnectReceiverAgent(source semanticview.Source, flowID, logicalID string) (string, string, bool) {
-	owner, ok := semanticview.AgentDeclarationOwner(source, flowID, logicalID)
-	if !ok {
-		return "", "", false
-	}
-	agentID := logicalID
-	if scope, found := source.FlowScopeByID(strings.TrimSpace(flowID)); found {
-		if entry, exists := scope.Agents[logicalID]; exists && strings.TrimSpace(entry.ID) != "" {
-			agentID = strings.TrimSpace(entry.ID)
+func staticConnectReceiverAgent(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint, logicalID string) (string, string, bool) {
+	packageKey := strings.TrimSpace(endpoint.PackageKey)
+	if packageKey != "" {
+		for _, scope := range source.ProjectScopes() {
+			if strings.TrimSpace(scope.Key) != packageKey {
+				continue
+			}
+			namePlan, err := semanticview.ProjectAgentNamePlan(source, scope, logicalID)
+			if err == nil {
+				return namePlan.AgentID, namePlan.OwnerURI, true
+			}
+			break
 		}
-	} else if entry, exists := source.AgentEntries()[logicalID]; exists && strings.TrimSpace(entry.ID) != "" {
-		agentID = strings.TrimSpace(entry.ID)
 	}
-	return agentID, owner, agentID != ""
+	flowID := strings.TrimSpace(endpoint.FlowID)
+	if flowID != "" {
+		if scope, ok := source.FlowScopeByID(flowID); ok {
+			namePlan, err := semanticview.FlowAgentNamePlan(source, scope, logicalID)
+			if err == nil {
+				return namePlan.AgentID, namePlan.OwnerURI, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func (g CompiledConnectGraph) MatchingPlans(evt events.Event) []ConnectRoutePlan {
