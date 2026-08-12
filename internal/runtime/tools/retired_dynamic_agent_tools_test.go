@@ -197,7 +197,7 @@ func TestRetiredDynamicAgentToolTokensRemainOnlyInRetirementEvidence(t *testing.
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
+			if entry.Name() == ".git" || entry.Name() == "test-results" {
 				return filepath.SkipDir
 			}
 			return nil
