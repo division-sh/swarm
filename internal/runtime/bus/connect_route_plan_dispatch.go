@@ -121,20 +121,28 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
-	if len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
+	publicAdmission, publicInput := publicInputAdmissionFromContext(ctx)
+	if publicInput {
+		if err := publicAdmission.validateEvent(evt); err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+	}
+	if !publicInput && len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
-	for _, issue := range r.issues {
-		if r.graph.IssueMatchesEvent(issue, evt) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
-			return connectRoutePlanDispatch{
-				Matched:    true,
-				Failure:    connectRoutePlanTargetFailure(issue.Failure),
-				Evaluation: emptyEvaluation,
-				ExtraDetail: map[string]any{
-					"connect_route_plan_failure": issue.Failure.Code(),
-					"connect_route_plan_detail":  strings.TrimSpace(issue.Detail),
-				},
-			}, nil
+	if !publicInput {
+		for _, issue := range r.issues {
+			if r.graph.IssueMatchesEvent(issue, evt) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
+				return connectRoutePlanDispatch{
+					Matched:    true,
+					Failure:    connectRoutePlanTargetFailure(issue.Failure),
+					Evaluation: emptyEvaluation,
+					ExtraDetail: map[string]any{
+						"connect_route_plan_failure": issue.Failure.Code(),
+						"connect_route_plan_detail":  strings.TrimSpace(issue.Detail),
+					},
+				}, nil
+			}
 		}
 	}
 
@@ -526,6 +534,12 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 }
 
 func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.Event) []runtimepinrouting.ConnectRoutePlan {
+	if admission, ok := publicInputAdmissionFromContext(ctx); ok {
+		if admission.validateEvent(evt) == nil {
+			return []runtimepinrouting.ConnectRoutePlan{admission.plan}
+		}
+		return nil
+	}
 	candidates := r.graph.MatchingPlans(evt)
 	out := make([]runtimepinrouting.ConnectRoutePlan, 0, len(candidates))
 	for _, plan := range candidates {

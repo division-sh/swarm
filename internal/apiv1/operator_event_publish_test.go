@@ -1216,6 +1216,59 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	}
 }
 
+func TestOperatorEventPublishNewRunTemplateInputHandsExactEndpointToPublicAdmission(t *testing.T) {
+	ctx := testAuthorActivityContext(context.Background())
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(eventPublishTargetRouteTestBundle())
+	bus, err := newScopedAPITestEventBus(t, sqliteStore, runStartTestEventBusOptions(source))
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	publisher := &publicInputPublishProbe{EventBus: bus}
+	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, publisher, source)
+
+	response := rpcCall(t, handler, eventPublishBody(
+		"", runStartTestBundleHash, "operating/opco.product_initialization_requested",
+		`{"topic":"public-template-input"}`, "operator-test", "idem-public-template-input",
+	))
+	if response.Error != nil {
+		t.Fatalf("event.publish error = %#v", response.Error)
+	}
+	if publisher.publicInputCalls != 1 {
+		t.Fatalf("public-input admission calls = %d, want 1", publisher.publicInputCalls)
+	}
+	endpoint := publisher.endpoint
+	if endpoint.FlowID != "operating" || endpoint.PinName != "opco.product_initialization_requested" {
+		t.Fatalf("public-input endpoint = flow:%q pin:%q, want operating.opco.product_initialization_requested", endpoint.FlowID, endpoint.PinName)
+	}
+	if endpoint.Event.Canonical != "operating/opco.product_initialization_requested" {
+		t.Fatalf("public-input resolved event = %q, want operating/opco.product_initialization_requested", endpoint.Event.Canonical)
+	}
+}
+
+func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscopedTemplate(t *testing.T) {
+	const eventName = "review.requested"
+
+	rootAndTemplate := semanticview.Wrap(eventPublishRootTemplateCollisionTestBundle())
+	if endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(rootAndTemplate, eventName, eventName); err != nil {
+		t.Fatalf("resolve root/template collision: %v", err)
+	} else if matched {
+		t.Fatalf("root/template collision selected template endpoint %#v", endpoint)
+	}
+
+	templateOnlyBundle := eventPublishRootTemplateCollisionTestBundle()
+	templateOnlyBundle.RootSchema.Pins.Inputs.Events = nil
+	templateOnlyBundle.FlowTree.Root.Children[0].Events = nil
+	templateOnly := semanticview.Wrap(templateOnlyBundle)
+	endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(templateOnly, eventName, eventName)
+	if err != nil {
+		t.Fatalf("resolve unscoped template input: %v", err)
+	}
+	if !matched || endpoint.FlowID != "operating" || endpoint.PinName != eventName {
+		t.Fatalf("unscoped template endpoint = matched:%t %#v, want operating.%s", matched, endpoint, eventName)
+	}
+}
+
 func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
@@ -1912,6 +1965,18 @@ func (p *plainEventPublisher) Publish(context.Context, events.Event) error {
 
 func (p *plainEventPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact()), nil
+}
+
+type publicInputPublishProbe struct {
+	*runtimebus.EventBus
+	publicInputCalls int
+	endpoint         semanticview.AuthoredEventEndpoint
+}
+
+func (p *publicInputPublishProbe) PublishPublicInputAcknowledged(ctx context.Context, evt events.Event, endpoint semanticview.AuthoredEventEndpoint) error {
+	p.publicInputCalls++
+	p.endpoint = endpoint
+	return p.EventBus.PublishAcknowledged(ctx, evt)
 }
 
 type failStandalonePipelineReceiptOnceStore struct {

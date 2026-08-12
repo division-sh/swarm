@@ -14,11 +14,14 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -64,6 +67,120 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 
 func TestServedParityHarnessGeneratedInputFixtureLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioGeneratedInputFixtureLifecycle), runServedGeneratedInputFixtureBackendProof)
+}
+
+func TestServedParityHarnessPublicMockApprovalLifecycle(t *testing.T) {
+	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioPublicMockApprovalLifecycle), runServedPublicMockApprovalBackendProof)
+}
+
+func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	contractsPath := writePublicTelegramMockApprovalScenarioFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+
+	var db *sql.DB
+	var configPath string
+	opts := cliapp.ServeOptions{
+		ContractsPath:           contractsPath,
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		NoRequireBundleMatch:    true,
+		Verbose:                 true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	}
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		stubServeRuntimeWorkspaceLifecycle(t)
+		sqlitePath := filepath.Join(t.TempDir(), "public-mock-approval.sqlite")
+		oldBuildStores := buildStoresForServe
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				db = stores.SQLDB
+			}
+			return stores, err
+		}
+		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
+	case servedparity.BackendExplicitPostgres:
+		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+			return serveRuntimeWorkspaceStub{}
+		})
+		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		opts.StoreMode = storebackend.BackendPostgres.String()
+		opts.StoreModeSet = true
+	default:
+		t.Fatalf("unsupported backend %q", backend)
+	}
+	opts.ConfigPath = configPath
+	var verifyOut, verifyErr bytes.Buffer
+	if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		"verify", "--contracts", contractsPath, "--config", configPath,
+	}, &verifyOut, &verifyErr, nil); code != 0 {
+		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
+	}
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+	requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t, strings.TrimSuffix(endpoint, "/v1/rpc"))
+
+	var stdout, stderr bytes.Buffer
+	started := time.Now()
+	scenario := filepath.ToSlash(filepath.Join("flows", "telegram-chat", "tests", "public-mock-approval.yaml"))
+	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		"test",
+		"--contracts", contractsPath,
+		"--config", configPath,
+		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
+		"--timeout", "45s",
+		"--poll-interval", "25ms",
+		scenario,
+	}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("%s code = %d stderr=%s stdout=%s", backend, code, stderr.String(), stdout.String())
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Second {
+		t.Fatalf("%s public mock approval journey took %s, want under 60s", backend, elapsed)
+	}
+	if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") || strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("%s stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
+		t.Fatalf("%s zero-credential journey created credential store %s: %v", backend, credentialPath, err)
+	}
+
+	runID := requireSingleServedBundleRun(t, endpoint, bundleHash)
+	requirePublicMockApprovalEvents(t, endpoint, runID)
+	requireServedParitySettlementPostconditions(t, endpoint, db, servedBackendLabel(backend), runID, servedparity.MustScenario(servedparity.ScenarioPublicMockApprovalLifecycle))
+}
+
+func requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t *testing.T, serverURL string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(serverURL, "/")+"/webhooks/chat/telegram", strings.NewReader(`{"update_id":1}`))
+	if err != nil {
+		t.Fatalf("build schema-only webhook probe: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("schema-only webhook probe: %v", err)
+	}
+	defer resp.Body.Close()
+	var body bytes.Buffer
+	if _, err := body.ReadFrom(resp.Body); err != nil {
+		t.Fatalf("read schema-only webhook response: %v", err)
+	}
+	if resp.StatusCode != http.StatusNotFound || !strings.Contains(body.String(), "no ingress target") || !strings.Contains(body.String(), "add ingress") {
+		t.Fatalf("schema-only webhook response = %d %q, want teaching 404 with no route activation", resp.StatusCode, body.String())
+	}
 }
 
 func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -189,11 +306,18 @@ func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) str
 	for _, name := range []string{
 		"flows/telegram-chat/agents.yaml",
 		"flows/telegram-chat/events.yaml",
-		"flows/telegram-chat/nodes.yaml",
 		"flows/telegram-chat/tools.yaml",
 	} {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, filepath.FromSlash(name)), "{}\n")
 	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "nodes.yaml"), `
+telegram-input-observer:
+  id: telegram-input-observer
+  execution_type: system_node
+  subscribes_to: [inbound.telegram.text_message]
+  event_handlers:
+    inbound.telegram.text_message: {}
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "generated-input.yaml"), `
 name: generated Telegram normalized input
 steps:
@@ -201,6 +325,132 @@ steps:
     payload: generate
 `)
 	return root
+}
+
+func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
+	t.Helper()
+	root := canonicalrouting.CopyStandingTelegramMockServe(t, "https://example.invalid")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: public-telegram-mock-approval
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+connector_packs:
+  imports:
+    - {provider: telegram, tool: telegram.send_message}
+provider_trigger_events:
+  imports:
+    - {provider: telegram, event: inbound.telegram.text_message}
+flows:
+  - {id: telegram-chat, flow: telegram-chat, mode: template}
+`)
+	for _, flow := range []string{"telegram-ingress", "memory-singleton"} {
+		if err := os.RemoveAll(filepath.Join(root, "flows", flow)); err != nil {
+			t.Fatalf("remove unrelated %s fixture flow: %v", flow, err)
+		}
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "public-mock-approval.yaml"), `
+name: public generated Telegram mock approval
+steps:
+  - publish: telegram_text_message
+    payload: generate
+  - mailbox.decide:
+      match:
+        anchor_kind: proposed_effect
+        decision: send_telegram_message
+        activity_id: telegram_send_message
+      verdict: approve
+      fields: {}
+expect:
+  events:
+    ordered:
+      - inbound.telegram.text_message
+      - platform.activity_requested
+      - telegram-chat/telegram_send_message.succeeded
+  no_dead_letters: true
+`)
+	return root
+}
+
+func requireSingleServedBundleRun(t *testing.T, endpoint, bundleHash string) string {
+	t.Helper()
+	var result struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"bundle_hash": bundleHash, "limit": 500}, &result)
+	var matches []operatorread.RunHeader
+	for _, run := range result.Runs {
+		if run.Origin.EventType() == "inbound.telegram.text_message" {
+			matches = append(matches, run)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("run.list for bundle %s returned %d normalized-input runs, want one: %#v", bundleHash, len(matches), result.Runs)
+	}
+	return matches[0].RunID
+}
+
+func requirePublicMockApprovalEvents(t *testing.T, endpoint, runID string) {
+	t.Helper()
+	var result operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+		"filter": map[string]any{"run_id": runID},
+		"limit":  500,
+	}, &result)
+	wantCounts := map[string]int{
+		"inbound.telegram.text_message":                 1,
+		"platform.activity_requested":                   1,
+		"telegram-chat/telegram_send_message.succeeded": 1,
+	}
+	counts := make(map[string]int, len(wantCounts))
+	replyRequested := 0
+	for _, event := range result.Events {
+		if strings.HasPrefix(event.EventName, "telegram-chat/") && strings.HasSuffix(event.EventName, "/telegram.reply_requested") {
+			replyRequested++
+			if event.ExecutionMode != executionmode.Mock {
+				t.Fatalf("event %s execution mode = %q, want mock", event.EventName, event.ExecutionMode)
+			}
+			if len(event.DeadLetters) != 0 {
+				t.Fatalf("event %s dead letters = %#v", event.EventName, event.DeadLetters)
+			}
+			continue
+		}
+		if _, tracked := wantCounts[event.EventName]; !tracked {
+			continue
+		}
+		counts[event.EventName]++
+		if event.ExecutionMode != executionmode.Mock {
+			t.Fatalf("event %s execution mode = %q, want mock", event.EventName, event.ExecutionMode)
+		}
+		if len(event.DeadLetters) != 0 {
+			t.Fatalf("event %s dead letters = %#v", event.EventName, event.DeadLetters)
+		}
+	}
+	if replyRequested != 1 {
+		t.Fatalf("template-scoped telegram.reply_requested count = %d, want one; events=%#v", replyRequested, result.Events)
+	}
+	for eventName, want := range wantCounts {
+		if got := counts[eventName]; got != want {
+			t.Fatalf("event.list %s count = %d, want %d; events=%#v", eventName, got, want, result.Events)
+		}
+	}
+	for _, event := range result.Events {
+		if event.EventName != "inbound.telegram.text_message" {
+			continue
+		}
+		agentDeliveries := 0
+		for _, delivery := range event.Deliveries {
+			if delivery.SubscriberType != "agent" || !strings.HasPrefix(delivery.SubscriberID, "phrase-bot") {
+				continue
+			}
+			agentDeliveries++
+			if delivery.Target.FlowID != "telegram-chat" || !strings.HasPrefix(delivery.Target.FlowInstance, "telegram-chat/") || delivery.Target.EntityID == "" {
+				t.Fatalf("public input agent delivery target = %#v", delivery.Target)
+			}
+		}
+		if agentDeliveries != 1 {
+			t.Fatalf("public input agent deliveries = %d, want one: %#v", agentDeliveries, event.Deliveries)
+		}
+	}
 }
 
 func loadGeneratedTelegramEvent(t *testing.T, db *sql.DB, backend servedparity.Backend) (eventID, runID string, payload map[string]any) {

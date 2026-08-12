@@ -201,6 +201,20 @@ func bundleCatalogPackageJSON(pkg ProjectPackageDocument) map[string]any {
 	if extra := packageExtraJSON(pkg.Extra); len(extra) > 0 {
 		out["extra"] = extra
 	}
+	if imports := providerTriggerEventImportsJSON(pkg.ProviderTriggerEvents); len(imports) > 0 {
+		out["provider_trigger_events"] = map[string]any{"imports": imports}
+	}
+	return out
+}
+
+func providerTriggerEventImportsJSON(declaration ProviderTriggerEventImports) []map[string]string {
+	out := make([]map[string]string, 0, len(declaration.Imports))
+	for _, item := range declaration.Imports {
+		out = append(out, map[string]string{
+			"provider": strings.TrimSpace(item.Provider),
+			"event":    strings.TrimSpace(item.Event),
+		})
+	}
 	return out
 }
 

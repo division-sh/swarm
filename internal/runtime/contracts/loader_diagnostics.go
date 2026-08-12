@@ -425,6 +425,10 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return connectorPackFieldOptions
 	case "connector_packs.imports":
 		return connectorPackImportFieldOptions
+	case "provider_trigger_events":
+		return providerTriggerEventFieldOptions
+	case "provider_trigger_events.imports":
+		return providerTriggerEventImportFieldOptions
 	case "requires.policy":
 		return flowPackageRequiresPolicyFieldOptions
 	case "connect":

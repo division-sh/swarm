@@ -9736,10 +9736,16 @@ tool_model:
           Only composed pack-owned normalized events may enter the target-free external input-plan lowering path; ordinary
           events cannot gain this authority by event name, catalog presence, source-agent label, or payload shape.
         source_composition: >
-          Before boot verification, packs selected by effective standing ingress bindings import raw and normalized schemas
-          into the semantic source. These are imported facts, not authored declarations. Local redeclaration fails closed
-          naming both owners. Normalized events retain ordinary exact-consumer and chain checks; an unused raw escape-hatch
-          declaration is legal.
+          Before boot verification, exact package.yaml `provider_trigger_events.imports[]` declarations import one named
+          normalized schema from the immutable verified trigger-pack catalog, and packs selected by effective standing ingress
+          bindings import their raw and normalized schemas into the same semantic-source owner. Both are imported facts, not
+          authored event declarations, and retain exact pack id/version/manifest_hash/source-provenance/catalog-generation
+          readback globally and in the declaring package scope. A schema-only import grants no ingress route, signing-secret
+          requirement or read, standing target, effective ingress subject, or provider-output authorization. Only compiled
+          standing ingress grants those capabilities. Import plus matching ingress consumes one schema owner; local
+          redeclaration or different pack ownership fails closed naming both owners. Schema-only imports reject raw events,
+          while an unused raw escape-hatch schema imported by active ingress remains legal. Normalized events retain ordinary
+          exact-consumer and chain checks. Declaration is not activation.
         capability_surface: >
           Installed and effective trigger subjects carry structured event descriptors with event, raw|normalized kind,
           field names/types/requiredness, carry eligibility, and pack provenance. Singular event-name or prose-only
@@ -10893,6 +10899,7 @@ flow_model:
         - subpackages
         - connect
         - connector_packs
+        - provider_trigger_events
         - handoffs
         retired_fields:
           entity_schema: >
@@ -10926,13 +10933,23 @@ flow_model:
           verified built-in connector pack, must produce a normal `ToolSchemaEntry` with `category: provider_connector`,
           and must fail closed on unknown fields, unknown providers/tools, provider/tool mismatch, or collision with any
           packed or flow-local tool id. Omission imports no connector tools.
+        provider_trigger_events: >
+          Optional schema-only provider-trigger event imports. The only supported shape is
+          `provider_trigger_events.imports[]` with required `provider` and `event` fields. Each entry resolves exactly one
+          normalized event from one immutable verified provider-trigger pack and retains that pack's id, version,
+          manifest hash, source provenance, and catalog generation in the effective semantic source. Unknown fields,
+          missing or unknown providers/events, raw events, duplicate declarations, unavailable catalogs, local event
+          redeclarations, and different-pack event ownership fail closed. Omission imports no schemas. This declaration
+          does not activate ingress and grants no HTTP route, webhook signing obligation, standing target, effective ingress
+          subject, or provider-output authorization; those remain owned exclusively by `flows[].ingress.providers[]`.
       catalog_consumption:
         owner: bundle catalog projection
         rule: >
           Persisted bundle catalog rows MUST consume the typed package manifest owner for these self-facts. The
           projection exposes them under parsed_json.package and mirrors them into catalog metadata for list/detail
-          read surfaces. Catalog replay MUST parse stored package.yaml through the same strict ProjectPackageDocument
-          owner; persisted unknown top-level fields are invalid runtime input.
+          read surfaces. `provider_trigger_events.imports[]` is also retained in canonical package bytes, bundle identity,
+          and typed parsed_json.package readback. Catalog replay MUST parse stored package.yaml through the same strict
+          ProjectPackageDocument owner; persisted unknown top-level fields are invalid runtime input.
       non_goals:
       - package.yaml.repository does not implement update or fetch behavior.
       - package.yaml.extra does not authorize runtime behavior, capability selection, tool binding, backend selection, or category taxonomy.

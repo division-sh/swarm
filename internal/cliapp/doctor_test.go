@@ -583,6 +583,44 @@ func TestDoctorContractSourceFailurePreservesProviderTriggerSubjects(t *testing.
 	}
 }
 
+func TestDoctorConsumesProviderTriggerEventImportOwner(t *testing.T) {
+	setDoctorEmptyProviderSecrets(t)
+	configPath := writeDoctorClaudeConfig(t, "")
+	tests := []struct {
+		name      string
+		event     string
+		wantCode  int
+		wantError bool
+	}{
+		{name: "normalized import", event: "inbound.telegram.text_message", wantCode: 0},
+		{name: "unknown import", event: "inbound.telegram.message", wantCode: CLIExitRuntime, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			contractsPath := writeDoctorAgentFreeContractsFixture(t)
+			packagePath := filepath.Join(contractsPath, "package.yaml")
+			raw, err := os.ReadFile(packagePath)
+			if err != nil {
+				t.Fatalf("read package: %v", err)
+			}
+			updated := strings.Replace(string(raw), "flows: []", fmt.Sprintf("provider_trigger_events:\n  imports:\n    - provider: telegram\n      event: %s\nflows: []", test.event), 1)
+			writeWorkflowValidationFixtureFile(t, packagePath, updated)
+
+			report, code, stderr := runDoctorPreflightJSON(t, configPath, contractsPath, "anthropic")
+			if code != test.wantCode || stderr != "" {
+				t.Fatalf("code=%d stderr=%q report=%#v, want code=%d", code, stderr, report, test.wantCode)
+			}
+			finding, found := localPreflightReportFinding(report, "provider_trigger_event_import_failed")
+			if found != test.wantError {
+				t.Fatalf("provider-trigger import finding = (%#v, %v), want error=%v", finding, found, test.wantError)
+			}
+			if test.wantError && (!strings.Contains(finding.Message, test.event) || !strings.Contains(finding.Message, "normalized events")) {
+				t.Fatalf("provider-trigger import finding = %#v, want exact event teaching evidence", finding)
+			}
+		})
+	}
+}
+
 func TestDoctorClaudeCLIPreflightSkipsCredentialForAgentFreeContracts(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
