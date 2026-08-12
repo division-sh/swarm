@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -43,11 +44,79 @@ func workflowInstanceRouteForExecution(source semanticview.Source, flowID, expli
 }
 
 func workflowInstanceRouteForPersisted(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Route, error) {
-	route := StoredFlowInstance(source, instance).Route()
-	if !route.Valid() {
+	instancePath := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
+	if instancePath == "" {
 		return runtimeflowidentity.Route{}, fmt.Errorf("persisted workflow instance is missing its canonical route")
 	}
+	route, err := workflowInstanceRouteForExecution(source, instance.WorkflowName, instancePath)
+	if err != nil {
+		return runtimeflowidentity.Route{}, fmt.Errorf("persisted workflow instance is missing its canonical route: %w", err)
+	}
+	if err := validateWorkflowInstanceRouteFacts(route, instance); err != nil {
+		return runtimeflowidentity.Route{}, err
+	}
 	return route, nil
+}
+
+func validateWorkflowInstanceRouteFacts(route runtimeflowidentity.Route, instance WorkflowInstance) error {
+	instancePath := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
+	if instancePath == "" {
+		return fmt.Errorf("persisted workflow instance is missing its row route")
+	}
+	if instancePath != route.InstancePath {
+		return fmt.Errorf("persisted workflow instance route %q disagrees with requested route %q", instancePath, route.InstancePath)
+	}
+	storedPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	if storedPath == "" {
+		return fmt.Errorf("persisted workflow instance %q is missing flow_path", instancePath)
+	}
+	if storedPath != route.InstancePath {
+		return fmt.Errorf("persisted workflow instance flow_path %q disagrees with requested route %q", storedPath, route.InstancePath)
+	}
+	storedID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
+	if storedID == "" {
+		return fmt.Errorf("persisted workflow instance %q is missing instance_id", instancePath)
+	}
+	if storedID != route.InstanceID {
+		return fmt.Errorf("persisted workflow instance instance_id %q disagrees with requested route %q", storedID, route.InstanceID)
+	}
+	return nil
+}
+
+func workflowInstancePersistedEntityID(instance WorkflowInstance) (identity.EntityID, error) {
+	entityID := identity.NormalizeEntityID(asString(instance.Metadata["entity_id"]))
+	if entityID.IsZero() {
+		return identity.EntityID(""), fmt.Errorf("persisted workflow instance %q is missing entity_id", strings.TrimSpace(instance.StorageRef))
+	}
+	return entityID, nil
+}
+
+func requireWorkflowInstanceIdentity(route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance) (runtimeflowidentity.Instance, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	entityID = identity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() {
+		return runtimeflowidentity.Instance{}, fmt.Errorf("persisted workflow instance validation requires exact route and entity identity")
+	}
+	if err := validateWorkflowInstanceRouteFacts(route, instance); err != nil {
+		return runtimeflowidentity.Instance{}, err
+	}
+	persistedEntityID, err := workflowInstancePersistedEntityID(instance)
+	if err != nil {
+		return runtimeflowidentity.Instance{}, err
+	}
+	if persistedEntityID != entityID {
+		return runtimeflowidentity.Instance{}, fmt.Errorf("persisted workflow instance entity_id %q disagrees with requested entity %q", persistedEntityID.String(), entityID.String())
+	}
+	return runtimeflowidentity.Instance{
+		TemplateID:     strings.TrimSpace(instance.WorkflowName),
+		ScopeKey:       route.ScopeKey,
+		InstanceID:     route.InstanceID,
+		InstancePath:   route.InstancePath,
+		EntityID:       entityID.String(),
+		ParentEntityID: strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
+		ParentRoute:    runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata),
+		HasStoredPath:  true,
+	}, nil
 }
 
 type FlowInstanceIdentity struct {
@@ -60,28 +129,6 @@ func DeriveFlowInstanceIdentity(source semanticview.Source, flowID, instanceID s
 
 func deriveFlowInstanceIdentity(source semanticview.Source, flowID, instanceID string) FlowInstanceIdentity {
 	return DeriveFlowInstanceIdentity(source, flowID, instanceID)
-}
-
-func StoredFlowInstance(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Instance {
-	materializedPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
-	entityID := strings.TrimSpace(asString(instance.Metadata["entity_id"]))
-	if entityID == "" && materializedPath == "" {
-		entityID = strings.TrimSpace(instance.InstanceID)
-	}
-	stored := runtimeflowidentity.Stored(
-		source,
-		strings.TrimSpace(instance.WorkflowName),
-		materializedPath,
-		strings.TrimSpace(firstNonEmptyString(asString(instance.Metadata["instance_id"]), instance.InstanceID)),
-		entityID,
-		strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
-	)
-	stored.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata)
-	return stored
-}
-
-func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Instance {
-	return StoredFlowInstance(source, instance)
 }
 
 func workflowInstancePersistedIdentity(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Persisted, error) {
@@ -113,14 +160,6 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 	}
 	persisted.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata)
 	return persisted, nil
-}
-
-func workflowInstanceScopeKey(source semanticview.Source, instance WorkflowInstance) string {
-	return workflowInstanceIdentity(source, instance).ScopeKey
-}
-
-func workflowInstancePath(source semanticview.Source, instance WorkflowInstance) string {
-	return workflowInstanceIdentity(source, instance).InstancePath
 }
 
 func workflowStateIdentity(source semanticview.Source, flowID string, state WorkflowState) runtimeflowidentity.Instance {

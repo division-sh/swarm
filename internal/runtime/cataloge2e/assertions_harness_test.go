@@ -168,7 +168,7 @@ func assertGates(t testing.TB, h *runtimeHarness, entityID string, want map[stri
 	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required for gates assertions")
 	}
-	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
+	instance, ok, err := catalogWorkflowInstanceForEntity(h.workflow, entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance %s for gates: %v", entityID, err)
 	}
@@ -206,7 +206,7 @@ func assertEntityFields(t testing.TB, workflow catalogWorkflowPersistence, entit
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for entity_fields assertions")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
+	instance, ok, err := catalogWorkflowInstanceForEntity(workflow, entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance %s for entity_fields: %v", entityID, err)
 	}
@@ -244,7 +244,7 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow catalogWorkflowPersist
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
+	instance, ok, err := catalogWorkflowInstanceForEntity(workflow, entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", entityID, err)
 	}
@@ -269,7 +269,7 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
+	instance, ok, err := catalogWorkflowInstanceForEntity(h.workflow, entityID)
 	if err != nil {
 		t.Fatalf("load workflow instance %s for flow state: %v", entityID, err)
 	}
@@ -291,6 +291,33 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	if strings.TrimSpace(got) != wantState {
 		t.Fatalf("flow state %q = %q, want %q", strings.TrimSpace(flowID), strings.TrimSpace(got), wantState)
 	}
+}
+
+func catalogWorkflowInstanceForEntity(workflow catalogWorkflowPersistence, entityID string) (runtimepipeline.WorkflowInstance, bool, error) {
+	if workflow == nil {
+		return runtimepipeline.WorkflowInstance{}, false, nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return runtimepipeline.WorkflowInstance{}, false, nil
+	}
+	instances, err := workflow.ListWorkflowInstances(catalogRuntimeContext())
+	if err != nil {
+		return runtimepipeline.WorkflowInstance{}, false, err
+	}
+	var match runtimepipeline.WorkflowInstance
+	found := false
+	for _, instance := range instances {
+		if strings.TrimSpace(asString(instance.Metadata["entity_id"])) != entityID {
+			continue
+		}
+		if found {
+			return runtimepipeline.WorkflowInstance{}, false, fmt.Errorf("entity %s has multiple workflow instance owners", entityID)
+		}
+		match = instance
+		found = true
+	}
+	return match, found, nil
 }
 
 func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersistence, source semanticview.Source, candidateEntityIDs map[string]struct{}, flowID string, requireCausal bool) (runtimepipeline.WorkflowInstance, bool, error) {

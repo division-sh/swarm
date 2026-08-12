@@ -349,7 +349,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-	currentState, err := e.coordinator.currentWorkflowState(ctx, stateRoute, entityID)
+	currentState, err := e.coordinator.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
 	if err != nil {
 		return nil, err
 	}

@@ -1,11 +1,1 @@
-initial_state: pending
-terminal_states: [done]
-states: [pending, done]
-pins:
-  inputs:
-    events: [task.submitted]
-  outputs:
-    events:
-      - name: task.accepted
-        event: task.accepted
-        sink: harness
+name: test-cross-entity-concurrent

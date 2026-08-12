@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -119,8 +120,8 @@ func TestStageGateOwnerRequiresAuthoritativeWorkflowInstance(t *testing.T) {
 	entityID := uuid.NewString()
 	instancePath := "telegram-ingress/standing-one"
 	instance := WorkflowInstance{
-		InstanceID: "standing-one", WorkflowName: "telegram-ingress",
-		Metadata: map[string]any{"flow_path": instancePath, "entity_id": entityID},
+		InstanceID: "standing-one", StorageRef: instancePath, WorkflowName: "telegram-ingress",
+		Metadata: map[string]any{"flow_path": instancePath, "instance_id": "standing-one", "entity_id": entityID},
 	}
 	anchor := decisioncard.StageGateAnchor{
 		Route:  runtimeflowidentity.StoredRoute("telegram-ingress", "standing-one", instancePath),
@@ -664,7 +665,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute("gate-test"), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
-			if err := pc.MarkTerminated(ctx, testWorkflowInstanceRoute("gate-test"), time.Now().UTC()); err != nil {
+			if err := pc.MarkTerminated(ctx, testWorkflowInstanceRoute("gate-test"), identity.NormalizeEntityID(entityID), time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if len(cards.supersededFor) != 1 || cards.supersededFor[0] != entityID {

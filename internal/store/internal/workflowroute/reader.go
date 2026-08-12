@@ -34,7 +34,12 @@ func (o *Postgres) LoadActive(ctx context.Context, instancePath string) (runtime
 	if err != nil {
 		return runtimeworkflowroute.RecoveryRecord{}, err
 	}
-	return scanActive(o.backend.QueryRowContext(ctx, `SELECT flow_template, config FROM flow_instances WHERE instance_id = $1 AND status = 'active' AND terminated_at IS NULL`, instancePath), instancePath)
+	return scanActive(o.backend.QueryRowContext(ctx, `
+		SELECT fi.flow_template, fi.config, COALESCE(MIN(es.entity_id::text), ''), COUNT(DISTINCT es.entity_id)
+		  FROM flow_instances fi
+		  LEFT JOIN entity_state es ON es.flow_instance = fi.instance_id
+		 WHERE fi.instance_id = $1 AND fi.status = 'active' AND fi.terminated_at IS NULL
+		 GROUP BY fi.instance_id, fi.flow_template, fi.config`, instancePath), instancePath)
 }
 
 func (o *SQLite) LoadActive(ctx context.Context, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
@@ -42,7 +47,12 @@ func (o *SQLite) LoadActive(ctx context.Context, instancePath string) (runtimewo
 	if err != nil {
 		return runtimeworkflowroute.RecoveryRecord{}, err
 	}
-	return scanActive(o.backend.QueryRowContext(ctx, `SELECT flow_template, config FROM flow_instances WHERE instance_id = ? AND status = 'active' AND terminated_at IS NULL`, instancePath), instancePath)
+	return scanActive(o.backend.QueryRowContext(ctx, `
+		SELECT fi.flow_template, fi.config, COALESCE(MIN(CAST(es.entity_id AS TEXT)), ''), COUNT(DISTINCT es.entity_id)
+		  FROM flow_instances fi
+		  LEFT JOIN entity_state es ON es.flow_instance = fi.instance_id
+		 WHERE fi.instance_id = ? AND fi.status = 'active' AND fi.terminated_at IS NULL
+		 GROUP BY fi.instance_id, fi.flow_template, fi.config`, instancePath), instancePath)
 }
 
 func validateInstancePath(instancePath string) (string, error) {
@@ -58,7 +68,8 @@ type rowScanner interface{ Scan(...any) error }
 func scanActive(row rowScanner, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
 	var record runtimeworkflowroute.RecoveryRecord
 	var config any
-	if err := row.Scan(&record.WorkflowName, &config); err != nil {
+	var ownerCount int
+	if err := row.Scan(&record.WorkflowName, &config, &record.EntityID, &ownerCount); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimeworkflowroute.RecoveryRecord{}, &runtimeworkflowroute.ActiveRouteNotFound{InstancePath: instancePath}
 		}
@@ -67,6 +78,10 @@ func scanActive(row rowScanner, instancePath string) (runtimeworkflowroute.Recov
 	record.WorkflowName = strings.TrimSpace(record.WorkflowName)
 	if record.WorkflowName == "" {
 		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s has empty flow_template for route recovery", instancePath)
+	}
+	record.EntityID = strings.TrimSpace(record.EntityID)
+	if ownerCount != 1 || record.EntityID == "" {
+		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s does not have exactly one persisted entity owner (owners=%d entity_id=%q)", instancePath, ownerCount, record.EntityID)
 	}
 	switch typed := config.(type) {
 	case []byte:

@@ -651,7 +651,7 @@ func (o *testWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowidenti
 		}
 		transition = &value
 	}
-	return runtimeworkflowlifecycle.NewAcceptedEvent(route, entityID.String(), event.ID(), string(event.Type()), event.ExecutionMode(), event.CreatedAt(), transition)
+	return runtimeworkflowlifecycle.NewAcceptedEvent(route, entityID, event.ID(), string(event.Type()), event.ExecutionMode(), event.CreatedAt(), transition)
 }
 
 func (o *testWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {

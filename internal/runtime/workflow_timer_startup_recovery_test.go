@@ -359,7 +359,12 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
-				Metadata:        map[string]any{"run_id": runID, "entity_id": entityID},
+				Metadata: map[string]any{
+					"run_id":      runID,
+					"entity_id":   entityID,
+					"flow_path":   "workflow-timer-startup",
+					"instance_id": "workflow-timer-startup",
+				},
 			}, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
@@ -491,7 +496,12 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
-				Metadata:        map[string]any{"run_id": runID, "entity_id": entityID},
+				Metadata: map[string]any{
+					"run_id":      runID,
+					"entity_id":   entityID,
+					"flow_path":   "workflow-timer-startup",
+					"instance_id": "workflow-timer-startup",
+				},
 			}, occurredAt)
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)

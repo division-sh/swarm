@@ -51,6 +51,7 @@ const (
 type catalogTriggerStep struct {
 	Event                         string                   `yaml:"event"`
 	Payload                       map[string]any           `yaml:"payload"`
+	Target                        catalogTriggerTarget     `yaml:"target"`
 	BarrierBefore                 catalogTranscriptBarrier `yaml:"barrier_before"`
 	AssertPersistedBeforeDelivery bool                     `yaml:"assert_persisted_before_delivery"`
 	ErrorContains                 string                   `yaml:"error_contains"`
@@ -63,6 +64,24 @@ type catalogTriggerStep struct {
 	createdAt                     time.Time
 	sourceAgent                   string
 	excludeFromEmitted            bool
+}
+
+type catalogTriggerTarget struct {
+	FlowID       string `yaml:"flow_id"`
+	FlowInstance string `yaml:"flow_instance"`
+	EntityID     string `yaml:"entity_id"`
+}
+
+func (t catalogTriggerTarget) route() (events.RouteIdentity, bool) {
+	route := events.RouteIdentity{
+		FlowID:       strings.TrimSpace(t.FlowID),
+		FlowInstance: strings.Trim(strings.TrimSpace(t.FlowInstance), "/"),
+		EntityID:     strings.TrimSpace(t.EntityID),
+	}
+	if route.FlowID == "" && route.FlowInstance == "" && route.EntityID == "" {
+		return events.RouteIdentity{}, false
+	}
+	return route, route.FlowID != "" && route.FlowInstance != "" && route.EntityID != ""
 }
 
 type catalogExpectedDocument struct {
@@ -702,6 +721,10 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	items := make([]publishItem, 0, len(steps))
 	for _, step := range steps {
 		payload := cloneStringAnyMap(step.Payload)
+		targetRoute, hasTarget := step.Target.route()
+		if !hasTarget && step.Target != (catalogTriggerTarget{}) {
+			h.t.Fatalf("concurrent trigger %s requires a complete target owner", step.Event)
+		}
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
 			h.seedInitialState(entityID)
 		}
@@ -714,6 +737,9 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
 		} else {
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
+		}
+		if hasTarget {
+			eventEnvelope = events.EnvelopeForTargetRoute(eventEnvelope, targetRoute)
 		}
 		eventID := strings.TrimSpace(step.eventID)
 		if eventID == "" {
@@ -730,6 +756,9 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		evt := eventtest.ExistingRunRootIngress(eventID,
 			events.EventType(strings.TrimSpace(step.Event)),
 			sourceAgent, "", raw, 0, catalogRuntimeRunID, eventEnvelope, createdAt)
+		if hasTarget {
+			h.ensureTargetFlowInstance(targetRoute, evt)
+		}
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
 			h.previews[evt.ID()] = preview
@@ -1166,6 +1195,41 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		},
 	}, h.startedAt); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
+	}
+}
+
+func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, trigger events.Event) {
+	h.t.Helper()
+	if h == nil || h.rt == nil || h.rt.Manager == nil || h.bundle == nil {
+		h.t.Fatal("catalog target activation requires the runtime manager and contract bundle")
+	}
+	target = target.Normalized()
+	if target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
+		h.t.Fatalf("catalog target owner is incomplete: %#v", target)
+	}
+	route := runtimeflowidentity.RouteForInstancePath(target.FlowInstance)
+	config := map[string]any{}
+	if schema, ok := h.bundle.FlowSchemaByID(target.FlowID); ok && !schema.Instance.Empty() {
+		config[schema.Instance.Path()] = route.InstanceID
+	}
+	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	_, err := h.rt.Manager.EnsureFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(h.bundle),
+		Instance: runtimeflowidentity.Stored(
+			semanticview.Wrap(h.bundle),
+			target.FlowID,
+			route.InstancePath,
+			route.InstanceID,
+			target.EntityID,
+			"",
+		),
+		Config:       config,
+		TriggerEvent: trigger,
+		OccurredAt:   trigger.CreatedAt(),
+	})
+	if err != nil {
+		h.t.Fatalf("activate catalog target owner %s/%s: %v", target.FlowInstance, target.EntityID, err)
 	}
 }
 

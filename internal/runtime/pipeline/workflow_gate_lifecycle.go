@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,102 +10,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
 )
-
-func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
-		return nil
-	}
-	if pc.workflowStore.engineMutations == nil {
-		return fmt.Errorf("workflow gate lifecycle requires the selected workflow engine mutation owner")
-	}
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	entityID = strings.TrimSpace(entityID)
-	currentStage = strings.TrimSpace(currentStage)
-	nextStage = strings.TrimSpace(nextStage)
-	if !route.Valid() || entityID == "" || nextStage == "" || currentStage == nextStage {
-		return nil
-	}
-	now := occurredAt.UTC()
-	if now.IsZero() {
-		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
-	}
-	instance, found, err := pc.workflowStore.Load(ctx, route)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
-	}
-	expectedState := strings.TrimSpace(instance.CurrentState)
-	expectedRevision := instance.Revision
-	var prepared PreparedWorkflowLifecycleMutation
-	if err := pc.planWorkflowGateEffect(ctx, &instance, entityID, currentStage, nextStage, sourceEvent, now, &prepared); err != nil {
-		return err
-	}
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" {
-		return fmt.Errorf("workflow gate lifecycle requires run identity")
-	}
-	updatedAt := time.Now().UTC()
-	if updatedAt.Before(instance.CreatedAt) {
-		updatedAt = instance.CreatedAt
-	}
-	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, updatedAt)
-	if err != nil {
-		return err
-	}
-	var publications []runtimeengine.DurablePublicationPlan
-	if len(prepared.Emissions) > 0 {
-		planner, ok := pc.bus.(EnginePublicationPlanner)
-		if !ok {
-			return fmt.Errorf("workflow gate lifecycle requires the publication planner")
-		}
-		publications, err = planner.PrepareEnginePublications(ctx, prepared.Emissions)
-		if err != nil {
-			return err
-		}
-		if len(publications) != len(prepared.Emissions) {
-			releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications)
-			return errors.Join(fmt.Errorf("workflow gate lifecycle planner returned %d plans for %d emissions", len(publications), len(prepared.Emissions)), releaseErr)
-		}
-	}
-	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
-		State: state, Lifecycle: prepared.Commit, Publications: publications,
-	})
-	if err != nil {
-		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
-		}
-		return err
-	}
-	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
-		if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
-			return err
-		}
-	}
-	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
-		return err
-	}
-	if len(prepared.Emissions) > 0 {
-		dispatcher := pc.bus.EngineDispatcher()
-		if dispatcher == nil {
-			return fmt.Errorf("workflow gate lifecycle requires the post-commit dispatcher")
-		}
-		if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), prepared.Emissions); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func workflowGateSupersededEvent(card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, now time.Time) (events.Event, error) {
 	var noEvent events.Event
@@ -168,10 +80,13 @@ func workflowGateBundleHash(ctx context.Context, pc *PipelineCoordinator) string
 	return ""
 }
 
-func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, entityID string, instance WorkflowInstance, flowInstance string, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
+func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, activation gateruntime.Activation, plan runtimecontracts.WorkflowGatePlan, frozenOutcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (decisioncard.Card, error) {
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+		return decisioncard.Card{}, fmt.Errorf("validate stage-gate owner: %w", err)
+	}
 	contextSnapshot := make(map[string]any, len(plan.Context))
 	for name, expression := range plan.Context {
-		value, err := evalWorkflowGateContext(expression, instance, pc.SemanticSource(), plan.FlowID)
+		value, err := evalWorkflowGateContext(expression, route, entityID, instance, pc.SemanticSource(), plan.FlowID)
 		if err != nil {
 			return decisioncard.Card{}, fmt.Errorf("evaluate gate %s context %s: %w", plan.Decision, name, err)
 		}
@@ -193,24 +108,19 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
 	}
-	instanceIdentity := StoredFlowInstance(pc.SemanticSource(), instance)
-	anchorRoute := instanceIdentity.Route()
-	if anchorRoute.InstancePath != strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/") {
-		return decisioncard.Card{}, fmt.Errorf("gate anchor route disagrees with the workflow instance")
-	}
 	anchorFlowID := strings.TrimSpace(plan.FlowID)
-	sourceRoute := events.RouteIdentity{EntityID: strings.TrimSpace(entityID)}
+	sourceRoute := events.RouteIdentity{EntityID: entityID.String()}
 	if anchorFlowID != "" {
 		sourceRoute.FlowID = anchorFlowID
-		sourceRoute.FlowInstance = anchorRoute.InstancePath
+		sourceRoute.FlowInstance = route.InstancePath
 	}
 	anchorSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(pc.SemanticSource(), anchorFlowID, sourceRoute)
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit stage-gate owner source: %w", err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route:  anchorRoute,
-		FlowID: anchorFlowID, EntityID: strings.TrimSpace(entityID), Source: anchorSource, Stage: plan.Stage,
+		Route:  route,
+		FlowID: anchorFlowID, EntityID: entityID.String(), Source: anchorSource, Stage: plan.Stage,
 		StageActivationID: activation.ActivationID,
 	})
 	if err != nil {
@@ -274,7 +184,10 @@ func cloneWorkflowGateSchema(in map[string]any) map[string]any {
 	return out
 }
 
-func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, instance WorkflowInstance, source semanticview.Source, flowID string) (any, error) {
+func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, route runtimeflowidentity.Route, entityID identity.EntityID, instance WorkflowInstance, source semanticview.Source, flowID string) (any, error) {
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+		return nil, fmt.Errorf("validate workflow gate context owner: %w", err)
+	}
 	if expression.HasLiteralValue() {
 		return expression.Literal, nil
 	}
@@ -289,7 +202,7 @@ func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, instan
 	return workflowexpr.EvalValueExpression(raw, workflowexpr.ValueContext{
 		Entity: instance.Metadata,
 		PlatformEntity: map[string]any{
-			"entity_id": instance.StorageRef, "flow_instance": asString(instance.Metadata["flow_path"]), "current_state": instance.CurrentState,
+			"entity_id": entityID.String(), "flow_instance": route.InstancePath, "current_state": instance.CurrentState,
 		},
 		Policy:   policy,
 		Computed: payloadMap(instance.Metadata["computed"]),

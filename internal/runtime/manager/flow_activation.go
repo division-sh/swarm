@@ -17,6 +17,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
@@ -40,7 +41,7 @@ type flowInstancePersistence interface {
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
-	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error
+	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
@@ -752,18 +753,6 @@ func flowScopeContainsStaticAgent(source semanticview.Source, flowID, logicalID 
 	return false
 }
 
-func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, flowPath, entityID string) error {
-	if am == nil {
-		return fmt.Errorf("agent manager is required")
-	}
-	if canonicalEntityID := runtimeflowidentity.EntityID(flowPath); canonicalEntityID != "" {
-		entityID = canonicalEntityID
-	}
-	return am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
-		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, ""),
-	})
-}
-
 func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
@@ -791,7 +780,7 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	termination, err := owner.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
-		Route: instance.Route(), RunID: runID, TerminatedAt: time.Now().UTC(),
+		Route: instance.Route(), EntityID: identity.NormalizeEntityID(entityID), RunID: runID, TerminatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("persist flow instance terminalization %s: %w", flowPath, err)

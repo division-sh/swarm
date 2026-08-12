@@ -3833,9 +3833,10 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if !found {
 		t.Fatalf("grandchild connect target %#v has no stored instance", grandchildTarget)
 	}
-	storedGrandchildIdentity := runtimepipeline.StoredFlowInstance(semanticview.Wrap(bundle), storedGrandchild)
-	if storedGrandchildIdentity.ScopeKey != "child/grandchild" {
-		t.Fatalf("grandchild stored identity = %#v, want child/grandchild scope; instance=%#v", storedGrandchildIdentity, storedGrandchild)
+	storedGrandchildRoute := runtimeflowidentity.RouteForInstancePath(storedGrandchild.StorageRef)
+	wantGrandchildRoute := runtimeflowidentity.RouteForInstancePath("child/grandchild")
+	if storedGrandchildRoute != wantGrandchildRoute {
+		t.Fatalf("grandchild stored route = %#v, want %#v; instance=%#v", storedGrandchildRoute, wantGrandchildRoute, storedGrandchild)
 	}
 	grandchildPreviewEnvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, grandchildTarget)
 	grandchildPreviewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
