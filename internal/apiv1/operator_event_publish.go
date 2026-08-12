@@ -79,6 +79,7 @@ type eventPublicationConfig struct {
 	injectRunIDEntityIDWhenMissing bool
 	injectRunIDEntityIDOnlyNewRun  bool
 	durablePublishAck              bool
+	atomicAPICompletion            bool
 	publishError                   func(eventPublicationParams, error) error
 	buildCompletion                func(context.Context, EventPublicationOptions, eventPublicationParams) (any, string, error)
 }
@@ -89,6 +90,10 @@ type AcknowledgedEventPublisher interface {
 
 type publicInputAcknowledgedPublisher interface {
 	PublishPublicInputAcknowledged(context.Context, events.Event, semanticview.AuthoredEventEndpoint) error
+}
+
+type apiEventAcknowledgedPublisher interface {
+	PublishAPIEventAcknowledged(context.Context, events.Event, *semanticview.AuthoredEventEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error)
 }
 
 func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]MethodHandler {
@@ -107,8 +112,9 @@ func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]Me
 }
 
 func eventPublishConfigured(opts EventPublicationOptions) bool {
+	atomicPublisher, _ := opts.Acknowledged.(apiEventAcknowledgedPublisher)
 	return runStartConfigured(RunStartHandlerOptions{Publication: opts}) &&
-		opts.Acknowledged != nil && opts.RecipientPlans != nil && opts.Runs != nil && opts.Observability != nil
+		opts.Acknowledged != nil && atomicPublisher != nil && opts.RecipientPlans != nil && opts.Runs != nil && opts.Observability != nil
 }
 
 func executeEventPublish(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
@@ -120,6 +126,7 @@ func executeEventPublish(ctx context.Context, req Request, opts EventPublication
 		injectRunIDEntityIDWhenMissing: true,
 		injectRunIDEntityIDOnlyNewRun:  true,
 		durablePublishAck:              true,
+		atomicAPICompletion:            true,
 		publishError:                   eventPublishPublishError,
 		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
 			return eventPublishResult{
@@ -193,14 +200,16 @@ func executeOperatorEventPublication(
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	return opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
+	idempotency := apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (apiidempotency.Completion, error) {
+	}
+	atomicReplay := false
+	execute := func(ctx context.Context) (apiidempotency.Completion, error) {
 		params, bundleIdentity, err := eventPublicationParamsFromRequest(req, cfg)
 		if err != nil {
 			return apiidempotency.Completion{}, err
@@ -218,12 +227,15 @@ func executeOperatorEventPublication(
 			}
 			params.EventName = resolvedEventName
 			if params.NewRunCreated {
-				endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
-				if err != nil {
-					return apiidempotency.Completion{}, err
-				}
-				if matched {
-					params.PublicInputEndpoint = &endpoint
+				resolution := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
+				switch resolution.Kind {
+				case eventPublicationEndpointOrdinary:
+				case eventPublicationEndpointTemplate:
+					params.PublicInputEndpoint = &resolution.Endpoint
+				case eventPublicationEndpointInvalidTemplate:
+					return apiidempotency.Completion{}, resolution.ApplicationError(requestedEventName)
+				default:
+					return apiidempotency.Completion{}, errors.New("event publication endpoint resolution is incomplete")
 				}
 			}
 		}
@@ -235,25 +247,53 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
+		if cfg.atomicAPICompletion {
+			completion, err := eventPublicationCompletion(ctx, selectedOpts, params, cfg)
+			if err != nil {
+				return apiidempotency.Completion{}, err
+			}
+			publisher, ok := selectedOpts.Acknowledged.(apiEventAcknowledgedPublisher)
+			if !ok || publisher == nil {
+				return apiidempotency.Completion{}, errors.New("event.publish requires atomic selected-store publication and API completion")
+			}
+			committed, replay, err := publisher.PublishAPIEventAcknowledged(ctx, publication, params.PublicInputEndpoint, idempotency, completion)
+			if err != nil {
+				if errors.Is(err, apiidempotency.ErrConflict) {
+					return apiidempotency.Completion{}, err
+				}
+				if cfg.publishError != nil {
+					return apiidempotency.Completion{}, cfg.publishError(params, err)
+				}
+				return apiidempotency.Completion{}, eventCatalogPublishError(params.EventName, err)
+			}
+			atomicReplay = replay
+			return committed, nil
+		}
 		if err := publishEventPublication(ctx, selectedOpts, publication, params.PublicInputEndpoint, cfg); err != nil {
 			if cfg.publishError != nil {
 				return apiidempotency.Completion{}, cfg.publishError(params, err)
 			}
 			return apiidempotency.Completion{}, eventCatalogPublishError(params.EventName, err)
 		}
-		result, resourceID, err := cfg.buildCompletion(ctx, selectedOpts, params)
-		if err != nil {
-			return apiidempotency.Completion{}, err
-		}
-		response, err := json.Marshal(result)
-		if err != nil {
-			return apiidempotency.Completion{}, err
-		}
-		return apiidempotency.Completion{
-			ResourceID: resourceID,
-			Response:   response,
-		}, nil
-	})
+		return eventPublicationCompletion(ctx, selectedOpts, params, cfg)
+	}
+	if cfg.atomicAPICompletion {
+		completion, err := execute(ctx)
+		return completion, atomicReplay, err
+	}
+	return opts.Idempotency.WithAPIIdempotency(ctx, idempotency, execute)
+}
+
+func eventPublicationCompletion(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) (apiidempotency.Completion, error) {
+	result, resourceID, err := cfg.buildCompletion(ctx, opts, params)
+	if err != nil {
+		return apiidempotency.Completion{}, err
+	}
+	response, err := json.Marshal(result)
+	if err != nil {
+		return apiidempotency.Completion{}, err
+	}
+	return apiidempotency.Completion{ResourceID: resourceID, Response: response}, nil
 }
 
 func publishEventPublication(ctx context.Context, opts EventPublicationOptions, evt events.Event, publicInput *semanticview.AuthoredEventEndpoint, cfg eventPublicationConfig) error {
@@ -610,30 +650,74 @@ func enrichExistingRunEventPublicationPrimaryEntity(ctx context.Context, opts Ev
 	return params, nil
 }
 
-func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, requestedEventName, resolvedEventName string) (semanticview.AuthoredEventEndpoint, bool, error) {
+type eventPublicationEndpointKind uint8
+
+const (
+	eventPublicationEndpointUnknown eventPublicationEndpointKind = iota
+	eventPublicationEndpointOrdinary
+	eventPublicationEndpointTemplate
+	eventPublicationEndpointInvalidTemplate
+)
+
+type eventPublicationEndpointResolution struct {
+	Kind       eventPublicationEndpointKind
+	Endpoint   semanticview.AuthoredEventEndpoint
+	Reason     string
+	Candidates []string
+}
+
+func (r eventPublicationEndpointResolution) ApplicationError(eventName string) error {
+	details := map[string]any{
+		"event_name": runtimeeventidentity.Normalize(eventName),
+		"reason":     strings.TrimSpace(r.Reason),
+	}
+	if len(r.Candidates) > 0 {
+		details["candidates"] = append([]string(nil), r.Candidates...)
+	}
+	return NewApplicationError(EventNotDeclaredCode, false, details)
+}
+
+func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, requestedEventName, resolvedEventName string) eventPublicationEndpointResolution {
+	ordinary := eventPublicationEndpointResolution{Kind: eventPublicationEndpointOrdinary}
 	if source == nil {
-		return semanticview.AuthoredEventEndpoint{}, false, nil
+		return ordinary
 	}
 	requestedEventName = runtimeeventidentity.Normalize(requestedEventName)
 	resolvedEventName = runtimeeventidentity.Normalize(resolvedEventName)
 	if requestedEventName == "" || resolvedEventName == "" {
-		return semanticview.AuthoredEventEndpoint{}, false, nil
+		return ordinary
 	}
 	scoped := strings.Contains(requestedEventName, "/")
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	if !scoped {
 		if _, authored := source.AuthoredEventEntries()[requestedEventName]; authored {
-			return semanticview.AuthoredEventEndpoint{}, false, nil
+			return ordinary
 		}
 		for _, endpoint := range census.InputPins() {
 			if strings.TrimSpace(endpoint.FlowID) == "" && runtimeeventidentity.Normalize(endpoint.Event.Canonical) == resolvedEventName {
-				return semanticview.AuthoredEventEndpoint{}, false, nil
+				return ordinary
 			}
 		}
 	}
 	scopes := make(map[string]semanticview.FlowScope)
+	templateOwners := make(map[string]struct{})
 	for _, scope := range source.FlowScopes() {
-		scopes[strings.TrimSpace(scope.ID)] = scope
+		flowID := strings.TrimSpace(scope.ID)
+		scopes[flowID] = scope
+		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		for local := range scope.Events {
+			local = runtimeeventidentity.Normalize(local)
+			canonical := canonicalFlowEventName(source, scope, local)
+			matches := !scoped && local == requestedEventName && canonical == resolvedEventName
+			if scoped {
+				matches = canonical == resolvedEventName && flowScopedEventNameMatches(requestedEventName, scope, local, canonical)
+			}
+			if matches {
+				templateOwners[flowID] = struct{}{}
+			}
+		}
 	}
 	candidates := make([]semanticview.AuthoredEventEndpoint, 0)
 	seen := map[string]struct{}{}
@@ -657,6 +741,7 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 		if !matches {
 			continue
 		}
+		templateOwners[strings.TrimSpace(endpoint.FlowID)] = struct{}{}
 		identity := strings.TrimSpace(endpoint.ID)
 		if _, exists := seen[identity]; exists {
 			continue
@@ -665,7 +750,15 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 		candidates = append(candidates, endpoint)
 	}
 	if len(candidates) == 0 {
-		return semanticview.AuthoredEventEndpoint{}, false, nil
+		if len(templateOwners) > 0 {
+			owners := make([]string, 0, len(templateOwners))
+			for owner := range templateOwners {
+				owners = append(owners, owner)
+			}
+			sort.Strings(owners)
+			return eventPublicationEndpointResolution{Kind: eventPublicationEndpointInvalidTemplate, Reason: "missing_template_input_endpoint", Candidates: owners}
+		}
+		return ordinary
 	}
 	if len(candidates) > 1 {
 		ids := make([]string, 0, len(candidates))
@@ -673,13 +766,9 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 			ids = append(ids, strings.TrimSpace(candidate.ID))
 		}
 		sort.Strings(ids)
-		return semanticview.AuthoredEventEndpoint{}, false, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
-			"event_name": requestedEventName,
-			"reason":     "ambiguous_template_input_endpoint",
-			"candidates": ids,
-		})
+		return eventPublicationEndpointResolution{Kind: eventPublicationEndpointInvalidTemplate, Reason: "ambiguous_template_input_endpoint", Candidates: ids}
 	}
-	return candidates[0], true, nil
+	return eventPublicationEndpointResolution{Kind: eventPublicationEndpointTemplate, Endpoint: candidates[0]}
 }
 
 func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams) (eventPublicationParams, error) {

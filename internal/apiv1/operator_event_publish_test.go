@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
@@ -1254,18 +1255,14 @@ func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscop
 	const eventName = "review.requested"
 
 	rootAndTemplate := semanticview.Wrap(eventPublishRootTemplateCollisionTestBundle())
-	if endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(rootAndTemplate, eventName, eventName); err != nil {
-		t.Fatalf("resolve root/template collision: %v", err)
-	} else if matched {
-		t.Fatalf("root/template collision selected template endpoint %#v", endpoint)
+	if resolution := resolveEventPublicationTemplateInputEndpoint(rootAndTemplate, eventName, eventName); resolution.Kind != eventPublicationEndpointOrdinary {
+		t.Fatalf("root/template collision resolution = %#v, want ordinary root publication", resolution)
 	}
 
 	rootWithoutInputPin := eventPublishRootTemplateCollisionTestBundle()
 	rootWithoutInputPin.RootSchema.Pins.Inputs.Events = nil
-	if endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(semanticview.Wrap(rootWithoutInputPin), eventName, eventName); err != nil {
-		t.Fatalf("resolve authored root without input pin: %v", err)
-	} else if matched {
-		t.Fatalf("authored root without input pin selected template endpoint %#v", endpoint)
+	if resolution := resolveEventPublicationTemplateInputEndpoint(semanticview.Wrap(rootWithoutInputPin), eventName, eventName); resolution.Kind != eventPublicationEndpointOrdinary {
+		t.Fatalf("authored root without input pin resolution = %#v, want ordinary root publication", resolution)
 	}
 
 	templateOnlyBundle := eventPublishTemplateInputTestBundle(eventName, false)
@@ -1274,12 +1271,9 @@ func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscop
 	if err != nil {
 		t.Fatalf("resolve template-only event name: %v", err)
 	}
-	endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(templateOnly, eventName, resolvedTemplateEvent)
-	if err != nil {
-		t.Fatalf("resolve unscoped template input: %v", err)
-	}
-	if !matched || endpoint.FlowID != "operating" || endpoint.PinName != eventName {
-		t.Fatalf("unscoped template endpoint = matched:%t %#v, want operating.%s; scopes=%#v inputs=%#v", matched, endpoint, eventName, templateOnly.FlowScopes(), semanticview.BuildAuthoredEventEndpointCensus(templateOnly).InputPins())
+	resolution := resolveEventPublicationTemplateInputEndpoint(templateOnly, eventName, resolvedTemplateEvent)
+	if resolution.Kind != eventPublicationEndpointTemplate || resolution.Endpoint.FlowID != "operating" || resolution.Endpoint.PinName != eventName {
+		t.Fatalf("unscoped template endpoint = %#v, want operating.%s; scopes=%#v inputs=%#v", resolution, eventName, templateOnly.FlowScopes(), semanticview.BuildAuthoredEventEndpointCensus(templateOnly).InputPins())
 	}
 
 	const importedEvent = "inbound.telegram.text_message"
@@ -1312,12 +1306,53 @@ func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscop
 	if err != nil {
 		t.Fatalf("resolve imported Telegram event name: %v", err)
 	}
-	endpoint, matched, err = resolveEventPublicationTemplateInputEndpoint(importedSource, importedEvent, resolvedImportedEvent)
-	if err != nil {
-		t.Fatalf("resolve imported Telegram template input: %v", err)
+	resolution = resolveEventPublicationTemplateInputEndpoint(importedSource, importedEvent, resolvedImportedEvent)
+	if resolution.Kind != eventPublicationEndpointTemplate || resolution.Endpoint.FlowID != "operating" || resolution.Endpoint.PinName != importedEvent {
+		t.Fatalf("imported Telegram template endpoint = %#v, want operating.%s; resolved=%q inputs=%#v", resolution, importedEvent, resolvedImportedEvent, semanticview.BuildAuthoredEventEndpointCensus(importedSource).InputPins())
 	}
-	if !matched || endpoint.FlowID != "operating" || endpoint.PinName != importedEvent {
-		t.Fatalf("imported Telegram template endpoint = matched:%t %#v, want operating.%s; resolved=%q inputs=%#v", matched, endpoint, importedEvent, resolvedImportedEvent, semanticview.BuildAuthoredEventEndpointCensus(importedSource).InputPins())
+}
+
+func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedencePublication(t *testing.T) {
+	for _, eventName := range []string{"review.requested", "operating/review.requested"} {
+		eventName := eventName
+		t.Run(strings.ReplaceAll(eventName, "/", "_"), func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+			db := storetest.Database(selected)
+			bundle := eventPublishTemplateInputTestBundle("review.requested", false)
+			bundle.FlowSchemas["operating"] = runtimecontracts.FlowSchemaDocument{Mode: "template"}
+			bundle.FlowTree.Root.Children[0].Schema = bundle.FlowSchemas["operating"]
+			consumer := runtimecontracts.SystemNodeContract{
+				ID: "lower-precedence-consumer", ExecutionType: "system_node",
+				SubscribesTo:  []string{"review.requested"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": {}},
+			}
+			bundle.FlowTree.Root.Children[0].Nodes = map[string]runtimecontracts.SystemNodeContract{consumer.ID: consumer}
+			source := semanticview.Wrap(bundle)
+			bus, err := newScopedAPITestEventBus(t, selected, runStartTestEventBusOptions(source))
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
+			response := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, eventName, `{"topic":"must reject"}`, "operator-test", "idem-missing-template-pin-"+strings.ReplaceAll(eventName, "/", "-")))
+			if response.Error == nil {
+				t.Fatal("event.publish error = nil")
+			}
+			data := asMap(t, response.Error.Data)
+			if data["code"] != EventNotDeclaredCode {
+				t.Fatalf("event.publish data = %#v, want %s", data, EventNotDeclaredCode)
+			}
+			details := asMap(t, data["details"])
+			if details["reason"] != "missing_template_input_endpoint" {
+				t.Fatalf("event.publish details = %#v, want missing_template_input_endpoint", details)
+			}
+			if got := countAllEventRows(t, db); got != 0 {
+				t.Fatalf("event rows after missing template input = %d, want 0", got)
+			}
+			if got := countAPIIdempotencyRows(t, db); got != 0 {
+				t.Fatalf("API idempotency rows after missing template input = %d, want 0", got)
+			}
+		})
 	}
 }
 
@@ -2031,6 +2066,14 @@ func (p *publicInputPublishProbe) PublishPublicInputAcknowledged(ctx context.Con
 	return p.EventBus.PublishAcknowledged(ctx, evt)
 }
 
+func (p *publicInputPublishProbe) PublishAPIEventAcknowledged(ctx context.Context, evt events.Event, endpoint *semanticview.AuthoredEventEndpoint, request apiidempotency.Request, completion apiidempotency.Completion) (apiidempotency.Completion, bool, error) {
+	p.publicInputCalls++
+	if endpoint != nil {
+		p.endpoint = *endpoint
+	}
+	return p.EventBus.PublishAPIEventAcknowledged(ctx, evt, nil, request, completion)
+}
+
 type failStandalonePipelineReceiptOnceStore struct {
 	*store.PostgresStore
 	obligations runtimepipelineobligation.Store
@@ -2064,6 +2107,13 @@ func (s *failCommittedReplayScopeStore) CommitPublication(ctx context.Context, c
 		return runtimebus.CommittedPublication{}, s.err
 	}
 	return s.PostgresStore.CommitPublication(ctx, command)
+}
+
+func (s *failCommittedReplayScopeStore) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (runtimebus.CommittedAPIEventPublication, error) {
+	if s.err != nil {
+		return runtimebus.CommittedAPIEventPublication{}, s.err
+	}
+	return s.PostgresStore.CommitAPIEventPublication(ctx, command)
 }
 
 type failNormalRunCompletionStore struct {

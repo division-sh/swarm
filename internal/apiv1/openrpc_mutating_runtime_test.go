@@ -1284,6 +1284,21 @@ func (p *mutatingProbeEventPublisher) PublishAcknowledged(ctx context.Context, e
 	return p.Publish(ctx, evt)
 }
 
+func (p *mutatingProbeEventPublisher) PublishAPIEventAcknowledged(
+	ctx context.Context,
+	evt events.Event,
+	_ *semanticview.AuthoredEventEndpoint,
+	request apiidempotency.Request,
+	completion apiidempotency.Completion,
+) (apiidempotency.Completion, bool, error) {
+	return p.state.idempotency.WithAPIIdempotency(ctx, request, func(ctx context.Context) (apiidempotency.Completion, error) {
+		if err := p.Publish(ctx, evt); err != nil {
+			return apiidempotency.Completion{}, err
+		}
+		return completion, nil
+	})
+}
+
 func (p *mutatingProbeEventPublisher) CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error) {
 	if p.checkErr != nil {
 		return runtimebus.PublishRecipientPlan{}, p.checkErr

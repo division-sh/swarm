@@ -79,48 +79,7 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
-			isolateCLIAPIConfigEnv(t)
-			unsetStoreSelectorEnv(t)
-			t.Setenv("PATH", t.TempDir())
-			t.Setenv("ANTHROPIC_API_KEY", "")
-			t.Setenv("TELEGRAM_BOT_TOKEN", "")
-			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
-			contractsPath := writePublicTelegramMockApprovalScenarioFixture(t)
-			bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-
-			var db *sql.DB
-			opts := cliapp.ServeOptions{
-				ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
-				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-				SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
-				TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			}
-			switch backend {
-			case servedparity.BackendDefaultSQLite:
-				stubServeRuntimeWorkspaceLifecycle(t)
-				oldBuildStores := buildStoresForServe
-				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
-					stores, err := oldBuildStores(ctx, selection, cfg)
-					if err == nil {
-						db = stores.SQLDB
-					}
-					return stores, err
-				}
-				t.Cleanup(func() { buildStoresForServe = oldBuildStores })
-				opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "public-input-rollback.sqlite"))
-			case servedparity.BackendExplicitPostgres:
-				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-				opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
-				opts.StoreMode = storebackend.BackendPostgres.String()
-				opts.StoreModeSet = true
-			default:
-				t.Fatalf("unsupported backend %q", backend)
-			}
-
-			endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
-			if db == nil {
-				t.Fatalf("%s selected database is required", backend)
-			}
+			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
 			claim := testsql.EventCorruptionClaim{
 				Invariant: "public_input.selected_store_atomicity",
 				Reason:    "prove public template lifecycle and publication facts roll back on late delivery failure",
@@ -144,27 +103,136 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 			if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
 			}
-			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey)
+			eventID, runID := publicInputFailureIdentity(t, rpcErr)
+			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
 		})
 	}
 }
 
-func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey string) {
+func TestPublicTemplateInputPublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores(t *testing.T) {
+	stages := []struct {
+		name    string
+		install func(testing.TB, context.Context, *sql.DB, testsql.EventCorruptionClaim, string, servedparity.Backend)
+	}{
+		{name: "replay_scope", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
+			if backend == servedparity.BackendExplicitPostgres {
+				testsql.InstallPostgresReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
+			} else {
+				testsql.InstallSQLiteReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
+			}
+		}},
+		{name: "api_completion", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
+			if backend == servedparity.BackendExplicitPostgres {
+				testsql.InstallPostgresAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
+			} else {
+				testsql.InstallSQLiteAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
+			}
+		}},
+	}
+	for _, backend := range servedparity.RequiredBackends {
+		for _, stage := range stages {
+			backend, stage := backend, stage
+			t.Run(string(backend)+"/"+stage.name, func(t *testing.T) {
+				endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
+				claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove rollback at " + stage.name + " after prior publication facts exist"}
+				stage.install(t, context.Background(), db, claim, "telegram-chat", backend)
+				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
+				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
+					"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
+					"payload":         map[string]any{"conversation_reference": "chat-42", "external_account_reference": "account-42", "provider_message_reference": 1, "text": "late rollback proof"},
+					"idempotency_key": idempotencyKey,
+				})
+				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
+					t.Fatalf("%s/%s event.publish error = %#v, want %s", backend, stage.name, rpcErr, apiv1.EventPublishFailedCode)
+				}
+				eventID, runID := publicInputFailureIdentity(t, rpcErr)
+				requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
+			})
+		}
+	}
+}
+
+func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend) (string, *sql.DB, string) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	contractsPath := writePublicTelegramMockApprovalScenarioFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	var db *sql.DB
+	opts := cliapp.ServeOptions{
+		ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	}
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		stubServeRuntimeWorkspaceLifecycle(t)
+		oldBuildStores := buildStoresForServe
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				db = stores.SQLDB
+			}
+			return stores, err
+		}
+		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "public-input-rollback.sqlite"))
+	case servedparity.BackendExplicitPostgres:
+		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		opts.StoreMode = storebackend.BackendPostgres.String()
+		opts.StoreModeSet = true
+	default:
+		t.Fatalf("unsupported backend %q", backend)
+	}
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+	if db == nil {
+		t.Fatalf("%s selected database is required", backend)
+	}
+	return endpoint, db, bundleHash
+}
+
+func publicInputFailureIdentity(t *testing.T, rpcErr *servedJSONRPCError) (string, string) {
+	t.Helper()
+	details, ok := rpcErr.Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("event.publish failure has no details: %#v", rpcErr)
+	}
+	eventID, _ := details["event_id"].(string)
+	runID, _ := details["run_id"].(string)
+	if strings.TrimSpace(eventID) == "" || strings.TrimSpace(runID) == "" {
+		t.Fatalf("event.publish failure identity = event:%q run:%q", eventID, runID)
+	}
+	return eventID, runID
+}
+
+func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string) {
 	t.Helper()
 	queries := []struct {
 		label string
 		sql   string
+		args  []any
 	}{
-		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE trigger_event_type = 'inbound.telegram.text_message'`},
+		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}},
 		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
-		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE flow_instance LIKE 'telegram-chat/%'`},
+		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}},
 		{label: "route", sql: `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE 'telegram-chat/%'`},
-		{label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'`},
-		{label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id IN (SELECT event_id FROM events WHERE event_name = 'inbound.telegram.text_message')`},
+		{label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_id = ?`, args: []any{eventID}},
+		{label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, args: []any{eventID}},
+		{label: "replay scope", sql: `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, args: []any{eventID}},
 	}
 	for _, query := range queries {
 		var count int
-		if err := db.QueryRowContext(context.Background(), query.sql).Scan(&count); err != nil {
+		statement := query.sql
+		if backend == servedparity.BackendExplicitPostgres && len(query.args) > 0 {
+			statement = strings.Replace(statement, "?", "$1::uuid", 1)
+		}
+		if err := db.QueryRowContext(context.Background(), statement, query.args...).Scan(&count); err != nil {
 			t.Fatalf("%s count %s rollback rows: %v", backend, query.label, err)
 		}
 		if count != 0 {

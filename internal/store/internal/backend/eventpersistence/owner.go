@@ -14,6 +14,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
+	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -44,6 +45,7 @@ type EventPostgresOwner struct {
 	validatorMu    sync.RWMutex
 	validator      func(context.Context, string, []byte) error
 	runFork        selectedForkLineageOwner
+	apiIdempotency *storeapiidempotency.PostgresOwner
 }
 
 type EventSQLiteOwner struct {
@@ -59,23 +61,24 @@ type EventSQLiteOwner struct {
 	validatorMu    sync.RWMutex
 	validator      func(context.Context, string, []byte) error
 	runFork        selectedForkLineageOwner
+	apiIdempotency *storeapiidempotency.SQLiteOwner
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivityPostgresOwner, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner) (*EventPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivityPostgresOwner, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, apiIdempotency *storeapiidempotency.PostgresOwner) (*EventPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil || apiIdempotency == nil {
 		return nil, errors.New("event PostgreSQL owner dependencies are required")
 	}
-	return &EventPostgresOwner{ActivityPostgresOwner: activity, RunLifecyclePostgresOwner: lifecycle, DeliveryPostgresOwner: delivery, ReplyPostgresOwner: reply, backend: backend, requireCurrent: requireCurrent}, nil
+	return &EventPostgresOwner{ActivityPostgresOwner: activity, RunLifecyclePostgresOwner: lifecycle, DeliveryPostgresOwner: delivery, ReplyPostgresOwner: reply, backend: backend, requireCurrent: requireCurrent, apiIdempotency: apiIdempotency}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivitySQLiteOwner, lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner, delivery *storedelivery.DeliverySQLiteOwner, reply *storereplycontext.ReplySQLiteOwner, now func() time.Time) (*EventSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivitySQLiteOwner, lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner, delivery *storedelivery.DeliverySQLiteOwner, reply *storereplycontext.ReplySQLiteOwner, apiIdempotency *storeapiidempotency.SQLiteOwner, now func() time.Time) (*EventSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || activity == nil || lifecycle == nil || delivery == nil || reply == nil || apiIdempotency == nil {
 		return nil, errors.New("event SQLite owner dependencies are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &EventSQLiteOwner{ActivitySQLiteOwner: activity, RunLifecycleSQLiteOwner: lifecycle, DeliverySQLiteOwner: delivery, ReplySQLiteOwner: reply, backend: backend, requireCurrent: requireCurrent, nowFn: now}, nil
+	return &EventSQLiteOwner{ActivitySQLiteOwner: activity, RunLifecycleSQLiteOwner: lifecycle, DeliverySQLiteOwner: delivery, ReplySQLiteOwner: reply, backend: backend, requireCurrent: requireCurrent, apiIdempotency: apiIdempotency, nowFn: now}, nil
 }
 
 func (s *EventPostgresOwner) BindPipeline(owner *storepipeline.PipelinePostgresOwner) error {

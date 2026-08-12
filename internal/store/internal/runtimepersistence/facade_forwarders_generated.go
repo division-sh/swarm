@@ -177,6 +177,10 @@ func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context
 	return s.runForkPostgresOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
 }
 
+func (s *PostgresStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
+	return s.eventPostgresOwner.CommitAPIEventPublication(ctx, command)
+}
+
 func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
 	return s.agentPostgresOwner.CommitAgentLifecycleTransition(ctx, req)
 }
@@ -1251,6 +1255,10 @@ func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx co
 
 func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
 	return s.runForkSQLiteOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
+}
+
+func (s *SQLiteRuntimeStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
+	return s.eventSQLiteOwner.CommitAPIEventPublication(ctx, command)
 }
 
 func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -213,6 +214,71 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	return eb.DispatchPreparedPublishAsync(ctx, prepared)
 }
 
+// PublishAPIEventAcknowledged commits an event.publish publication and its
+// deterministic API completion as one selected-store operation, then dispatches
+// only after that operation succeeds.
+func (eb *EventBus) PublishAPIEventAcknowledged(
+	ctx context.Context,
+	evt events.Event,
+	endpoint *semanticview.AuthoredEventEndpoint,
+	idempotency apiidempotency.Request,
+	completion apiidempotency.Completion,
+) (apiidempotency.Completion, bool, error) {
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	if endpoint != nil {
+		admission, err := newPublicInputAdmission(eb.semanticSource, *endpoint)
+		if err != nil {
+			return apiidempotency.Completion{}, false, err
+		}
+		if err := admission.validateEvent(evt); err != nil {
+			return apiidempotency.Completion{}, false, err
+		}
+		ctx = withPublicInputAdmission(ctx, admission)
+	}
+	owner, ok := eb.store.(APIEventPublicationCommitOwner)
+	if !ok || owner == nil {
+		return apiidempotency.Completion{}, false, errors.New("selected store does not support atomic API event publication")
+	}
+	preparedCtx, prepared, command, err := eb.preparePublishCommand(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	committed, err := owner.CommitAPIEventPublication(preparedCtx, APIEventPublicationCommand{
+		Publication: command,
+		Idempotency: idempotency,
+		Completion:  completion,
+	})
+	if err != nil {
+		return apiidempotency.Completion{}, false, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	}
+	if committed.Replay {
+		return committed.Completion, true, prepared.publicationClaim.Release(preparedCtx)
+	}
+	prepared, err = eb.applyCommittedPublication(preparedCtx, prepared, committed.Publication)
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	if prepared.exactDuplicate {
+		err = eb.DispatchPreparedPublish(preparedCtx, prepared)
+	} else {
+		err = eb.DispatchPreparedPublishAsync(preparedCtx, prepared)
+	}
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	return committed.Completion, false, nil
+}
+
 type eventBusCommitPublishPlan struct {
 	bus                 *EventBus
 	event               events.Event
@@ -229,19 +295,7 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	if !ok || owner == nil {
 		return PreparedPublish{}, errors.New("selected store does not support the closed CommitPublish operation")
 	}
-	preparedCtx, admitted, err := eb.admitPublishEvent(ctx, plan.event)
-	if err != nil {
-		return PreparedPublish{}, err
-	}
-	plan.event = admitted.Event()
-	plan.admitted = admitted
-	if err := eb.executionPosture.Admit(plan.event.ExecutionMode(), "event persistence and delivery"); err != nil {
-		return PreparedPublish{}, err
-	}
-	if err := eb.requireExistingRunActive(preparedCtx, plan.event); err != nil {
-		return PreparedPublish{}, err
-	}
-	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
+	preparedCtx, prepared, command, err := eb.preparePublishCommand(ctx, plan)
 	if err != nil {
 		return PreparedPublish{}, err
 	}
@@ -249,16 +303,38 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	if err != nil {
 		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
 	}
+	return eb.applyCommittedPublication(preparedCtx, prepared, committed)
+}
+
+func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusCommitPublishPlan) (context.Context, PreparedPublish, PublicationCommand, error) {
+	preparedCtx, admitted, err := eb.admitPublishEvent(ctx, plan.event)
+	if err != nil {
+		return ctx, PreparedPublish{}, PublicationCommand{}, err
+	}
+	plan.event = admitted.Event()
+	plan.admitted = admitted
+	if err := eb.executionPosture.Admit(plan.event.ExecutionMode(), "event persistence and delivery"); err != nil {
+		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
+	}
+	if err := eb.requireExistingRunActive(preparedCtx, plan.event); err != nil {
+		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
+	}
+	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
+	return preparedCtx, prepared, command, err
+}
+
+func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (PreparedPublish, error) {
+	var err error
 	prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
 	if err != nil {
-		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
 	}
 	prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
-	if err := eb.finalizeCommittedFlowInstanceActivations(preparedCtx, committed.Activations); err != nil {
-		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations); err != nil {
+		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
 	}
 	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
-		eb.notifyTestPublishPersisted(preparedCtx, prepared.Event, prepared.plan)
+		eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 	}
 	return prepared, nil
 }
