@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -203,20 +204,23 @@ func (pc *PipelineCoordinator) prepareWorkflowLifecycleMutation(ctx context.Cont
 	if pc == nil || instance == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return prepared, fmt.Errorf("workflow lifecycle planning requires selected workflow persistence and semantic source")
 	}
+	if reconcileGenerations && len(effects) == 0 {
+		return prepared, fmt.Errorf("workflow artifact reconciliation requires an exact lifecycle effect owner")
+	}
 	for index, effect := range effects {
 		if err := pc.planWorkflowLifecycleEffect(ctx, instance, effect, &prepared); err != nil {
 			return PreparedWorkflowLifecycleMutation{}, fmt.Errorf("workflow lifecycle effect %d: %w", index, err)
 		}
 	}
 	if reconcileGenerations {
-		if err := pc.planSupersededWorkflowArtifacts(ctx, instance, &prepared.Commit); err != nil {
+		if err := pc.planSupersededWorkflowArtifacts(ctx, instance, effects[0].Route(), effects[0].EntityID(), &prepared.Commit); err != nil {
 			return PreparedWorkflowLifecycleMutation{}, err
 		}
 	}
 	return prepared, nil
 }
 
-func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Context, instance *WorkflowInstance, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Context, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, plan *WorkflowLifecycleMutationPlan) error {
 	if instance == nil || plan == nil {
 		return nil
 	}
@@ -234,12 +238,14 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 			current = append(current, generation)
 		}
 	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
+		return fmt.Errorf("validate loop artifact owner: %w", err)
+	}
 	runID := workflowTimerRunID(ctx, *instance)
-	entityID := workflowTimerCanonicalEntityID(*instance, "")
-	if runID == "" || entityID == "" {
+	if runID == "" || entityID.IsZero() {
 		return fmt.Errorf("loop artifact reconciliation requires exact run and entity identity")
 	}
-	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID, true)
+	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), true)
 	if err != nil {
 		return err
 	}
@@ -266,7 +272,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID.String(), route, activation, kind)
 		if err != nil {
 			return err
 		}
@@ -307,11 +313,13 @@ func workflowLifecycleHasScheduleMutation(items []WorkflowScheduleMutation, task
 }
 
 func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, instance *WorkflowInstance, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
-	entityID := strings.TrimSpace(effect.InstanceID())
+	entityID := effect.EntityID()
 	route := runtimeflowidentity.StoredRoute(effect.Route().ScopeKey, effect.Route().InstanceID, effect.Route().InstancePath)
-	identity := StoredFlowInstance(pc.SemanticSource(), *instance)
-	if entityID == "" || !route.Valid() || effect.OccurredAt().IsZero() || identity.InstancePath != route.InstancePath || identity.EntityID != entityID {
+	if effect.OccurredAt().IsZero() {
 		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
+		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope: %w", err)
 	}
 	fromState, toState := "", ""
 	cause := workflowTimerCause{OccurredAt: effect.OccurredAt()}
@@ -334,25 +342,25 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	default:
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
-	if err := pc.planWorkflowTimerEffect(ctx, *instance, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
+	if err := pc.planWorkflowTimerEffect(ctx, *instance, route, entityID, fromState, toState, cause, &prepared.Commit); err != nil {
 		return err
 	}
-	if err := pc.planWorkflowJoinEffect(ctx, instance, entityID, fromState, toState, effect.OccurredAt(), &prepared.Commit); err != nil {
+	if err := pc.planWorkflowJoinEffect(ctx, instance, route, entityID, fromState, toState, effect.OccurredAt(), &prepared.Commit); err != nil {
 		return err
 	}
-	if err := pc.planWorkflowGateEffect(ctx, instance, entityID, fromState, toState, cause.EventType, effect.OccurredAt(), prepared); err != nil {
+	if err := pc.planWorkflowGateEffect(ctx, instance, route, entityID, fromState, toState, cause.EventType, effect.OccurredAt(), prepared); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, instance WorkflowInstance, entityID, currentState, nextState string, cause workflowTimerCause, plan *WorkflowLifecycleMutationPlan) error {
+func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, instance WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentState, nextState string, cause workflowTimerCause, plan *WorkflowLifecycleMutationPlan) error {
 	source := pc.SemanticSource()
 	runID := workflowTimerRunID(ctx, instance)
 	if runID == "" {
 		return fmt.Errorf("workflow timer lifecycle requires run identity")
 	}
-	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID, true)
+	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), true)
 	if err != nil {
 		return err
 	}
@@ -392,7 +400,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 		if interval <= 0 {
 			return fmt.Errorf("workflow timer %s has no executable positive delay", declaration.ID)
 		}
-		activation, err := workflowTimerActivationForCause(source, runID, entityID, StoredFlowInstance(source, instance).Route(), declaration, generation, cause, interval)
+		activation, err := workflowTimerActivationForCause(source, runID, entityID.String(), route, declaration, generation, cause, interval)
 		if err != nil {
 			return err
 		}
@@ -408,11 +416,10 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, instance *WorkflowInstance, entityID, currentStage, nextStage string, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
-	entityID = strings.TrimSpace(entityID)
+func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage string, occurredAt time.Time, plan *WorkflowLifecycleMutationPlan) error {
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
-	if instance == nil || entityID == "" || nextStage == "" || currentStage == nextStage {
+	if instance == nil || entityID.IsZero() || nextStage == "" || currentStage == nextStage {
 		return nil
 	}
 	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
@@ -435,7 +442,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID.String(), route, activation, kind)
 		if err != nil {
 			return err
 		}
@@ -500,7 +507,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID.String(), route, activation, kind)
 		if err != nil {
 			return err
 		}
@@ -510,11 +517,10 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 	return nil
 }
 
-func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, instance *WorkflowInstance, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time, prepared *PreparedWorkflowLifecycleMutation) error {
-	entityID = strings.TrimSpace(entityID)
+func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, instance *WorkflowInstance, route runtimeflowidentity.Route, entityID identity.EntityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time, prepared *PreparedWorkflowLifecycleMutation) error {
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
-	if instance == nil || entityID == "" || nextStage == "" || currentStage == nextStage {
+	if instance == nil || entityID.IsZero() || nextStage == "" || currentStage == nextStage {
 		return nil
 	}
 	now := occurredAt.UTC()
@@ -554,7 +560,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 			return err
 		}
 		prepared.Commit.GateCards = append(prepared.Commit.GateCards, WorkflowGateCardMutation{
-			Kind: WorkflowGateCardMutationSupersede, Card: card, EntityID: entityID,
+			Kind: WorkflowGateCardMutationSupersede, Card: card, EntityID: entityID.String(),
 			ActivationID: activation.ActivationID, Reason: activation.SupersededReason, OccurredAt: now,
 		})
 		prepared.Commit.RequestCompletionCandidate = true
@@ -577,7 +583,6 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 			if enteredAt.IsZero() {
 				enteredAt = now
 			}
-			identity := StoredFlowInstance(pc.SemanticSource(), *instance)
 			frozenOutcomes, err := pc.resolvedWorkflowGateOutcomes(gatePlan)
 			if err != nil {
 				return err
@@ -586,18 +591,18 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 			if err != nil {
 				return fmt.Errorf("freeze gate %s continuation routes: %w", gatePlan.Decision, err)
 			}
-			activation, err := gateruntime.New(runID, identity.InstancePath, entityID, flowID, nextStage, gatePlan.Decision, bundleHash, routesJSON, sourceEvent, enteredAt)
+			activation, err := gateruntime.New(runID, route.InstancePath, entityID.String(), flowID, nextStage, gatePlan.Decision, bundleHash, routesJSON, sourceEvent, enteredAt)
 			if err != nil {
 				return err
 			}
 			if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 				return err
 			}
-			card, err := pc.buildWorkflowDecisionCard(ctx, entityID, *instance, identity.InstancePath, activation, gatePlan, frozenOutcomes)
+			card, err := pc.buildWorkflowDecisionCard(ctx, route, entityID, *instance, activation, gatePlan, frozenOutcomes)
 			if err != nil {
 				return err
 			}
-			prepared.Commit.GateCards = append(prepared.Commit.GateCards, WorkflowGateCardMutation{Kind: WorkflowGateCardMutationCreate, Card: card, EntityID: entityID})
+			prepared.Commit.GateCards = append(prepared.Commit.GateCards, WorkflowGateCardMutation{Kind: WorkflowGateCardMutationCreate, Card: card, EntityID: entityID.String()})
 		}
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()

@@ -391,11 +391,11 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 }
 
 func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instance WorkflowInstance, activation gateruntime.Activation) error {
-	owner := StoredFlowInstance(nil, instance)
-	if strings.TrimSpace(anchor.FlowID) != strings.TrimSpace(activation.FlowID) ||
-		anchor.Route != owner.Route() ||
-		strings.TrimSpace(anchor.EntityID) != strings.TrimSpace(owner.EntityID) {
+	if strings.TrimSpace(anchor.FlowID) != strings.TrimSpace(activation.FlowID) {
 		return fmt.Errorf("stage_gate anchor does not match its authoritative workflow instance")
+	}
+	if _, err := requireWorkflowInstanceIdentity(anchor.Route, identity.NormalizeEntityID(anchor.EntityID), instance); err != nil {
+		return fmt.Errorf("stage_gate anchor does not match its authoritative workflow instance: %w", err)
 	}
 	return nil
 }

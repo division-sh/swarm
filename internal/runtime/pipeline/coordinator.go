@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -631,10 +632,14 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			_ = heartbeat.Stop()
 			return false, err
 		}
-		currentState, err := pc.currentWorkflowState(executionCtx, stateRoute, workflowEventEntityID(evt))
-		if err != nil {
-			_ = heartbeat.Stop()
-			return false, err
+		eventEntityID := identity.NormalizeEntityID(workflowDeliveryEntityID(executionCtx, evt))
+		currentState := WorkflowState{Metadata: map[string]any{}}
+		if !handler.CreateEntity || !eventEntityID.IsZero() {
+			currentState, err = pc.currentWorkflowState(executionCtx, stateRoute, eventEntityID)
+			if err != nil {
+				_ = heartbeat.Stop()
+				return false, err
+			}
 		}
 		result, err := pc.executeNodeContractHandler(executionCtx, nodeID, handler, workflowTriggerContext{
 			Event:           evt,

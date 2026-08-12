@@ -115,25 +115,22 @@ func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, 
 }
 
 func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Context, flowID, nodeID string, evt events.Event, selected WorkflowInstance, label string) (selectedHandlerEntity, error) {
-	entityID := strings.TrimSpace(FlowInstanceEntityID(selected.StorageRef))
-	if entityID == "" {
-		entityID = strings.TrimSpace(selected.InstanceID)
-	}
-	if entityID == "" {
-		return selectedHandlerEntity{}, fmt.Errorf("%s_no_match: node %s flow %s selected entity has empty entity_id", label, nodeID, flowID)
-	}
 	route, err := workflowInstanceRouteForPersisted(pc.SemanticSource(), selected)
 	if err != nil {
 		return selectedHandlerEntity{}, err
+	}
+	entityID, err := workflowInstancePersistedEntityID(selected)
+	if err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("%s_no_match: node %s flow %s: %w", label, nodeID, flowID, err)
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, selected); err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("%s_no_match: node %s flow %s: %w", label, nodeID, flowID, err)
 	}
 	state, err := pc.currentWorkflowState(ctx, route, entityID)
 	if err != nil {
 		return selectedHandlerEntity{}, err
 	}
-	if strings.TrimSpace(state.EntityID) == "" {
-		state.EntityID = entityID
-	}
-	envelope := events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID)
+	envelope := events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID.String())
 	if storageRef := strings.TrimSpace(selected.StorageRef); storageRef != "" {
 		envelope = events.EnvelopeForFlowInstance(envelope, storageRef)
 	}
@@ -142,7 +139,7 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 		return selectedHandlerEntity{}, fmt.Errorf("%s selected event envelope: %w", label, err)
 	}
 	return selectedHandlerEntity{
-		EntityID: entityID,
+		EntityID: entityID.String(),
 		State:    state,
 		Event:    selectedEvent,
 	}, nil

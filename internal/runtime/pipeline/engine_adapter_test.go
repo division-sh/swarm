@@ -479,7 +479,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("root"), entityID, "done"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("root"), identity.NormalizeEntityID(entityID), "done"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if deactivated {
@@ -539,7 +539,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 		t.Fatalf("seed template instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(flowPath), entityID, "completed"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(flowPath), identity.NormalizeEntityID(entityID), "completed"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if !called {

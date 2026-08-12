@@ -184,7 +184,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
-		currentState, err := pc.currentWorkflowState(ctx, stateRoute, entityID)
+		currentState, err := pc.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}

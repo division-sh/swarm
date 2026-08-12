@@ -1,11 +1,13 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 func TestWorkflowEventEntityIDPrefersTypedDeliveryTarget(t *testing.T) {
@@ -28,5 +30,27 @@ func TestWorkflowEventEntityIDFallsBackToJournalEntity(t *testing.T) {
 
 	if got := workflowEventEntityID(evt); got != "source-entity" {
 		t.Fatalf("workflowEventEntityID = %q, want source-entity", got)
+	}
+}
+
+func TestWorkflowDeliveryEntityIDUsesAdmittedTargetOwner(t *testing.T) {
+	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, "source-entity")
+	envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{
+		FlowID:       "producer",
+		FlowInstance: "producer",
+		EntityID:     "event-target-entity",
+	})
+	evt := eventtest.RunCreatingRootIngress("", "task.ready", "", "", nil, 0, "", "", envelope, time.Time{})
+	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("producer-node"),
+		Target: events.RouteIdentity{
+			FlowID:       "producer",
+			FlowInstance: "producer",
+			EntityID:     "persisted-target-entity",
+		},
+	})
+
+	if got := workflowDeliveryEntityID(ctx, evt); got != "persisted-target-entity" {
+		t.Fatalf("workflowDeliveryEntityID = %q, want persisted-target-entity", got)
 	}
 }

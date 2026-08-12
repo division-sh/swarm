@@ -18,6 +18,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -75,7 +76,7 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 				fixture := newDynamicFlowCreationAtomicityFixture(t, backend)
 				switch order {
 				case "terminal_wins":
-					if err := fixture.workflow.MarkTerminated(fixture.ctx, fixture.plan.Identity.Route(), time.Now().UTC()); err != nil {
+					if err := fixture.workflow.MarkTerminated(fixture.ctx, fixture.plan.Identity.Route(), identity.NormalizeEntityID(fixture.plan.Identity.EntityID), time.Now().UTC()); err != nil {
 						t.Fatalf("MarkTerminated: %v", err)
 					}
 					err := fixture.commit()
@@ -89,6 +90,7 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 					if err := fixture.workflow.MarkTerminated(
 						fixture.ctx,
 						fixture.plan.Identity.Route(),
+						identity.NormalizeEntityID(fixture.plan.Identity.EntityID),
 						time.Now().UTC(),
 					); err != nil {
 						t.Fatalf("terminalize after creation commit: %v", err)

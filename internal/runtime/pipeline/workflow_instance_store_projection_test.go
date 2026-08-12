@@ -417,7 +417,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
 			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"projection-flow","flow_path":"review/inst-1"}`,
-			wantContains: "disagrees with flow_instance_path",
+			wantContains: "disagrees with row route",
 		},
 		{
 			name:         "slash-only flow path fails closed",

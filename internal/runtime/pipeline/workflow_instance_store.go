@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -104,6 +105,14 @@ type WorkflowInstancePersistenceRecord struct {
 // DecodeWorkflowInstancePersistenceRecord converts one exact selected-store
 // record into the canonical runtime workflow value.
 func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceRecord) (WorkflowInstance, error) {
+	route, err := workflowInstanceRouteForPath(record.FlowInstance)
+	if err != nil {
+		return WorkflowInstance{}, fmt.Errorf("decode workflow instance row route: %w", err)
+	}
+	entityID := runtimeidentity.NormalizeEntityID(record.EntityID)
+	if entityID.IsZero() {
+		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s: entity_id is required", route.InstancePath)
+	}
 	projection, err := decodeWorkflowInstancePersistedProjection(
 		record.Fields,
 		record.Gates,
@@ -121,6 +130,8 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		return WorkflowInstance{}, err
 	}
 	item := WorkflowInstance{
+		StorageRef:        route.InstancePath,
+		InstanceID:        route.InstanceID,
 		WorkflowName:      strings.TrimSpace(record.WorkflowName),
 		WorkflowVersion:   strings.TrimSpace(record.WorkflowVersion),
 		Status:            strings.TrimSpace(record.Status),
@@ -135,16 +146,9 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		CreatedAt:         record.CreatedAt.UTC(),
 		UpdatedAt:         record.UpdatedAt.UTC(),
 	}
-	persistedIdentity, err := workflowInstancePersistedIdentity(nil, WorkflowInstance{
-		StorageRef:   projection.Control.StorageRef,
-		WorkflowName: item.WorkflowName,
-		Metadata:     item.Metadata,
-	})
-	if err != nil {
-		return WorkflowInstance{}, err
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, item); err != nil {
+		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: %w", route.InstancePath, err)
 	}
-	item.StorageRef = persistedIdentity.StorageRef
-	item.InstanceID = persistedIdentity.InstanceID
 	if item.StateBuckets == nil {
 		item.StateBuckets = map[string]any{}
 	}
@@ -472,7 +476,7 @@ func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
 	if !ok {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires canonical instance identity")
 	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.Instance.Route(), identity.RowID(), normalized.CurrentState, occurredAt)
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.Instance.Route(), runtimeidentity.NormalizeEntityID(identity.RowID()), normalized.CurrentState, occurredAt)
 	if err != nil {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
 	}
@@ -607,13 +611,14 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	return instance, identity, true, nil
 }
 
-func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
+func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID, terminatedAt time.Time) error {
 	if s == nil || !s.enabled() {
 		return nil
 	}
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() || terminatedAt.IsZero() {
-		return fmt.Errorf("workflow instance termination requires exact route and occurrence time")
+	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() || terminatedAt.IsZero() {
+		return fmt.Errorf("workflow instance termination requires exact route, entity, and occurrence time")
 	}
 	if s.engineMutations == nil {
 		return fmt.Errorf("workflow instance termination requires the selected workflow engine mutation owner")
@@ -631,6 +636,9 @@ func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtim
 	}
 	if !found {
 		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+		return fmt.Errorf("validate workflow instance termination owner: %w", err)
 	}
 	if strings.TrimSpace(instance.Status) == "terminated" {
 		if instance.TerminatedAt.IsZero() {

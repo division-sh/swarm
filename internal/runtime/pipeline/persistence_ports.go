@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -17,6 +18,7 @@ import (
 
 type FlowInstanceTerminationRequest struct {
 	Route        runtimeflowidentity.Route
+	EntityID     identity.EntityID
 	RunID        string
 	TerminatedAt time.Time
 }
@@ -128,10 +130,11 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 	}
 	route := runtimeflowidentity.StoredRoute(req.Route.ScopeKey, req.Route.InstanceID, req.Route.InstancePath)
 	runID := strings.TrimSpace(req.RunID)
-	if !route.Valid() || runID == "" {
-		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires an exact route and run_id")
+	entityID := identity.NormalizeEntityID(req.EntityID.String())
+	if !route.Valid() || entityID.IsZero() || runID == "" {
+		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires an exact route, entity_id, and run_id")
 	}
-	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), route, req.TerminatedAt, true)
+	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), route, entityID, req.TerminatedAt, true)
 	if err != nil {
 		return FlowInstanceTermination{}, err
 	}
@@ -230,8 +233,8 @@ func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.C
 	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
-func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
-	_, err := pc.commitWorkflowTermination(ctx, route, terminatedAt, false)
+func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, terminatedAt time.Time) error {
+	_, err := pc.commitWorkflowTermination(ctx, route, entityID, terminatedAt, false)
 	return err
 }
 
