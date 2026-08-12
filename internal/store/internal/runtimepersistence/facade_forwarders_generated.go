@@ -761,6 +761,10 @@ func (s *PostgresStore) LoadWorkflowTimerActivation(ctx context.Context, activat
 	return s.pipelinePostgresOwner.LoadWorkflowTimerActivation(ctx, activationID)
 }
 
+func (s *PostgresStore) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return s.eventPostgresOwner.LookupAPIEventPublication(ctx, request)
+}
+
 func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
@@ -1767,6 +1771,10 @@ func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, route flo
 
 func (s *SQLiteRuntimeStore) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (pipeline.WorkflowTimerActivation, bool, error) {
 	return s.pipelineSQLiteOwner.LoadWorkflowTimerActivation(ctx, activationID)
+}
+
+func (s *SQLiteRuntimeStore) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return s.eventSQLiteOwner.LookupAPIEventPublication(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {

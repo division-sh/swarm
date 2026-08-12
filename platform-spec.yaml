@@ -11827,6 +11827,10 @@ flow_model:
             idempotency completion mutation is one typed selected-store API-event publication transaction; any lifecycle,
             materialization, delivery, replay-scope, completion, or commit failure leaves no partial public-input publication
             facts. The operation preserves #1214 short keyed lookup/serialization and does not alter generic callback ownership.
+            A durable keyed replay is resolved before current bundle, endpoint, route, or runtime admission is re-evaluated.
+            Once publication plus completion commits, that completion remains the API result; process-local activation finalization
+            or dispatch-admission failures are reported and recovered through durable readiness/delivery owners rather than
+            contradicting the committed response.
           consumes:
           - authored root event catalog and authored endpoint census
           - effective provider-trigger schema imports without provider-output authority
@@ -11842,6 +11846,8 @@ flow_model:
           - create, select, and select-or-create modes consume the same canonical lifecycle owner
           - the complete public rejection matrix fails before acknowledgment
           - SQLite and PostgreSQL faults at delivery insertion, replay-scope insertion after delivery, and API completion insertion after complete publication leave zero exact run, instance, entity, route, event, delivery, replay-scope, or idempotency residue
+          - same-key replay returns the stored response after the selected runtime context is unloaded and does not re-enter semantic admission
+          - process-local activation finalization failure after the atomic commit cannot replace the committed API completion with an error
           does_not_close:
           - provider ingress activation, signing, and provider-output authority
           - automatic scenario derivation tracked by the S6 workstream
@@ -30211,7 +30217,10 @@ api_specification:
         \ failure, noncanonical route ownership, and zero durable deliveries also fail closed. Run, template instance, entity, route,\
         \ event, delivery, replay-scope, and deterministic API idempotency completion writes commit through one typed selected-store\
         \ API-event publication transaction or leave no residue. The operation preserves the generic #1214 short keyed lookup/lock\
-        \ contract and does not execute an arbitrary idempotency callback inside the publication transaction. Existing-run publication must preflight\
+        \ contract and does not execute an arbitrary idempotency callback inside the publication transaction. A same-key replay with\
+        \ the same request body returns its durable completion before current bundle, endpoint, route, or runtime admission is re-evaluated.\
+        \ Once the transaction commits, process-local activation finalization or dispatch-admission failure is reported for durable\
+        \ recovery and cannot replace the committed API result with an error. Existing-run publication must preflight\
         \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
         \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
         \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\

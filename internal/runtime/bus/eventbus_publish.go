@@ -266,7 +266,8 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 	}
 	prepared, err = eb.applyCommittedPublication(preparedCtx, prepared, committed.Publication)
 	if err != nil {
-		return apiidempotency.Completion{}, false, err
+		eb.reportLocalDispatchFailure("api_event_publication_finalize_failed", evt, err)
+		return committed.Completion, false, nil
 	}
 	if prepared.exactDuplicate {
 		err = eb.DispatchPreparedPublish(preparedCtx, prepared)
@@ -274,9 +275,24 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 		err = eb.DispatchPreparedPublishAsync(preparedCtx, prepared)
 	}
 	if err != nil {
-		return apiidempotency.Completion{}, false, err
+		eb.reportLocalDispatchFailure("api_event_publication_dispatch_failed", evt, err)
+		return committed.Completion, false, nil
 	}
 	return committed.Completion, false, nil
+}
+
+// LookupAPIEventPublication returns a durable keyed completion before request
+// semantics are re-evaluated. A miss is intentionally released before route
+// planning; CommitAPIEventPublication rechecks under the same keyed owner.
+func (eb *EventBus) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	if eb == nil {
+		return apiidempotency.Completion{}, false, errors.New("event bus is required")
+	}
+	owner, ok := eb.store.(APIEventPublicationCommitOwner)
+	if !ok || owner == nil {
+		return apiidempotency.Completion{}, false, errors.New("selected store does not support atomic API event publication")
+	}
+	return owner.LookupAPIEventPublication(ctx, request)
 }
 
 type eventBusCommitPublishPlan struct {

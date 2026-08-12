@@ -340,6 +340,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"FinalizeSelectedReceiverAdmission":          operationRetained,
 		"HasFlowInstanceRoute":                       operationPureRead,
 		"ListFlowInstanceRoutes":                     operationPureRead,
+		"LookupAPIEventPublication":                  operationPureRead,
 		"LogRuntime":                                 operationMutation,
 		"MarkDeliveryInProgress":                     operationMutation,
 		"OutboxSweeperActive":                        operationPureRead,
