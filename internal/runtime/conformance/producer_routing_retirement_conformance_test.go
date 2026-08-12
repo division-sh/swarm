@@ -55,7 +55,7 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 	}
 	testEntrypoints := repositoryTestEntrypoints(t, repoRoot)
 	wantDispositionCounts := map[string]int{
-		"harness": 94, "negative_removal": 39, "dead_removal": 46,
+		"harness": 93, "negative_removal": 39, "dead_removal": 47,
 		"same_flow": 7, "external": 3, "historical_connect": 8,
 	}
 	gotDispositionCounts := map[string]int{}

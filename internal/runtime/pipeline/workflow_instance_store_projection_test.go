@@ -24,7 +24,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	parentFlowInstance := "operating/root"
 	now := time.Now().UTC().Round(time.Microsecond)
 
-	instance := WorkflowInstance{
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
 		WorkflowName:    "projection-flow",
@@ -66,7 +66,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 				"g_ready": true,
 			},
 		},
-	}
+	})
 
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
 		t.Fatalf("upsert workflow instance: %v", err)
@@ -161,7 +161,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	entityID := uuid.NewString()
 	storageRef := "projection-flow"
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
-	instance := WorkflowInstance{
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
 		WorkflowName:    "projection-flow",
@@ -181,7 +181,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		StateBuckets: map[string]any{
 			"score": float64(9),
 		},
-	}
+	})
 
 	if err := workflowStore.upsert(ctx, instance); err != nil {
 		t.Fatalf("upsert workflow instance: %v", err)
@@ -326,7 +326,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	}
 }
 
-func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPathOnRoundTrip(t *testing.T) {
+func TestWorkflowInstanceStoreProjection_StaticRowsPersistCanonicalFlowPathOnRoundTrip(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -355,15 +355,15 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 	if !ok {
 		t.Fatal("expected static workflow instance to persist")
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "" {
-		t.Fatalf("Metadata flow_path = %#v, want empty for static row", loaded.Metadata["flow_path"])
+	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "static-flow" {
+		t.Fatalf("Metadata flow_path = %#v, want canonical static route", loaded.Metadata["flow_path"])
 	}
 	identity, err := workflowInstancePersistedIdentity(nil, loaded)
 	if err != nil {
 		t.Fatalf("workflowInstancePersistedIdentity(static): %v", err)
 	}
-	if identity.HasStoredPath {
-		t.Fatalf("identity.HasStoredPath = true, want false for static row")
+	if !identity.HasStoredPath {
+		t.Fatalf("identity.HasStoredPath = false, want persisted canonical static route")
 	}
 	if identity.ScopeKey != "static-flow" {
 		t.Fatalf("identity.ScopeKey = %q, want static-flow", identity.ScopeKey)
@@ -416,8 +416,8 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			name:         "instance id disagrees with flow path",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"projection-flow","flow_path":"review/inst-1"}`,
-			wantContains: "disagrees with flow_instance_path",
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"projection-flow","flow_path":"projection-flow"}`,
+			wantContains: "instance_id",
 		},
 		{
 			name:         "slash-only flow path fails closed",

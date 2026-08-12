@@ -13,6 +13,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/google/uuid"
 )
 
 func withLiveWorkflowInitialEntry(ctx context.Context) context.Context {
@@ -88,11 +89,115 @@ func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, r
 	if !ok {
 		mode = runtimeeffects.ExecutionModeLive
 	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(instance.StorageRef), entityID, instance.CurrentState, mode, instance.EnteredStageAt)
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(instance.StorageRef), identity.NormalizeEntityID(entityID), instance.CurrentState, mode, instance.EnteredStageAt)
 	if err != nil {
 		return err
 	}
 	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, instance.CurrentState, []runtimeworkflowlifecycle.Effect{effect})
+}
+
+func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage string, occurredAt time.Time) error {
+	return applyTestAcceptedLifecycleEffect(ctx, pc, route, entityID, currentStage, nextStage, "test.join_transition", occurredAt)
+}
+
+func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
+	return applyTestAcceptedLifecycleEffect(ctx, pc, route, entityID, currentStage, nextStage, sourceEvent, occurredAt)
+}
+
+func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context, route runtimeflowidentity.Route, entityID string, _ runtimeengine.StateCarrier) error {
+	instance, found, err := pc.workflowStore.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(route, identity.NormalizeEntityID(entityID), uuid.NewString(), "test.join_reconcile", mode, time.Now().UTC(), nil)
+	if err != nil {
+		return err
+	}
+	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, instance.CurrentState, []runtimeworkflowlifecycle.Effect{effect})
+}
+
+func applyTestAcceptedLifecycleEffect(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID, currentStage, nextStage, eventType string, occurredAt time.Time) error {
+	instance, found, err := pc.workflowStore.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	var effect runtimeworkflowlifecycle.Effect
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	if strings.TrimSpace(currentStage) == "" {
+		effect, err = runtimeworkflowlifecycle.NewInitialEntry(route, identity.NormalizeEntityID(entityID), nextStage, mode, occurredAt)
+	} else {
+		var transition runtimeworkflowlifecycle.Transition
+		transition, err = runtimeworkflowlifecycle.NewTransition(currentStage, nextStage, "test_"+uuid.NewString())
+		if err == nil {
+			effect, err = runtimeworkflowlifecycle.NewAcceptedEvent(route, identity.NormalizeEntityID(entityID), uuid.NewString(), eventType, mode, occurredAt, &transition)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	expectedState := instance.CurrentState
+	instance.CurrentState = nextStage
+	instance.EnteredStageAt = occurredAt.UTC()
+	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, expectedState, []runtimeworkflowlifecycle.Effect{effect})
+}
+
+func reconcileWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID, currentStage, nextStage string, cause workflowTimerCause) error {
+	instance, found, err := pc.workflowStore.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	cause = cause.normalized()
+	mode := cause.ExecutionMode
+	if !mode.Valid() {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	var effect runtimeworkflowlifecycle.Effect
+	if cause.Kind == workflowTimerCauseInitial {
+		effect, err = runtimeworkflowlifecycle.NewInitialEntry(route, identity.NormalizeEntityID(entityID), nextStage, mode, cause.OccurredAt)
+	} else {
+		var transition *runtimeworkflowlifecycle.Transition
+		if strings.TrimSpace(currentStage) != "" && strings.TrimSpace(currentStage) != strings.TrimSpace(nextStage) {
+			transitionID := firstNonEmptyString(cause.TransitionID, "test_"+uuid.NewString())
+			value, transitionErr := runtimeworkflowlifecycle.NewTransition(currentStage, nextStage, transitionID)
+			if transitionErr != nil {
+				return transitionErr
+			}
+			transition = &value
+		}
+		effect, err = runtimeworkflowlifecycle.NewAcceptedEvent(
+			route,
+			identity.NormalizeEntityID(entityID),
+			firstNonEmptyString(cause.EventID, uuid.NewString()),
+			firstNonEmptyString(cause.EventType, "test.timer_event"),
+			mode,
+			cause.OccurredAt,
+			transition,
+		)
+	}
+	if err != nil {
+		return err
+	}
+	expectedState := instance.CurrentState
+	if strings.TrimSpace(nextStage) != "" {
+		instance.CurrentState = strings.TrimSpace(nextStage)
+	}
+	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, expectedState, []runtimeworkflowlifecycle.Effect{effect})
 }
 
 func commitTestWorkflowLifecycleMutation(

@@ -1,0 +1,5 @@
+scout_state:
+  member_ids:
+    type: "[text]"
+  batch_id:
+    type: text

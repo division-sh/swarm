@@ -598,7 +598,7 @@ rows:
 - id: B119
   path: tests/tier6-event-loop/test-cross-entity-concurrent/nodes.yaml
   event: task.accepted
-  disposition: harness
+  disposition: dead_removal
   proof: TestCatalogReplayClean_SelectedStores/test-cross-entity-concurrent
 - id: B120
   path: tests/tier6-event-loop/test-dead-letter/nodes.yaml

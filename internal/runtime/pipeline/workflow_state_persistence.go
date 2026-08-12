@@ -8,18 +8,22 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
-func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route runtimeflowidentity.Route, entityID string) (WorkflowState, error) {
-	entityID = strings.TrimSpace(entityID)
+func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID) (WorkflowState, error) {
+	entityID = identity.NormalizeEntityID(entityID.String())
 	state := WorkflowState{
-		EntityID: entityID,
+		EntityID: entityID.String(),
 		Stage:    NormalizeWorkflowStateID(""),
 		Metadata: map[string]any{},
 	}
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || entityID == "" {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return state, nil
+	}
+	if entityID.IsZero() {
+		return WorkflowState{}, fmt.Errorf("load current workflow state requires an exact entity identity")
 	}
 	if !route.Valid() {
 		return WorkflowState{}, fmt.Errorf("load current workflow state requires an exact workflow instance route")
@@ -31,11 +35,9 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route r
 	if !ok {
 		return state, nil
 	}
-	persisted := StoredFlowInstance(pc.SemanticSource(), instance)
-	if strings.TrimSpace(persisted.EntityID) == "" {
-		return WorkflowState{}, fmt.Errorf("loaded workflow state is missing its exact entity identity")
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+		return WorkflowState{}, fmt.Errorf("validate loaded workflow state identity: %w", err)
 	}
-	state.EntityID = strings.TrimSpace(persisted.EntityID)
 	state.Stage = NormalizeWorkflowStateID(strings.TrimSpace(instance.CurrentState))
 	state.Metadata = cloneStringAnyMap(instance.Metadata)
 	if state.Metadata == nil {
