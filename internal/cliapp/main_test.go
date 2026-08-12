@@ -4748,6 +4748,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 					"agent-1": {ID: "agent-1", Tools: []string{"missing_tool"}},
 				}
+				addTestAgentOwners(bundle)
 				return bundle
 			}(),
 			wantErr: false,
@@ -4759,6 +4760,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 					"agent-1": {ID: "agent-1", Tools: []string{"schedule"}, Permissions: []string{"schedule"}},
 				}
+				addTestAgentOwners(bundle)
 				return bundle
 			}(),
 			wantErr: false,
@@ -4770,6 +4772,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
 				}
+				addTestAgentOwners(bundle)
 				return bundle
 			}(),
 			errContains: "'missing.event' emitted but no schema in events.yaml",
@@ -4824,6 +4827,24 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				}
 			}
 		})
+	}
+}
+
+func addTestAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {
+	if bundle == nil {
+		return
+	}
+	if bundle.URIRegistry.Agents == nil {
+		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
+	}
+	if bundle.URIRegistry.ByURI == nil {
+		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{}
+	}
+	for localID := range bundle.Agents {
+		uri := "swarm-test://root/agents/" + localID
+		ref := runtimecontracts.ContractURIRef{Kind: "agent", LocalID: localID, Full: uri}
+		bundle.URIRegistry.Agents[localID] = ref
+		bundle.URIRegistry.ByURI[uri] = ref
 	}
 }
 

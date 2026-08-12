@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -27,18 +28,25 @@ func (c *checkerContext) toolResolution() []Finding {
 	// Boot tool warnings must consume the same runtime inventory truth that the
 	// generic runtime ships, then layer MCP discovery on top of it.
 	runtimeToolNames := c.runtimeAvailableToolNames()
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
+	for _, declaration := range semanticview.AgentDeclarations(c.source) {
+		plan, err := semanticview.ScopedAgentNamePlan(c.source, declaration)
+		if err != nil {
+			continue
+		}
+		projection, projected := semanticview.ScopedAgentContractProjection(c.source, declaration)
+		agent := declaration.Entry
 		for _, toolID := range agent.ConfiguredTools() {
 			toolID = strings.TrimSpace(toolID)
 			if toolID == "" {
 				continue
 			}
-			if runtimetools.IsAgentRequiredMCPToolReference(c.source, agentID, toolID) {
+			if runtimetools.IsAgentRequiredMCPToolReference(c.source, declaration, toolID) {
 				continue
 			}
-			if _, ok := c.source.ToolEntryForAgent(agentID, toolID); ok {
-				continue
+			if projected {
+				if _, ok := projection.ToolEntry(toolID); ok {
+					continue
+				}
 			}
 			if runtimetools.MCPToolDiscovered(toolID, discoveredTools) {
 				continue
@@ -49,8 +57,8 @@ func (c *checkerContext) toolResolution() []Finding {
 			c.toolFindings = append(c.toolFindings, Finding{
 				CheckID:  "tool_resolution",
 				Severity: "warning",
-				Message:  fmt.Sprintf("agent %s references missing tool %s", agentID, toolID),
-				Location: agentID,
+				Message:  fmt.Sprintf("agent %s references missing tool %s", plan.AgentID, toolID),
+				Location: plan.AgentID,
 			})
 		}
 	}

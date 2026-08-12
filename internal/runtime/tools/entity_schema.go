@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -13,30 +14,30 @@ type entityToolSchema struct {
 	Contract entityruntime.Contract
 }
 
-func entityToolSchemaForActor(source semanticview.Source, actorID string) (entityToolSchema, error) {
+func entityToolSchemaForActor(source semanticview.Source, actor models.AgentConfig) (entityToolSchema, error) {
 	if source == nil {
 		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
 	}
-	contract, ok := entityruntime.ResolveForActor(source, actorID)
+	contract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
-		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actorID))
+		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actor.ID))
 	}
 	return entityToolSchema{Defined: true, Contract: contract}, nil
 }
 
-func entityToolSchemaForReadTarget(source semanticview.Source, actorID string, payload map[string]any) (entityToolSchema, error) {
+func entityToolSchemaForReadTarget(source semanticview.Source, actor models.AgentConfig, payload map[string]any) (entityToolSchema, error) {
 	if source == nil {
 		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
 	}
 	target := strings.TrimSpace(asString(payload["entity_type"]))
-	contract, ok, err := entityruntime.ResolveForReadTarget(source, actorID, target)
+	contract, ok, err := entityruntime.ResolveForReadTarget(source, actor, target)
 	if err != nil {
 		return entityToolSchema{}, err
 	}
 	if !ok {
-		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actorID))
+		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actor.ID))
 	}
-	if !entityReadContractOwnedByActor(source, actorID, contract) {
+	if !entityReadContractOwnedByActor(source, actor, contract) {
 		targetLabel := target
 		if targetLabel == "" {
 			targetLabel = entityruntime.CanonicalReadTargetName(contract)

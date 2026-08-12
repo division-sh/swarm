@@ -103,7 +103,7 @@ func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing
 }
 
 func TestValidateNativeToolBootConfig_FailsClosedWhenRuntimeLacksNativeCapability(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
 				ID: "agent-1",
@@ -121,7 +121,7 @@ func TestValidateNativeToolBootConfig_FailsClosedWhenRuntimeLacksNativeCapabilit
 }
 
 func TestValidateNativeToolBootConfig_CLINativeWebSearchDoesNotRequireFallbackProviderPolicy(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
 				ID: "agent-1",
@@ -145,7 +145,7 @@ func TestValidateNativeToolBootConfig_CLINativeWebSearchDoesNotRequireFallbackPr
 }
 
 func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCredential(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
 				ID: "agent-1",
@@ -192,7 +192,7 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 }
 
 func TestValidateNativeToolBootConfig_ExactlyMockedAgentSkipsLiveNativeAdmission(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
 				ID: "agent-1",
@@ -246,7 +246,7 @@ func TestValidateNativeToolBootConfig_ExactlyMockedAgentSkipsLiveNativeAdmission
 }
 
 func TestValidateNativeToolBootConfig_FallbackFileIORequiresWorkspaceExecutionTarget(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
 				ID: "agent-1",
@@ -294,28 +294,20 @@ func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(
 	}
 }
 
-func TestValidateNativeToolBootConfigRejectsCollapsedProjectOwnersAndResolvesFlowOwners(t *testing.T) {
+func TestValidateNativeToolBootConfigResolvesDistinctProjectAndFlowOwners(t *testing.T) {
 	source := scopedNativeToolAgentFixture(t)
-	_, err := ValidateNativeToolBootConfig(
+	warnings, err := ValidateNativeToolBootConfig(
 		unmanagedToolTestContext(),
 		source,
 		nil,
 		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
 		relayWorkspaceResolverStub{target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()}},
 	)
-	if err == nil {
-		t.Fatal("ValidateNativeToolBootConfig unexpectedly admitted declarations with one shared runtime owner")
+	if err != nil {
+		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
 	}
-	for _, project := range []string{"project-a", "project-b"} {
-		want := "project packages/" + project + " agent shared-worker has no unique scoped declaration owner"
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ValidateNativeToolBootConfig error = %v, want %q", err, want)
-		}
-	}
-	for _, flowID := range []string{"flow-a", "flow-b"} {
-		if strings.Contains(err.Error(), "flow "+flowID+" agent shared-worker") {
-			t.Fatalf("ValidateNativeToolBootConfig error = %v, flow owner %s should resolve exactly", err, flowID)
-		}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
 	}
 }
 
@@ -355,33 +347,30 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 	}
 }
 
-func TestValidateNativeToolBootConfigRejectsProjectOwnersCollapsedWithinOneFlow(t *testing.T) {
+func TestValidateNativeToolBootConfigResolvesProjectOwnersWithinOneFlow(t *testing.T) {
 	source := sameFlowScopedNativeToolAgentFixture(t)
 	declarations := semanticview.AgentDeclarations(source)
 	if len(declarations) != 2 {
 		t.Fatalf("declarations = %#v, want two scoped project agents", declarations)
 	}
 	for _, declaration := range declarations {
-		if owner, ok := semanticview.ScopedAgentDeclarationOwner(source, declaration); ok {
-			t.Fatalf("declaration %#v unexpectedly resolved shared owner %q", declaration, owner)
+		if owner, ok := semanticview.ScopedAgentDeclarationOwner(source, declaration); !ok || strings.TrimSpace(owner) == "" {
+			t.Fatalf("declaration %#v did not resolve an exact owner", declaration)
 		}
 	}
 
-	_, err := ValidateNativeToolBootConfig(
+	warnings, err := ValidateNativeToolBootConfig(
 		unmanagedToolTestContext(),
 		source,
 		nil,
 		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
 		relayWorkspaceResolverStub{target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()}},
 	)
-	if err == nil {
-		t.Fatal("ValidateNativeToolBootConfig unexpectedly admitted collapsed same-flow owners")
+	if err != nil {
+		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
 	}
-	for _, project := range []string{"project-a", "project-b"} {
-		want := "project flows/operating/packages/" + project + " agent shared-worker has no unique scoped declaration owner"
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ValidateNativeToolBootConfig error = %v, want %q", err, want)
-		}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
 	}
 }
 

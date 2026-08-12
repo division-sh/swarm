@@ -20,18 +20,26 @@ func RequiredMCPToolAvailabilityFindings(source semanticview.Source, discovered 
 		return nil
 	}
 	findings := make([]RequiredMCPToolAvailabilityFinding, 0)
-	for agentID, agent := range source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			continue
+		}
+		projection, ok := semanticview.ScopedAgentContractProjection(source, declaration)
+		if !ok {
+			continue
+		}
+		agent := declaration.Entry
 		for _, toolName := range agent.ConfiguredTools() {
 			toolName = strings.TrimSpace(toolName)
-			if toolName == "" || !IsAgentRequiredMCPToolReference(source, agentID, toolName) {
+			if toolName == "" || !isAgentRequiredMCPToolReference(source, projection, toolName) {
 				continue
 			}
 			if MCPToolDiscovered(toolName, discovered) {
 				continue
 			}
 			findings = append(findings, RequiredMCPToolAvailabilityFinding{
-				AgentID:  agentID,
+				AgentID:  plan.AgentID,
 				ToolName: toolName,
 				Reason:   "no exact discovered MCP catalog entry exists for required agent tool",
 			})
@@ -46,7 +54,15 @@ func RequiredMCPToolAvailabilityFindings(source semanticview.Source, discovered 
 	return findings
 }
 
-func IsAgentRequiredMCPToolReference(source semanticview.Source, agentID, toolName string) bool {
+func IsAgentRequiredMCPToolReference(source semanticview.Source, declaration semanticview.AgentDeclaration, toolName string) bool {
+	projection, ok := semanticview.ScopedAgentContractProjection(source, declaration)
+	if !ok {
+		return false
+	}
+	return isAgentRequiredMCPToolReference(source, projection, toolName)
+}
+
+func isAgentRequiredMCPToolReference(source semanticview.Source, projection semanticview.AgentContractProjection, toolName string) bool {
 	if source == nil {
 		return false
 	}
@@ -54,7 +70,7 @@ func IsAgentRequiredMCPToolReference(source semanticview.Source, agentID, toolNa
 	if toolName == "" {
 		return false
 	}
-	if entry, ok := source.ToolEntryForAgent(strings.TrimSpace(agentID), toolName); ok {
+	if entry, ok := projection.ToolEntry(toolName); ok {
 		return toolEntryRequiresMCPDiscovery(entry)
 	}
 	prefix, _, ok := strings.Cut(toolName, ".")

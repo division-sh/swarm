@@ -20,6 +20,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	"gopkg.in/yaml.v3"
@@ -147,7 +148,7 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"agent-1": {ID: "agent-1", Tools: []string{"schedule"}, Permissions: []string{"schedule"}},
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -156,6 +157,58 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	}
 	if reportContains(report.Warnings(), "tool_resolution", "schedule") {
 		t.Fatalf("unexpected tool_resolution warning for builtin runtime tool, got %#v", report.Warnings())
+	}
+}
+
+func TestScopedLiteralAgentToolResolutionMatchesRuntimeAndPermissionOwner(t *testing.T) {
+	tool := func(description, permission string) runtimecontracts.ToolSchemaEntry {
+		return runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolDescription(description),
+			runtimecontracts.WithToolPermission(permission),
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+			runtimecontracts.WithToolSchemas(
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			),
+		)
+	}
+	alpha := runtimecontracts.FlowContractView{
+		Path:  "alpha",
+		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "public-worker", Tools: []string{"shared-tool"}, Permissions: []string{"alpha-permission"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"shared-tool": tool("alpha tool", "alpha-permission")},
+	}
+	beta := runtimecontracts.FlowContractView{
+		Path:  "beta",
+		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "public-worker", Tools: []string{"shared-tool"}, Permissions: []string{"beta-permission"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"shared-tool": tool("beta tool", "beta-permission")},
+	}
+	refs := map[string]runtimecontracts.ContractURIRef{
+		"alpha/local-worker": {Kind: "agent", FlowID: "alpha", LocalID: "local-worker", Full: "test://alpha/local-worker"},
+		"beta/local-worker":  {Kind: "agent", FlowID: "beta", LocalID: "local-worker", Full: "test://beta/local-worker"},
+	}
+	byURI := map[string]runtimecontracts.ContractURIRef{}
+	for _, ref := range refs {
+		byURI[ref.Full] = ref
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{alpha, beta}},
+			ByID: map[string]*runtimecontracts.FlowContractView{"alpha": &alpha, "beta": &beta},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{Agents: refs, ByURI: byURI},
+	})
+	checker := newCheckerContext(context.Background(), source, Options{})
+	if findings := checker.toolResolution(); len(findings) != 0 {
+		t.Fatalf("scoped tool resolution findings = %#v", findings)
+	}
+	if warnings := mergedAgentPermissionWarnings(source); len(warnings) != 0 {
+		t.Fatalf("scoped permission warnings = %#v", warnings)
 	}
 }
 
@@ -234,7 +287,7 @@ func TestRun_FailsClosedForMissingDiscoveredMCPTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {
 				Tools: []string{"infra.missing"},
@@ -298,7 +351,7 @@ func TestRun_FailsClosedForMissingContractMCPTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {Tools: []string{"infra.missing"}},
 		},
@@ -362,7 +415,7 @@ func TestRun_FailsClosedForRequiredMCPToolWhenDiscoveryFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {Tools: []string{"infra.ping"}},
 		},
@@ -395,7 +448,7 @@ func TestRun_FailsClosedForPrefixOnlyRequiredMCPToolWhenDiscoveryDisabled(t *tes
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {Tools: []string{"infra.ping"}},
 		},
@@ -526,7 +579,7 @@ func TestRun_SkipsMCPServerReachableWhenReachabilityCheckDisabled(t *testing.T) 
 }
 
 func TestRun_MapsPlatformToolUsageHintCoverageToBootCheck(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"custom_platform_tool": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("platform_builtin")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
@@ -540,7 +593,7 @@ func TestRun_MapsPlatformToolUsageHintCoverageToBootCheck(t *testing.T) {
 }
 
 func TestRun_MapsGeneratedToolSchemaClosureToBootCheck(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
 		},
@@ -3533,6 +3586,7 @@ func TestRun_MapsReservedPlatformNamespaceInAgentEmitEventsToNamedCheck(t *testi
 	agent := bundle.Agents["intake-agent"]
 	agent.EmitEvents = []string{"platform.forbidden"}
 	bundle.Agents["intake-agent"] = agent
+	addBootverifyAgentOwner(bundle, "", "", "intake-agent")
 	source := semanticview.Wrap(bundle)
 
 	report := Run(context.Background(), source, Options{})
@@ -4435,6 +4489,7 @@ func TestRun_RejectsHarnessInputWithInternalOrPlatformProducer(t *testing.T) {
 		bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 		markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
 		bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{ID: "lifecycle-coordinator", EmitEvents: []string{"task.feedback"}}
+		addBootverifyAgentOwner(bundle, "", "", "lifecycle-coordinator")
 		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 		if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") ||
 			!reportContains(report.Errors(), "input_pin_wiring", "internal") {
@@ -4523,6 +4578,7 @@ func TestRun_DoesNotErrorForRootAgentEmitInputProducerPath(t *testing.T) {
 		ID:         "lifecycle-coordinator",
 		EmitEvents: []string{"task.feedback"},
 	}
+	addBootverifyAgentOwner(bundle, "", "", "lifecycle-coordinator")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4734,6 +4790,7 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 						bundle.FlowTree.Root.Nodes["listener"] = listener
 					case "agent":
 						bundle.Agents["retired-agent"] = runtimecontracts.AgentRegistryEntry{ID: "retired-agent", Subscriptions: []string{authored}}
+						addBootverifyAgentOwner(bundle, "", "", "retired-agent")
 					}
 
 					report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4824,6 +4881,9 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 				Root: &root,
 				ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
 			}}
+			if tc.kind == "agent" {
+				addBootverifyAgentOwner(bundle, "child", "child", "observer")
+			}
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 			gotInvalid := reportContains(report.HardInvalidities(), "legacy_qualified_subscription", tc.authored)
@@ -4832,6 +4892,32 @@ func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *t
 			}
 		})
 	}
+}
+
+func addBootverifyAgentOwner(bundle *runtimecontracts.WorkflowContractBundle, flowID, path, localID string) {
+	if bundle == nil {
+		return
+	}
+	if bundle.URIRegistry.Agents == nil {
+		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
+	}
+	if bundle.URIRegistry.ByURI == nil {
+		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{}
+	}
+	absolute := strings.Trim(strings.TrimSpace(path), "/")
+	if absolute != "" {
+		absolute += "/"
+	}
+	absolute += strings.TrimSpace(localID)
+	uri := "swarm-test://" + absolute
+	ref := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: strings.TrimSpace(flowID), LocalID: strings.TrimSpace(localID), Path: strings.Trim(strings.TrimSpace(path), "/"), Absolute: absolute, Full: uri}
+	key := strings.TrimSpace(localID)
+	if strings.TrimSpace(flowID) != "" {
+		key = strings.TrimSpace(flowID) + "/" + key
+	}
+	bundle.URIRegistry.Agents[key] = ref
+	bundle.URIRegistry.ByURI[absolute] = ref
+	bundle.URIRegistry.ByURI[uri] = ref
 }
 
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
@@ -6550,8 +6636,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 78 {
-		t.Fatalf("bootCheckRegistry count = %d, want 78", got)
+	if got := len(bootCheckRegistry); got != 79 {
+		t.Fatalf("bootCheckRegistry count = %d, want 79", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)

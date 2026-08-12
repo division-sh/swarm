@@ -120,6 +120,14 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"analyst": {ID: "analyst", Role: "analyst", Subscriptions: []string{"analysis.requested"}, EmitEvents: []string{"analysis.completed"}},
 		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"analyst": {Kind: "agent", LocalID: "analyst", Full: "test://endpoint-census/analyst"},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				"test://endpoint-census/analyst": {Kind: "agent", LocalID: "analyst", Full: "test://endpoint-census/analyst"},
+			},
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
 		},

@@ -207,21 +207,27 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 	if source == nil {
 		return nil
 	}
-	agents := source.AgentEntries()
-	agentIDs := make([]string, 0, len(agents))
-	for agentID := range agents {
-		agentIDs = append(agentIDs, strings.TrimSpace(agentID))
-	}
-	sort.Strings(agentIDs)
 	var errs []error
-	for _, agentID := range agentIDs {
-		entry := agents[agentID]
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		agentID := strings.TrimSpace(declaration.LocalID)
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			agentID = plan.AgentID
+		}
+		projection, ok := semanticview.ScopedAgentContractProjection(source, declaration)
+		if !ok {
+			errs = append(errs, fmt.Errorf("agent %q has no exact contract projection", agentID))
+			continue
+		}
+		entry := declaration.Entry
 		for _, toolID := range entry.ConfiguredTools() {
 			toolID = strings.TrimSpace(toolID)
 			if toolID == "" {
 				continue
 			}
-			tool, ok := source.ToolEntryForAgent(agentID, toolID)
+			tool, ok := projection.ToolEntry(toolID)
 			if !ok || !isProviderConnector(tool) {
 				continue
 			}

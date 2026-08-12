@@ -119,10 +119,15 @@ func sourceRoles(source semanticview.Source) []string {
 	if source == nil {
 		return nil
 	}
-	roles := make([]string, 0, len(source.AgentEntries()))
-	seen := make(map[string]struct{}, len(source.AgentEntries()))
-	for key, entry := range source.AgentEntries() {
-		role := canonicalRole(firstNonEmpty(entry.Role, key))
+	declarations := semanticview.AgentDeclarations(source)
+	roles := make([]string, 0, len(declarations))
+	seen := make(map[string]struct{}, len(declarations))
+	for _, declaration := range declarations {
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			continue
+		}
+		role := canonicalRole(plan.EffectiveRole(declaration.Entry))
 		if role == "" {
 			continue
 		}

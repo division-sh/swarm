@@ -146,7 +146,7 @@ func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRout
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	got := rt.Resolve(identity.InstancePath + "/opco.product_initialization_requested")
-	if len(got) != 1 || got[0].Recipient.ID() != "ceo-"+identity.InstanceID || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+	if len(got) != 1 || got[0].Recipient.ID() != "ceo" || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
 		t.Fatalf("resolved subscribers = %#v, want concrete same-scope agent route", got)
 	}
 }
@@ -375,7 +375,7 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 		t.Fatalf("Publish after readiness: %v", err)
 	}
 	got := store.deliveries[after.ID()]
-	if len(got) != 1 || got[0] != "ceo-11111111-1111-4111-8111-111111111111" {
+	if len(got) != 1 || got[0] != "ceo" {
 		t.Fatalf("post-readiness delivery recipients = %#v, want exact instantiated agent", got)
 	}
 }
@@ -739,8 +739,8 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 	if !ok {
 		t.Fatalf("persisted routes = %#v, want operating instance route", store.routes)
 	}
-	if route.SubscriberID != "ceo-11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("persisted subscriber_id = %q, want rendered ceo id", route.SubscriberID)
+	if route.SubscriberID != "ceo" {
+		t.Fatalf("persisted subscriber_id = %q, want stable declared ceo name", route.SubscriberID)
 	}
 
 	agentIdentity, admission := routeMaterializationAgentRoute(t, source, identity)
@@ -761,8 +761,8 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 		t.Fatalf("Publish: %v", err)
 	}
 	got := store.deliveries[evt.ID()]
-	if len(got) != 1 || got[0] != "ceo-11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("delivery recipients = %#v, want rendered ceo id", got)
+	if len(got) != 1 || got[0] != "ceo" {
+		t.Fatalf("delivery recipients = %#v, want stable declared ceo name", got)
 	}
 }
 
@@ -849,7 +849,7 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	}
 }
 
-func TestRouteTableFlowInstanceRouteRendersSubscriberWithActivationConfigVars(t *testing.T) {
+func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t *testing.T) {
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(routeMaterializationConfigVarBundle()))
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -868,8 +868,8 @@ func TestRouteTableFlowInstanceRouteRendersSubscriberWithActivationConfigVars(t 
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one ceo route", got)
 	}
-	if got[0].Recipient.ID() != "ceo-11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("resolved subscriber id = %q, want rendered ceo id", got[0].Recipient.ID())
+	if got[0].Recipient.ID() != "ceo" {
+		t.Fatalf("resolved subscriber id = %q, want stable declared ceo name", got[0].Recipient.ID())
 	}
 	if got[0].AgentIdentity.AgentID() != got[0].Recipient.ID() || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
 		t.Fatalf("resolved subscriber identity = %#v, want exact first instance", got[0].AgentIdentity)
@@ -890,8 +890,51 @@ func TestRouteTableFlowInstanceRouteRendersSubscriberWithActivationConfigVars(t 
 		t.Fatalf("resolved sibling subscriber = %#v, want same slug with distinct concrete identity from %#v", sibling, got[0])
 	}
 	routes := rt.MaterializedRoutes(identity)
-	if len(routes) != 1 || routes[0].SubscriberID != "ceo-11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("materialized routes = %#v, want rendered ceo subscriber", routes)
+	if len(routes) != 1 || routes[0].SubscriberID != "ceo" {
+		t.Fatalf("materialized routes = %#v, want stable declared ceo subscriber", routes)
+	}
+}
+
+func TestRouteTableExplicitAgentNameChangesPublicNameNotScopedCoordinate(t *testing.T) {
+	bundle := routeMaterializationConfigVarBundle()
+	flow := bundle.FlowTree.ByID["operating"]
+	entry := flow.Agents["ceo"]
+	entry.ID = "executive"
+	flow.Agents["ceo"] = entry
+	source := semanticview.Wrap(bundle)
+
+	scope, ok := source.FlowScopeByID("operating")
+	if !ok {
+		t.Fatal("operating flow scope not found")
+	}
+	plan, err := semanticview.FlowAgentNamePlan(source, scope, "ceo")
+	if err != nil {
+		t.Fatalf("AgentNamePlanFor: %v", err)
+	}
+	if plan.LocalID != "ceo" || plan.AgentID != "executive" {
+		t.Fatalf("agent name plan = %#v, want local coordinate ceo and public name executive", plan)
+	}
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	identities := []runtimeflowidentity.Route{
+		runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111"),
+		runtimeflowidentity.DeriveRoute("operating", "22222222-2222-4222-8222-222222222222"),
+	}
+	var concrete []agentidentity.Identity
+	for _, identity := range identities {
+		if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			t.Fatalf("AddFlowInstanceRoute(%s): %v", identity.InstancePath, err)
+		}
+		got := routes.Resolve(identity.InstancePath + "/opco.product_initialization_requested")
+		if len(got) != 1 || got[0].Recipient.ID() != "executive" || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+			t.Fatalf("resolved %s = %#v, want executive on exact instance", identity.InstancePath, got)
+		}
+		concrete = append(concrete, got[0].AgentIdentity)
+	}
+	if concrete[0] == concrete[1] {
+		t.Fatalf("sibling concrete identities collapsed: %#v", concrete)
 	}
 }
 
@@ -939,7 +982,6 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"ceo": {
-				ID:            "ceo-{vertical_id}",
 				Type:          "generic",
 				Role:          "ceo",
 				Subscriptions: []string{"opco.product_initialization_requested"},
@@ -983,14 +1025,17 @@ func routeMaterializationAgentRoute(
 	route runtimeflowidentity.Route,
 ) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission) {
 	t.Helper()
-	const agentID = "ceo-11111111-1111-4111-8111-111111111111"
-	owner, ok := semanticview.AgentDeclarationOwner(source, "operating", "ceo")
+	scope, ok := source.FlowScopeByID("operating")
 	if !ok {
-		t.Fatal("resolve operating/ceo declaration owner")
+		t.Fatal("operating flow scope not found")
 	}
-	name, err := agentidentity.DeclaredName(agentID, owner)
+	plan, err := semanticview.FlowAgentNamePlan(source, scope, "ceo")
 	if err != nil {
-		t.Fatalf("build rendered agent name: %v", err)
+		t.Fatalf("resolve operating/ceo declared name: %v", err)
+	}
+	name, err := plan.Materialize()
+	if err != nil {
+		t.Fatalf("materialize operating/ceo declared name: %v", err)
 	}
 	identityRoute, err := route.AgentIdentityRoute()
 	if err != nil {
@@ -1001,7 +1046,7 @@ func routeMaterializationAgentRoute(
 		t.Fatalf("build rendered agent identity: %v", err)
 	}
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID:  agentID,
+		AgentID:  plan.AgentID,
 		FlowID:   "operating",
 		FlowPath: route.InstancePath,
 	})

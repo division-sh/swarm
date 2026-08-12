@@ -102,6 +102,76 @@ func TestAdmittedToolMutationCannotChangeDefinitionAuthorizationRateOrDispatch(t
 	}
 }
 
+func TestExecutionToolsForActorUsesScopedDeclarationWithLiteralPublicName(t *testing.T) {
+	tool := func(description string) runtimecontracts.ToolSchemaEntry {
+		return runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolDescription(description),
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+			runtimecontracts.WithToolSchemas(
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+			),
+		)
+	}
+	alpha := runtimecontracts.FlowContractView{
+		Path:  "alpha",
+		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "alpha-worker", Tools: []string{"shared-tool", "infra.ping"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"shared-tool": tool("alpha scoped tool"),
+			"infra.ping": runtimecontracts.MustToolSchemaEntry(
+				runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")),
+				runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+			),
+		},
+	}
+	beta := runtimecontracts.FlowContractView{
+		Path:  "beta",
+		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "public-worker", Tools: []string{"shared-tool", "infra.ping"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"shared-tool": tool("beta scoped tool"),
+			"infra.ping": runtimecontracts.MustToolSchemaEntry(
+				runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")),
+				runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+			),
+		},
+	}
+	refs := map[string]runtimecontracts.ContractURIRef{
+		"alpha/local-worker": {Kind: "agent", FlowID: "alpha", LocalID: "local-worker", Full: "test://alpha/local-worker"},
+		"beta/local-worker":  {Kind: "agent", FlowID: "beta", LocalID: "local-worker", Full: "test://beta/local-worker"},
+	}
+	byURI := map[string]runtimecontracts.ContractURIRef{}
+	for _, ref := range refs {
+		byURI[ref.Full] = ref
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{alpha, beta}},
+			ByID: map[string]*runtimecontracts.FlowContractView{"alpha": &alpha, "beta": &beta},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{Agents: refs, ByURI: byURI},
+	})
+	entries, err := executionToolsForActor(source, models.AgentConfig{
+		ID: "public-worker", FlowID: "beta", Tools: []string{"shared-tool"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := entries["shared-tool"]
+	if !ok || entry.Description() != "beta scoped tool" {
+		t.Fatalf("runtime scoped tool = %#v ok %v", entry, ok)
+	}
+	findings := RequiredMCPToolAvailabilityFindings(source, nil)
+	if len(findings) != 2 || findings[0].AgentID != "alpha-worker" || findings[1].AgentID != "public-worker" {
+		t.Fatalf("scoped required MCP findings = %#v", findings)
+	}
+}
+
 func TestDirectAndDurableHTTPExecutionConsumeSameAdmittedToolSemantics(t *testing.T) {
 	entry := runtimecontracts.MustToolSchemaEntry(
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),

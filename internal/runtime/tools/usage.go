@@ -127,7 +127,11 @@ func validateEmitToolUsageHintCoverage(source semanticview.Source) []UsageHintFi
 	}
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
 	findings := make([]UsageHintFinding, 0)
-	for _, actor := range providerSchemaValidationActors(source) {
+	actors, actorErrs := providerSchemaValidationActors(source)
+	for _, err := range actorErrs {
+		findings = append(findings, UsageHintFinding{ToolName: "generated emit tools", Severity: "error", Message: err.Error()})
+	}
+	for _, actor := range actors {
 		for _, def := range registry.GenerateEmitToolsForActor(actor, nil) {
 			usage := strings.TrimSpace(def.Usage)
 			if usage == "" {

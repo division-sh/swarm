@@ -21,8 +21,7 @@ func ValidateGeneratedToolSchemaClosureForSource(source semanticview.Source) []e
 		return nil
 	}
 	registry := NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
-	actors := providerSchemaValidationActors(source)
-	var errs []error
+	actors, errs := providerSchemaValidationActors(source)
 	for _, actor := range actors {
 		errs = append(errs, validateGeneratedRoleScopedEntitySchemasForActor(source, actor)...)
 		for _, tool := range registry.GenerateEmitToolsForActor(actor, nil) {

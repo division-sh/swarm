@@ -235,23 +235,6 @@ func (b *WorkflowContractBundle) ToolEntries() map[string]ToolSchemaEntry {
 	}
 	return cloneToolSchemaEntryMap(b.Tools)
 }
-func (b *WorkflowContractBundle) ToolEntryForAgent(agentID, toolID string) (ToolSchemaEntry, bool) {
-	agentID = strings.TrimSpace(agentID)
-	toolID = strings.TrimSpace(toolID)
-	if b == nil || agentID == "" || toolID == "" {
-		return ToolSchemaEntry{}, false
-	}
-	source, ok := b.AgentContractSource(agentID)
-	if !ok {
-		entry, ok := b.Tools[toolID]
-		return entry, ok
-	}
-	if entry, ok := b.scopedTools[contractScopeKey(source, toolID)]; ok {
-		return entry, true
-	}
-	entry, ok := b.Tools[toolID]
-	return entry, ok
-}
 func (b *WorkflowContractBundle) AuthoredEventEntries() map[string]EventCatalogEntry {
 	if b == nil {
 		return nil
@@ -741,6 +724,14 @@ func (b *WorkflowContractBundle) AgentContractSource(agentID string) (ContractIt
 		return ContractItemSource{}, false
 	}
 	source, ok := b.agentSources[strings.TrimSpace(agentID)]
+	return source, ok
+}
+
+func (b *WorkflowContractBundle) ScopedAgentContractSource(scope ContractItemSource, agentID string) (ContractItemSource, bool) {
+	if b == nil {
+		return ContractItemSource{}, false
+	}
+	source, ok := b.scopedAgentSources[contractScopeKey(scope, strings.TrimSpace(agentID))]
 	return source, ok
 }
 func (b *WorkflowContractBundle) ResolveNodeEventReference(nodeID, eventType string) string {

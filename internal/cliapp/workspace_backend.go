@@ -263,7 +263,14 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 	reasons := []WorkspaceCapabilityReason{{Kind: WorkspaceReasonLifecycle}}
 	for _, declaration := range entries {
 		entry := declaration.Entry
-		label := workspaceBackendAgentLabel(declaration.Label(localIDCounts[declaration.LocalID] > 1), entry.ID, entry.Role)
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			return "", nil, err
+		}
+		label := plan.AgentID
+		if localIDCounts[declaration.LocalID] > 1 {
+			label += " (" + declaration.Label(true) + ")"
+		}
 		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
 			ConfiguredDefault: profile,
 			MockConfigured:    entry.Mock.Configured(),

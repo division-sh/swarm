@@ -26,7 +26,7 @@ func TestEmitToolName_LocalizesScopedEventTypes(t *testing.T) {
 }
 
 func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"campaign-coordinator": {
 				ID:         "campaign-coordinator",
@@ -83,8 +83,36 @@ func TestGenerateEmitToolsForActor_FallsBackToRoleWhenConfigIsSilent(t *testing.
 	t.Fatalf("expected role-scoped emit tool in %#v", tools)
 }
 
+func TestDeclarationDerivedActorRolesUseEffectivePublicName(t *testing.T) {
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "public-worker"},
+		},
+	})
+	declarations := semanticview.AgentDeclarations(source)
+	if len(declarations) != 1 {
+		t.Fatalf("declarations = %#v, want one", declarations)
+	}
+	plan, err := semanticview.ScopedAgentNamePlan(source, declarations[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	actors, errs := providerSchemaValidationActors(source)
+	if len(errs) != 0 || len(actors) != 1 || actors[0].Role != "public-worker" {
+		t.Fatalf("provider actors = %#v errors = %v, want effective public role", actors, errs)
+	}
+	entries, errs := scopedAgentEntries(source)
+	if len(errs) != 0 || len(entries) != 1 || entries[0].role != "public-worker" {
+		t.Fatalf("permission actors = %#v errors = %v, want effective public role", entries, errs)
+	}
+	nativeActor := nativeToolAgentConfig(plan.AgentID, plan.EffectiveRole(declarations[0].Entry), declarations[0].Entry)
+	if nativeActor.Role != "public-worker" {
+		t.Fatalf("native-tool actor role = %q, want public-worker", nativeActor.Role)
+	}
+}
+
 func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
-	sourceA := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	sourceA := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"coordinator": {
 				ID:         "coordinator",
@@ -102,7 +130,7 @@ func TestEmitRegistry_KeepsRuntimeSourcesIsolated(t *testing.T) {
 			},
 		},
 	})
-	sourceB := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	sourceB := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"coordinator": {
 				ID:         "coordinator",
@@ -272,7 +300,7 @@ func TestGenerateEmitToolsForActor_ResolvesInstanceScopedFlowEmitEventsThroughOw
 }
 
 func TestGenerateEmitToolsForActor_ProviderSchemaNormalizesPrecisionRefs(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"RequiredCapabilities": {
@@ -330,7 +358,7 @@ func TestGenerateEmitToolsForActor_ProviderSchemaNormalizesPrecisionRefs(t *test
 }
 
 func TestGenerateEmitToolsForActor_GeneratedSchemaIsClosedRequiredAndRejectsUndeclaredPayload(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
 				"SignalStrength": {Values: []string{"weak", "strong"}, Default: "weak"},
@@ -445,7 +473,7 @@ func generatedSchemaClosureErrorStrings(errs []error) []string {
 }
 
 func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"market-research-agent": {
 				ID:         "market-research-agent",

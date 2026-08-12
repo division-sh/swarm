@@ -144,6 +144,48 @@ func TestValidateSourceRejectsAgentExposureOfProviderConnector(t *testing.T) {
 	}
 }
 
+func TestValidateSourceRejectsScopedDuplicateAgentExposureOfProviderConnector(t *testing.T) {
+	connector := telegramConnectorTool("https://api.telegram.org")
+	alpha := runtimecontracts.FlowContractView{
+		Path:  "alpha",
+		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"sender": {ID: "alpha-sender", Tools: []string{"telegram.send_message"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": connector},
+	}
+	beta := runtimecontracts.FlowContractView{
+		Path:  "beta",
+		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"sender": {ID: "beta-sender", Tools: []string{"telegram.send_message"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": connector},
+	}
+	refs := map[string]runtimecontracts.ContractURIRef{
+		"alpha/sender": {Kind: "agent", FlowID: "alpha", LocalID: "sender", Full: "test://alpha/sender"},
+		"beta/sender":  {Kind: "agent", FlowID: "beta", LocalID: "sender", Full: "test://beta/sender"},
+	}
+	byURI := map[string]runtimecontracts.ContractURIRef{}
+	for _, ref := range refs {
+		byURI[ref.Full] = ref
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{alpha, beta}},
+			ByID: map[string]*runtimecontracts.FlowContractView{"alpha": &alpha, "beta": &beta},
+		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{Agents: refs, ByURI: byURI},
+	})
+
+	joined := joinErrors(ValidateSource(source))
+	for _, agentID := range []string{"alpha-sender", "beta-sender"} {
+		if !strings.Contains(joined, `agent "`+agentID+`" must not expose provider connector tool "telegram.send_message" directly`) {
+			t.Fatalf("ValidateSource errors = %q, want scoped exposure rejection for %s", joined, agentID)
+		}
+	}
+}
+
 func TestSurfacesReportManagedCredentialRequirementsWithoutSecretValues(t *testing.T) {
 	ctx := context.Background()
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{

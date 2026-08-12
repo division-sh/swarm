@@ -47,6 +47,7 @@ type AuthoredEventEndpoint struct {
 	Pattern        bool                                     `json:"pattern,omitempty"`
 	NodeID         string                                   `json:"node_id,omitempty"`
 	HandlerEvent   string                                   `json:"handler_event,omitempty"`
+	AgentLocalID   string                                   `json:"agent_local_id,omitempty"`
 	AgentID        string                                   `json:"agent_id,omitempty"`
 	Role           string                                   `json:"role,omitempty"`
 	TimerID        string                                   `json:"timer_id,omitempty"`
@@ -791,48 +792,30 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 }
 
 func (b *endpointCensusBuilder) addAgentEndpoints() {
-	represented := map[string]struct{}{}
-	projectScopes := sortedAuthoredProjectScopes(b.source.ProjectScopes())
-	for _, scope := range projectScopes {
-		if authoredEmitSiteSkipsProjectScope(scope) {
+	for _, declaration := range AgentDeclarations(b.source) {
+		projection, ok := ScopedAgentContractProjection(b.source, declaration)
+		if !ok {
 			continue
 		}
-		b.addAgentScope(scope.OwningFlowID, scope.Key, "", scope.Agents, represented)
-	}
-	flowScopes := sortedAuthoredFlowScopes(b.source.FlowScopes())
-	preferredFlowScopeKeys := authoredPreferredFlowScopeKeys(projectScopes, flowScopes)
-	for _, scope := range flowScopes {
-		scopeKey := authoredEmitSiteFlowScopeKey(scope)
-		if preferred := preferredFlowScopeKeys[strings.TrimSpace(scope.ID)]; preferred != "" && scopeKey != preferred {
+		plan, err := ScopedAgentNamePlan(b.source, declaration)
+		if err != nil {
 			continue
 		}
-		b.addAgentScope(scope.ID, scopeKey, scope.Path, scope.Agents, represented)
-	}
-	for _, agentID := range sortedMapKeys(b.source.AgentEntries()) {
-		if _, ok := represented[agentID]; ok {
-			continue
+		flowPath := ""
+		if projection.OwnerFlowID != "" {
+			flowPath = strings.Trim(strings.TrimSpace(b.source.FlowPath(projection.OwnerFlowID)), "/")
 		}
-		agent := b.source.AgentEntries()[agentID]
-		contractSource, _ := b.source.AgentContractSource(agentID)
-		b.addAgent(agentID, agent, contractSource.FlowID, contractSource.PackageKey, "", contractSource.File)
+		b.addAgent(plan, declaration.Entry, projection.ContractSource.PackageKey, flowPath, projection.ContractSource.File)
 	}
 }
 
-func (b *endpointCensusBuilder) addAgentScope(flowID, packageKey, flowPath string, agents map[string]runtimecontracts.AgentRegistryEntry, represented map[string]struct{}) {
-	for _, agentID := range sortedMapKeys(agents) {
-		represented[agentID] = struct{}{}
-		contractSource, _ := b.source.AgentContractSource(agentID)
-		sourceFile := strings.TrimSpace(contractSource.File)
-		b.addAgent(agentID, agents[agentID], flowID, packageKey, flowPath, sourceFile)
-	}
-}
-
-func (b *endpointCensusBuilder) addAgent(agentID string, agent runtimecontracts.AgentRegistryEntry, flowID, packageKey, flowPath, sourceFile string) {
-	flowID = strings.TrimSpace(flowID)
+func (b *endpointCensusBuilder) addAgent(plan AgentNamePlan, agent runtimecontracts.AgentRegistryEntry, packageKey, flowPath, sourceFile string) {
+	flowID := strings.TrimSpace(plan.OwnerFlowID)
 	role := strings.TrimSpace(agent.Role)
 	for _, eventType := range normalizedSortedStrings(agent.EmitEvents) {
 		endpoint := b.endpoint(EventEndpointProducer, EventEndpointAgent, flowID, eventType)
-		endpoint.AgentID = agentID
+		endpoint.AgentLocalID = plan.LocalID
+		endpoint.AgentID = plan.AgentID
 		endpoint.Role = role
 		endpoint.PackageKey = strings.TrimSpace(packageKey)
 		endpoint.FlowPath = strings.TrimSpace(flowPath)
@@ -842,7 +825,8 @@ func (b *endpointCensusBuilder) addAgent(agentID string, agent runtimecontracts.
 	}
 	for _, eventType := range normalizedSortedStrings(agent.Subscriptions) {
 		endpoint := b.endpoint(EventEndpointConsumer, EventEndpointAgent, flowID, eventType)
-		endpoint.AgentID = agentID
+		endpoint.AgentLocalID = plan.LocalID
+		endpoint.AgentID = plan.AgentID
 		endpoint.Role = role
 		endpoint.PackageKey = strings.TrimSpace(packageKey)
 		endpoint.FlowPath = strings.TrimSpace(flowPath)
@@ -1036,7 +1020,7 @@ func (b *endpointCensusBuilder) endpointSourceLine(endpoint AuthoredEventEndpoin
 		if endpoint.Direction == EventEndpointProducer {
 			field = "emit_events"
 		}
-		return yamlActorEventLine(root, endpoint.AgentID, []string{field}, eventType)
+		return yamlActorEventLine(root, endpoint.AgentLocalID, []string{field}, eventType)
 	default:
 		return 0
 	}
@@ -1179,7 +1163,7 @@ func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint
 		consumerID = endpoint.NodeID
 	case EventEndpointAgent:
 		consumerKind = AuthoredSubscriptionConsumerAgent
-		consumerID = endpoint.AgentID
+		consumerID = endpoint.AgentLocalID
 	case EventEndpointTimer:
 		consumerKind = AuthoredSubscriptionConsumerTimer
 		consumerID = endpoint.TimerID

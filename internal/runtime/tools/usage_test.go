@@ -55,7 +55,7 @@ func TestValidateUsageHintCoverage_RejectsGeneratedEmitHintMentioningCEL(t *test
 	emitToolUsageHint = "Use CEL"
 	t.Cleanup(func() { emitToolUsageHint = original })
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent": {
 				ID:         "agent",
@@ -87,7 +87,7 @@ func TestValidateUsageHintCoverage_CoversRoleDerivedEmitTools(t *testing.T) {
 	emitToolUsageHint = "Use CEL"
 	t.Cleanup(func() { emitToolUsageHint = original })
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"agent-instance-1": {
 				ID:   "agent-instance-1",

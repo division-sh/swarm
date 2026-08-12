@@ -20,14 +20,6 @@ func (s toolOverlaySource) ToolEntries() map[string]runtimecontracts.ToolSchemaE
 	return out
 }
 
-func (s toolOverlaySource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
-	if tool, ok := s.Source.ToolEntryForAgent(agentID, toolID); ok {
-		return tool, true
-	}
-	tool, ok := s.tools[strings.TrimSpace(toolID)]
-	return tool, ok
-}
-
 // WithRuntimeTools adds platform-compiled tools without mutating the authored
 // bundle or granting authors a second declaration path.
 func WithRuntimeTools(source Source, tools map[string]runtimecontracts.ToolSchemaEntry) (Source, error) {

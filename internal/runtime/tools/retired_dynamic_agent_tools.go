@@ -39,21 +39,18 @@ func ValidateRetiredDynamicAgentToolReferences(source semanticview.Source) []err
 	}
 	type authoredScope struct {
 		label  string
-		agents map[string]runtimecontracts.AgentRegistryEntry
 		tools  map[string]runtimecontracts.ToolSchemaEntry
 		policy runtimecontracts.PolicyDocument
 	}
 
 	scopes := []authoredScope{{
 		label:  "root",
-		agents: source.AgentEntries(),
 		tools:  source.ToolEntries(),
 		policy: source.ResolvedPolicyForFlow(""),
 	}}
 	for _, project := range semanticview.ProjectScopes(source) {
 		scopes = append(scopes, authoredScope{
 			label:  "project " + strings.TrimSpace(project.Key),
-			agents: project.Agents,
 			tools:  project.Tools,
 			policy: project.Policy,
 		})
@@ -61,7 +58,6 @@ func ValidateRetiredDynamicAgentToolReferences(source semanticview.Source) []err
 	for _, flow := range semanticview.FlowScopes(source) {
 		scopes = append(scopes, authoredScope{
 			label:  "flow " + strings.TrimSpace(flow.ID),
-			agents: flow.Agents,
 			tools:  flow.Tools,
 			policy: flow.Policy,
 		})
@@ -83,16 +79,19 @@ func ValidateRetiredDynamicAgentToolReferences(source semanticview.Source) []err
 		errs = append(errs, retiredDynamicAgentToolError(name, location))
 	}
 
-	for _, scope := range scopes {
-		for _, agentID := range sortedAgentIDs(scope.agents) {
-			agent := scope.agents[agentID]
-			for _, name := range agent.ConfiguredTools() {
-				add(name, fmt.Sprintf("%s agent %s tools", scope.label, agentID))
-			}
-			for _, name := range agent.Permissions {
-				add(name, fmt.Sprintf("%s agent %s permissions", scope.label, agentID))
-			}
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		label := declaration.Label(true)
+		if strings.TrimSpace(declaration.ScopeKind) == "" {
+			label = "root agent " + strings.TrimSpace(declaration.LocalID)
 		}
+		for _, name := range declaration.Entry.ConfiguredTools() {
+			add(name, label+" tools")
+		}
+		for _, name := range declaration.Entry.Permissions {
+			add(name, label+" permissions")
+		}
+	}
+	for _, scope := range scopes {
 		for name := range scope.tools {
 			add(name, scope.label+" tool entry")
 		}

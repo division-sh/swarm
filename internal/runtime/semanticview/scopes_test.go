@@ -200,7 +200,6 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
-  id: backend-{vertical_id}
   intent: {inline: "Exercise package-backed memory proof."}
   model: regular
   memory: true
@@ -263,7 +262,6 @@ states:
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
-  id: backend-{flow_id}
   intent: {inline: "Exercise flow-scoped memory proof."}
   model: regular
   memory: true

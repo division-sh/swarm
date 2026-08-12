@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
@@ -39,22 +40,21 @@ type WriteTarget struct {
 	Nested    bool
 }
 
-func ResolveForActor(source semanticview.Source, actorID string) (Contract, bool) {
-	actorID = strings.TrimSpace(actorID)
-	if source == nil || actorID == "" {
+func ResolveForActor(source semanticview.Source, actor models.AgentConfig) (Contract, bool) {
+	if source == nil || strings.TrimSpace(actor.ID) == "" {
 		return Contract{}, false
 	}
-	contractSource, ok := source.AgentContractSource(actorID)
+	projection, ok := semanticview.ResolveAgentContractProjection(source, actor)
 	if !ok {
 		return Contract{}, false
 	}
-	return ResolveForFlow(source, contractSource.FlowID)
+	return ResolveForFlow(source, projection.OwnerFlowID)
 }
 
-func ResolveForReadTarget(source semanticview.Source, actorID, target string) (Contract, bool, error) {
+func ResolveForReadTarget(source semanticview.Source, actor models.AgentConfig, target string) (Contract, bool, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		contract, ok := ResolveForActor(source, actorID)
+		contract, ok := ResolveForActor(source, actor)
 		return contract, ok, nil
 	}
 	if source == nil {

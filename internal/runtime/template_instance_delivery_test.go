@@ -331,7 +331,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 
-	renderedAgentID := "ceo-product-1"
+	renderedAgentID := "ceo"
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM routing_rules
 		WHERE flow_instance = 'operating/11111111-1111-4111-8111-111111111111'
@@ -865,7 +865,6 @@ auto_emit_on_create:
   product_id: string
 `,
 		"flows/operating/agents.yaml": `ceo:
-  id: ceo-{product_id}
   type: generic
   role: ceo
   intent: {inline: "Initialize the product for this operating instance."}

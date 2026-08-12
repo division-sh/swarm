@@ -292,13 +292,17 @@ func RegisterURI(registry *URIRegistry, target *map[string]string, kind, flowID,
 		Absolute: AbsoluteURI(flowPath, localID),
 		Full:     FullURI(registry, AbsoluteURI(flowPath, localID)),
 	}
+	registryKey := RegistryKey(ref.FlowID, ref.LocalID)
+	if ref.FlowID == "" && strings.Trim(strings.TrimSpace(ref.Path), "/") != "" {
+		registryKey = ref.Absolute
+	}
 	switch ref.Kind {
 	case "node":
-		registry.Nodes[RegistryKey(ref.FlowID, ref.LocalID)] = ref
+		registry.Nodes[registryKey] = ref
 	case "agent":
-		registry.Agents[RegistryKey(ref.FlowID, ref.LocalID)] = ref
+		registry.Agents[registryKey] = ref
 	case "event":
-		registry.Events[RegistryKey(ref.FlowID, ref.LocalID)] = ref
+		registry.Events[registryKey] = ref
 	}
 	registry.ByURI[ref.Absolute] = ref
 	registry.ByURI[ref.Full] = ref

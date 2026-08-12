@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
 const (
@@ -73,8 +74,8 @@ func CredentialStoreKeyForActorFlow(source Source, actorID, flowID, key string) 
 	if flowID != "" {
 		return CredentialStoreKeyForFlow(source, flowID, key)
 	}
-	if agentSource, ok := source.AgentContractSource(actorID); ok {
-		return CredentialStoreKeyForFlow(source, agentSource.FlowID, key)
+	if projection, ok := ResolveAgentContractProjection(source, models.AgentConfig{ID: actorID, FlowID: flowID}); ok {
+		return CredentialStoreKeyForFlow(source, projection.OwnerFlowID, key)
 	}
 	return strings.TrimSpace(key), false
 }

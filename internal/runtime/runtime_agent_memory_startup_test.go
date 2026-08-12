@@ -41,7 +41,7 @@ func assertRuntimeStartCarriesMemoryIdentity(t *testing.T, source semanticview.S
 		t.Fatalf("Start: %v", err)
 	}
 
-	cfg, err := rt.Manager.ResolveAgentConfig("backend-{vertical_id}", "support")
+	cfg, err := rt.Manager.ResolveAgentConfig("backend", "support")
 	if err != nil {
 		t.Fatalf("resolve package-backed static flow agent config: %v", err)
 	}

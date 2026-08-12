@@ -21,7 +21,7 @@ func TestNewSourceProvider_UsesDeclaredAgentEmitEventsOnly(t *testing.T) {
 		},
 	}
 
-	provider := NewSourceProvider(semanticview.Wrap(bundle))
+	provider := NewSourceProvider(authorityTestSource(bundle))
 	got := provider.ProducerEventsForRole("worker")
 	if len(got) != 1 || got[0] != "work.completed" {
 		t.Fatalf("ProducerEventsForRole(worker) = %#v, want [work.completed]", got)
@@ -45,7 +45,7 @@ func TestNewSourceProvider_UsesDeclaredRoleForProducerEvents(t *testing.T) {
 		},
 	}
 
-	provider := NewSourceProvider(semanticview.Wrap(bundle))
+	provider := NewSourceProvider(authorityTestSource(bundle))
 	got := provider.ProducerEventsForRole("reviewer")
 	if len(got) != 1 || got[0] != "review.completed" {
 		t.Fatalf("ProducerEventsForRole(reviewer) = %#v, want [review.completed]", got)
@@ -53,6 +53,40 @@ func TestNewSourceProvider_UsesDeclaredRoleForProducerEvents(t *testing.T) {
 	if got := provider.ProducerEventsForRole("agent-instance-1"); len(got) != 0 {
 		t.Fatalf("ProducerEventsForRole(agent-instance-1) = %#v, want nil/empty", got)
 	}
+}
+
+func TestNewSourceProvider_UsesEffectiveDeclaredNameForMailboxRole(t *testing.T) {
+	provider := NewSourceProvider(authorityTestSource(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"local-worker": {ID: "public-worker"},
+		},
+	}))
+
+	if err := provider.AuthorizeMailboxSend(models.AgentConfig{Role: "public-worker"}); err != nil {
+		t.Fatalf("effective declared name mailbox authority: %v", err)
+	}
+	if err := provider.AuthorizeMailboxSend(models.AgentConfig{Role: "local-worker"}); err == nil {
+		t.Fatal("local declaration coordinate retained mailbox authority")
+	}
+}
+
+func authorityTestSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	if bundle == nil {
+		return nil
+	}
+	if bundle.URIRegistry.Agents == nil {
+		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
+	}
+	if bundle.URIRegistry.ByURI == nil {
+		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{}
+	}
+	for localID := range bundle.Agents {
+		uri := "swarm-test://root/agents/" + localID
+		ref := runtimecontracts.ContractURIRef{Kind: "agent", LocalID: localID, Full: uri}
+		bundle.URIRegistry.Agents[localID] = ref
+		bundle.URIRegistry.ByURI[uri] = ref
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestNewSourceProvider_UsesEffectiveSystemNodeProduces(t *testing.T) {
@@ -74,7 +108,7 @@ func TestNewSourceProvider_UsesEffectiveSystemNodeProduces(t *testing.T) {
 }
 
 func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
-	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	provider := NewSourceProvider(authorityTestSource(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"control-plane": {ID: "control-plane", Role: "control-plane"},
 			"reviewer":      {ID: "reviewer", Role: "reviewer", ManagerFallback: "control-plane"},
@@ -130,7 +164,7 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 }
 
 func TestMessageSelfAuthorityRequiresExactConcreteIdentity(t *testing.T) {
-	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	provider := NewSourceProvider(authorityTestSource(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {ID: "worker", Role: "worker"},
 		},

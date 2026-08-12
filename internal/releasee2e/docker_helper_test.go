@@ -28,7 +28,7 @@ const (
 	releaseE2EWorkspaceImage   = "swarm-workspace:latest"
 	releaseE2ENetwork          = "mas_default"
 	releaseE2EAgentWorkdir     = "/workspace"
-	releaseE2EAgentFingerprint = "ef1581e2042b4a9932ec6994425466b32b6e05c225780b02d46be87a535524f7"
+	releaseE2EAgentFingerprint = "1f16a79924a40cd1e6e42105063bd4b8d5e3332769c777508831bb193986d791"
 	releaseE2EAgentContainer   = "swarm-agent-" + releaseE2EAgentFingerprint
 	releaseE2EAgentVolume      = "workspaces_agent_" + releaseE2EAgentFingerprint
 	releaseE2EOrphanKill       = `if command -v pkill >/dev/null 2>&1; then
@@ -528,7 +528,7 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 	if create.name == releaseE2EAgentContainer {
 		wantIdentityLabels := map[string]string{
 			"dev.swarm.agent_id":                 "release-worker",
-			"dev.swarm.agent_name_owner":         "claude-cli-release-lifecycle://worker/release-worker",
+			"dev.swarm.agent_name_owner":         "claude-cli-release-lifecycle://flows/worker/release-worker",
 			"dev.swarm.agent_name_source":        "declared",
 			"dev.swarm.agent_route_presence":     "present",
 			"dev.swarm.agent_flow_scope_key":     "worker",

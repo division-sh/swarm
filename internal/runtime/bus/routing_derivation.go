@@ -137,12 +137,12 @@ type routeFlowTemplate struct {
 }
 
 type routeSubscriberTemplate struct {
-	IDTemplate     string
-	Kind           subscriberKind
-	RawPatterns    []string
-	AgentNameOwner string
-	HandlerFlowID  string
-	HandlerNodeID  string
+	IDTemplate    string
+	Kind          subscriberKind
+	RawPatterns   []string
+	AgentNamePlan semanticview.AgentNamePlan
+	HandlerFlowID string
+	HandlerNodeID string
 }
 
 type subscriberKind uint8
@@ -203,11 +203,18 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	if source == nil {
 		return rt, nil
 	}
+	if _, err := semanticview.AgentNamePlans(source); err != nil {
+		return nil, fmt.Errorf("compile declared agent names: %w", err)
+	}
 	if err := validateTypedPubSubAuthorizations(source); err != nil {
 		return nil, err
 	}
 
 	for _, scope := range semanticview.ProjectScopes(source) {
+		agentNamePlans, err := routeProjectAgentNamePlans(source, scope)
+		if err != nil {
+			return nil, err
+		}
 		localEvents := routeProjectLocalEventSet(scope)
 		agentFlowID := strings.TrimSpace(scope.OwningFlowID)
 		agentPath := ""
@@ -233,7 +240,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			handlerFlowID = strings.TrimSpace(source.WorkflowName())
 		}
 		rt.addAuthoredEventPathsLocked(basePath, localEvents)
-		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents); err != nil {
+		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents, agentNamePlans); err != nil {
 			return nil, err
 		}
 		if err := rt.addNodePatternsLocked(source, scope.Key, owningFlowID, agentFlowID, handlerFlowID, inputEvents, basePath, localEvents, scope.Nodes); err != nil {
@@ -242,6 +249,10 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	}
 
 	for _, scope := range semanticview.FlowScopes(source) {
+		agentNamePlans, err := routeFlowAgentNamePlans(source, scope)
+		if err != nil {
+			return nil, err
+		}
 		flowPath := routeFlowPath(source, scope.ID)
 		localEvents := routeFlowLocalEventSet(source, scope)
 		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
@@ -262,7 +273,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			rt.authoredScopes[flowPath] = struct{}{}
 		}
 		rt.addAuthoredEventPathsLocked(flowPath, localEvents)
-		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents); err != nil {
+		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents, agentNamePlans); err != nil {
 			return nil, err
 		}
 		if err := rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes); err != nil {
@@ -451,7 +462,17 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	rt.materializeTemplateSourceObserversLocked(templateScope, instancePath)
 	vars := flowInstanceRouteMaterializationVars(req, templateDef.FlowID)
 	for _, subscriberTemplate := range templateDef.Subscribers {
-		recipient, err := subscriberRecipient(subscriberTemplate.Kind, routeRenderTemplate(subscriberTemplate.IDTemplate, vars))
+		subscriberID := routeRenderTemplate(subscriberTemplate.IDTemplate, vars)
+		var name agentidentity.Name
+		var err error
+		if subscriberTemplate.Kind == subscriberAgent {
+			name, err = subscriberTemplate.AgentNamePlan.Materialize()
+			if err != nil {
+				return fmt.Errorf("materialize route subscriber agent name: %w", err)
+			}
+			subscriberID = name.AgentID
+		}
+		recipient, err := subscriberRecipient(subscriberTemplate.Kind, subscriberID)
 		if err != nil {
 			return fmt.Errorf("materialize route subscriber: %w", err)
 		}
@@ -460,10 +481,6 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			handlerFlowID: subscriberTemplate.HandlerFlowID, handlerNodeID: subscriberTemplate.HandlerNodeID,
 		}
 		if subscriber.Recipient.IsAgent() {
-			name, err := agentidentity.DeclaredName(subscriber.Recipient.ID(), subscriberTemplate.AgentNameOwner)
-			if err != nil {
-				return fmt.Errorf("materialize route subscriber agent identity: %w", err)
-			}
 			agentRoute, err := identity.AgentIdentityRoute()
 			if err != nil {
 				return fmt.Errorf("materialize route subscriber flow identity: %w", err)
@@ -1004,6 +1021,30 @@ func routeCanonicalPathsOverlap(left, right string) bool {
 	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
+func routeProjectAgentNamePlans(source semanticview.Source, scope semanticview.ProjectScope) (map[string]semanticview.AgentNamePlan, error) {
+	plans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
+	for _, key := range sortedStringKeys(scope.Agents) {
+		plan, err := semanticview.ProjectAgentNamePlan(source, scope, key)
+		if err != nil {
+			return nil, fmt.Errorf("project scope %q agent %s declaration name: %w", scope.Key, key, err)
+		}
+		plans[key] = plan
+	}
+	return plans, nil
+}
+
+func routeFlowAgentNamePlans(source semanticview.Source, scope semanticview.FlowScope) (map[string]semanticview.AgentNamePlan, error) {
+	plans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
+	for _, key := range sortedStringKeys(scope.Agents) {
+		plan, err := semanticview.FlowAgentNamePlan(source, scope, key)
+		if err != nil {
+			return nil, fmt.Errorf("flow scope %q agent %s declaration name: %w", scope.ID, key, err)
+		}
+		plans[key] = plan
+	}
+	return plans, nil
+}
+
 func (rt *RouteTable) addAgentPatternsLocked(
 	source semanticview.Source,
 	packageKey, routingFlowID, agentFlowID string,
@@ -1011,20 +1052,21 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	basePath, agentPath string,
 	localEvents map[string]struct{},
 	agents map[string]runtimecontracts.AgentRegistryEntry,
+	agentNamePlans map[string]semanticview.AgentNamePlan,
 ) error {
 	for _, key := range sortedStringKeys(agents) {
 		entry := agents[key]
-		subscriber := Subscriber{
-			Recipient: events.MustAgentDeliveryRecipient(strings.TrimSpace(entry.ID)),
-			Path:      strings.Trim(strings.TrimSpace(agentPath), "/"),
-		}
-		owner, ok := semanticview.AgentDeclarationOwner(source, agentFlowID, key)
+		namePlan, ok := agentNamePlans[key]
 		if !ok {
-			return fmt.Errorf("route subscriber agent %s missing scoped declaration owner", key)
+			return fmt.Errorf("route subscriber agent %s has no exact scoped declaration name", key)
 		}
-		name, err := agentidentity.DeclaredName(subscriber.Recipient.ID(), owner)
+		name, err := namePlan.Materialize()
 		if err != nil {
 			return fmt.Errorf("route subscriber agent %s declaration identity: %w", key, err)
+		}
+		subscriber := Subscriber{
+			Recipient: events.MustAgentDeliveryRecipient(name.AgentID),
+			Path:      strings.Trim(strings.TrimSpace(agentPath), "/"),
 		}
 		route := agentidentity.RootRoute()
 		if subscriber.Path != "" {
@@ -1387,15 +1429,20 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 				return nil, fmt.Errorf("route subscriber agent %s: %s", key, admission.Message())
 			}
 		}
-		owner, ok := semanticview.AgentDeclarationOwner(source, scope.ID, key)
-		if !ok {
-			return nil, fmt.Errorf("route subscriber template agent %s missing scoped declaration owner", key)
+		namePlan, err := semanticview.FlowAgentNamePlan(source, scope, key)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"flow %q agent subscriber %q subscriptions %q has no valid declared name: %w; remediation: omit id to use the declaration key or author one non-empty literal id",
+				scope.ID,
+				key,
+				strings.Join(patterns, ","),
+				err,
+			)
 		}
 		out = append(out, routeSubscriberTemplate{
-			IDTemplate:     strings.TrimSpace(entry.ID),
-			Kind:           subscriberAgent,
-			RawPatterns:    append([]string{}, patterns...),
-			AgentNameOwner: owner,
+			Kind:          subscriberAgent,
+			RawPatterns:   append([]string{}, patterns...),
+			AgentNamePlan: namePlan,
 		})
 	}
 	for _, key := range sortedStringKeys(scope.Nodes) {

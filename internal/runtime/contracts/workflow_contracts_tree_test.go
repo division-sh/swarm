@@ -138,21 +138,90 @@ func TestBuildFlowTreeRootOnlyPackageIndexesAgentIdentityWithoutCopyingCatalogs(
 	}
 }
 
-func TestAgentDeclarationRejectsInstanceIDInterpolation(t *testing.T) {
-	_, err := normalizeAgentRegistryEntries(map[string]AgentRegistryEntry{
-		"account-worker": {ID: "account-worker-{instance_id}"},
-	}, "flows/account/agents.yaml")
-	if err == nil {
-		t.Fatal("agent declaration accepted retired {instance_id} interpolation")
+func TestAgentDeclarationRejectsArbitraryIDInterpolation(t *testing.T) {
+	for _, id := range []string{"account-worker-{instance_id}", "account-worker-{unknown_business_key}"} {
+		t.Run(id, func(t *testing.T) {
+			_, err := normalizeAgentRegistryEntries(map[string]AgentRegistryEntry{
+				"account-worker": {ID: id},
+			}, "flows/account/agents.yaml")
+			if err == nil {
+				t.Fatalf("agent declaration accepted retired interpolation %q", id)
+			}
+			for _, want := range []string{
+				"flows/account/agents.yaml",
+				`agent "account-worker"`,
+				"contains interpolation",
+				"move the discriminator to instance.by",
+				"declaration x instance route",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %q, want teaching fragment %q", err, want)
+				}
+			}
+		})
 	}
-	for _, want := range []string{
-		"flows/account/agents.yaml",
-		`agent "account-worker"`,
-		"agent IDs are declaration identities",
-		"runtime carries flow-instance identity separately",
+}
+
+func TestAgentDeclarationIDPresenceMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		field   string
+		wantErr bool
+	}{
+		{name: "omitted"},
+		{name: "quoted empty", field: `  id: ""`, wantErr: true},
+		{name: "whitespace", field: `  id: "   "`, wantErr: true},
+		{name: "null", field: "  id: null", wantErr: true},
+		{name: "bare", field: "  id:", wantErr: true},
+		{name: "tilde", field: "  id: ~", wantErr: true},
+		{name: "literal override", field: "  id: public-worker"},
 	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %q, want teaching fragment %q", err, want)
+		t.Run(tc.name, func(t *testing.T) {
+			source := "worker:\n  role: worker\n"
+			if tc.field != "" {
+				source = "worker:\n" + tc.field + "\n  role: worker\n"
+			}
+			var entries map[string]AgentRegistryEntry
+			if err := yaml.Unmarshal([]byte(source), &entries); err != nil {
+				t.Fatal(err)
+			}
+			normalized, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "id is authored but empty") {
+					t.Fatalf("normalize error = %v, want authored-empty rejection", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := DeclaredAgentID("worker", normalized["worker"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "worker"
+			if tc.name == "literal override" {
+				want = "public-worker"
+			}
+			if got != want {
+				t.Fatalf("effective id = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestAgentDeclarationRejectsDuplicateEffectiveNames(t *testing.T) {
+	for _, source := range []string{
+		"worker:\n  role: worker\nalias:\n  id: worker\n  role: alias\n",
+		"first:\n  id: shared\n  role: first\nsecond:\n  id: shared\n  role: second\n",
+	} {
+		var entries map[string]AgentRegistryEntry
+		if err := yaml.Unmarshal([]byte(source), &entries); err != nil {
+			t.Fatal(err)
+		}
+		_, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
+		if err == nil || !strings.Contains(err.Error(), "derive the same effective agent id") {
+			t.Fatalf("normalize error = %v, want duplicate effective-name rejection", err)
 		}
 	}
 }

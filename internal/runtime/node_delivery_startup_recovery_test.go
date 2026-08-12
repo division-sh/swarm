@@ -35,6 +35,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -192,9 +193,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			bundle := loadEntitylessStartupRecoveryBundle(t)
-			source := semanticview.Wrap(bundle)
-			module := newRuntimeTestWorkflowModule(t, source)
-
 			const agentID = "startup-order-agent"
 			agentConfig := runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: agentID, Type: "test", Role: "observer", FlowID: "global", Model: "regular",
@@ -204,6 +202,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				ID: agentID, Type: "test", Role: "observer", Model: "regular",
 				ResolvedIntent: agentConfig.Intent, Subscriptions: []string{"task.completed"},
 			}
+			source := semanticviewtest.WrapRootAgents(bundle)
+			module := newRuntimeTestWorkflowModule(t, source)
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			entityID := eventtest.UUID("startup-order-node-entity-" + backend.name)

@@ -11,7 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 const (
@@ -430,7 +430,7 @@ func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName strin
 		},
 		Agents: agents,
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 	workOwner := runtimeTestOccurrence(t, bundleHash)
 	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
 		WorkOwner:        workOwner,

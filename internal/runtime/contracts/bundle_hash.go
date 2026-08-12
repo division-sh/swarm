@@ -283,16 +283,20 @@ func (b *bundleHashEntryBuilder) addAgentMockModuleFiles(bundle *WorkflowContrac
 	}
 	for _, record := range bundleAgentRecords(bundle) {
 		agent := record.Entry
+		agentID, err := DeclaredAgentID(record.LogicalID, agent)
+		if err != nil {
+			return err
+		}
 		if !agent.Mock.Configured() {
 			continue
 		}
 		sourcePath := strings.TrimSpace(agent.Mock.SourcePath)
 		if sourcePath == "" {
-			return fmt.Errorf("agent %s mock module is configured but has no source path", strings.TrimSpace(agent.ID))
+			return fmt.Errorf("agent %s mock module is configured but has no source path", agentID)
 		}
 		path := filepath.Join(b.contractsRoot, filepath.FromSlash(sourcePath))
 		if err := b.addOptionalBundleFile(path, bundleHashRaw); err != nil {
-			return fmt.Errorf("agent %s mock module: %w", strings.TrimSpace(agent.ID), err)
+			return fmt.Errorf("agent %s mock module: %w", agentID, err)
 		}
 	}
 	return nil

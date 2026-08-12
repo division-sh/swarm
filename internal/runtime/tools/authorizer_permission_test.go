@@ -84,7 +84,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 }
 
 func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"permission_bundles": {
 				Value: map[string]any{
@@ -116,7 +116,7 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 	platform := runtimecontracts.PlatformSpecDocument{}
 	platform.PermissionsModel.Permissions = append([]string(nil), defaultPlatformPermissions...)
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Platform: platform,
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"permission_bundles": {
@@ -155,7 +155,7 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 }
 
 func TestValidateAgentPermissions_AcceptsToolDefinedExtensionPermission(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"researcher": {
 				ID:          "researcher",

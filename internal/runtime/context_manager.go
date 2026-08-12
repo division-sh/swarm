@@ -461,7 +461,11 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if _, exists := m.contexts[contextDef.BundleHash()]; exists {
 		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash())
 	}
-	if collision, ok := m.duplicateLoadedAgentSlugLocked(contextDef); ok {
+	collision, duplicateAgent, err := m.duplicateLoadedAgentSlugLocked(contextDef)
+	if err != nil {
+		return fmt.Errorf("resolve runtime context declared agent names: %w", err)
+	}
+	if duplicateAgent {
 		return fmt.Errorf(
 			"duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s",
 			collision.agentID,
@@ -724,10 +728,13 @@ func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming Bundl
 	return BundleContext{}, BundleContext{}, "", false
 }
 
-func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleContext) (runtimeContextAgentSlugCollision, bool) {
-	incomingIDs := runtimeContextAgentIDs(incoming.Source)
+func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleContext) (runtimeContextAgentSlugCollision, bool, error) {
+	incomingIDs, err := runtimeContextAgentIDs(incoming.Source)
+	if err != nil {
+		return runtimeContextAgentSlugCollision{}, false, err
+	}
 	if len(incomingIDs) == 0 {
-		return runtimeContextAgentSlugCollision{}, false
+		return runtimeContextAgentSlugCollision{}, false, nil
 	}
 	incomingSet := make(map[string]struct{}, len(incomingIDs))
 	for _, agentID := range incomingIDs {
@@ -738,7 +745,11 @@ func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleCo
 		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
-		for _, existingAgentID := range runtimeContextAgentIDs(entry.context.Source) {
+		existingAgentIDs, err := runtimeContextAgentIDs(entry.context.Source)
+		if err != nil {
+			return runtimeContextAgentSlugCollision{}, false, err
+		}
+		for _, existingAgentID := range existingAgentIDs {
 			if _, ok := incomingSet[existingAgentID]; !ok {
 				continue
 			}
@@ -746,10 +757,10 @@ func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleCo
 				agentID:  existingAgentID,
 				existing: *entry.context,
 				incoming: incoming,
-			}, true
+			}, true, nil
 		}
 	}
-	return runtimeContextAgentSlugCollision{}, false
+	return runtimeContextAgentSlugCollision{}, false, nil
 }
 
 func runtimeContextEntryLoaded(entry *runtimeContextEntry) bool {
@@ -763,24 +774,20 @@ func runtimeContextEntryLoaded(entry *runtimeContextEntry) bool {
 	return state == RuntimeContextStateLoaded
 }
 
-func runtimeContextAgentIDs(source semanticview.Source) []string {
+func runtimeContextAgentIDs(source semanticview.Source) ([]string, error) {
 	if source == nil {
-		return nil
+		return nil, nil
 	}
-	entries := source.AgentEntries()
-	ids := make([]string, 0, len(entries))
-	for key, entry := range entries {
-		agentID := strings.TrimSpace(entry.ID)
-		if agentID == "" {
-			agentID = strings.TrimSpace(key)
-		}
-		if agentID == "" {
-			continue
-		}
-		ids = append(ids, agentID)
+	plans, err := semanticview.AgentNamePlans(source)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		ids = append(ids, plan.AgentID)
 	}
 	sort.Strings(ids)
-	return ids
+	return ids, nil
 }
 
 func runtimeContextBundleLabel(contextDef BundleContext) string {
@@ -1684,7 +1691,11 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 			return nil, fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash())
 		}
 	}
-	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash); ok {
+	collision, duplicateAgent, err := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash)
+	if err != nil {
+		return nil, fmt.Errorf("resolve replacement declared agent names: %w", err)
+	}
+	if duplicateAgent {
 		return nil, fmt.Errorf("duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s", collision.agentID, runtimeContextBundleLabel(collision.existing), runtimeContextBundleLabel(collision.incoming))
 	}
 	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLockedExcluding(contextDef, existingHash); ok {
@@ -1980,7 +1991,11 @@ func (m *RuntimeContextManager) validateReplacementLocked(existingHash string, c
 			return fmt.Errorf("replacement runtime context bundle_hash %s is already registered", contextDef.BundleHash())
 		}
 	}
-	if collision, ok := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash); ok {
+	collision, duplicateAgent, err := m.duplicateLoadedAgentSlugLockedExcluding(contextDef, existingHash)
+	if err != nil {
+		return fmt.Errorf("resolve replacement declared agent names: %w", err)
+	}
+	if duplicateAgent {
 		return fmt.Errorf("duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s", collision.agentID, runtimeContextBundleLabel(collision.existing), runtimeContextBundleLabel(collision.incoming))
 	}
 	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLockedExcluding(contextDef, existingHash); ok {
@@ -1989,9 +2004,13 @@ func (m *RuntimeContextManager) validateReplacementLocked(existingHash string, c
 	return nil
 }
 
-func (m *RuntimeContextManager) duplicateLoadedAgentSlugLockedExcluding(incoming BundleContext, excludedHash string) (runtimeContextAgentSlugCollision, bool) {
+func (m *RuntimeContextManager) duplicateLoadedAgentSlugLockedExcluding(incoming BundleContext, excludedHash string) (runtimeContextAgentSlugCollision, bool, error) {
 	incomingSet := map[string]struct{}{}
-	for _, agentID := range runtimeContextAgentIDs(incoming.Source) {
+	incomingIDs, err := runtimeContextAgentIDs(incoming.Source)
+	if err != nil {
+		return runtimeContextAgentSlugCollision{}, false, err
+	}
+	for _, agentID := range incomingIDs {
 		incomingSet[agentID] = struct{}{}
 	}
 	for _, bundleHash := range m.order {
@@ -2002,13 +2021,17 @@ func (m *RuntimeContextManager) duplicateLoadedAgentSlugLockedExcluding(incoming
 		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
-		for _, agentID := range runtimeContextAgentIDs(entry.context.Source) {
+		existingAgentIDs, err := runtimeContextAgentIDs(entry.context.Source)
+		if err != nil {
+			return runtimeContextAgentSlugCollision{}, false, err
+		}
+		for _, agentID := range existingAgentIDs {
 			if _, ok := incomingSet[agentID]; ok {
-				return runtimeContextAgentSlugCollision{agentID: agentID, existing: *entry.context, incoming: incoming}, true
+				return runtimeContextAgentSlugCollision{agentID: agentID, existing: *entry.context, incoming: incoming}, true, nil
 			}
 		}
 	}
-	return runtimeContextAgentSlugCollision{}, false
+	return runtimeContextAgentSlugCollision{}, false, nil
 }
 
 func (m *RuntimeContextManager) duplicateLoadedIngressAliasLockedExcluding(incoming BundleContext, excludedHash string) (BundleContext, BundleContext, string, bool) {

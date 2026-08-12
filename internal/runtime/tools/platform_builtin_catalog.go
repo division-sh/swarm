@@ -176,7 +176,7 @@ func resolveEntityToolContract(source semanticview.Source, actor *models.AgentCo
 		return entityruntime.Contract{}, false
 	}
 	if actor != nil {
-		if contract, ok := entityruntime.ResolveForActor(source, actor.ID); ok {
+		if contract, ok := entityruntime.ResolveForActor(source, *actor); ok {
 			return contract, true
 		}
 	}

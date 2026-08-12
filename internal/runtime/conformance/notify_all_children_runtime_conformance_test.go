@@ -970,109 +970,118 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 }
 
 func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminalizesEntity(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	for _, nameCase := range []struct {
+		name    string
+		agentID string
+		opts    notifyallchildren.Options
 	}{
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
-			},
-		},
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, storetest.DatabaseForTest(backend)
-			},
-		},
+		{name: "omitted_id", agentID: "account-worker"},
+		{name: "literal_override", agentID: "account-handler", opts: notifyallchildren.Options{ExplicitAgentName: true}},
 	} {
-		for _, cardinality := range []int{1, 2, 3} {
-			t.Run(fmt.Sprintf("%s/n=%d", tc.name, cardinality), func(t *testing.T) {
-				ctx := testAuthorActivityContext(context.Background())
-				backend, db := tc.setup(t)
-				runID := uuid.NewString()
-				ctx = runtimecorrelation.WithRunID(ctx, runID)
-				source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-				gate := newNotifyAllChildrenAgentGate()
-				runtime := newNotifyAllChildrenRuntime(
-					t,
-					backend,
-					db,
-					source,
-					time.Now,
-					notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate},
-				)
-				t.Cleanup(func() {
-					if t.Failed() {
-						t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
+		for _, tc := range []struct {
+			name  string
+			setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		}{
+			{
+				name: "postgres",
+				setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+					_, db, cleanup := testutil.StartPostgres(t)
+					t.Cleanup(cleanup)
+					return storetest.AdmitPostgresRuntimeStore(t, db), db
+				},
+			},
+			{
+				name: "sqlite",
+				setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+					backend := storetest.StartSQLiteRuntimeStore(t)
+					return backend, storetest.DatabaseForTest(backend)
+				},
+			},
+		} {
+			for _, cardinality := range []int{1, 2, 3} {
+				t.Run(fmt.Sprintf("%s/%s/n=%d", nameCase.name, tc.name, cardinality), func(t *testing.T) {
+					ctx := testAuthorActivityContext(context.Background())
+					backend, db := tc.setup(t)
+					runID := uuid.NewString()
+					ctx = runtimecorrelation.WithRunID(ctx, runID)
+					source := notifyallchildren.LoadSource(t, nameCase.opts)
+					gate := newNotifyAllChildrenAgentGate()
+					runtime := newNotifyAllChildrenRuntime(
+						t,
+						backend,
+						db,
+						source,
+						time.Now,
+						notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate},
+					)
+					t.Cleanup(func() {
+						if t.Failed() {
+							t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
+						}
+					})
+					if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-fixed-slug")); err != nil {
+						t.Fatalf("run manager: %v", err)
+					}
+
+					publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+						"portfolio_id": "portfolio-main",
+					})
+					accountIDs := make([]string, 0, cardinality)
+					for i := 0; i < cardinality; i++ {
+						accountIDs = append(accountIDs, fmt.Sprintf("acct-%d", i+1))
+					}
+					publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.accounts.register.requested", map[string]any{
+						"portfolio_id": "portfolio-main",
+						"account_ids":  accountIDs,
+					})
+
+					descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
+					if len(descriptors) != cardinality {
+						t.Fatalf("active account descriptors = %#v, want %d", descriptors, cardinality)
+					}
+					assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, descriptors, nameCase.agentID)
+
+					blocked := descriptors[accountIDs[len(accountIDs)-1]].FlowInstance
+					gate.block(blocked)
+					publishNotifyAllChildrenEventAsync(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+						"portfolio_id": "portfolio-main",
+						"command":      "notify-every-account",
+					})
+					gate.waitStarted(t, blocked)
+
+					for _, accountID := range accountIDs[:len(accountIDs)-1] {
+						waitNotifyAllChildrenEntityState(t, ctx, backend, db, descriptors[accountID].FlowInstance, "completed")
+					}
+					if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, blocked); got != "active" {
+						t.Fatalf("blocked sibling status = %q, want active while another instance is terminal", got)
+					}
+					if _, err := runtime.manager.ResolveAgentConfig(nameCase.agentID, blocked); err != nil {
+						t.Fatalf("blocked sibling agent disappeared after another instance terminated: %v", err)
+					}
+					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, nameCase.agentID, blocked, "in_progress")
+
+					gate.release(blocked)
+					waitNotifyAllChildrenBus(t, runtime.bus)
+					for _, accountID := range accountIDs {
+						instancePath := descriptors[accountID].FlowInstance
+						waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
+						waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, nameCase.agentID, instancePath, "delivered")
+						assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, nameCase.agentID, instancePath)
+						waitNotifyAllChildrenAgentAbsent(t, runtime.manager, nameCase.agentID, instancePath)
+					}
+					assertNotifyAllChildrenCompletedTurns(t, ctx, backend, db, runID, nameCase.agentID, cardinality)
+					if active, err := backend.LoadAgents(ctx); err != nil {
+						t.Fatalf("LoadAgents after independent terminalization: %v", err)
+					} else if len(active) != 0 {
+						t.Fatalf("active agents after independent terminalization = %#v, want none", active)
 					}
 				})
-				if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-fixed-slug")); err != nil {
-					t.Fatalf("run manager: %v", err)
-				}
-
-				publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
-					"portfolio_id": "portfolio-main",
-				})
-				accountIDs := make([]string, 0, cardinality)
-				for i := 0; i < cardinality; i++ {
-					accountIDs = append(accountIDs, fmt.Sprintf("acct-%d", i+1))
-				}
-				publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.accounts.register.requested", map[string]any{
-					"portfolio_id": "portfolio-main",
-					"account_ids":  accountIDs,
-				})
-
-				descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
-				if len(descriptors) != cardinality {
-					t.Fatalf("active account descriptors = %#v, want %d", descriptors, cardinality)
-				}
-				assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, descriptors)
-
-				blocked := descriptors[accountIDs[len(accountIDs)-1]].FlowInstance
-				gate.block(blocked)
-				publishNotifyAllChildrenEventAsync(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
-					"portfolio_id": "portfolio-main",
-					"command":      "notify-every-account",
-				})
-				gate.waitStarted(t, blocked)
-
-				for _, accountID := range accountIDs[:len(accountIDs)-1] {
-					waitNotifyAllChildrenEntityState(t, ctx, backend, db, descriptors[accountID].FlowInstance, "completed")
-				}
-				if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, blocked); got != "active" {
-					t.Fatalf("blocked sibling status = %q, want active while another instance is terminal", got)
-				}
-				if _, err := runtime.manager.ResolveAgentConfig("account-worker", blocked); err != nil {
-					t.Fatalf("blocked sibling agent disappeared after another instance terminated: %v", err)
-				}
-				waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, blocked, "in_progress")
-
-				gate.release(blocked)
-				waitNotifyAllChildrenBus(t, runtime.bus)
-				for _, accountID := range accountIDs {
-					instancePath := descriptors[accountID].FlowInstance
-					waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
-					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, instancePath, "delivered")
-					assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, instancePath)
-					waitNotifyAllChildrenAgentAbsent(t, runtime.manager, instancePath)
-				}
-				assertNotifyAllChildrenCompletedTurns(t, ctx, backend, db, runID, cardinality)
-				if active, err := backend.LoadAgents(ctx); err != nil {
-					t.Fatalf("LoadAgents after independent terminalization: %v", err)
-				} else if len(active) != 0 {
-					t.Fatalf("active agents after independent terminalization = %#v, want none", active)
-				}
-			})
+			}
 		}
 	}
 }
 
-func assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t testing.TB, ctx context.Context, db *sql.DB, backend, runID, flowInstance string) {
+func assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t testing.TB, ctx context.Context, db *sql.DB, backend, runID, agentID, flowInstance string) {
 	t.Helper()
 	query := `
 		SELECT COUNT(*)
@@ -1080,16 +1089,17 @@ func assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t testing.TB,
 		JOIN event_deliveries d ON d.event_id = e.event_id
 		WHERE e.run_id = ?
 		  AND e.produced_by_type = 'agent'
-		  AND e.produced_by = 'account-worker'
+		  AND e.produced_by = ?
 		  AND e.flow_instance = ?
 		  AND d.subscriber_type = 'node'
 		  AND d.subscriber_id = 'account-node'
 		  AND d.status = 'delivered'
 		  AND e.route_settlement IS NOT NULL`
-	args := []any{runID, flowInstance}
+	args := []any{runID, agentID, flowInstance}
 	if backend == "postgres" {
 		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
-		query = strings.Replace(query, "e.flow_instance = ?", "e.flow_instance = $2", 1)
+		query = strings.Replace(query, "e.produced_by = ?", "e.produced_by = $2", 1)
+		query = strings.Replace(query, "e.flow_instance = ?", "e.flow_instance = $3", 1)
 	}
 	var count int
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
@@ -1592,6 +1602,7 @@ func assertNotifyAllChildrenConcreteAgentSet(
 	ctx context.Context,
 	selected notifyAllChildrenStore,
 	descriptors map[string]runtimebus.ActiveFlowInstanceDescriptor,
+	agentID string,
 ) {
 	t.Helper()
 	agents, err := selected.LoadAgents(ctx)
@@ -1604,15 +1615,15 @@ func assertNotifyAllChildrenConcreteAgentSet(
 	}
 	var matched int
 	for _, agent := range agents {
-		if agent.Config.ID != "account-worker" {
+		if agent.Config.ID != agentID {
 			continue
 		}
 		identity, err := agent.Config.ConcreteIdentity()
 		if err != nil {
-			t.Fatalf("account-worker concrete identity: %v", err)
+			t.Fatalf("%s concrete identity: %v", agentID, err)
 		}
 		if _, ok := remaining[identity.FlowInstance()]; !ok {
-			t.Fatalf("account-worker has unexpected concrete route %#v", identity)
+			t.Fatalf("%s has unexpected concrete route %#v", agentID, identity)
 		}
 		delete(remaining, identity.FlowInstance())
 		matched++
@@ -1699,6 +1710,7 @@ func waitNotifyAllChildrenAgentDeliveryStatus(
 	backend notifyAllChildrenStore,
 	db *sql.DB,
 	runID string,
+	agentID string,
 	flowInstance string,
 	want string,
 ) {
@@ -1708,8 +1720,8 @@ func waitNotifyAllChildrenAgentDeliveryStatus(
 		FROM event_deliveries
 		WHERE run_id = $1::uuid
 		  AND subscriber_type = 'agent'
-		  AND subscriber_id = 'account-worker'
-		  AND agent_flow_instance_path = $2
+		  AND subscriber_id = $2
+		  AND agent_flow_instance_path = $3
 		ORDER BY created_at DESC, delivery_id DESC
 		LIMIT 1
 	`
@@ -1719,7 +1731,7 @@ func waitNotifyAllChildrenAgentDeliveryStatus(
 			FROM event_deliveries
 			WHERE run_id = ?
 			  AND subscriber_type = 'agent'
-			  AND subscriber_id = 'account-worker'
+			  AND subscriber_id = ?
 			  AND agent_flow_instance_path = ?
 			ORDER BY created_at DESC, delivery_id DESC
 			LIMIT 1
@@ -1731,14 +1743,15 @@ func waitNotifyAllChildrenAgentDeliveryStatus(
 		lastErr error
 	)
 	for time.Now().Before(deadline) {
-		lastErr = db.QueryRowContext(ctx, query, runID, flowInstance).Scan(&got)
+		lastErr = db.QueryRowContext(ctx, query, runID, agentID, flowInstance).Scan(&got)
 		if lastErr == nil && strings.TrimSpace(got) == want {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf(
-		"account-worker delivery at %s = %q err=%v, want %q",
+		"%s delivery at %s = %q err=%v, want %q",
+		agentID,
 		flowInstance,
 		strings.TrimSpace(got),
 		lastErr,
@@ -1752,28 +1765,30 @@ func assertNotifyAllChildrenCompletedTurns(
 	backend notifyAllChildrenStore,
 	db *sql.DB,
 	runID string,
+	agentID string,
 	wantInstances int,
 ) {
 	t.Helper()
 	query := `
 		SELECT COUNT(*), COUNT(DISTINCT flow_instance)
 		FROM agent_turns
-		WHERE run_id = $1::uuid AND agent_id = 'account-worker' AND failure IS NULL
+		WHERE run_id = $1::uuid AND agent_id = $2 AND failure IS NULL
 	`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		query = `
 			SELECT COUNT(*), COUNT(DISTINCT flow_instance)
 			FROM agent_turns
-			WHERE run_id = ? AND agent_id = 'account-worker' AND failure IS NULL
+			WHERE run_id = ? AND agent_id = ? AND failure IS NULL
 		`
 	}
 	var turns, instances int
-	if err := db.QueryRowContext(ctx, query, runID).Scan(&turns, &instances); err != nil {
-		t.Fatalf("count completed account-worker turns: %v", err)
+	if err := db.QueryRowContext(ctx, query, runID, agentID).Scan(&turns, &instances); err != nil {
+		t.Fatalf("count completed %s turns: %v", agentID, err)
 	}
 	if turns < wantInstances || instances != wantInstances {
 		t.Fatalf(
-			"completed account-worker turns=%d distinct instances=%d, want at least %d turns across %d instances",
+			"completed %s turns=%d distinct instances=%d, want at least %d turns across %d instances",
+			agentID,
 			turns,
 			instances,
 			wantInstances,
@@ -1785,13 +1800,14 @@ func assertNotifyAllChildrenCompletedTurns(
 func waitNotifyAllChildrenAgentAbsent(
 	t testing.TB,
 	manager *runtimemanager.AgentManager,
+	agentID string,
 	flowInstance string,
 ) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		_, lastErr = manager.ResolveAgentConfig("account-worker", flowInstance)
+		_, lastErr = manager.ResolveAgentConfig(agentID, flowInstance)
 		if lastErr != nil {
 			return
 		}
