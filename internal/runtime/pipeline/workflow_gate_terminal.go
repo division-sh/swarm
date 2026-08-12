@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -15,6 +16,8 @@ import (
 
 func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	ctx context.Context,
+	route runtimeflowidentity.Route,
+	entityID identity.EntityID,
 	instance *WorkflowInstance,
 	reason string,
 	terminatedAt time.Time,
@@ -34,9 +37,11 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	if err != nil {
 		return prepared, err
 	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
+		return prepared, fmt.Errorf("validate workflow termination owner: %w", err)
+	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	identity := StoredFlowInstance(pc.SemanticSource(), *instance)
-	if runID == "" || strings.TrimSpace(identity.EntityID) == "" {
+	if runID == "" || entityID.IsZero() {
 		return prepared, fmt.Errorf("workflow termination requires exact run and persisted entity identity")
 	}
 	for _, activation := range activations {
@@ -63,7 +68,7 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 		prepared.Commit.GateCards = append(prepared.Commit.GateCards, WorkflowGateCardMutation{
 			Kind:         WorkflowGateCardMutationSupersede,
 			Card:         card,
-			EntityID:     identity.EntityID,
+			EntityID:     entityID.String(),
 			ActivationID: activation.ActivationID,
 			Reason:       activation.SupersededReason,
 			OccurredAt:   terminatedAt.UTC(),
@@ -78,6 +83,7 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 func (pc *PipelineCoordinator) commitWorkflowTermination(
 	ctx context.Context,
 	route runtimeflowidentity.Route,
+	entityID identity.EntityID,
 	terminatedAt time.Time,
 	retireRoute bool,
 ) (WorkflowInstance, error) {
@@ -85,8 +91,9 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires the selected workflow engine mutation owner")
 	}
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() || terminatedAt.IsZero() {
-		return WorkflowInstance{}, fmt.Errorf("workflow termination requires exact route and occurrence time")
+	entityID = identity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() || terminatedAt.IsZero() {
+		return WorkflowInstance{}, fmt.Errorf("workflow termination requires exact route, entity, and occurrence time")
 	}
 	instance, found, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
@@ -94,6 +101,9 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	if !found {
 		return WorkflowInstance{}, &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+		return WorkflowInstance{}, fmt.Errorf("validate workflow termination owner: %w", err)
 	}
 	if strings.TrimSpace(instance.Status) == "terminated" {
 		if instance.TerminatedAt.IsZero() {
@@ -103,7 +113,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	expectedState := strings.TrimSpace(instance.CurrentState)
 	expectedRevision := instance.Revision
-	prepared, err := pc.prepareWorkflowTermination(ctx, &instance, "flow_terminated", terminatedAt.UTC())
+	prepared, err := pc.prepareWorkflowTermination(ctx, route, entityID, &instance, "flow_terminated", terminatedAt.UTC())
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
@@ -175,6 +185,9 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	if !found || strings.TrimSpace(persisted.Status) != "terminated" || persisted.TerminatedAt.IsZero() {
 		return WorkflowInstance{}, fmt.Errorf("canonical terminal flow instance %s was not persisted", route.InstancePath)
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, persisted); err != nil {
+		return WorkflowInstance{}, fmt.Errorf("validate persisted terminal workflow owner: %w", err)
 	}
 	return persisted, nil
 }

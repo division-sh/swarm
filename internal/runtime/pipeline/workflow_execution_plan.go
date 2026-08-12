@@ -1,11 +1,13 @@
 package pipeline
 
 import (
+	"context"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type workflowTriggerContext struct {
@@ -42,6 +44,15 @@ type handlerExecutionPlan struct {
 
 func workflowEventEntityID(evt events.Event) string {
 	return workflowEventEntityIDWithPayload(evt, nil)
+}
+
+func workflowDeliveryEntityID(ctx context.Context, evt events.Event) string {
+	if route, ok := runtimedelivery.RouteFromContext(ctx); ok {
+		if target := route.Target.Normalized(); target.EntityID != "" {
+			return target.EntityID
+		}
+	}
+	return workflowEventEntityID(evt)
 }
 
 func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) string {

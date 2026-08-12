@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -182,7 +183,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 	atomic.StoreInt32(&runner.calls, 0)
 
-	if err := store.MarkTerminated(ctx, testWorkflowInstanceRoute(storageRef), terminatedAt); err != nil {
+	if err := store.MarkTerminated(ctx, testWorkflowInstanceRoute(storageRef), identity.NormalizeEntityID(entityID), terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {

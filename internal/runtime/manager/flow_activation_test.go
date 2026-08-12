@@ -24,6 +24,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -43,6 +44,13 @@ import (
 )
 
 type unavailableFlowActivationDeliveryStore struct{ runtimedelivery.Store }
+
+func deactivateFlowInstanceForTest(am *AgentManager, ctx context.Context, templateID, instanceID, flowPath, entityID string) error {
+	return am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
+		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, ""),
+	})
+}
+
 type unavailableFlowActivationDeadLetterRecorder struct {
 	runtimebus.TargetFailureDeadLetterRecorder
 }
@@ -314,7 +322,7 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 		o.instances.readiness = priorReadiness
 		o.instances.readinessMu.Unlock()
 	}
-	if err := o.instances.MarkTerminated(ctx, route, req.TerminatedAt); err != nil {
+	if err := o.instances.MarkTerminated(ctx, route, req.EntityID, req.TerminatedAt); err != nil {
 		return runtimepipeline.FlowInstanceTermination{}, err
 	}
 	instance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
@@ -765,7 +773,7 @@ func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline
 	}
 }
 
-func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
+func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, route runtimeflowidentity.Route, _ identity.EntityID, terminatedAt time.Time) error {
 	storageRef := route.InstancePath
 	s.terminatedPaths = append(s.terminatedPaths, strings.TrimSpace(storageRef))
 	s.terminatedAtSeen = append(s.terminatedAtSeen, terminatedAt)
@@ -803,11 +811,18 @@ func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.
 	if !ok {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("active flow instance not found for route recovery: %s", route.InstancePath)
 	}
-	identity := runtimepipeline.StoredFlowInstance(nil, instance)
-	if identity.Route() != route {
+	entityID := identity.NormalizeEntityID(fmt.Sprint(instance.Metadata["entity_id"]))
+	if entityID.IsZero() {
+		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow instance route recovery entity identity is missing")
+	}
+	instanceIdentity := runtimeflowidentity.Instance{
+		TemplateID: instance.WorkflowName, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID,
+		InstancePath: route.InstancePath, EntityID: entityID.String(), HasStoredPath: true,
+	}
+	if instanceIdentity.Route() != route {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow instance route recovery identity mismatch")
 	}
-	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{Identity: identity, Config: instance.Config}, nil
+	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{Identity: instanceIdentity, Config: instance.Config}, nil
 }
 
 func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAgent) error {
@@ -2429,7 +2444,7 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 		)
 	}()
 	<-stageEntered
-	if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), time.Now().UTC()); err != nil {
+	if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	close(stageRelease)
@@ -2460,7 +2475,7 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances.creationMarkErr = nil
 	instances.beforeCreation = func() {
 		instances.beforeCreation = nil
-		if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), time.Now().UTC()); err != nil {
+		if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 			t.Fatalf("terminalize at creation boundary: %v", err)
 		}
 	}
@@ -3479,7 +3494,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
@@ -3512,7 +3527,7 @@ func TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit(t *testi
 	if err := am.lifecycle.waitForWork(quiescenceCtx); err != nil {
 		t.Fatalf("wait for activation backlog replay: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 
@@ -3549,7 +3564,7 @@ func TestDeactivateFlowInstanceReportsPostCommitAgentFailureAfterRouteRetirement
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err == nil || !strings.Contains(err.Error(), "agent terminate failed") {
+	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err == nil || !strings.Contains(err.Error(), "agent terminate failed") {
 		t.Fatalf("DeactivateFlowInstance error = %v, want committed teardown failure", err)
 	}
 	if len(bus.runtimeLogs) != 1 {
@@ -3582,7 +3597,7 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersiste
 	}
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
-	err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1")
+	err := deactivateFlowInstanceForTest(am, ctx, "review", "inst-1", "review/inst-1", "ent-1")
 	if err == nil || !strings.Contains(err.Error(), "persist flow instance terminalization") || !strings.Contains(err.Error(), "route removal failed") {
 		t.Fatalf("DeactivateFlowInstance error = %v, want exact route persistence failure", err)
 	}
@@ -3619,7 +3634,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
+	if err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "child/grandchild/inst-1" {

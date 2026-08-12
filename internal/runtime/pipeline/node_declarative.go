@@ -297,7 +297,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	source := e.coordinator.SemanticSource()
-	entityID := workflowEventEntityID(evt)
+	entityID := workflowDeliveryEntityID(ctx, evt)
 	flowID := workflowNodeFlowID(source, e.nodeID)
 	selectedState := WorkflowState{}
 	hasSelectedState := false
@@ -349,7 +349,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-	currentState, err := e.coordinator.currentWorkflowState(ctx, stateRoute, entityID)
+	currentState, err := e.coordinator.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
 	if err != nil {
 		return nil, err
 	}
