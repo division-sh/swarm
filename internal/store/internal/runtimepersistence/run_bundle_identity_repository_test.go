@@ -553,7 +553,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/store/internal/runtimepersistence/agent_directive_run_target_test.go",
 	"internal/store/internal/runtimepersistence/agent_lifecycle_effects_test.go",
 	"internal/store/internal/runtimepersistence/agent_lifecycle_read_surface_test.go",
-	"internal/store/internal/runtimepersistence/agent_lifecycle_subordinate_test.go",
 	"internal/store/internal/runtimepersistence/author_activity_receipt_parity_test.go",
 	"internal/store/internal/runtimepersistence/budget_spend_test.go",
 	"internal/store/internal/runtimepersistence/bundle_delete_test.go",

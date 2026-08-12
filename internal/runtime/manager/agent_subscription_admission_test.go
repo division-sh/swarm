@@ -90,10 +90,10 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 		t.Fatal("initial execution missing")
 	}
 
-	_, err = am.ReconfigureAgentTarget(initial.ID, initial.FlowPath, runtimeactors.AgentConfig{
+	err = reconfigureAgentThroughLifecycleForTest(t, am, initial.ID, initial.FlowPath, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		Subscriptions: []string{"foreign/**/task.ready"},
-	}, nil)
+	})
 	if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 		t.Fatalf("ReconfigureAgent error = %v, want admission rejection", err)
 	}

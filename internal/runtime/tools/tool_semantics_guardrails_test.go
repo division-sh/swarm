@@ -63,13 +63,6 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 			},
 		},
 		{
-			name: "agent_fire_default_reason",
-			tool: "agent_fire",
-			input: map[string]any{
-				"agent_id": "worker-1",
-			},
-		},
-		{
 			name: "mailbox_send_aliases",
 			tool: "mailbox_send",
 			input: map[string]any{

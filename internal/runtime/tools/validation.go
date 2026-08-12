@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +13,9 @@ import (
 func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 	if source == nil {
 		return nil, nil
+	}
+	if retired := ValidateRetiredDynamicAgentToolReferences(source); len(retired) > 0 {
+		return nil, errors.Join(retired...)
 	}
 	entries := source.ToolEntries()
 	names := make([]string, 0, len(entries))

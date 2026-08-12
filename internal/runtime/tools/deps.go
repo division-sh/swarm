@@ -35,12 +35,6 @@ type EventPublisher interface {
 
 type Manager interface {
 	ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error)
-	SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error
-	TeardownAgentTarget(
-		agentID, flowInstance string,
-		expected *models.AgentConfig,
-	) (models.AgentTargetMutationResult, error)
-	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig, expected *models.AgentConfig) (models.AgentTargetMutationResult, error)
 }
 
 type ManagerProvider func() Manager

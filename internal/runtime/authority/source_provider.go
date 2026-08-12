@@ -1,25 +1,19 @@
 package authority
 
 import (
-	"fmt"
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type sourceProvider struct {
-	mu               sync.RWMutex
 	mailboxSendRoles []string
 	producerRoles    []string
 	agentEvents      map[string][]string
-	declaredParents  map[string]string
-	managedParents   map[agentidentity.Identity]agentidentity.Identity
 }
 
 func NewSourceProvider(source semanticview.Source) Provider {
@@ -30,7 +24,7 @@ func buildSourceProvider(source semanticview.Source) Provider {
 	if source == nil {
 		return noopProvider{}
 	}
-	allRoles, _ := sourceRolesAndToolGrants(source)
+	allRoles := sourceRoles(source)
 	mailboxSendRoles := append([]string(nil), allRoles...)
 
 	agentEvents := buildProducerRegistry(source)
@@ -44,8 +38,6 @@ func buildSourceProvider(source semanticview.Source) Provider {
 		mailboxSendRoles: cloneRoles(mailboxSendRoles),
 		producerRoles:    producerRoles,
 		agentEvents:      agentEvents,
-		declaredParents:  buildManagerFallbackGraph(source),
-		managedParents:   make(map[agentidentity.Identity]agentidentity.Identity),
 	}
 }
 
@@ -102,149 +94,6 @@ func (p *sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) b
 	}
 }
 
-func (p *sourceProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
-	_ = strings.TrimSpace(strings.ToLower(status))
-	if !hasToolGrant(permissionSet(actor.Permissions), "configure_routing") {
-		return authorizationDenied("configure_routing", actor, target)
-	}
-	if same, err := SameAgent(actor, target); err == nil && same {
-		return nil
-	}
-	if err := p.AuthorizeManagement(actor, target); err != nil {
-		return authorizationDenied("configure_routing", actor, target)
-	}
-	return nil
-}
-
-func (p *sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) error {
-	if !hasAnyToolGrant(permissionSet(actor.Permissions), "agent_hire", "agent_fire", "agent_reconfigure") {
-		return authorizationDenied("agent_manage", actor, target)
-	}
-	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
-		return authorizationDenied("agent_manage", actor, target)
-	}
-	same, err := SameAgent(actor, target)
-	if err != nil && !target.Identity.IsZero() {
-		return authorizationDenied("agent_manage", actor, target)
-	}
-	if err == nil && same {
-		return authorizationDenied("agent_manage", actor, target)
-	}
-	if !SameFlowInstance(actor, target) {
-		return authorizationDenied("agent_manage", actor, target)
-	}
-	if p.isManagedDescendant(actor, target) {
-		return nil
-	}
-	return authorizationDenied("agent_manage", actor, target)
-}
-
-func (p *sourceProvider) UpsertManagedAgent(identity, parent agentidentity.Identity) error {
-	if p == nil {
-		return nil
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("managed agent identity: %w", err)
-	}
-	parent = parent.Normalize()
-	if err := parent.Validate(); err != nil {
-		return fmt.Errorf("managed parent identity: %w", err)
-	}
-	same, err := agentidentity.Equal(identity, parent)
-	if err != nil {
-		return err
-	}
-	if same {
-		return fmt.Errorf("managed agent identity cannot be its own parent")
-	}
-	if identity.Route != parent.Route {
-		return fmt.Errorf("managed agent and parent must have the same concrete route")
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if err := p.validateManagedParentUpdateLocked(identity, parent); err != nil {
-		return err
-	}
-	p.managedParents[identity] = parent
-	return nil
-}
-
-func (p *sourceProvider) ValidateManagedAgent(identity, parent agentidentity.Identity) error {
-	if p == nil {
-		return nil
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("managed agent identity: %w", err)
-	}
-	parent = parent.Normalize()
-	if err := parent.Validate(); err != nil {
-		return fmt.Errorf("managed parent identity: %w", err)
-	}
-	same, err := agentidentity.Equal(identity, parent)
-	if err != nil {
-		return err
-	}
-	if same {
-		return fmt.Errorf("managed agent identity cannot be its own parent")
-	}
-	if identity.Route != parent.Route {
-		return fmt.Errorf("managed agent and parent must have the same concrete route")
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.validateManagedParentUpdateLocked(identity, parent)
-}
-
-func (p *sourceProvider) validateManagedParentUpdateLocked(identity, parent agentidentity.Identity) error {
-	current := parent
-	visited := map[agentidentity.Identity]struct{}{}
-	for {
-		if current == identity {
-			return fmt.Errorf("managed parent update would create a cycle")
-		}
-		if _, seen := visited[current]; seen {
-			return fmt.Errorf("managed parent graph already contains a cycle")
-		}
-		visited[current] = struct{}{}
-		next, ok := p.managedParents[current]
-		if !ok {
-			return nil
-		}
-		current = next
-	}
-}
-
-func (p *sourceProvider) RemoveManagedAgent(identity agentidentity.Identity) error {
-	if p == nil {
-		return nil
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("managed agent identity: %w", err)
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	delete(p.managedParents, identity)
-	return nil
-}
-
-func (p *sourceProvider) ManagedAgentParent(identity agentidentity.Identity) (agentidentity.Identity, bool, error) {
-	if p == nil {
-		return agentidentity.Identity{}, false, nil
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return agentidentity.Identity{}, false, fmt.Errorf("managed agent identity: %w", err)
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	parent, ok := p.managedParents[identity]
-	return parent, ok, nil
-}
-
 func (p *sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	if containsCanonical(p.mailboxSendRoles, actor.Role) {
 		return nil
@@ -266,31 +115,24 @@ func authorizationDenied(action string, actor, target models.AgentConfig) error 
 	)
 }
 
-func sourceRolesAndToolGrants(source semanticview.Source) ([]string, map[string]map[string]struct{}) {
+func sourceRoles(source semanticview.Source) []string {
 	if source == nil {
-		return nil, map[string]map[string]struct{}{}
+		return nil
 	}
 	roles := make([]string, 0, len(source.AgentEntries()))
-	grants := make(map[string]map[string]struct{}, len(source.AgentEntries()))
+	seen := make(map[string]struct{}, len(source.AgentEntries()))
 	for key, entry := range source.AgentEntries() {
 		role := canonicalRole(firstNonEmpty(entry.Role, key))
 		if role == "" {
 			continue
 		}
-		if _, ok := grants[role]; !ok {
+		if _, ok := seen[role]; !ok {
 			roles = append(roles, role)
-			grants[role] = map[string]struct{}{}
-		}
-		for _, toolName := range entry.ConfiguredTools() {
-			toolName = strings.TrimSpace(toolName)
-			if toolName == "" {
-				continue
-			}
-			grants[role][toolName] = struct{}{}
+			seen[role] = struct{}{}
 		}
 	}
 	sort.Strings(roles)
-	return roles, grants
+	return roles
 }
 
 func buildProducerRegistry(source semanticview.Source) map[string][]string {
@@ -314,126 +156,6 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 		agentEvents[role] = appendUniqueSortedEvent(agentEvents[role], endpoint.Event.Authored)
 	}
 	return agentEvents
-}
-
-func buildManagerFallbackGraph(source semanticview.Source) map[string]string {
-	if source == nil {
-		return map[string]string{}
-	}
-	graph := make(map[string]string)
-	for key, entry := range source.AgentEntries() {
-		agentID := strings.TrimSpace(firstNonEmpty(entry.ID, key))
-		if agentID == "" {
-			continue
-		}
-		parent := strings.TrimSpace(entry.ManagerFallback)
-		if parent == "" || parent == agentID {
-			continue
-		}
-		graph[agentID] = parent
-		agentRole := canonicalRole(firstNonEmpty(entry.Role, key))
-		parentRole := canonicalRole(parent)
-		if agentRole != "" && parentRole != "" && agentRole != parentRole {
-			graph[agentRole] = parentRole
-		}
-	}
-	return graph
-}
-
-func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) bool {
-	if authorized, authoritative := p.isConcreteManagedDescendant(actor, target); authoritative {
-		return authorized
-	}
-	actorIDs := uniqueGraphCandidates(strings.TrimSpace(actor.ID), canonicalRole(actor.Role))
-	targetIDs := uniqueGraphCandidates(strings.TrimSpace(target.ID), canonicalRole(target.Role))
-	if len(actorIDs) == 0 || len(targetIDs) == 0 {
-		return false
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	actorSet := make(map[string]struct{}, len(actorIDs))
-	for _, actorID := range actorIDs {
-		if actorID == "" {
-			continue
-		}
-		actorSet[actorID] = struct{}{}
-	}
-	for _, targetID := range targetIDs {
-		if targetID == "" {
-			continue
-		}
-		current := targetID
-		visited := map[string]struct{}{current: {}}
-		for {
-			parent := strings.TrimSpace(p.declaredParents[current])
-			if parent == "" {
-				break
-			}
-			if _, ok := actorSet[parent]; ok {
-				return true
-			}
-			if _, seen := visited[parent]; seen {
-				break
-			}
-			visited[parent] = struct{}{}
-			current = parent
-		}
-	}
-	return false
-}
-
-func (p *sourceProvider) isConcreteManagedDescendant(actor, target models.AgentConfig) (authorized, authoritative bool) {
-	targetIdentity, err := target.ConcreteIdentity()
-	if err != nil {
-		return false, false
-	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	if _, ok := p.managedParents[targetIdentity]; !ok {
-		return false, false
-	}
-	actorIdentity, err := actor.ConcreteIdentity()
-	if err != nil {
-		return false, true
-	}
-	current := targetIdentity
-	visited := map[agentidentity.Identity]struct{}{current: {}}
-	for {
-		parent, ok := p.managedParents[current]
-		if !ok {
-			return false, true
-		}
-		same, err := agentidentity.Equal(parent, actorIdentity)
-		if err != nil {
-			return false, true
-		}
-		if same {
-			return true, true
-		}
-		if _, seen := visited[parent]; seen {
-			return false, true
-		}
-		visited[parent] = struct{}{}
-		current = parent
-	}
-}
-
-func uniqueGraphCandidates(values ...string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func strongestMessagePermission(grants map[string]struct{}) string {
@@ -465,15 +187,6 @@ func hasToolGrant(grants map[string]struct{}, toolName string) bool {
 	}
 	_, ok := grants[strings.TrimSpace(toolName)]
 	return ok
-}
-
-func hasAnyToolGrant(grants map[string]struct{}, toolNames ...string) bool {
-	for _, toolName := range toolNames {
-		if hasToolGrant(grants, toolName) {
-			return true
-		}
-	}
-	return false
 }
 
 func canonicalRole(role string) string {

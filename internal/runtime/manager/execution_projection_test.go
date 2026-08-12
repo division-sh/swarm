@@ -341,7 +341,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		_, err := am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+		err := reconfigureAgentThroughLifecycleForTest(t, am, agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
 		reconfigureDone <- err
 	}()
 	<-factory.secondStarted
@@ -397,7 +397,7 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			}
 			reconfigureDone := make(chan error, 1)
 			go func() {
-				_, err := am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+				err := reconfigureAgentThroughLifecycleForTest(t, am, agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
 				reconfigureDone <- err
 			}()
 			<-factory.secondStarted
@@ -610,7 +610,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	}
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		_, err := am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+		err := reconfigureAgentThroughLifecycleForTest(t, am, agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}})
 		reconfigureDone <- err
 	}()
 	select {
@@ -699,7 +699,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	if !ok {
 		t.Fatal("run did not install route")
 	}
-	if _, err := am.TeardownAgentTarget(agentID, "", nil); err != nil {
+	if err := teardownAgentThroughLifecycleForTest(t, am, agentID, ""); err != nil {
 		t.Fatalf("TeardownAgent: %v", err)
 	}
 	if _, live := bus.current(agentID); live {

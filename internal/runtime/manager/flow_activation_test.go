@@ -3444,7 +3444,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 		"permission_bundles": {
 			Value: map[string]any{
 				"ops": map[string]any{
-					"permissions": []any{"agent_fire"},
+					"permissions": []any{"human_task_request"},
 				},
 			},
 		},
@@ -3464,8 +3464,8 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	if !ok {
 		t.Fatal("expected activated flow agent config")
 	}
-	if len(cfg.Permissions) != 2 || cfg.Permissions[0] != "agent_fire" || cfg.Permissions[1] != "schedule" {
-		t.Fatalf("permissions = %#v, want [agent_fire schedule]", cfg.Permissions)
+	if len(cfg.Permissions) != 2 || cfg.Permissions[0] != "human_task_request" || cfg.Permissions[1] != "schedule" {
+		t.Fatalf("permissions = %#v, want [human_task_request schedule]", cfg.Permissions)
 	}
 }
 
