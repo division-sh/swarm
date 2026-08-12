@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -238,6 +239,9 @@ func runtimeToolHiddenFromAgents(name string) bool {
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
+	if retired := ValidateRetiredDynamicAgentToolReferences(source); len(retired) > 0 {
+		return nil, errors.Join(retired...)
+	}
 	entries, err := builtinExecutionTools(source, nil)
 	if err != nil {
 		return nil, err

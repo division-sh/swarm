@@ -6,11 +6,14 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -173,6 +176,48 @@ func TestRetiredDynamicAgentToolCallsNeverReachManager(t *testing.T) {
 	}
 }
 
+func TestRetiredDynamicAgentToolsFailClosedAtProviderProjectionAndDispatch(t *testing.T) {
+	for _, name := range retiredDynamicAgentToolTestNames {
+		t.Run(name, func(t *testing.T) {
+			var transportCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				transportCalls.Add(1)
+			}))
+			defer server.Close()
+
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": {ID: "worker", Tools: []string{name}}},
+				Tools: map[string]runtimecontracts.ToolSchemaEntry{name: retiredToolEntry(
+					runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+					runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: server.URL}),
+				)},
+			})
+			if _, err := ContractDefinitionsForSource(source); err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("ContractDefinitionsForSource error = %v, want retirement of %s", err, name)
+			}
+
+			manager := &retiredToolManagerProbe{}
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, WorkflowSource: source})
+			actor := models.AgentConfig{ExecutionMode: "live", ID: "worker", Tools: []string{name}}
+			if defs := exec.ToolDefinitionsForActor(actor); len(defs) != 0 {
+				t.Fatalf("provider projection retained %s: %#v", name, defs)
+			}
+			ctx := WithActor(context.Background(), actor)
+			for _, callName := range []string{name, "mcp__runtime-tools__" + name} {
+				if _, err := exec.Execute(ctx, callName, map[string]any{"agent_id": "target"}); err == nil {
+					t.Fatalf("hostile call %q was accepted", callName)
+				}
+			}
+			if manager.resolveCalls != 0 {
+				t.Fatalf("hostile calls reached manager %d time(s)", manager.resolveCalls)
+			}
+			if got := transportCalls.Load(); got != 0 {
+				t.Fatalf("hostile calls reached HTTP transport %d time(s)", got)
+			}
+		})
+	}
+}
+
 func TestValidateRetiredDynamicAgentToolReferencesUsesExactNamesOnly(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
@@ -187,8 +232,10 @@ func TestValidateRetiredDynamicAgentToolReferencesUsesExactNamesOnly(t *testing.
 func TestRetiredDynamicAgentToolTokensRemainOnlyInRetirementEvidence(t *testing.T) {
 	root := retiredDynamicAgentToolRepoRoot(t)
 	allowed := map[string]struct{}{
-		"internal/runtime/tools/retired_dynamic_agent_tools.go":      {},
-		"internal/runtime/tools/retired_dynamic_agent_tools_test.go": {},
+		"internal/runtime/tools/retired_dynamic_agent_tools.go":                 {},
+		"internal/runtime/tools/retired_dynamic_agent_tools_test.go":            {},
+		"internal/runtime/mcp/retired_dynamic_agent_tools_test.go":              {},
+		"internal/runtime/runforkexecution/retired_dynamic_agent_tools_test.go": {},
 		"platform-spec.yaml": {},
 	}
 	pattern := regexp.MustCompile(`\bagent_(hire|fire|reconfigure)\b`)

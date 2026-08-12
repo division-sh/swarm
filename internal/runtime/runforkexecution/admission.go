@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type SelectedContractBindingReader interface {
@@ -275,6 +276,9 @@ func compileSelectedContractSource(source semanticview.Source) (semanticview.Sou
 	effective, err := providerconnectors.SourceWithConnectorPackImports(source)
 	if err != nil {
 		return nil, nil, fmt.Errorf("selected-contract provider connector pack import failed: %w", err)
+	}
+	if retired := runtimetools.ValidateRetiredDynamicAgentToolReferences(effective); len(retired) > 0 {
+		return nil, nil, fmt.Errorf("selected-contract source admission failed: %w", errors.Join(retired...))
 	}
 	plan, err := providerconnectors.CompileMockResponsePlan(effective)
 	if err != nil {
