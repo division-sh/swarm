@@ -56,13 +56,44 @@ func (r *recordingRuntimeMutationRunner) LoadActiveWorkflowRoute(ctx context.Con
 	if r == nil || r.db == nil {
 		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("test workflow route recovery reader is required")
 	}
-	query := `SELECT fi.flow_template, fi.config, (SELECT CASE WHEN COUNT(DISTINCT es.entity_id) = 1 THEN MIN(es.entity_id::text) ELSE '' END FROM entity_state es WHERE es.flow_instance = fi.instance_id) FROM flow_instances fi WHERE fi.instance_id = $1 AND fi.status = 'active' AND fi.terminated_at IS NULL`
+	query := `
+		SELECT fi.flow_template, fi.config, COALESCE(owner.entity_id, ''), COALESCE(owner.owner_count, 0)
+		  FROM flow_instances fi
+		  LEFT JOIN (
+			SELECT candidates.flow_instance,
+			       candidates.entity_id,
+			       COUNT(*) OVER (PARTITION BY candidates.flow_instance) AS owner_count
+			  FROM (
+				SELECT DISTINCT state.flow_instance, state.entity_id::text AS entity_id
+				  FROM entity_state AS state
+				  JOIN runs AS run ON run.run_id = state.run_id
+				 WHERE LOWER(BTRIM(run.status)) IN ('running', 'paused')
+			  ) AS candidates
+		  ) AS owner ON owner.flow_instance = fi.instance_id
+		 WHERE fi.instance_id = $1 AND fi.status = 'active' AND fi.terminated_at IS NULL
+	`
 	if r.dialect != workflowStoreDialectPostgres {
-		query = `SELECT fi.flow_template, fi.config, (SELECT CASE WHEN COUNT(DISTINCT es.entity_id) = 1 THEN MIN(CAST(es.entity_id AS TEXT)) ELSE '' END FROM entity_state es WHERE es.flow_instance = fi.instance_id) FROM flow_instances fi WHERE fi.instance_id = ? AND fi.status = 'active' AND fi.terminated_at IS NULL`
+		query = `
+			SELECT fi.flow_template, fi.config, COALESCE(owner.entity_id, ''), COALESCE(owner.owner_count, 0)
+			  FROM flow_instances fi
+			  LEFT JOIN (
+				SELECT candidates.flow_instance,
+				       candidates.entity_id,
+				       COUNT(*) OVER (PARTITION BY candidates.flow_instance) AS owner_count
+				  FROM (
+					SELECT DISTINCT state.flow_instance, CAST(state.entity_id AS TEXT) AS entity_id
+					  FROM entity_state AS state
+					  JOIN runs AS run ON run.run_id = state.run_id
+					 WHERE LOWER(TRIM(run.status)) IN ('running', 'paused')
+				  ) AS candidates
+			  ) AS owner ON owner.flow_instance = fi.instance_id
+			 WHERE fi.instance_id = ? AND fi.status = 'active' AND fi.terminated_at IS NULL
+		`
 	}
 	var record runtimeworkflowroute.RecoveryRecord
 	var config any
-	err := r.db.QueryRowContext(ctx, query, instancePath).Scan(&record.WorkflowName, &config, &record.EntityID)
+	var ownerCount int
+	err := r.db.QueryRowContext(ctx, query, instancePath).Scan(&record.WorkflowName, &config, &record.EntityID, &ownerCount)
 	if err == sql.ErrNoRows {
 		return runtimeworkflowroute.RecoveryRecord{}, &runtimeworkflowroute.ActiveRouteNotFound{InstancePath: instancePath}
 	}
@@ -70,8 +101,8 @@ func (r *recordingRuntimeMutationRunner) LoadActiveWorkflowRoute(ctx context.Con
 		return runtimeworkflowroute.RecoveryRecord{}, err
 	}
 	record.EntityID = strings.TrimSpace(record.EntityID)
-	if record.EntityID == "" {
-		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s does not have exactly one persisted entity owner", instancePath)
+	if ownerCount != 1 || record.EntityID == "" {
+		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("flow instance %s does not have exactly one current persisted entity owner (owners=%d entity_id=%q)", instancePath, ownerCount, record.EntityID)
 	}
 	switch typed := config.(type) {
 	case []byte:

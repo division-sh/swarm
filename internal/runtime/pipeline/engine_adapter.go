@@ -240,8 +240,11 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 }
 
 func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation, target events.DeliveryTargetOwnership) (runtimeengine.CommittedEngineMutation, error) {
-	if mutation.Address.EntityID.String() != "" || mutation.Address.Route.InstancePath != target.Route().FlowInstance {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation disagrees with stamped receiver target")
+	if entityID := mutation.Address.EntityID.String(); entityID != "" {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation carries entity identity %q", entityID)
+	}
+	if instancePath := mutation.Address.Route.InstancePath; instancePath != target.Route().FlowInstance {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation route %q disagrees with stamped receiver route %q", instancePath, target.Route().FlowInstance)
 	}
 	if len(mutation.LifecycleEffects) > 0 || len(mutation.EmitPrerequisites.Fields) > 0 {
 		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation cannot carry state or lifecycle prerequisites")
