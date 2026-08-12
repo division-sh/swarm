@@ -150,11 +150,7 @@ func executeEventPublish(ctx context.Context, req Request, opts EventPublication
 		}
 		return nil, fmt.Errorf("decode event.publish response: %w", err)
 	}
-	result, err := eventPublishResultFromStore(ctx, opts, completion, stored)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return stored, nil
 }
 
 func eventPublishStoredResult(completion apiidempotency.Completion) (eventPublishResult, error) {
@@ -163,31 +159,6 @@ func eventPublishStoredResult(completion apiidempotency.Completion) (eventPublis
 		return eventPublishResult{}, err
 	}
 	return stored, nil
-}
-
-func eventPublishResultFromStore(ctx context.Context, opts EventPublicationOptions, completion apiidempotency.Completion, stored eventPublishResult) (eventPublishResult, error) {
-	eventID := strings.TrimSpace(completion.ResourceID)
-	if eventID == "" {
-		eventID = strings.TrimSpace(stored.EventID)
-	}
-	event, err := opts.Observability.LoadOperatorEvent(ctx, eventID)
-	if errors.Is(err, operatorread.ErrEventNotFound) {
-		return eventPublishResult{}, fmt.Errorf("load published event %s: %w", eventID, err)
-	}
-	if err != nil {
-		return eventPublishResult{}, err
-	}
-	runID := strings.TrimSpace(event.RunID)
-	if runID == "" {
-		runID = strings.TrimSpace(stored.RunID)
-	}
-	return eventPublishResult{
-		EventID:                  strings.TrimSpace(event.EventID),
-		RunID:                    runID,
-		OperatorReferenceEventID: strings.TrimSpace(event.OperatorReferenceEventID),
-		NewRunCreated:            stored.NewRunCreated,
-		Deliveries:               eventPublishDeliveries(event.Deliveries),
-	}, nil
 }
 
 func executeOperatorEventPublication(
