@@ -340,18 +340,26 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if exactDelivery {
 		statePath = stampedOwner.Route().FlowInstance
 	}
-	stateRoute, err := canonicalHandlerRoute(
-		source,
-		flowID,
-		statePath,
-		evt,
-	)
+	var stateRoute runtimeflowidentity.Route
+	if exactDelivery {
+		stateRoute, err = workflowInstanceRouteForExecution(source, flowID, statePath)
+	} else {
+		stateRoute, err = canonicalHandlerRoute(
+			source,
+			flowID,
+			statePath,
+			evt,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
-	currentState, err := e.coordinator.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
-	if err != nil {
-		return nil, err
+	currentState := WorkflowState{Metadata: map[string]any{}}
+	if !exactDelivery || !stampedOwner.EntitylessReceiver() {
+		currentState, err = e.coordinator.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
 		currentState = selectedState

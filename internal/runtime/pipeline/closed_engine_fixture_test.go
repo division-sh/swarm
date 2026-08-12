@@ -122,13 +122,15 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 	result := CommittedWorkflowEngineMutation{}
 	err := r.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		store := workflowStoreForRecordingRunner(r)
-		if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
-			return err
-		}
-		var err error
-		result.Lifecycle, err = commitPipelineTestWorkflowLifecycle(txctx, store, command.Lifecycle)
-		if err != nil {
-			return err
+		if command.EntitylessTarget.Empty() {
+			if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
+				return err
+			}
+			var err error
+			result.Lifecycle, err = commitPipelineTestWorkflowLifecycle(txctx, store, command.Lifecycle)
+			if err != nil {
+				return err
+			}
 		}
 		if len(command.ProposedEffects) != 0 {
 			return fmt.Errorf("pipeline test closed engine owner does not support proposed effects")
