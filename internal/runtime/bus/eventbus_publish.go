@@ -253,6 +253,10 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
+	completion, err = withAPIEventPublicationDeliveryCompletion(completion, command)
+	if err != nil {
+		return apiidempotency.Completion{}, false, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	}
 	committed, err := owner.CommitAPIEventPublication(preparedCtx, APIEventPublicationCommand{
 		Publication: command,
 		Idempotency: idempotency,

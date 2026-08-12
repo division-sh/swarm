@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -675,7 +676,7 @@ func rpcCallWithPlainRequestContext(t *testing.T, handler *Handler, body string)
 	return response
 }
 
-func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing.T) {
+func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -693,53 +694,59 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	handler := eventPublishTestHandlerWithObservability(t, pg, bus, source, observability)
 	body := eventPublishBody("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-readback")
 
-	var first rpcResponse
-	logOutput := captureProcessLog(t, func() {
-		first = rpcCall(t, handler, body)
-	})
-	requireRPCFailure(t, first.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
-	if first.Error.Code != codeInternalError {
-		t.Fatalf("first event.publish code = %d, want %d", first.Error.Code, codeInternalError)
-	}
-	for _, want := range []string{
-		"runtime.error component=api",
-		"json-rpc internal error",
-		`"method":"event.publish"`,
-		`"correlation_id":"publish"`,
-		`"event_name":"scan.requested"`,
-		"platform.internal_failure",
-		"unclassified_runtime_error",
-	} {
-		if !strings.Contains(logOutput, want) {
-			t.Fatalf("readback failure log = %q, want substring %q", logOutput, want)
-		}
-	}
-	if strings.Contains(logOutput, "transient event readback failure") {
-		t.Fatalf("readback failure log leaked raw error prose: %q", logOutput)
+	first := rpcCall(t, handler, body)
+	if first.Error != nil {
+		t.Fatalf("first event.publish error = %#v", first.Error)
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
-		t.Fatalf("scan.requested event count after readback failure = %d, want 1", count)
+		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
-		t.Fatalf("api_idempotency rows after readback failure = %d, want 1", count)
+		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
-	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after readback failure")
+	var storedResponse []byte
+	if err := db.QueryRow(`SELECT response FROM api_idempotency WHERE method='event.publish' AND idempotency_key='idem-readback'`).Scan(&storedResponse); err != nil {
+		t.Fatalf("load stored event.publish response: %v", err)
+	}
+	var storedResult any
+	if err := json.Unmarshal(storedResponse, &storedResult); err != nil {
+		t.Fatalf("decode stored event.publish response: %v", err)
+	}
+	if !reflect.DeepEqual(storedResult, first.Result) {
+		t.Fatalf("first result = %#v, want stored response %#v", first.Result, storedResult)
+	}
+	if observability.calls != 0 {
+		t.Fatalf("operator event readback calls = %d, want 0", observability.calls)
+	}
+	firstResult := asMap(t, first.Result)
+	firstEventID := stringValue(t, firstResult["event_id"], "event_id")
+	firstRunID := stringValue(t, firstResult["run_id"], "run_id")
+	firstDeliveries := asSlice(t, firstResult["deliveries"])
+	if len(firstDeliveries) != 2 {
+		t.Fatalf("first deliveries = %#v, want typed stored delivery results", firstDeliveries)
+	}
+	assertEventPublishDeliveriesContain(t, firstDeliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, firstDeliveries, "node", "scan-orchestrator", "pending", 1)
+	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after stored completion")
 
 	replay := rpcCall(t, handler, body)
 	if replay.Error != nil {
-		t.Fatalf("event.publish replay after readback recovery error = %#v", replay.Error)
+		t.Fatalf("event.publish replay error = %#v", replay.Error)
+	}
+	if !reflect.DeepEqual(replay.Result, first.Result) {
+		t.Fatalf("replay result = %#v, want original stored result %#v", replay.Result, first.Result)
 	}
 	replayResult := asMap(t, replay.Result)
 	eventID := stringValue(t, replayResult["event_id"], "event_id")
 	runID := stringValue(t, replayResult["run_id"], "run_id")
-	if _, err := uuid.Parse(eventID); err != nil {
-		t.Fatalf("event_id = %q, want UUID", eventID)
-	}
-	if _, err := uuid.Parse(runID); err != nil {
-		t.Fatalf("run_id = %q, want UUID", runID)
+	if eventID != firstEventID || runID != firstRunID {
+		t.Fatalf("replay identity = %s/%s, want stored %s/%s", eventID, runID, firstEventID, firstRunID)
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
+	}
+	if observability.calls != 0 {
+		t.Fatalf("operator event readback calls after replay = %d, want 0", observability.calls)
 	}
 	deliveries := asSlice(t, replayResult["deliveries"])
 	if len(deliveries) != 2 {
@@ -2156,10 +2163,12 @@ func (s *failNormalRunCompletionStore) ConvergeNormalRunCompletion(context.Conte
 
 type failOnceEventReadStore struct {
 	ObservabilityReadStore
-	err error
+	err   error
+	calls int
 }
 
 func (s *failOnceEventReadStore) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
+	s.calls++
 	if s.err != nil {
 		err := s.err
 		s.err = nil

@@ -5734,6 +5734,9 @@ engine:
         private transaction. It exposes no transaction or callback capability. Failure at any publication or completion
         write leaves none of those request-owned facts, and retry cannot create a second publication before one durable
         completion exists. Generic `WithAPIIdempotency` semantics for every other mutating method remain unchanged.
+        The stored `event.publish` response includes the deterministic initial selected-delivery snapshot derived from the
+        canonical prepared routes. The first response and every replay return those exact stored bytes; mutable operator
+        delivery readback is not a second response owner and cannot introduce a post-commit API failure.
       excludes:
       - broad API delivery/replay/concurrency semantics owned by #1087
     - name: runtime_session_registry_rows
@@ -11838,7 +11841,9 @@ flow_model:
             A durable keyed replay is resolved before current bundle, endpoint, route, or runtime admission is re-evaluated.
             Once publication plus completion commits, that completion remains the API result; process-local activation finalization
             or dispatch-admission failures are reported and recovered through durable readiness/delivery owners rather than
-            contradicting the committed response.
+            contradicting the committed response. The completion includes the deterministic initial selected-delivery snapshot
+            from the prepared canonical routes and is returned directly for both the first response and replay; post-commit
+            operator readback cannot reinterpret it.
           consumes:
           - authored root event catalog and authored endpoint census
           - effective provider-trigger schema imports without provider-output authority
@@ -11856,6 +11861,7 @@ flow_model:
           - SQLite and PostgreSQL faults at delivery insertion, replay-scope insertion after delivery, and API completion insertion after complete publication leave zero exact run, instance, entity, route, event, delivery, replay-scope, or idempotency residue
           - same-key replay returns the stored response after the selected runtime context is unloaded and does not re-enter semantic admission
           - process-local activation finalization failure after the atomic commit cannot replace the committed API completion with an error
+          - first response and replay return the same stored initial delivery snapshot without post-commit operator readback
           does_not_close:
           - provider ingress activation, signing, and provider-output authority
           - automatic scenario derivation tracked by the S6 workstream
@@ -30233,7 +30239,9 @@ api_specification:
         \ contract and does not execute an arbitrary idempotency callback inside the publication transaction. A same-key replay with\
         \ the same request body returns its durable completion before current bundle, endpoint, route, or runtime admission is re-evaluated.\
         \ Once the transaction commits, process-local activation finalization or dispatch-admission failure is reported for durable\
-        \ recovery and cannot replace the committed API result with an error. Existing-run publication must preflight\
+        \ recovery and cannot replace the committed API result with an error. The stored completion includes the deterministic\
+        \ initial selected-delivery snapshot from the canonical prepared routes; the first response and every replay return it\
+        \ directly without mutable post-commit operator readback. Existing-run publication must preflight\
         \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
         \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
         \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\
