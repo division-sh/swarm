@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // WorkflowInstanceRouteRecoveryProjection is the run-independent persisted
@@ -32,33 +33,24 @@ func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 
 	config, control, err := decodeWorkflowInstanceConfigPayload(record.Config, workflowInstancePersistedControl{
 		StorageRef: route.InstancePath,
+		EntityID:   record.EntityID,
 	})
 	if err != nil {
 		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("decode flow instance for route recovery %s: %w", route.InstancePath, err)
 	}
 	persistedProjection := workflowInstancePersistedProjection{Config: config, Control: control}
-	persistedIdentity, err := workflowInstancePersistedIdentity(nil, WorkflowInstance{
+	instance := WorkflowInstance{
 		StorageRef:   route.InstancePath,
 		WorkflowName: record.WorkflowName,
 		Config:       config,
 		Metadata:     persistedProjection.Metadata(),
-	})
-	if err != nil {
-		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("derive flow instance identity for route recovery %s: %w", route.InstancePath, err)
 	}
-	if derived := persistedIdentity.Route(); derived != route {
-		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf(
-			"flow instance route recovery identity mismatch: persisted=%s/%s/%s requested=%s/%s/%s",
-			derived.ScopeKey,
-			derived.InstanceID,
-			derived.InstancePath,
-			route.ScopeKey,
-			route.InstanceID,
-			route.InstancePath,
-		)
+	persistedIdentity, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(record.EntityID), instance)
+	if err != nil {
+		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("validate flow instance identity for route recovery %s: %w", route.InstancePath, err)
 	}
 	return WorkflowInstanceRouteRecoveryProjection{
-		Identity: persistedIdentity.Instance,
+		Identity: persistedIdentity,
 		Config:   cloneStringAnyMap(config),
 	}, nil
 }

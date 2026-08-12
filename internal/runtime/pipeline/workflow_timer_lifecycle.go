@@ -135,7 +135,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		return true, true, err
 	}
 	pc.notifyTestEntityStateUpdated(entityID, nextStage)
-	if err := pc.maybeDeactivateTerminalFlowInstance(ctx, route, entityID, nextStage); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(ctx, route, identity.NormalizeEntityID(entityID), nextStage); err != nil {
 		return true, true, err
 	}
 	if lateBy := evt.CreatedAt().Sub(occurrence.DueAt); lateBy > time.Minute {

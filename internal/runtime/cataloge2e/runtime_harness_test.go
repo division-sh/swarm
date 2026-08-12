@@ -51,6 +51,7 @@ const (
 type catalogTriggerStep struct {
 	Event                         string                   `yaml:"event"`
 	Payload                       map[string]any           `yaml:"payload"`
+	Target                        catalogTriggerTarget     `yaml:"target"`
 	BarrierBefore                 catalogTranscriptBarrier `yaml:"barrier_before"`
 	AssertPersistedBeforeDelivery bool                     `yaml:"assert_persisted_before_delivery"`
 	ErrorContains                 string                   `yaml:"error_contains"`
@@ -63,6 +64,24 @@ type catalogTriggerStep struct {
 	createdAt                     time.Time
 	sourceAgent                   string
 	excludeFromEmitted            bool
+}
+
+type catalogTriggerTarget struct {
+	FlowID       string `yaml:"flow_id"`
+	FlowInstance string `yaml:"flow_instance"`
+	EntityID     string `yaml:"entity_id"`
+}
+
+func (t catalogTriggerTarget) route() (events.RouteIdentity, bool) {
+	route := events.RouteIdentity{
+		FlowID:       strings.TrimSpace(t.FlowID),
+		FlowInstance: strings.Trim(strings.TrimSpace(t.FlowInstance), "/"),
+		EntityID:     strings.TrimSpace(t.EntityID),
+	}
+	if route.FlowID == "" && route.FlowInstance == "" && route.EntityID == "" {
+		return events.RouteIdentity{}, false
+	}
+	return route, route.FlowID != "" && route.FlowInstance != "" && route.EntityID != ""
 }
 
 type catalogExpectedDocument struct {
@@ -702,6 +721,12 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	items := make([]publishItem, 0, len(steps))
 	for _, step := range steps {
 		payload := cloneStringAnyMap(step.Payload)
+		targetRoute, hasTarget := step.Target.route()
+		if hasTarget {
+			h.seedTargetState(targetRoute)
+		} else if step.Target != (catalogTriggerTarget{}) {
+			h.t.Fatalf("concurrent trigger %s requires a complete target owner", step.Event)
+		}
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
 			h.seedInitialState(entityID)
 		}
@@ -714,6 +739,9 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
 		} else {
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
+		}
+		if hasTarget {
+			eventEnvelope = events.EnvelopeForTargetRoute(eventEnvelope, targetRoute)
 		}
 		eventID := strings.TrimSpace(step.eventID)
 		if eventID == "" {
@@ -1166,6 +1194,54 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		},
 	}, h.startedAt); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
+	}
+}
+
+func (h *runtimeHarness) seedTargetState(target events.RouteIdentity) {
+	h.t.Helper()
+	if h == nil || h.workflow == nil || h.bundle == nil {
+		return
+	}
+	target = target.Normalized()
+	if target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
+		h.t.Fatalf("catalog target owner is incomplete: %#v", target)
+	}
+	route := catalogExactWorkflowRoute(target.FlowInstance)
+	if _, ok, err := h.workflow.Load(h.ctx, route); err != nil {
+		h.t.Fatalf("load catalog target owner %s: %v", target.FlowInstance, err)
+	} else if ok {
+		return
+	}
+	initialState := strings.TrimSpace(h.bundle.FlowInitialStage(target.FlowID))
+	if initialState == "" {
+		h.t.Fatalf("catalog target flow %s has no initial state", target.FlowID)
+	}
+	metadata := map[string]any{
+		"run_id":      catalogRuntimeRunID,
+		"entity_id":   target.EntityID,
+		"flow_path":   route.InstancePath,
+		"instance_id": route.InstanceID,
+	}
+	if schema, ok := h.bundle.FlowSchemaByID(target.FlowID); ok && !schema.Instance.Empty() {
+		metadata[schema.Instance.Path()] = route.InstanceID
+	}
+	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	result, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+		InstanceID:      route.InstanceID,
+		StorageRef:      route.InstancePath,
+		WorkflowName:    target.FlowID,
+		WorkflowVersion: h.bundle.WorkflowVersion(),
+		CurrentState:    initialState,
+		EnteredStageAt:  h.startedAt,
+		CreatedAt:       h.startedAt,
+		Metadata:        metadata,
+	}, h.startedAt)
+	if err != nil {
+		h.t.Fatalf("materialize catalog target owner %s/%s: %v", target.FlowInstance, target.EntityID, err)
+	}
+	if result != runtimepipeline.WorkflowInitialMaterializationCreated && result != runtimepipeline.WorkflowInitialMaterializationAlreadyExists {
+		h.t.Fatalf("materialize catalog target owner %s/%s: result=%v", target.FlowInstance, target.EntityID, result)
 	}
 }
 
