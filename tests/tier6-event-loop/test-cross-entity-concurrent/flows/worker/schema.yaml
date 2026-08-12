@@ -1,0 +1,14 @@
+name: worker
+mode: template
+instance: work_id
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events:
+      - name: task_submitted
+        event: task.submitted
+        source: external
+  outputs:
+    events: []
