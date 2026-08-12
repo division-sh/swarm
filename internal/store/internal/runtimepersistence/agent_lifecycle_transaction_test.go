@@ -40,7 +40,7 @@ func seedLifecycleRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
 	if sqlite {
 		requireRunningSQLiteRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
 	} else {
-			requireRunningPostgresRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
+		requireRunningPostgresRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
 	}
 }
 
