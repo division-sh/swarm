@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/testsql"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -71,6 +73,107 @@ func TestServedParityHarnessGeneratedInputFixtureLifecycle(t *testing.T) {
 
 func TestServedParityHarnessPublicMockApprovalLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioPublicMockApprovalLifecycle), runServedPublicMockApprovalBackendProof)
+}
+
+func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		backend := backend
+		t.Run(string(backend), func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			unsetStoreSelectorEnv(t)
+			t.Setenv("PATH", t.TempDir())
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("TELEGRAM_BOT_TOKEN", "")
+			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+			contractsPath := writePublicTelegramMockApprovalScenarioFixture(t)
+			bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+
+			var db *sql.DB
+			opts := cliapp.ServeOptions{
+				ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+				SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+				TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+			}
+			switch backend {
+			case servedparity.BackendDefaultSQLite:
+				stubServeRuntimeWorkspaceLifecycle(t)
+				oldBuildStores := buildStoresForServe
+				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+					stores, err := oldBuildStores(ctx, selection, cfg)
+					if err == nil {
+						db = stores.SQLDB
+					}
+					return stores, err
+				}
+				t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+				opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "public-input-rollback.sqlite"))
+			case servedparity.BackendExplicitPostgres:
+				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+				opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+				opts.StoreMode = storebackend.BackendPostgres.String()
+				opts.StoreModeSet = true
+			default:
+				t.Fatalf("unsupported backend %q", backend)
+			}
+
+			endpoint, _ := startServedEventPublishFollowUpRuntime(t, opts)
+			if db == nil {
+				t.Fatalf("%s selected database is required", backend)
+			}
+			claim := testsql.EventCorruptionClaim{
+				Invariant: "public_input.selected_store_atomicity",
+				Reason:    "prove public template lifecycle and publication facts roll back on late delivery failure",
+			}
+			if backend == servedparity.BackendExplicitPostgres {
+				testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
+			} else {
+				testsql.InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
+			}
+
+			idempotencyKey := "public-input-rollback-" + string(backend)
+			rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
+				"bundle_hash": bundleHash,
+				"event_name":  "inbound.telegram.text_message",
+				"payload": map[string]any{
+					"conversation_reference": "chat-42", "external_account_reference": "account-42",
+					"provider_message_reference": 1, "text": "rollback proof",
+				},
+				"idempotency_key": idempotencyKey,
+			})
+			if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
+				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
+			}
+			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey)
+		})
+	}
+}
+
+func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey string) {
+	t.Helper()
+	queries := []struct {
+		label string
+		sql   string
+	}{
+		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE trigger_event_type = 'inbound.telegram.text_message'`},
+		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
+		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE flow_instance LIKE 'telegram-chat/%'`},
+		{label: "route", sql: `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE 'telegram-chat/%'`},
+		{label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'`},
+		{label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id IN (SELECT event_id FROM events WHERE event_name = 'inbound.telegram.text_message')`},
+	}
+	for _, query := range queries {
+		var count int
+		if err := db.QueryRowContext(context.Background(), query.sql).Scan(&count); err != nil {
+			t.Fatalf("%s count %s rollback rows: %v", backend, query.label, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s %s rows after public-input rollback = %d, want 0", backend, query.label, count)
+		}
+	}
+	if got := servedEventPublishAPIIdempotencyCount(t, db, servedBackendLabel(backend), "event.publish", idempotencyKey); got != 0 {
+		t.Fatalf("%s API idempotency completion rows after public-input rollback = %d, want 0", backend, got)
+	}
 }
 
 func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.Backend) {

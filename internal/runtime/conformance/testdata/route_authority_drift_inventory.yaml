@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085, 2105, 2126]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826, 2085, 2105, 2126, 2207]
 parent_issues: [1340, 1353, 1481, 1493, 1738, 1786, 1827, 2084]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -356,12 +356,14 @@ seam_families:
     paths:
       - platform-spec.yaml
       - openrpc.json
-    search_dimensions: [route_plan, event_deliveries, public_readback]
+    search_dimensions: [route_plan, connect_route_plan, event_deliveries, public_readback]
     notes: >
       The authoritative runtime contract defines RoutePlan as publish-time typed
       authority, event_deliveries as durable authority, runtime callback
       context normalization, public readback as projection, and replay/redelivery
-      boundaries.
+      boundaries. #2207 adds authored-root-versus-effective-schema precedence
+      for public template-input admission through ConnectRoutePlan. openrpc.json
+      is the generated public projection of that authority, not a second owner.
   - id: event_context_inputs
     layer: event_context
     classification: canonical_owner

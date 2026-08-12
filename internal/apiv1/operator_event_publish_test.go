@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -31,6 +34,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -1256,16 +1260,64 @@ func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscop
 		t.Fatalf("root/template collision selected template endpoint %#v", endpoint)
 	}
 
-	templateOnlyBundle := eventPublishRootTemplateCollisionTestBundle()
-	templateOnlyBundle.RootSchema.Pins.Inputs.Events = nil
-	templateOnlyBundle.FlowTree.Root.Children[0].Events = nil
+	rootWithoutInputPin := eventPublishRootTemplateCollisionTestBundle()
+	rootWithoutInputPin.RootSchema.Pins.Inputs.Events = nil
+	if endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(semanticview.Wrap(rootWithoutInputPin), eventName, eventName); err != nil {
+		t.Fatalf("resolve authored root without input pin: %v", err)
+	} else if matched {
+		t.Fatalf("authored root without input pin selected template endpoint %#v", endpoint)
+	}
+
+	templateOnlyBundle := eventPublishTemplateInputTestBundle(eventName, false)
 	templateOnly := semanticview.Wrap(templateOnlyBundle)
-	endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(templateOnly, eventName, eventName)
+	resolvedTemplateEvent, err := resolveEventPublicationEventName(templateOnly, eventName)
+	if err != nil {
+		t.Fatalf("resolve template-only event name: %v", err)
+	}
+	endpoint, matched, err := resolveEventPublicationTemplateInputEndpoint(templateOnly, eventName, resolvedTemplateEvent)
 	if err != nil {
 		t.Fatalf("resolve unscoped template input: %v", err)
 	}
 	if !matched || endpoint.FlowID != "operating" || endpoint.PinName != eventName {
-		t.Fatalf("unscoped template endpoint = matched:%t %#v, want operating.%s", matched, endpoint, eventName)
+		t.Fatalf("unscoped template endpoint = matched:%t %#v, want operating.%s; scopes=%#v inputs=%#v", matched, endpoint, eventName, templateOnly.FlowScopes(), semanticview.BuildAuthoredEventEndpointCensus(templateOnly).InputPins())
+	}
+
+	const importedEvent = "inbound.telegram.text_message"
+	importedBundle := eventPublishTemplateInputTestBundle(importedEvent, false)
+	importedBundle.FlowTree.Root.Children[0].Events = nil
+	importedBundle.PackageTree = []runtimecontracts.LoadedProjectPackage{{
+		Key: "root",
+		Manifest: runtimecontracts.ProjectPackageDocument{
+			ProviderTriggerEvents: runtimecontracts.ProviderTriggerEventImports{Imports: []runtimecontracts.ProviderTriggerEventImport{{
+				Provider: "telegram", Event: importedEvent,
+			}}},
+		},
+	}}
+	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(
+		"0.7.0",
+		[]string{filepath.Join(canonicalrouting.RepoRoot(t), "packs", "provider-triggers", "telegram")},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("load Telegram provider-trigger catalog: %v", err)
+	}
+	importedSource, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(importedBundle), catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	if _, authored := importedSource.AuthoredEventEntries()[importedEvent]; authored {
+		t.Fatal("imported Telegram schema was misclassified as authored root authority")
+	}
+	resolvedImportedEvent, err := resolveEventPublicationEventName(importedSource, importedEvent)
+	if err != nil {
+		t.Fatalf("resolve imported Telegram event name: %v", err)
+	}
+	endpoint, matched, err = resolveEventPublicationTemplateInputEndpoint(importedSource, importedEvent, resolvedImportedEvent)
+	if err != nil {
+		t.Fatalf("resolve imported Telegram template input: %v", err)
+	}
+	if !matched || endpoint.FlowID != "operating" || endpoint.PinName != importedEvent {
+		t.Fatalf("imported Telegram template endpoint = matched:%t %#v, want operating.%s; resolved=%q inputs=%#v", matched, endpoint, importedEvent, resolvedImportedEvent, semanticview.BuildAuthoredEventEndpointCensus(importedSource).InputPins())
 	}
 }
 
@@ -2328,14 +2380,10 @@ func eventPublishTargetRouteTestBundle() *runtimecontracts.WorkflowContractBundl
 }
 
 func eventPublishRootTemplateCollisionTestBundle() *runtimecontracts.WorkflowContractBundle {
-	eventName := "review.requested"
-	rootNode := runtimecontracts.SystemNodeContract{
-		ID:           "root-orchestrator",
-		SubscribesTo: []string{eventName},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			eventName: {},
-		},
-	}
+	return eventPublishTemplateInputTestBundle("review.requested", true)
+}
+
+func eventPublishTemplateInputTestBundle(eventName string, authoredRoot bool) *runtimecontracts.WorkflowContractBundle {
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating", Mode: "template"},
@@ -2349,28 +2397,10 @@ func eventPublishRootTemplateCollisionTestBundle() *runtimecontracts.WorkflowCon
 			eventName: {},
 		},
 	}
-	root := runtimecontracts.FlowContractView{
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"root-orchestrator": rootNode,
-		},
-		Children: []runtimecontracts.FlowContractView{operating},
-	}
-	return &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"root-orchestrator": rootNode,
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
-			},
-		},
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{operating}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics:  runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"operating": operating.Schema,
 		},
@@ -2381,6 +2411,22 @@ func eventPublishRootTemplateCollisionTestBundle() *runtimecontracts.WorkflowCon
 			},
 		},
 	}
+	if !authoredRoot {
+		return bundle
+	}
+	rootNode := runtimecontracts.SystemNodeContract{
+		ID:           "root-orchestrator",
+		SubscribesTo: []string{eventName},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			eventName: {},
+		},
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: {}}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{"root-orchestrator": rootNode}
+	bundle.RootSchema.Pins.Inputs.Events = []string{eventName}
+	bundle.FlowTree.Root.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: {}}
+	bundle.FlowTree.Root.Nodes = map[string]runtimecontracts.SystemNodeContract{"root-orchestrator": rootNode}
+	return bundle
 }
 
 func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBundle {
