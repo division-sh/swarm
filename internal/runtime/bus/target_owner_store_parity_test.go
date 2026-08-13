@@ -125,7 +125,7 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			}
 			requireDurableTargetOwnerRoutes(t, ctx, selected, eventID, wantOwner)
 
-			if _, err := restarted.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
+			if _, err := restarted.RecoverPersistedPipeline(duplicateCtx, runtimepipelineobligation.ClaimedWork{
 				Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 			}, nil); err != nil {
 				t.Fatalf("recover persisted target-owner route: %v", err)
