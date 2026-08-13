@@ -708,12 +708,15 @@ func (s *runtimeProjectSupervisor) restoreCommittedSourceSetAndSurvivors(
 	previous runtimeagenttopology.SourceSetPlan,
 	attempt sourceSetReplacementAttempt,
 ) error {
-	if err := s.restoreCommittedSourceSet(ctx, expected, previous, attempt); err != nil {
-		return err
-	}
 	transition, err := manager.PrepareSourceSetTransition(ctx, previous)
 	if err != nil {
 		return fmt.Errorf("prepare predecessor source-set survivor restoration: %w", err)
+	}
+	if err := s.restoreCommittedSourceSet(ctx, expected, previous, attempt); err != nil {
+		if transition != nil {
+			return errors.Join(err, transition.Abort())
+		}
+		return err
 	}
 	if transition == nil {
 		return nil
