@@ -45,7 +45,7 @@ type runtimeProjectSupervisor struct {
 	loadProviderCatalog  func() (*providertriggers.CatalogSnapshot, error)
 	loadChannelPacks     func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
 	onRuntimePublished   func(context.Context) error
-	beforeStartupHandoff func(context.Context) error
+	beforeStartupHandoff func(context.Context) (func(), error)
 	channelPlans         []packs.SatisfactionPlan
 	channelBindings      []packs.OutboundBindingPlan
 	startRuntime         func(context.Context, *runtime.Runtime) error
@@ -104,7 +104,7 @@ func (s *runtimeProjectSupervisor) SetRuntimePublishedHook(hook func(context.Con
 	s.mu.Unlock()
 }
 
-func (s *runtimeProjectSupervisor) SetStartupOwnershipHandoffBarrier(barrier func(context.Context) error) {
+func (s *runtimeProjectSupervisor) SetStartupOwnershipHandoffBarrier(barrier func(context.Context) (func(), error)) {
 	if s == nil {
 		return
 	}
@@ -520,7 +520,24 @@ type pendingRuntimeReplacement struct {
 	identity    runtimecontracts.BundleIdentity
 	runtime     *runtime.Runtime
 	admission   *processAdmissionCandidate
+	freeze      *startupHandoffFreeze
 	finalized   bool
+}
+
+type startupHandoffFreeze struct {
+	once    sync.Once
+	release func()
+}
+
+func (f *startupHandoffFreeze) Release() {
+	if f == nil {
+		return
+	}
+	f.once.Do(func() {
+		if f.release != nil {
+			f.release()
+		}
+	})
 }
 
 func cloneProcessAdmissionCandidate(candidate *processAdmissionCandidate) *processAdmissionCandidate {
@@ -586,6 +603,7 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 	s.pendingReplacement = nil
 	hook := s.onRuntimePublished
 	s.mu.Unlock()
+	pending.freeze.Release()
 	if hook != nil {
 		if err := hook(s.runtimeStartContext(context.Background())); err != nil {
 			s.setReady(false)
@@ -717,31 +735,43 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		oldRT := s.currentRT
 		s.mu.RUnlock()
 		s.setReady(false)
+		s.mu.RLock()
+		beforeStartupHandoff := s.beforeStartupHandoff
+		s.mu.RUnlock()
+		var freeze *startupHandoffFreeze
+		if beforeStartupHandoff != nil {
+			release, err := beforeStartupHandoff(ctx)
+			if err != nil {
+				s.setReady(true)
+				return s.CurrentProject(), fmt.Errorf("settle public channel registration before startup ownership handoff: %w", err)
+			}
+			freeze = &startupHandoffFreeze{release: release}
+			defer func() {
+				s.mu.RLock()
+				retained := s.pendingReplacement != nil && s.pendingReplacement.freeze == freeze
+				s.mu.RUnlock()
+				if !retained {
+					freeze.Release()
+				}
+			}()
+		}
 		if _, err := manager.BeginBundleHashReplacement(ctx, oldHash, contextDef); err != nil {
 			withdrawErr := fmt.Errorf("withdraw predecessor runtime context for replacement: %w", err)
 			status := manager.LookupBundleHashStatus(oldHash)
 			if status.Found && status.Cause == runtime.RuntimeContextCauseReplacing {
-				restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT)
+				restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT, freeze)
 				return s.CurrentProject(), errors.Join(withdrawErr, restoreErr)
 			}
 			s.setReady(true)
 			return s.CurrentProject(), withdrawErr
 		}
 		if err := s.quiesceCurrentRuntimeWithOptions(ctx, oldRT, s.replacementShutdown); err != nil {
-			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT)
+			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT, freeze)
 			return s.CurrentProject(), errors.Join(fmt.Errorf("quiesce predecessor runtime before replacement: %w", err), restoreErr)
-		}
-		s.mu.RLock()
-		beforeStartupHandoff := s.beforeStartupHandoff
-		s.mu.RUnlock()
-		if beforeStartupHandoff != nil {
-			if err := beforeStartupHandoff(ctx); err != nil {
-				return s.CurrentProject(), errors.Join(fmt.Errorf("settle public channel registration before startup ownership handoff: %w", err), s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
-			}
 		}
 		handoff, err := newRT.PrepareStartupOwnershipHandoff(oldRT)
 		if err != nil {
-			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
 		transitionRetained := false
 		var publication *runtime.PreparedRuntimeContextReplacement
@@ -756,13 +786,13 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		if err := s.startCurrentRuntime(ctx, newRT); err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
 		targets, _, err := newRT.EnsureStandingReplacementTargets(ctx, oldRT)
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
 		contextDef.StandingTargets = targets
 		if admissionCandidate == nil {
@@ -773,18 +803,18 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
 		if err := handoff.Commit(); err != nil {
 			discardErr := publication.Discard()
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, discardErr, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			return s.CurrentProject(), errors.Join(err, discardErr, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
 		pending := &pendingRuntimeReplacement{
 			handoff: handoff, publication: publication,
 			root: resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
-			admission: cloneProcessAdmissionCandidate(admissionCandidate),
+			admission: cloneProcessAdmissionCandidate(admissionCandidate), freeze: freeze,
 		}
 		s.mu.Lock()
 		if s.pendingReplacement != nil {
@@ -898,7 +928,7 @@ func (s *runtimeProjectSupervisor) quiesceCurrentRuntimeWithOptions(ctx context.
 	return rt.QuiesceForReplacement(opts)
 }
 
-func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime) error {
+func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime, freeze *startupHandoffFreeze) error {
 	if predecessor == nil {
 		return fmt.Errorf("restore predecessor runtime: predecessor is required")
 	}
@@ -973,6 +1003,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		handoff: handoff, publication: publication,
 		root: predecessorRoot, source: predecessorContext.Source, bundle: predecessorBundle,
 		fact: predecessorContext.BundleSourceFact, identity: predecessorContext.BundleIdentity, runtime: restored,
+		freeze: freeze,
 	}
 	s.mu.Lock()
 	if s.pendingReplacement != nil {
@@ -987,11 +1018,11 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	return s.completePendingReplacement()
 }
 
-func (s *runtimeProjectSupervisor) completeFailedQuiescenceAndRestore(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime) error {
+func (s *runtimeProjectSupervisor) completeFailedQuiescenceAndRestore(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime, freeze *startupHandoffFreeze) error {
 	if err := s.quiesceCurrentRuntimeWithOptions(context.Background(), predecessor, runtime.DefaultShutdownOptions()); err != nil {
 		return fmt.Errorf("complete failed predecessor quiescence before restoration: %w", err)
 	}
-	return s.restoreQuiescedPredecessor(ctx, manager, predecessorContext, predecessor)
+	return s.restoreQuiescedPredecessor(ctx, manager, predecessorContext, predecessor, freeze)
 }
 
 func (s *runtimeProjectSupervisor) shutdownCurrentRuntimeWithOptions(ctx context.Context, rt *runtime.Runtime, opts runtime.ShutdownOptions) error {

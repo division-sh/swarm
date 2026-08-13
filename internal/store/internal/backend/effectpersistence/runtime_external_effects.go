@@ -771,10 +771,13 @@ func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffec
 	if err != nil {
 		return false
 	}
+	launchRejected, _ := failure.Detail.Attributes["launch_rejected"].(bool)
+	if req.Adapter == "provider_registration" {
+		return launchRejected && failure.Retryable
+	}
 	if !existing.launched {
 		return failure.Retryable || failure.Detail.Code == "effect_recovery_prelaunch_abandoned"
 	}
-	launchRejected, _ := failure.Detail.Attributes["launch_rejected"].(bool)
 	return launchRejected && failure.Retryable
 }
 

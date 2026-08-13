@@ -990,21 +990,38 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						runtimeContexts:         manager,
 						executionPosture:        executionposture.Live,
 					}
+					supervisor.ready.Store(true)
+					supervisor.SetStartupOwnershipHandoffBarrier(func(context.Context) (func(), error) {
+						return nil, errors.New("injected unresolved registration attempt")
+					})
+					if _, err := supervisor.replaceCurrentRuntimeWithSource(
+						context.Background(), "/rejected", source, bundle, newFact,
+						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(),
+					); err == nil || !strings.Contains(err.Error(), "injected unresolved registration attempt") {
+						t.Fatalf("registration barrier rejection error = %v", err)
+					}
+					rejectedLookup := manager.LookupBundleHashStatus(oldHash)
+					if !supervisor.ready.Load() || supervisor.CurrentRuntime() != predecessor || !predecessor.Manager.IsRunning() || !predecessor.Bus.OutboxSweeperActive() || !rejectedLookup.Loaded() {
+						t.Fatalf("registration barrier rejection mutated predecessor = ready:%v runtime:%p manager:%v outbox:%v lookup:%#v", supervisor.ready.Load(), supervisor.CurrentRuntime(), predecessor.Manager.IsRunning(), predecessor.Bus.OutboxSweeperActive(), rejectedLookup)
+					}
 					var registrationBarrierCalls atomic.Int32
 					barrierPredecessor := predecessor
-					supervisor.SetStartupOwnershipHandoffBarrier(func(ctx context.Context) error {
+					var registrationFreezeActive atomic.Int32
+					supervisor.SetStartupOwnershipHandoffBarrier(func(ctx context.Context) (func(), error) {
 						current := supervisor.CurrentRuntime()
 						if current == nil || current != barrierPredecessor {
-							return errors.New("registration handoff barrier does not own the expected predecessor runtime")
+							return nil, errors.New("registration handoff barrier does not own the expected predecessor runtime")
 						}
-						if current.Manager.IsRunning() || current.Bus.OutboxSweeperActive() {
-							return errors.New("registration handoff barrier ran before predecessor quiescence")
+						if !current.Manager.IsRunning() || !current.Bus.OutboxSweeperActive() {
+							return nil, errors.New("registration handoff barrier ran after predecessor quiescence")
 						}
 						if _, err := current.CurrentStartupAuthority(); err != nil {
-							return err
+							return nil, err
 						}
 						registrationBarrierCalls.Add(1)
-						return nil
+						registrationFreezeActive.Add(1)
+						var once sync.Once
+						return func() { once.Do(func() { registrationFreezeActive.Add(-1) }) }, nil
 					})
 					supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
 						if rt == candidate {
@@ -1014,7 +1031,6 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						}
 						return rt.Start(ctx)
 					}
-					supervisor.ready.Store(true)
 					status, err := supervisor.replaceCurrentRuntimeWithSource(
 						context.Background(), "/new", source, bundle, newFact,
 						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(),
@@ -1024,6 +1040,9 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}
 					if supervisor.ready.Load() || supervisor.pendingReplacement == nil || supervisor.CurrentRuntime() != predecessor {
 						t.Fatalf("failed finalization visibility = status:%#v ready:%v runtime:%p pending:%#v", status, supervisor.ready.Load(), supervisor.CurrentRuntime(), supervisor.pendingReplacement)
+					}
+					if got := registrationFreezeActive.Load(); got != 1 {
+						t.Fatalf("registration freeze after retained finalization failure=%d, want 1", got)
 					}
 					lookup := manager.LookupBundleHashStatus(oldHash)
 					if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
@@ -1044,6 +1063,9 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}
 					if got := registrationBarrierCalls.Load(); got != 1 {
 						t.Fatalf("registration barrier calls after first handoff=%d, want 1", got)
+					}
+					if got := registrationFreezeActive.Load(); got != 0 {
+						t.Fatalf("registration freeze after published replacement=%d, want 0", got)
 					}
 					replacementContext, ok := manager.LookupBundleHash(newHash)
 					if !ok {
@@ -1076,6 +1098,9 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}
 					if got := registrationBarrierCalls.Load(); got != 2 {
 						t.Fatalf("registration barrier calls after second handoff=%d, want 2", got)
+					}
+					if got := registrationFreezeActive.Load(); got != 0 {
+						t.Fatalf("registration freeze after second published replacement=%d, want 0", got)
 					}
 					if err := successor.Shutdown(); err != nil {
 						t.Fatalf("shutdown later replacement: %v", err)
