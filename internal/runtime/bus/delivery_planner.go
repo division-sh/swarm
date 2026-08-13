@@ -835,9 +835,10 @@ func routedImportBoundaryNoTargetNodeDeliveryIntents(evt events.Event, routed []
 }
 
 func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, plan RoutePlan) error {
-	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+	if len(routed) == 0 {
 		return nil
 	}
+	hasExplicitTargets := len(eventDeliveryTargetRoutes(evt)) > 0
 	authorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
 	apiAuthorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
 	for _, intent := range plan.DeliveryIntents {
@@ -860,10 +861,16 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 			if _, ok := apiAuthorized[subscriber.Recipient]; ok {
 				continue
 			}
+			if _, planned := authorized[subscriber.Recipient]; hasExplicitTargets && !planned {
+				continue
+			}
 			return fmt.Errorf(
-				"routed root-input node %q at %q matched target-free event %q without root_ingress admission",
+				"routed root-input node %q at %q matched event %q without root_ingress or typed API admission",
 				subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), evt.Type(),
 			)
+		}
+		if hasExplicitTargets {
+			continue
 		}
 		if subscriber.routeSource != subscriberRouteSourceSubscription {
 			continue
@@ -929,7 +936,7 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 }
 
 func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
-	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+	if len(routed) == 0 {
 		return nil
 	}
 	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
@@ -937,9 +944,19 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 		return nil
 	}
 	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
+	targets := eventDeliveryTargetRoutes(evt)
 	for _, subscriber := range routed {
 		if !subscriber.Recipient.IsNode() {
 			continue
+		}
+		if len(targets) > 0 {
+			matched := false
+			for _, target := range targets {
+				matched = matched || routeMatchesInternalSubscriber(target, subscriber)
+			}
+			if !matched {
+				continue
+			}
 		}
 		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 		flowID := strings.TrimSpace(subscriber.handlerFlowID)

@@ -2596,20 +2596,29 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want select existing route %#v", store.routes[eventID], want)
 	}
+	committedRoute := store.routes[eventID][0]
 
-	replayTarget := subscribeInternalDeliveriesForTest(t, eb, "account-node-one")
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
 		EntityID:      eventtest.UUID("ent-drift"),
 		FlowInstance:  "account/drift",
 		AddressFields: map[string]string{"entity.account_id": "acct-1"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
+	restarted, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("restart EventBus against replacement topology: %v", err)
 	}
+	store.bus = restarted
+	if err := restarted.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(drift) after restart: %v", err)
+	}
+	replayTarget := subscribeInternalDeliveriesForTest(t, restarted, "account-node-one")
+	hostileReplacement := subscribeInternalDeliveriesForTest(t, restarted, "account-node-drift")
 	store.flowInstanceDescriptorCalls = 0
-	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+	if _, err := restarted.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
 		t.Fatalf("RecoverPersistedPipeline: %v", err)
@@ -2620,6 +2629,10 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	}
 	if got := store.flowInstanceDescriptorCalls; got != 0 {
 		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
+	}
+	requireNoConnectRoutePlanBusEvent(t, hostileReplacement, "replacement topology must not capture historical replay")
+	if routes := store.routes[eventID]; len(routes) != 1 || routes[0] != committedRoute {
+		t.Fatalf("persisted route changed across replacement-topology restart: %#v, want unchanged %#v", routes, committedRoute)
 	}
 }
 
