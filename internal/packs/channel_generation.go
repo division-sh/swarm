@@ -65,6 +65,10 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 			"descriptor": compiledChannelEventGenerationValue(event),
 		}
 	}
+	var registration any
+	if p.registration != nil {
+		registration = p.registration.generationValue()
+	}
 	return plangeneration.FromCanonicalValue(map[string]any{
 		"interface_ref":      p.interfaceRef.String(),
 		"channel":            p.channel,
@@ -77,6 +81,7 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 		"constraints":        channelSchemaMapGenerationValue(p.constraints),
 		"operations":         operations,
 		"events":             events,
+		"registration":       registration,
 	})
 }
 
@@ -106,6 +111,13 @@ func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
 		for fieldName, schema := range event.fieldSchema {
 			if err := schema.ValidateDefinition(); err != nil {
 				return fmt.Errorf("channel generation event %q field %q: %w", eventName, fieldName, err)
+			}
+		}
+	}
+	if plan.registration != nil {
+		for _, operation := range []compiledRegistrationOperation{plan.registration.identify, plan.registration.apply, plan.registration.readback} {
+			if err := operation.tool.Validate(); err != nil {
+				return fmt.Errorf("channel generation registration %q tool: %w", operation.name, err)
 			}
 		}
 	}
@@ -154,8 +166,9 @@ func compiledChannelMappingGenerationValue(mappings []compiledChannelMapping) ma
 }
 
 type PrivateActivityTargetIdentity struct {
-	toolID     channelPlanIdentity
-	generation plangeneration.Generation
+	toolID         channelPlanIdentity
+	generation     plangeneration.Generation
+	credentialKeys map[string]string
 }
 
 func (t PrivateActivityTargetIdentity) ToolID() string {
@@ -166,11 +179,16 @@ func (t PrivateActivityTargetIdentity) Generation() plangeneration.Generation {
 	return t.generation
 }
 
+func (t PrivateActivityTargetIdentity) CredentialStoreKeys() map[string]string {
+	return cloneChannelStringMap(t.credentialKeys)
+}
+
 func (p OutboundBindingPlan) RuntimeActivityTarget(operation string) (PrivateActivityTargetIdentity, error) {
 	operation = strings.TrimSpace(operation)
 	target, ok := p.activityTargets[operation]
 	if !ok {
 		return PrivateActivityTargetIdentity{}, fmt.Errorf("channel operation %q is not compiled", operation)
 	}
+	target.credentialKeys = cloneChannelStringMap(target.credentialKeys)
 	return target, nil
 }

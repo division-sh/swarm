@@ -178,7 +178,9 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	providerCtx = managedSelectedExecutionStoreTestContext(t, providerCtx, providerAuthority)
 	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 	for _, registration := range runtimeeffects.Registrations() {
-		if registration.Kind == runtimeeffects.KindProviderTurn || registration.Kind == runtimeeffects.KindProviderStartupProbe {
+		if registration.Kind == runtimeeffects.KindProviderTurn ||
+			registration.Kind == runtimeeffects.KindProviderStartupProbe ||
+			registration.Kind == runtimeeffects.KindServeRegistration {
 			continue
 		}
 		handle, err := runtimeeffects.Begin(providerCtx, registration.Adapter, []byte(registration.Adapter), nil)

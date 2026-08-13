@@ -143,18 +143,27 @@ type ChannelActivityTarget struct {
 }
 
 type channelActivityTargetValue struct {
-	tool       runtimecontracts.ToolSchemaEntry
-	generation plangeneration.Generation
+	tool           runtimecontracts.ToolSchemaEntry
+	generation     plangeneration.Generation
+	credentialKeys map[string]string
 }
 
 func NewChannelActivityTarget(tool runtimecontracts.ToolSchemaEntry, generation plangeneration.Generation) (ChannelActivityTarget, error) {
+	return NewChannelActivityTargetWithCredentials(tool, generation, nil)
+}
+
+func NewChannelActivityTargetWithCredentials(tool runtimecontracts.ToolSchemaEntry, generation plangeneration.Generation, credentialKeys map[string]string) (ChannelActivityTarget, error) {
 	if tool.IsZero() {
 		return ChannelActivityTarget{}, fmt.Errorf("private channel activity tool is missing")
 	}
 	if !generation.Valid() {
 		return ChannelActivityTarget{}, fmt.Errorf("private channel activity plan generation is missing")
 	}
-	return ChannelActivityTarget{value: &channelActivityTargetValue{tool: tool, generation: generation}}, nil
+	keys := make(map[string]string, len(credentialKeys))
+	for logical, rawKey := range credentialKeys {
+		keys[strings.TrimSpace(logical)] = strings.TrimSpace(rawKey)
+	}
+	return ChannelActivityTarget{value: &channelActivityTargetValue{tool: tool, generation: generation, credentialKeys: keys}}, nil
 }
 
 func (t ChannelActivityTarget) Tool() (runtimecontracts.ToolSchemaEntry, bool) {
@@ -169,6 +178,14 @@ func (t ChannelActivityTarget) Generation() plangeneration.Generation {
 		return plangeneration.Generation{}
 	}
 	return t.value.generation
+}
+
+func (t ChannelActivityTarget) CredentialStoreKey(logical string) (string, bool) {
+	if t.value == nil {
+		return "", false
+	}
+	value, ok := t.value.credentialKeys[strings.TrimSpace(logical)]
+	return value, ok
 }
 
 type DecisionCardDraftExpiry interface {

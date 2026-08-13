@@ -1081,6 +1081,8 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm serve", "flag:api-listen-addr"):                 true,
 	cliIdentifierRegistryKey("swarm serve", "flag:backend"):                         true,
 	cliIdentifierRegistryKey("swarm serve", "flag:mcp-listen-addr"):                 true,
+	cliIdentifierRegistryKey("swarm serve", "flag:public-webhook-base-url"):         true,
+	cliIdentifierRegistryKey("swarm serve", "flag:public-webhook-listen"):           true,
 	cliIdentifierRegistryKey("swarm serve", "flag:store"):                           true,
 	cliIdentifierRegistryKey("swarm serve", "flag:workspace-backend"):               true,
 	cliIdentifierRegistryKey("swarm workspace build", "flag:backend"):               true,

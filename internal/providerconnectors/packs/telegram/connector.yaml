@@ -164,3 +164,81 @@ tools:
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/answerCallbackQuery
       body:
         callback_query_id: "{{input.callback_query_id}}"
+  telegram.identify_bot:
+    category: provider_registration
+    description: identify the Telegram bot webhook slot
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [bot_id]
+      properties:
+        bot_id: {type: integer, minimum: 1, maximum: 4503599627370495}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      bot_id: "{{response.body.result.id}}"
+    http:
+      method: GET
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMe
+  telegram.apply_webhook:
+    category: provider_registration
+    description: register the current Swarm callback generation
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [telegram_bot_token, webhook_signing_secret]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [callback_url]
+      properties:
+        callback_url: {type: string, minLength: 1}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [applied]
+      properties:
+        applied: {type: boolean, enum: [true]}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      applied: "{{response.body.result}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/setWebhook
+      body:
+        url: "{{input.callback_url}}"
+        secret_token: "{{credentials.webhook_signing_secret}}"
+  telegram.read_webhook:
+    category: provider_registration
+    description: read the current Telegram webhook callback
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [callback_url]
+      properties:
+        callback_url: {type: string}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      callback_url: "{{response.body.result.url}}"
+    http:
+      method: GET
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getWebhookInfo

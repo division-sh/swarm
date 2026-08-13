@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -35,7 +34,7 @@ type runtimeProjectSupervisor struct {
 	platformSpecPath    string
 	cfg                 *config.Config
 	stores              storeBundle
-	ready               *atomic.Bool
+	ready               serveReadiness
 	dev                 bool
 	mountSources        cliapp.WorkspaceMountSources
 	workspaceBackend    cliapp.WorkspaceBackendSelection
@@ -45,6 +44,7 @@ type runtimeProjectSupervisor struct {
 	processWorkOwner    *worklifetime.Process
 	loadProviderCatalog func() (*providertriggers.CatalogSnapshot, error)
 	loadChannelPacks    func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
+	onRuntimePublished  func(context.Context) error
 	channelPlans        []packs.SatisfactionPlan
 	channelBindings     []packs.OutboundBindingPlan
 	startRuntime        func(context.Context, *runtime.Runtime) error
@@ -94,12 +94,30 @@ func (s *runtimeProjectSupervisor) SetChannelPackLoader(loader func(context.Cont
 	s.loadChannelPacks = loader
 }
 
+func (s *runtimeProjectSupervisor) SetRuntimePublishedHook(hook func(context.Context) error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.onRuntimePublished = hook
+	s.mu.Unlock()
+}
+
+func (s *runtimeProjectSupervisor) PublicIngressState() (*runtime.Runtime, []packs.OutboundBindingPlan, *runtime.RuntimeContextManager) {
+	if s == nil {
+		return nil, nil, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.currentRT, append([]packs.OutboundBindingPlan(nil), s.channelBindings...), s.runtimeContexts
+}
+
 func newRuntimeProjectSupervisor(
 	RepoRoot string,
 	platformSpecPath string,
 	cfg *config.Config,
 	stores storeBundle,
-	ready *atomic.Bool,
+	ready serveReadiness,
 	mountSources cliapp.WorkspaceMountSources,
 	workspaceBackend cliapp.WorkspaceBackendSelection,
 	credentials runtimecredentials.Store,
@@ -556,10 +574,15 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 		s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
 	}
 	s.pendingReplacement = nil
-	if s.ready != nil {
-		s.ready.Store(true)
-	}
+	hook := s.onRuntimePublished
 	s.mu.Unlock()
+	if hook != nil {
+		if err := hook(s.runtimeStartContext(context.Background())); err != nil {
+			s.setReady(false)
+			return fmt.Errorf("reconcile published runtime public ingress: %w", err)
+		}
+	}
+	s.setReady(true)
 	return nil
 }
 

@@ -9477,6 +9477,70 @@ tool_model:
     - mailbox-owned direct Telegram HTTP notifier and retry loop
     - provider-specific runtime channel branches
     compatibility: none; pre-1.0 selected configuration must use the canonical pack and binding owners
+  channel_callback_registration:
+    issue: '#1973'
+    declaration:
+      owner: immutable compiled ChannelManifest.registration in internal/packs
+      binding_shape: 'channels.bindings.<id>: {pack: <channel-pack-id>, destination: <provider-owned value>, credentials: {<logical-role>: <credential-store-key>}, register: ingress:<package>:<flow>:<provider>}'
+      rule: >
+        `register` is one explicit scalar target selector on the exact channel binding. It is never inferred, defaulted,
+        duplicated in a second registration section, or selected through a global default. A registration profile declares
+        one stable provider slot namespace, one read-only identify operation, one non-idempotent apply operation, one
+        read-only exact readback operation, and distinct logical provider/signing credential roles. Compilation proves
+        operation category/effect, exact credential-role coverage, bounded context/result mappings, required stable slot
+        projection, callback URL carriage, and immutable generation identity. Provider-specific registration syntax and
+        HTTP behavior remain connector-pack data; generic serve and CLI code contain no provider branch.
+    public_exposure:
+      owner: serve-scoped PublicExposureController under startup authority and process work lifetime
+      modes:
+        managed_quick_tunnel: '`swarm serve --dev --expose`; requires parseable cloudflared semver >= 2021.7.0, a Swarm-owned empty temporary config, exact `/ready` and `/quicktunnel` endpoint admission, and one `*.trycloudflare.com` hostname'
+        external_origin: '`swarm serve --dev --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>`'
+      route_scope: >
+        A dedicated loopback listener fronts only `/webhooks/*`. API, JSON-RPC, WebSocket, MCP, tools, health, and
+        readiness routes are absent. `/webhooks/_swarm_probe/*` is reserved for one unguessable reachability nonce and
+        cannot be selected by an ingress alias.
+      lifecycle: >
+        Exposure is explicit and process-local. Successful public nonce proof mints one random exposure generation.
+        Tunnel loss revokes readiness immediately, then performs at most three re-establishment attempts after 1s, 2s,
+        and 4s; each success mints a fresh generation and callback intent. Sustained failure terminates serve with cause.
+        Shutdown revokes and joins listener/tunnel work but does not unregister the provider callback. Quick-tunnel URLs
+        are development-only, ephemeral, and carry no availability guarantee.
+    registration_intent:
+      owner: process-local ProviderRegistrationController
+      slot_identity: >
+        Before any provider write, every selected pair executes its compiled read-only identify operation. Slot identity is
+        provider plus declared slot namespace plus the opaque provider-returned account/resource identifier. Credential
+        keys or values, secret metadata, plan generation, binding alias, and startup generation are not slot identity.
+        Duplicate selected slots reject the whole identified set with zero applies.
+      semantic_identity: >
+        One fresh intent binds exposure generation and public origin, exact binding and target generations, compiled plan
+        generation, callback route and random token, stable provider slot, and atomic provider/signing credential snapshot
+        identities. Snapshot identity is source plus store key plus a process-random epoch that changes whenever the value
+        or metadata changes; secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
+        and output. Startup authority fences execution and handler/readiness use but is deliberately excluded from semantic
+        request identity, so an unchanged startup handoff performs no provider apply.
+      callback: '`https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits only a selected registration pair with the exact current token under current startup authority, while unregistered and stale-generation routes return not found'
+      apply: >
+        Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
+        serve-registration authority, revalidates startup authority and all credential snapshots, commits the launched
+        marker before one HTTP dispatch, and settles from the provider response. Acknowledgment loss permits readback only:
+        exact current callback URL settles by authoritative readback; mismatch or unavailable readback settles outcome
+        uncertain and never resends. Process restart or changed semantic intent creates a new token and operation; replay
+        and recovery never redispatch the old operation.
+      observations: >
+        Slot identify, callback readback, and nonce reachability are bounded, redacted, process-local read-only
+        observations. No exposure, intent, slot, readback, reachability, or readiness table is permitted.
+    readiness:
+      owner: immutable PublicIngressReadinessSnapshot projected at read time
+      cadence: {renewal: 30s, expiry: 90s}
+      rule: >
+        Public-ingress readiness requires the current startup authority, fresh nonce proof for the current exposure,
+        successful apply or exact authoritative readback, fresh exact callback readback for the current intent and slot,
+        and current credential snapshots. Every human, JSON, health, and `/readyz` surface consumes the same Snapshot(now);
+        time expiry, replacement, credential change, failed renewal, stale authority, or callback mismatch lowers readiness
+        immediately. A configured runtime with no registering bindings may be locally ready and teaches the operator to
+        connect a channel; without exposure, declared ingress teaches `--expose` and the external-origin alternative.
+    compatibility: none; no manual URL copy owner, provider-specific generic branch, alias, fallback, migration, export, purge, or legacy registration path survives
   provider_trigger_adapters:
     description: >
       Source authority for first-class provider webhook triggers on top of the existing `inbound.webhook` gateway. The
@@ -13058,7 +13122,7 @@ platform_tables:
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             bundle_hash        TEXT NOT NULL,
-            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe')),
+            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration')),
             authority_id       TEXT NOT NULL,
             agent_id           TEXT,
             agent_name_owner   TEXT,
@@ -13080,9 +13144,9 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            CHECK (authority_kind = 'conversation_fork_chat' OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
+            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
-            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL)),
+            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL)),
             FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE (authority_kind, authority_id, operation_id),
             INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
@@ -33295,6 +33359,12 @@ managed_external_effect_authority:
     managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token and usage target; selected-contract-fork agents require the exact selected execution authority and actor usage target. Same-slug sibling identity is a mismatch. Missing or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
     startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Startup authority cannot authorize a provider turn or be reused after execution admission.
+    serve_registration: >
+      Channel-backed provider callback apply requires one closed serve-registration authority containing the current
+      startup authority identity/state version and one process-local registration intent identity. The selected-store
+      authority check fences predecessor processes and stale handlers without making startup generation part of provider
+      request identity. Read-only identify, readback, and reachability observations are operator infrastructure and never
+      create effect rows.
     gateway_reentry: Turn-context registration and gateway reconstruction preserve lifecycle token, controller, the full explicit logical identity, inbound identity, and lineage. Managed Claude CLI MCP tools/call requests MUST carry the provider-owned non-empty params._meta["claudecode/toolUseId"] call-occurrence coordinate. The gateway refines the preserved provider-turn identity with that coordinate and fails closed before executor admission when it is absent. JSON-RPC id, progressToken, method, tool name, arguments, and other request content are correlation or fingerprint evidence, never occurrence identity; identical sibling calls remain distinct while replay of one provider call remains stable across transport-correlation replacement.
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
@@ -33337,6 +33407,7 @@ managed_external_effect_authority:
       exclusion: cmd.Start success, launched/response_observed/outcome_uncertain/settled state, provider exit classification, and inferred gateway/native/customization inactivity never authorize another attempt
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
+    provider_registration: [provider_registration]
     tool: [authored_http_tool, managed_credential, native_web_search]
     mcp: [mcp_tools_call_http, mcp_tools_call_stdio]
     native: [native_bash, native_read_file, native_write_file]

@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
@@ -45,6 +44,8 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
+	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -78,6 +79,11 @@ const (
 var (
 	buildStoresForServe = buildStores
 )
+
+type serveReadiness interface {
+	Load() bool
+	Store(bool)
+}
 
 type serveStartupRecoveryContainers struct {
 	lifecycle cliapp.ServeWorkspaceLifecycle
@@ -897,6 +903,23 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(1, "serve_admission", fmt.Errorf("--no-feed requires --dev"))
 		return 2
 	}
+	publicIngressMode, publicIngressEnabled, err := resolveServePublicIngressMode(opts)
+	if err != nil {
+		presenter.fail(1, "serve_admission", err)
+		return 2
+	}
+	if publicIngressEnabled {
+		if err := runtimepublicingress.ValidateConfiguration(publicIngressMode, opts.PublicWebhookBaseURL, opts.PublicWebhookListen); err != nil {
+			presenter.fail(1, "serve_admission", err)
+			return 2
+		}
+	}
+	if publicIngressMode == runtimepublicingress.ModeManagedQuickTunnel {
+		if err := runtimepublicingress.PreflightCloudflared(ctx, ""); err != nil {
+			presenter.fail(1, "serve_admission", err)
+			return 3
+		}
+	}
 	presenter.boot(1, "process_start", "ok", "")
 	apiAuth, err := cliapp.ResolveServeAPIAuth(repo, opts)
 	if err != nil {
@@ -1254,13 +1277,19 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 
-	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Catalog, contractsRoot, bundle, source, rt, opts.Dev)
+	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Catalog, contractsRoot, bundle, source, rt, opts.Dev)
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) {
 		return providerPackLoad.Reload()
 	}
 	supervisor.SetChannelPackLoader(func(loadCtx context.Context, candidateSource semanticview.Source, candidateCatalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
-		return cliapp.LoadConfiguredChannelPacks(loadCtx, repo, cfgResult, candidateSource.PlatformSpec(), candidateCatalog, providerCredentialStore, managedCredentialStore)
+		freshConfig, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
+			RepoRoot: repo, ExplicitPath: opts.ConfigPath, BackendOverride: opts.Backend,
+		})
+		if err != nil {
+			return cliapp.ChannelPackLoad{}, err
+		}
+		return cliapp.LoadConfiguredChannelPacks(loadCtx, repo, freshConfig, candidateSource.PlatformSpec(), candidateCatalog, providerCredentialStore, managedCredentialStore)
 	})
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
@@ -1273,13 +1302,18 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 	var apiServer, mcpServer *http.Server
+	var publicExposure *runtimepublicingress.Controller
 	var storyFollower *serveAuthorActivityFollower
 	defer func() {
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
 		storyFollower.StopAndWait()
-		shutdownErr := shutdownHTTPServer(shutdownCtx, "api", apiServer)
+		var shutdownErr error
+		if publicExposure != nil {
+			shutdownErr = publicExposure.Stop(shutdownCtx)
+		}
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
 		shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
@@ -1374,7 +1408,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
-	apiServer = newAPIServer(&ready, apiV1Handler, inboundHandler, ctx)
+	apiServer = newAPIServer(ready, apiV1Handler, inboundHandler, ctx)
 	mcpServer = newMCPServer(rt.ToolGateway)
 	apiServer.Handler = processOwnedHTTPHandler(processWorkOwner, apiServer.Handler)
 	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler)
@@ -1386,6 +1420,73 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	runtimeFailure := func(subject string, err error) {
 		presenter.runtimeFailure(subject, err)
 		cancelServe()
+	}
+	var reconcilePublicIngress func(context.Context, runtimepublicingress.Generation) error
+	if publicIngressEnabled {
+		credentialOwner, snapshotErr := runtimecredentials.NewSnapshotOwner(providerCredentialStore)
+		if snapshotErr != nil {
+			presenter.fail(20, "public_ingress", snapshotErr)
+			return 1
+		}
+		registrationController, controllerErr := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
+			CredentialOwner: credentialOwner, EffectsStore: stores.EffectsStore,
+			HTTP: runtimeregistration.HTTPExecutor{}, Posture: rt.ExecutionPosture, RuntimeInstanceID: runtimeInstanceID,
+			StartupAuthority: func() (runtimestartupownership.Authority, error) {
+				current, _, _ := supervisor.PublicIngressState()
+				if current == nil {
+					return runtimestartupownership.Authority{}, fmt.Errorf("public ingress runtime owner is unavailable")
+				}
+				return current.CurrentStartupAuthority()
+			},
+			Readiness: ready,
+		})
+		if controllerErr != nil {
+			presenter.fail(20, "public_ingress", controllerErr)
+			return 1
+		}
+		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
+			_, bindings, manager := supervisor.PublicIngressState()
+			pairs, pairErr := resolveServeRegistrationPairs(bindings, manager)
+			if pairErr != nil {
+				return pairErr
+			}
+			return registrationController.Reconcile(reconcileCtx, generation, pairs)
+		}
+		publicHandler := http.NotFoundHandler()
+		if inboundHandler != nil {
+			publicHandler = registrationController.Handler(inboundHandler)
+		}
+		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
+			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
+			Handler: publicHandler, Readiness: ready,
+			StartupAuthority: func() string {
+				current, _, _ := supervisor.PublicIngressState()
+				if current == nil {
+					return ""
+				}
+				authority, authorityErr := current.CurrentStartupAuthority()
+				if authorityErr != nil {
+					return ""
+				}
+				return authority.AuthorityID
+			},
+			OnGeneration: reconcilePublicIngress,
+			OnFatal:      func(exposureErr error) { runtimeFailure("public_ingress", exposureErr) },
+		})
+		if controllerErr != nil {
+			presenter.fail(20, "public_ingress", controllerErr)
+			return 1
+		}
+		supervisor.SetRuntimePublishedHook(func(hookCtx context.Context) error {
+			generation := publicExposure.Generation()
+			if generation.ID == "" {
+				return fmt.Errorf("public exposure generation is unavailable after runtime publication")
+			}
+			if err := publicExposure.Renew(hookCtx); err != nil {
+				return err
+			}
+			return reconcilePublicIngress(hookCtx, generation)
+		})
 	}
 	apiServerLease, err := processWorkOwner.Begin(ctx)
 	if err != nil {
@@ -1415,6 +1516,26 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
+	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
+	if publicIngressEnabled {
+		_, bindings, manager := supervisor.PublicIngressState()
+		initialRegistrationPairs, err = resolveServeRegistrationPairs(bindings, manager)
+		if err != nil {
+			presenter.fail(22, "public_ingress", err)
+			return 1
+		}
+		if err := publicExposure.Start(ctx); err != nil {
+			presenter.fail(22, "public_ingress", err)
+			return 1
+		}
+		if err := startServePublicIngressRenewal(ctx, processWorkOwner, publicExposure, reconcilePublicIngress); err != nil {
+			presenter.fail(22, "public_ingress", err)
+			return 1
+		}
+		if len(initialRegistrationPairs) == 0 {
+			presenter.recordNoConnectedChannels()
+		}
+	}
 	if opts.TestRuntimeReadyHook != nil {
 		opts.TestRuntimeReadyHook(rt)
 	}
@@ -1436,6 +1557,10 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
+	if !publicIngressEnabled && len(standing) > 0 {
+		presenter.recordPublicIngressDisabledHint()
+	}
+	standing = publicIngressPresentation(standing, ready.Snapshot(time.Now().UTC()))
 	if opts.TestBeforeReadinessCommit != nil {
 		if err := opts.TestBeforeReadinessCommit(); err != nil {
 			presenter.fail(22, "ready", err)
@@ -1906,6 +2031,7 @@ func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeCont
 		}
 		facts = append(facts, serveLifecycleIngressFact{
 			Provider:      strings.TrimSpace(target.Provider),
+			Alias:         strings.TrimSpace(target.Alias),
 			URL:           fmt.Sprintf("http://%s/webhooks/%s/%s", apiAddr.String(), target.Alias, target.Provider),
 			SigningSecret: signingSecret,
 			SigningBound:  bound,
@@ -2615,11 +2741,11 @@ func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 	return lister.SystemWorkspaceContainers()
 }
 
-func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler http.Handler, baseContexts ...context.Context) *http.Server {
+func newAPIServer(ready serveReadiness, apiV1Handler http.Handler, inboundHandler http.Handler, baseContexts ...context.Context) *http.Server {
 	mux := http.NewServeMux()
 	gateReady := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ready != nil && !ready.Load() {
+			if ready != nil && !runtimeAdmissionReady(ready) {
 				http.Error(w, "booting", http.StatusServiceUnavailable)
 				return
 			}
@@ -2654,6 +2780,13 @@ func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler 
 		server.BaseContext = func(net.Listener) context.Context { return base }
 	}
 	return server
+}
+
+func runtimeAdmissionReady(ready serveReadiness) bool {
+	if runtimeReady, ok := ready.(interface{ RuntimeLoad() bool }); ok {
+		return runtimeReady.RuntimeLoad()
+	}
+	return ready.Load()
 }
 
 func newMCPServer(toolGateway *runtimemcp.Gateway) *http.Server {

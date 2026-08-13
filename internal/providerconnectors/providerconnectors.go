@@ -94,10 +94,12 @@ func ValidateSource(source semanticview.Source) []error {
 	var errs []error
 	for _, name := range names {
 		tool := tools[name]
-		if !isProviderConnector(tool) {
-			continue
+		switch {
+		case isProviderConnector(tool):
+			errs = append(errs, validateTool(name, tool)...)
+		case isProviderRegistration(tool):
+			errs = append(errs, validateRegistrationTool(name, tool)...)
 		}
-		errs = append(errs, validateTool(name, tool)...)
 	}
 	errs = append(errs, validateProviderConnectorAgentExposure(source)...)
 	return errs
@@ -144,6 +146,9 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 	}
 	if opts.IncludeInstalled {
 		for _, installed := range opts.Registry.Inventory() {
+			if !isProviderConnector(installed.Tool) {
+				continue
+			}
 			if _, exists := effective[installed.ToolID]; exists {
 				continue
 			}
@@ -159,6 +164,45 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 
 func isProviderConnector(tool runtimecontracts.ToolSchemaEntry) bool {
 	return tool.Category() == runtimecontracts.ToolCategoryProviderConnector
+}
+
+func isProviderRegistration(tool runtimecontracts.ToolSchemaEntry) bool {
+	return tool.Category() == runtimecontracts.ToolCategoryProviderRegistration
+}
+
+func validateRegistrationTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {
+	context := fmt.Sprintf("provider registration tool %q", strings.TrimSpace(toolID))
+	var errs []error
+	if _, _, ok := splitToolID(toolID); !ok {
+		errs = append(errs, fmt.Errorf("%s must use <provider>.<action> id form", context))
+	}
+	if tool.Handler() != runtimecontracts.ToolHandlerHTTP {
+		errs = append(errs, fmt.Errorf("%s handler_type %q is not supported; provider registration uses authored HTTP tools", context, tool.Handler()))
+	}
+	if _, ok := tool.HTTPExecution(); !ok {
+		errs = append(errs, fmt.Errorf("%s is missing http block", context))
+	}
+	if err := tool.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("%s: %w", context, err))
+	}
+	switch tool.Effect() {
+	case runtimecontracts.ActivityEffectClassReadOnly, runtimecontracts.ActivityEffectClassNonIdempotentWrite:
+	default:
+		errs = append(errs, fmt.Errorf("%s effect_class must be read_only or non_idempotent_write", context))
+	}
+	if len(tool.Credentials()) == 0 {
+		errs = append(errs, fmt.Errorf("%s must declare static credentials", context))
+	}
+	if _, ok := tool.ManagedCredentialExecution(); ok {
+		errs = append(errs, fmt.Errorf("%s does not support managed credentials", context))
+	}
+	if _, ok := tool.ResponseSuccessPolicy(); !ok {
+		errs = append(errs, fmt.Errorf("%s must declare exactly one response_success policy", context))
+	}
+	if tool.RatePolicy().Enabled() {
+		errs = append(errs, fmt.Errorf("%s must not declare rate_limit", context))
+	}
+	return errs
 }
 
 func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {

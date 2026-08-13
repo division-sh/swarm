@@ -39,6 +39,7 @@ const (
 	KindNativeFileWrite       Kind = "native_file_write"
 	KindToolResultRelay       Kind = "tool_result_relay"
 	KindClaudeToolResultRelay Kind = "claude_tool_result_relay"
+	KindServeRegistration     Kind = "serve_registration"
 )
 
 type LifecycleToken struct {
@@ -181,6 +182,7 @@ var registrations = []Registration{
 	registration(KindProviderTurn, EffectWriteOrUnknown, "claude_cli", "process", "internal/runtime/llm/cli_runtime_process.go", []string{"internal/runtime/llm/cli_runtime_process.go:runWithPreparedInput:process_launch:1", "internal/runtime/llm/cli_runtime_process.go:runStreamingPrepared:process_launch:1"}, "TestManagedClaudeCLIEffectOutcomes"),
 	registration(KindProviderTurn, EffectReadOnly, "mock_python", "in_process", "internal/runtime/llm/mock_runtime.go", nil, "TestMockRuntimeEndToEnd"),
 	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go", []string{"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1"}, "TestManagedToolEffectOutcomes/authored_http_tool"),
+	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes/native_web_search"),
 	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1"}, "TestManagedMCPEffectOutcomes/http"),
@@ -484,6 +486,38 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: fingerprint, CapabilitySurface: &surface, Lineage: lineage,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
+// BeginServeRegistration authorizes one provider callback-registration write.
+// It is deliberately separate from agent capability surfaces and DifferentOwner.
+func BeginServeRegistration(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
+	const adapter = "provider_registration"
+	if err := admitExecutionMode(ctx, adapter); err != nil {
+		return nil, err
+	}
+	if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_serve_registration", nil)
+	}
+	controller, ok := ControllerFromContext(ctx)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_serve_registration", nil)
+	}
+	authority, ok := AuthorityFromContext(ctx)
+	if !ok || authority.Kind != AuthorityServeRegistration {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "serve_registration_authority_missing", "external-effects", "authorize_serve_registration", nil)
+	}
+	ctx = WithLogicalOperationIdentitySegment(ctx, "serve-registration:"+authority.ServeRegistration.IntentID)
+	operationID, err := canonicalOperationID(ctx, authority, adapter, lineage)
+	if err != nil {
+		return nil, err
+	}
+	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
@@ -841,6 +875,10 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	} else if registration.Kind == KindProviderStartupProbe {
 		if req.CapabilitySurface == nil || !startupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
+	} else if registration.Kind == KindServeRegistration {
+		if authority.Kind != AuthorityServeRegistration || req.CapabilitySurface != nil {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "serve_registration_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else {
 		if req.CapabilitySurface == nil {

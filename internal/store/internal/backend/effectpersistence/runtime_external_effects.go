@@ -330,6 +330,7 @@ var externalEffectStoryDispositions = map[string]externalEffectStoryDisposition{
 	"provider_turn/claude_cli":                          {Launch: true},
 	"provider_turn/mock_python":                         {Launch: true},
 	"provider_startup_probe/claude_cli_startup_probe":   {Launch: true},
+	"serve_registration/provider_registration":          {Launch: true},
 	"http_tool_target/authored_http_tool":               {Launch: true},
 	"managed_credential_request/managed_credential":     {},
 	"native_web_search_http/native_web_search":          {Launch: true},
@@ -897,7 +898,7 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		agentIdentity[0], agentIdentity[1], agentIdentity[2], agentIdentity[3], agentIdentity[4], agentIdentity[5], agentIdentity[6],
 		authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
-		authority.StartupProbe.StartupAuthorityID, capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC()); err != nil {
+		externalEffectStartupAuthorityID(authority), capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC()); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert external effect operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -941,7 +942,7 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		agentIdentity[0], agentIdentity[1], agentIdentity[2], agentIdentity[3], agentIdentity[4], agentIdentity[5], agentIdentity[6],
 		authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
-		authority.StartupProbe.StartupAuthorityID, capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC()); err != nil {
+		externalEffectStartupAuthorityID(authority), capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC()); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -968,6 +969,13 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with forkchat source bundle")
 	}
 	return bundleHash, nil
+}
+
+func externalEffectStartupAuthorityID(authority runtimeeffects.Authority) string {
+	if authority.Kind == runtimeeffects.AuthorityServeRegistration {
+		return authority.ServeRegistration.StartupAuthorityID
+	}
+	return authority.StartupProbe.StartupAuthorityID
 }
 
 func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, attemptID string, ordinal int) runtimeeffects.Attempt {

@@ -320,6 +320,19 @@ func (rt *Runtime) WorkOccurrence() *worklifetime.RuntimeOccurrence {
 	return rt.workOccurrence
 }
 
+func (rt *Runtime) CurrentStartupAuthority() (runtimestartupownership.Authority, error) {
+	if rt == nil {
+		return runtimestartupownership.Authority{}, fmt.Errorf("runtime is required")
+	}
+	rt.lifecycleMu.Lock()
+	lease := rt.ownershipLease
+	rt.lifecycleMu.Unlock()
+	if lease == nil {
+		return runtimestartupownership.Authority{}, fmt.Errorf("runtime startup ownership is unavailable")
+	}
+	return lease.Authority()
+}
+
 // PrepareInitialStartupOwnership acquires the selected-store lease before
 // serve-level recovery and desired-state reconciliation mutate durable state.
 // Start consumes the prepared lease instead of acquiring a second owner.
@@ -623,7 +636,7 @@ func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[str
 			if err != nil {
 				return nil, fmt.Errorf("channel binding %q operation %q: %w", binding.BindingID(), operation, err)
 			}
-			target, err := runtimepipeline.NewChannelActivityTarget(tool, identity.Generation())
+			target, err := runtimepipeline.NewChannelActivityTargetWithCredentials(tool, identity.Generation(), identity.CredentialStoreKeys())
 			if err != nil {
 				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), operation, err)
 			}

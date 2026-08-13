@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -79,42 +80,46 @@ func (s *OverlayStore) Delete(ctx context.Context, key string) error {
 }
 
 func (s *OverlayStore) Inspect(ctx context.Context, key string) (Metadata, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return Metadata{}, nil
-	}
-	var writableMeta Metadata
-	var writableInspected bool
-	if inspector, ok := s.writable.(Inspector); ok && inspector != nil {
-		meta, err := inspector.Inspect(ctx, key)
-		if err != nil {
-			return Metadata{}, err
-		}
-		meta.Writable = true
-		writableMeta = meta
-		writableInspected = true
-	}
-	if inspector, ok := s.primary.(Inspector); ok && inspector != nil {
-		meta, err := inspector.Inspect(ctx, key)
-		if err != nil {
-			return Metadata{}, err
-		}
-		if meta.Present {
-			meta.Writable = false
-			meta.Shadowed = writableInspected && writableMeta.Present
-			return meta, nil
-		}
-	}
-	if writableInspected {
-		return writableMeta, nil
-	}
-	_, present, err := s.Get(ctx, key)
+	snapshot, err := s.Snapshot(ctx, key)
 	if err != nil {
 		return Metadata{}, err
 	}
-	return Metadata{
-		Key:      key,
-		Present:  present,
-		Writable: s.writable != nil,
-	}, nil
+	return snapshot.Metadata(), nil
+}
+
+func (s *OverlayStore) Snapshot(ctx context.Context, key string) (AtomicSnapshot, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return AtomicSnapshot{}, nil
+	}
+	var writableSnapshot AtomicSnapshot
+	var writableInspected bool
+	if snapshotter, ok := s.writable.(Snapshotter); ok && snapshotter != nil {
+		snapshot, err := snapshotter.Snapshot(ctx, key)
+		if err != nil {
+			return AtomicSnapshot{}, err
+		}
+		snapshot.Writable = true
+		writableSnapshot = snapshot
+		writableInspected = true
+	} else if s.writable != nil {
+		return AtomicSnapshot{}, fmt.Errorf("writable credential store does not provide atomic snapshots")
+	}
+	if snapshotter, ok := s.primary.(Snapshotter); ok && snapshotter != nil {
+		snapshot, err := snapshotter.Snapshot(ctx, key)
+		if err != nil {
+			return AtomicSnapshot{}, err
+		}
+		if snapshot.Present {
+			snapshot.Writable = false
+			snapshot.Shadowed = writableInspected && writableSnapshot.Present
+			return snapshot, nil
+		}
+	} else if s.primary != nil {
+		return AtomicSnapshot{}, fmt.Errorf("primary credential store does not provide atomic snapshots")
+	}
+	if writableInspected {
+		return writableSnapshot, nil
+	}
+	return AtomicSnapshot{Key: key, Writable: s.writable != nil}, nil
 }

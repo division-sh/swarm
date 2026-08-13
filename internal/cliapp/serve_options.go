@@ -32,6 +32,9 @@ type ServeOptions struct {
 	APITokenFileFlagSet              bool
 	APIListenAddr                    string
 	MCPListenAddr                    string
+	Expose                           bool
+	PublicWebhookBaseURL             string
+	PublicWebhookListen              string
 	ShutdownGrace                    time.Duration
 	Dev                              bool
 	SelfCheck                        bool

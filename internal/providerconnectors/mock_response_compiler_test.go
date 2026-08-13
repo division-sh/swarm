@@ -14,6 +14,9 @@ import (
 func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministically(t *testing.T) {
 	tools := map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, installed := range DefaultPackRegistry().Inventory() {
+		if installed.Tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
+			continue
+		}
 		tools[installed.ToolID] = installed.Tool
 	}
 	if got := len(tools); got != 10 {

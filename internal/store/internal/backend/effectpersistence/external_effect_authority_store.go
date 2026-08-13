@@ -62,6 +62,8 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		return forkChatAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityStartupProbe:
 		return startupProbeAuthorityCurrentPostgres(ctx, q, authority)
+	case runtimeeffects.AuthorityServeRegistration:
+		return serveRegistrationAuthorityCurrentPostgres(ctx, q, authority)
 	default:
 		return false, nil
 	}
@@ -122,6 +124,8 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 		return forkChatAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityStartupProbe:
 		return startupProbeAuthorityCurrentSQLite(ctx, q, authority)
+	case runtimeeffects.AuthorityServeRegistration:
+		return serveRegistrationAuthorityCurrentSQLite(ctx, q, authority)
 	default:
 		return false, nil
 	}
@@ -169,7 +173,7 @@ func (s *EffectSQLiteOwner) RequireExternalEffectAuthorityTx(ctx context.Context
 }
 
 func externalEffectRunID(ctx context.Context, authority runtimeeffects.Authority) (string, bool, error) {
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration {
 		return "", false, nil
 	}
 	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
@@ -288,6 +292,17 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
 			  )
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
+	case runtimeeffects.AuthorityServeRegistration:
+		startup := authority.ServeRegistration
+		res, err = tx.ExecContext(ctx, `
+			UPDATE runtime_startup_authority_facts SET created_at=created_at
+			WHERE authority_id=$1::uuid AND state_version=$2 AND state IN ('active','prepared','probe_settled','admitted','committed','finalized')
+			  AND owner_id=$3 AND generation=$4 AND NOT EXISTS (
+			    SELECT 1 FROM runtime_startup_authority_facts newer
+			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
+			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			  )
+		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -344,6 +359,17 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 		res, err = tx.ExecContext(ctx, `
 			UPDATE runtime_startup_authority_facts SET created_at=created_at
 			WHERE authority_id=? AND state_version=? AND state IN ('active','prepared')
+			  AND owner_id=? AND generation=? AND NOT EXISTS (
+			    SELECT 1 FROM runtime_startup_authority_facts newer
+			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
+			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			  )
+		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
+	case runtimeeffects.AuthorityServeRegistration:
+		startup := authority.ServeRegistration
+		res, err = tx.ExecContext(ctx, `
+			UPDATE runtime_startup_authority_facts SET created_at=created_at
+			WHERE authority_id=? AND state_version=? AND state IN ('active','prepared','probe_settled','admitted','committed','finalized')
 			  AND owner_id=? AND generation=? AND NOT EXISTS (
 			    SELECT 1 FROM runtime_startup_authority_facts newer
 			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
@@ -428,6 +454,8 @@ func externalEffectAttemptLeasePostgres(ctx context.Context, q schemaQueryer, au
 		return lease.UTC(), nil
 	case runtimeeffects.AuthorityStartupProbe:
 		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityServeRegistration:
+		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease time.Time
 		err := q.QueryRowContext(ctx, `
@@ -460,6 +488,8 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 		}
 		return lease.Time.UTC(), nil
 	case runtimeeffects.AuthorityStartupProbe:
+		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityServeRegistration:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease conversationForkTimeValue
@@ -494,6 +524,32 @@ func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, au
 	err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM runtime_startup_authority_facts f
 		WHERE f.authority_id=? AND f.state_version=? AND f.state IN ('active','prepared') AND f.owner_id=? AND f.generation=?
+		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
+	return count == 1, err
+}
+
+func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	startup := authority.ServeRegistration
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM runtime_startup_authority_facts f
+		WHERE f.authority_id=$1::uuid AND f.state_version=$2
+		  AND f.state IN ('active','prepared','probe_settled','admitted','committed','finalized')
+		  AND f.owner_id=$3 AND f.generation=$4
+		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
+	return count == 1, err
+}
+
+func serveRegistrationAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	startup := authority.ServeRegistration
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM runtime_startup_authority_facts f
+		WHERE f.authority_id=? AND f.state_version=?
+		  AND f.state IN ('active','prepared','probe_settled','admitted','committed','finalized')
+		  AND f.owner_id=? AND f.generation=?
 		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
 	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
 	return count == 1, err

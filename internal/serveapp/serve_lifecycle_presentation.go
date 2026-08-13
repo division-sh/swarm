@@ -25,6 +25,7 @@ type serveLifecycleWorkspaceFact struct {
 
 type serveLifecycleIngressFact struct {
 	Provider      string
+	Alias         string
 	URL           string
 	SigningSecret string
 	SigningBound  bool
@@ -247,6 +248,24 @@ func (p *serveLifecyclePresenter) recordDefaultAPITokenWarning() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.operatorWarnings = append(p.operatorWarnings, "using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener")
+}
+
+func (p *serveLifecyclePresenter) recordPublicIngressDisabledHint() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.operatorWarnings = append(p.operatorWarnings, "declared ingress is local only; use --dev --expose or --dev --public-webhook-base-url <https-origin> --public-webhook-listen <loopback:port>")
+	p.mu.Unlock()
+}
+
+func (p *serveLifecyclePresenter) recordNoConnectedChannels() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.operatorWarnings = append(p.operatorWarnings, "No channels connected yet. Run: swarm channel connect telegram")
+	p.mu.Unlock()
 }
 
 func (p *serveLifecyclePresenter) recordBundleMatchDisabledWarning() {

@@ -1,20 +1,37 @@
 package packs_test
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
+	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/yamlsource"
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -390,6 +407,263 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	if _, hasDestination := prepared["destination"]; hasDestination {
 		t.Fatalf("acknowledgment gained ambient destination context: %#v", prepared)
 	}
+}
+
+func TestChannelRegistrationCompilerIsProviderNeutralAcrossTelegramAndDifferentialMock(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	channel, trigger, connector := mockChannelSatisfier()
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatalf("CompileChannel(mock registration): %v", err)
+	}
+	registration, ok := plan.Registration()
+	if !ok {
+		t.Fatal("mock registration plan is missing")
+	}
+	if registration.Provider() != "mock" || registration.SlotNamespace() != "workspace_webhook" || registration.SigningCredential() != "mock_callback_key" {
+		t.Fatalf("mock registration identity = provider=%q namespace=%q signing=%q", registration.Provider(), registration.SlotNamespace(), registration.SigningCredential())
+	}
+	identify, err := registration.Operation(packs.RegistrationOperationIdentify)
+	if err != nil {
+		t.Fatalf("identify operation: %v", err)
+	}
+	identified, err := identify.Project(map[string]any{"workspace": map[string]any{"key": "mock-workspace:alpha"}})
+	if err != nil || identified["resource_id"] != "mock-workspace:alpha" {
+		t.Fatalf("identify projection = %#v, %v", identified, err)
+	}
+	apply, err := registration.Operation(packs.RegistrationOperationApply)
+	if err != nil {
+		t.Fatalf("apply operation: %v", err)
+	}
+	input, err := apply.Prepare(map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/mock?swarm_callback_generation=opaque"})
+	if err != nil {
+		t.Fatalf("apply projection: %v", err)
+	}
+	endpoint, ok := input["endpoint"].(map[string]any)
+	if !ok || endpoint["callback"] == "" {
+		t.Fatalf("apply input = %#v, want nested endpoint.callback", input)
+	}
+	readback, err := registration.Operation(packs.RegistrationOperationReadback)
+	if err != nil {
+		t.Fatalf("readback operation: %v", err)
+	}
+	projected, err := readback.Project(map[string]any{"registration": map[string]any{"callback": endpoint["callback"]}})
+	if err != nil || projected["callback_url"] != endpoint["callback"] {
+		t.Fatalf("readback projection = %#v, %v", projected, err)
+	}
+}
+
+type mockRegistrationEffectStore struct{ *effecttest.Harness }
+
+func (s mockRegistrationEffectStore) IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error) {
+	return true, nil
+}
+
+type mockRegistrationTransport struct {
+	mu            sync.Mutex
+	identifyCount int
+	applyCount    int
+	currentURL    string
+	readbackURL   string
+	loseAck       bool
+}
+
+func (t *mockRegistrationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch {
+	case request.Method == http.MethodGet && request.URL.Path == "/v2/workspace":
+		t.identifyCount++
+		return mockRegistrationResponse(http.StatusOK, `{"data":{"workspace":{"key":"mock-workspace:alpha"}}}`), nil
+	case request.Method == http.MethodPut && request.URL.Path == "/v2/callback":
+		var payload struct {
+			Subscription struct {
+				Endpoint string `json:"endpoint"`
+				Proof    string `json:"proof"`
+			} `json:"subscription"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			return nil, err
+		}
+		if payload.Subscription.Endpoint == "" || payload.Subscription.Proof == "" || request.Header.Get("X-Mock-Key") == "" {
+			return nil, errors.New("mock registration request omitted admitted credentials or endpoint")
+		}
+		t.currentURL = payload.Subscription.Endpoint
+		t.applyCount++
+		if t.loseAck {
+			return nil, fmt.Errorf("injected acknowledgment loss for %s %s", request.Header.Get("X-Mock-Key"), payload.Subscription.Proof)
+		}
+		return mockRegistrationResponse(http.StatusOK, `{"result":{"accepted":true}}`), nil
+	case request.Method == http.MethodGet && request.URL.Path == "/v2/callback":
+		callback := t.currentURL
+		if t.readbackURL != "" {
+			callback = t.readbackURL
+		}
+		body, err := json.Marshal(map[string]any{"data": map[string]any{"subscription": map[string]any{"endpoint": callback}}})
+		if err != nil {
+			return nil, err
+		}
+		return mockRegistrationResponse(http.StatusOK, string(body)), nil
+	default:
+		return nil, fmt.Errorf("unexpected mock registration request %s %s", request.Method, request.URL)
+	}
+}
+
+func (t *mockRegistrationTransport) counts() (int, int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.identifyCount, t.applyCount
+}
+
+func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	channel, trigger, connector := mockChannelSatisfier()
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatalf("CompileChannel: %v", err)
+	}
+	registration, ok := plan.Registration()
+	if !ok {
+		t.Fatal("compiled mock registration is missing")
+	}
+	planGeneration, err := plan.Generation()
+	if err != nil {
+		t.Fatalf("plan generation: %v", err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for key, value := range map[string]string{"api": "mock-api-v1", "signing": "mock-proof-v1"} {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+	}
+	snapshots, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatalf("NewSnapshotOwner: %v", err)
+	}
+	startup, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
+		OwnerID: "mock-serve", BootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64),
+	}, "test")
+	if err != nil {
+		t.Fatalf("NewColdAuthority: %v", err)
+	}
+	transport := &mockRegistrationTransport{}
+	readiness := runtimepublicingress.NewReadinessOwner(true)
+	controller, err := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
+		CredentialOwner:   snapshots,
+		EffectsStore:      mockRegistrationEffectStore{Harness: effecttest.New()},
+		HTTP:              runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+		Posture:           executionposture.Live,
+		RuntimeInstanceID: uuid.NewString(),
+		StartupAuthority:  func() (startupownership.Authority, error) { return startup, nil },
+		Readiness:         readiness,
+	})
+	if err != nil {
+		t.Fatalf("NewProviderRegistrationController: %v", err)
+	}
+	exposure := runtimepublicingress.Generation{ID: uuid.NewString(), Mode: runtimepublicingress.ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
+	pair := runtimepublicingress.RegistrationPair{
+		BindingID: "mock-hitl", PlanGeneration: planGeneration, Registration: registration,
+		CredentialKeys: map[string]string{"mock_api_key": "api"},
+		Target: runtimepublicingress.RegistrationTarget{
+			Selector: "ingress:support:mock:mock", BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64),
+			ServiceID: uuid.NewString(), PackageKey: "support", FlowID: "mock", Alias: "support", Provider: "mock",
+			Generation: 1, PublicationSequence: 1, AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("mock-admission")),
+			SigningCredentialKey: "signing",
+		},
+	}
+	other := pair
+	other.BindingID = "mock-alerts"
+	other.Target.Selector = "ingress:alerts:mock:mock"
+	other.Target.PackageKey = "alerts"
+	other.Target.Alias = "alerts"
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair, other}); err == nil || !strings.Contains(err.Error(), "selected by both") {
+		t.Fatalf("slot collision error = %v", err)
+	}
+	if identified, applied := transport.counts(); identified != 2 || applied != 0 {
+		t.Fatalf("collision identify/apply counts = %d/%d, want 2/0", identified, applied)
+	}
+
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+		t.Fatalf("known-success reconcile: %v", err)
+	}
+	first := readiness.Snapshot(time.Now().UTC())
+	if len(first.Registrations) != 1 || !first.Registrations[0].Applied || !first.Registrations[0].CallbackMatched {
+		t.Fatalf("known-success readiness = %#v", first)
+	}
+	firstCallback := first.Registrations[0].CallbackURL
+	if _, applied := transport.counts(); applied != 1 {
+		t.Fatalf("known-success apply count = %d, want 1", applied)
+	}
+
+	startup, err = startupownership.NewColdAuthority(startupownership.AcquireRequest{
+		OwnerID: "mock-serve-successor", BootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64),
+	}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+		t.Fatalf("unchanged handoff reconcile: %v", err)
+	}
+	if _, applied := transport.counts(); applied != 1 {
+		t.Fatalf("startup handoff performed another apply: %d", applied)
+	}
+
+	if err := credentialStore.Set(context.Background(), "signing", "mock-proof-v2"); err != nil {
+		t.Fatalf("rotate signing credential: %v", err)
+	}
+	transport.mu.Lock()
+	transport.loseAck = true
+	transport.readbackURL = "https://hooks.example.test/stale"
+	transport.mu.Unlock()
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil || strings.Contains(err.Error(), "mock-proof-v2") {
+		t.Fatalf("ack-loss mismatch error = %v", err)
+	}
+	if _, applied := transport.counts(); applied != 2 {
+		t.Fatalf("rotated acknowledgment-loss apply count = %d, want 2", applied)
+	}
+	transport.mu.Lock()
+	transport.loseAck = false
+	transport.readbackURL = ""
+	transport.mu.Unlock()
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+		t.Fatalf("authoritative readback reconcile: %v", err)
+	}
+	if _, applied := transport.counts(); applied != 2 {
+		t.Fatalf("ack-loss recovery resent apply: %d", applied)
+	}
+	rotated := readiness.Snapshot(time.Now().UTC())
+	if len(rotated.Registrations) != 1 || rotated.Registrations[0].CallbackURL == firstCallback || !rotated.Registrations[0].CallbackMatched {
+		t.Fatalf("rotated readiness = %#v", rotated)
+	}
+
+	var admitted int
+	handler := controller.Handler(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		admitted++
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	staleRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(staleRecorder, httptest.NewRequest(http.MethodPost, firstCallback, nil))
+	currentRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(currentRecorder, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, nil))
+	if staleRecorder.Code != http.StatusNotFound || currentRecorder.Code != http.StatusNoContent || admitted != 1 {
+		t.Fatalf("callback fencing stale/current/admitted = %d/%d/%d", staleRecorder.Code, currentRecorder.Code, admitted)
+	}
+
+	readiness.SetRuntimeReady(true)
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
+		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
+		StartupAuthorityID: startup.AuthorityID, ObservedAt: time.Now().UTC(), ExpiresAt: rotated.Registrations[0].ExpiresAt.Add(time.Minute),
+	})
+	if snapshot := readiness.Snapshot(rotated.Registrations[0].ExpiresAt); snapshot.Ready || snapshot.PublicIngressReady {
+		t.Fatalf("expired registration remained ready: %#v", snapshot)
+	}
+}
+
+func mockRegistrationResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
 }
 
 func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) {
@@ -991,9 +1265,54 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		"mock.ack": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"cursor": mockStringSchema(1, 16, ""),
 		}, "cursor"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
+		"mock.identify_workspace": mockRegistrationTool(
+			runtimecontracts.ActivityEffectClassReadOnly,
+			[]string{"mock_api_key"},
+			mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
+			mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+				"workspace": mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"key": mockStringSchema(1, 64, `^mock-workspace:[a-z]+$`)}, "key"),
+			}, "workspace"),
+			runtimecontracts.HTTPToolSpec{Method: http.MethodGet, URL: "https://mock.example.test/v2/workspace", Headers: map[string]string{"X-Mock-Key": "{{credentials.mock_api_key}}"}},
+			map[string]any{"workspace": map[string]any{"key": "{{response.body.data.workspace.key}}"}},
+		),
+		"mock.apply_callback": mockRegistrationTool(
+			runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+			[]string{"mock_api_key", "mock_callback_key"},
+			mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+				"endpoint": mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"callback": mockStringSchema(1, 512, "")}, "callback"),
+			}, "endpoint"),
+			mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"accepted": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean)}, "accepted"),
+			runtimecontracts.HTTPToolSpec{Method: http.MethodPut, URL: "https://mock.example.test/v2/callback", Headers: map[string]string{"X-Mock-Key": "{{credentials.mock_api_key}}"}, Body: map[string]any{"subscription": map[string]any{"endpoint": "{{input.endpoint.callback}}", "proof": "{{credentials.mock_callback_key}}"}}},
+			map[string]any{"accepted": "{{response.body.result.accepted}}"},
+		),
+		"mock.read_callback": mockRegistrationTool(
+			runtimecontracts.ActivityEffectClassReadOnly,
+			[]string{"mock_api_key"},
+			mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
+			mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+				"registration": mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"callback": mockStringSchema(0, 512, "")}, "callback"),
+			}, "registration"),
+			runtimecontracts.HTTPToolSpec{Method: http.MethodGet, URL: "https://mock.example.test/v2/callback", Headers: map[string]string{"X-Mock-Key": "{{credentials.mock_api_key}}"}},
+			map[string]any{"registration": map[string]any{"callback": "{{response.body.data.subscription.endpoint}}"}},
+		),
 	}
 	manifest := packs.ChannelManifest{
 		Provider: "mock",
+		Registration: &packs.ChannelRegistrationProfile{
+			Slot: packs.ChannelRegistrationSlot{
+				Namespace: "workspace_webhook",
+				Identify: packs.ChannelRegistrationOperation{
+					Tool: "mock.identify_workspace", Output: map[string]packs.ChannelMapping{"resource_id": {From: "result.workspace.key"}},
+				},
+			},
+			Credentials: packs.ChannelRegistrationCredentials{Provider: []string{"mock_api_key"}, Signing: "mock_callback_key"},
+			Apply: packs.ChannelRegistrationOperation{
+				Tool: "mock.apply_callback", Input: map[string]packs.ChannelMapping{"endpoint.callback": {From: "context.callback_url"}},
+			},
+			Readback: packs.ChannelRegistrationOperation{
+				Tool: "mock.read_callback", Output: map[string]packs.ChannelMapping{"callback_url": {From: "result.registration.callback"}},
+			},
+		},
 		OpaqueTypes: map[string]runtimecontracts.ToolInputSchema{
 			"destination": destination, "delivery_reference": deliveryReference, "delivery_receipt": deliveryReceipt,
 			"interaction_reference": interaction, "external_account_reference": externalAccount, "conversation_reference": conversation,
@@ -1074,6 +1393,20 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 
 func mockConnectorTool(input, output runtimecontracts.ToolInputSchema) runtimecontracts.ToolSchemaEntry {
 	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(input, output))
+}
+
+func mockRegistrationTool(effect runtimecontracts.ActivityEffectClass, credentials []string, input, output runtimecontracts.ToolInputSchema, httpSpec runtimecontracts.HTTPToolSpec, responseMapping map[string]any) runtimecontracts.ToolSchemaEntry {
+	return runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory(runtimecontracts.ToolCategoryProviderRegistration.String()),
+		runtimecontracts.WithToolDescription("mock provider registration operation"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(effect),
+		runtimecontracts.WithToolSchemas(input, output),
+		runtimecontracts.WithToolHTTP(httpSpec),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),
+		runtimecontracts.WithToolResponseMapping(responseMapping),
+		runtimecontracts.WithToolCredentials(credentials...),
+	)
 }
 
 func mockStringSchema(min, max int, pattern string) runtimecontracts.ToolInputSchema {
