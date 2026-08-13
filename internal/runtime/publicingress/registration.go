@@ -210,15 +210,24 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	return nil
 }
 
-// PrepareStartupHandoff settles every predecessor-owned live registration
-// attempt before startup authority can move to a replacement runtime.
-func (c *ProviderRegistrationController) PrepareStartupHandoff(ctx context.Context) error {
+// PrepareStartupHandoff settles predecessor-owned registration attempts and
+// prevents renewal from opening another attempt until the caller releases it.
+func (c *ProviderRegistrationController) PrepareStartupHandoff(ctx context.Context) (func(), error) {
 	if c == nil {
-		return fmt.Errorf("provider registration controller is required")
+		return nil, fmt.Errorf("provider registration controller is required")
 	}
 	c.reconcileMu.Lock()
-	defer c.reconcileMu.Unlock()
+	if err := c.prepareStartupHandoffLocked(ctx); err != nil {
+		c.reconcileMu.Unlock()
+		return nil, err
+	}
+	var once sync.Once
+	return func() {
+		once.Do(c.reconcileMu.Unlock)
+	}, nil
+}
 
+func (c *ProviderRegistrationController) prepareStartupHandoffLocked(ctx context.Context) error {
 	snapshot := c.snapshot.capture()
 	keys := make([]string, 0, len(snapshot.registrations))
 	for key := range snapshot.registrations {

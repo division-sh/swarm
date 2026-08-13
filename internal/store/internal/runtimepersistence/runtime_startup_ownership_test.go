@@ -259,6 +259,44 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 				})
 			}
 
+			t.Run("provider registration retry requires exact launch rejection proof", func(t *testing.T) {
+				operationID := uuid.NewString()
+				request := runtimeeffects.AuthorizeRequest{
+					OperationID: operationID, AttemptID: uuid.NewString(), Kind: registration.Kind, Class: registration.Class,
+					Adapter: registration.Adapter, Transport: registration.Transport,
+					RequestFingerprint: runtimeeffects.Fingerprint([]byte("provider-registration-unproven-prelaunch")),
+					Lineage:            map[string]string{"binding_id": "hitl", "intent_id": authority.ID}, Now: time.Now().UTC(),
+				}
+				first, err := store.AuthorizeExternalAttempt(ctx, authority, request)
+				if err != nil {
+					t.Fatalf("authorize unproven prelaunch attempt: %v", err)
+				}
+				failureErr := runtimefailures.New(
+					runtimefailures.ClassDependencyUnavailable,
+					"provider_registration_prelaunch_unproven",
+					"provider_registration",
+					"dispatch",
+					nil,
+				)
+				failure, ok := runtimefailures.EnvelopeFromError(failureErr)
+				if !ok || !failure.Retryable {
+					t.Fatalf("unproven failure envelope = %#v, want retryable", failure)
+				}
+				if err := store.SettleExternalAttempt(ctx, runtimeeffects.Settlement{
+					OperationID: first.OperationID, AttemptID: first.AttemptID, Authority: authority,
+					State: runtimeeffects.StateTerminalFailure, Failure: &failure, Now: time.Now().UTC(),
+				}); err != nil {
+					t.Fatalf("terminalize unproven prelaunch attempt: %v", err)
+				}
+				request.AttemptID = uuid.NewString()
+				if _, err := store.AuthorizeExternalAttempt(ctx, authority, request); err == nil {
+					t.Fatal("provider registration admitted retry without launch_rejected=true")
+				}
+				if got := selectedStoreExternalEffectCount(t, ctx, db, "runtime_external_effect_attempts", "operation_id", operationID); got != 1 {
+					t.Fatalf("unproven prelaunch attempt rows=%d, want 1", got)
+				}
+			})
+
 			t.Run("provider registration authorization acknowledgment loss resumes same prelaunch attempt", func(t *testing.T) {
 				operationID := uuid.NewString()
 				request := runtimeeffects.AuthorizeRequest{
@@ -468,7 +506,7 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 			}
 
 			faulting.failNextSettlement()
-			if err := controller.PrepareStartupHandoff(ctx); err == nil {
+			if _, err := controller.PrepareStartupHandoff(ctx); err == nil {
 				t.Fatal("handoff barrier accepted an uncommitted settlement")
 			}
 			predecessorAuthority := testServeRegistrationAuthorityFromIdentity(startup, pending.Registrations[0].IntentID)
@@ -479,9 +517,11 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 				t.Fatalf("failed barrier state/apply=%q/%d", got, transport.applies())
 			}
 
-			if err := controller.PrepareStartupHandoff(ctx); err != nil {
+			releaseHandoff, err := controller.PrepareStartupHandoff(ctx)
+			if err != nil {
 				t.Fatalf("PrepareStartupHandoff exact settlement: %v", err)
 			}
+			defer releaseHandoff()
 			if got := selectedStoreAttemptState(t, ctx, db, attemptID); got != string(runtimeeffects.StateSettled) {
 				t.Fatalf("pre-handoff durable state=%q, want settled", got)
 			}
@@ -509,6 +549,7 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 				t.Fatalf("successor registration authority current=%v err=%v", current, err)
 			}
 			setSelectedStoreExposure(readiness, exposure, startup, now)
+			releaseHandoff()
 			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
 				t.Fatalf("successor verified rebind: %v", err)
 			}

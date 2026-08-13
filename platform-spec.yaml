@@ -9546,8 +9546,12 @@ tool_model:
         selection, route selection, replacement, and removal publish as one atomic selected set; exposure mutation and
         revocation use the same snapshot owner.
       startup_handoff: >
-        Before startup ownership commit, one registration-controller barrier serializes with renewal while the predecessor
-        remains current. Verified evidence carries without apply and is rebound/revalidated after successor publication;
+        Before runtime-context withdrawal or predecessor quiescence, one registration-controller barrier settles live
+        attempts and retains exclusive renewal admission until startup ownership and runtime-context publication select the
+        successor or a fully restored predecessor. A rejected barrier performs no runtime-context or runtime-lifecycle
+        mutation, so the predecessor remains running and current. A retained finalization retry or post-quiescence rollback
+        retains the same barrier; release occurs only after the selected runtime is published and immediately before its
+        registration reconciliation. Verified evidence carries without apply and is rebound/revalidated after successor publication;
         outcome_uncertain carries terminal local evidence only and remains unready; no_attempt carries no effect and may
         perform its first apply after successor activation. Pending settlement must settle exact or terminalize mismatch or
         unavailability under the predecessor. If that durable settlement cannot complete, handoff aborts and the predecessor

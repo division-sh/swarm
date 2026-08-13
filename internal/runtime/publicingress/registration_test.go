@@ -743,9 +743,23 @@ func TestProviderRegistrationStartupHandoffPhaseBarrier(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			f := tc.prepare(t)
-			err := f.controller.PrepareStartupHandoff(context.Background())
+			release, err := f.controller.PrepareStartupHandoff(context.Background())
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("PrepareStartupHandoff error = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if err == nil {
+				if f.controller.reconcileMu.TryLock() {
+					f.controller.reconcileMu.Unlock()
+					t.Fatal("registration renewal lock was not retained through startup handoff")
+				}
+				release()
+				release()
+				if !f.controller.reconcileMu.TryLock() {
+					t.Fatal("registration renewal lock was not released after startup handoff")
+				}
+				f.controller.reconcileMu.Unlock()
+			} else if release != nil {
+				t.Fatal("failed startup handoff retained the registration renewal lock")
 			}
 			state, ok := f.controller.snapshot.state(pairKey(f.pair))
 			if !ok && tc.wantPhase == registrationPhaseNoAttempt {

@@ -83,7 +83,7 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read startup handoff owner: %v", err)
 	}
-	if !strings.Contains(string(supervisorSource), "beforeStartupHandoff(ctx)") {
+	if !strings.Contains(string(supervisorSource), "release, err := beforeStartupHandoff(ctx)") {
 		t.Fatal("runtime replacement can commit startup ownership without the registration barrier")
 	}
 	spec, err := os.ReadFile(filepath.Join(repo, "platform-spec.yaml"))
