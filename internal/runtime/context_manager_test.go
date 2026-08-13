@@ -110,6 +110,47 @@ func TestRuntimeContextManagerReplacementTransactionWithdrawsAndPublishesAuthori
 	}
 }
 
+func TestRuntimeContextManagerPublishedReplacementCanBeWithdrawn(t *testing.T) {
+	for _, candidateHash := range []string{runtimeContextTestHashA, runtimeContextTestHashB} {
+		candidateHash := candidateHash
+		t.Run(candidateHash, func(t *testing.T) {
+			predecessor := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+			candidate := testBundleContext(t, candidateHash, "alpha.requested")
+			manager, err := newTestRuntimeContextManager(t, nil, predecessor)
+			if err != nil {
+				t.Fatalf("NewRuntimeContextManager: %v", err)
+			}
+			if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
+				t.Fatalf("BeginBundleHashReplacement: %v", err)
+			}
+			publication, err := manager.PrepareBundleHashReplacementPublication(runtimeContextTestHashA, candidate)
+			if err != nil {
+				t.Fatalf("PrepareBundleHashReplacementPublication: %v", err)
+			}
+			if err := publication.Publish(); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if err := publication.Withdraw(context.Background()); err != nil {
+				t.Fatalf("Withdraw: %v", err)
+			}
+
+			lookup := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+			if lookup.Loaded() || lookup.State != RuntimeContextStateUnloaded || lookup.Cause != RuntimeContextCauseReplacing {
+				t.Fatalf("restored predecessor lookup = %#v, want unavailable replacing state", lookup)
+			}
+			if candidateHash != runtimeContextTestHashA {
+				candidateLookup := manager.LookupBundleHashStatus(candidateHash)
+				if candidateLookup.Found || candidateLookup.Cause != RuntimeContextCauseNotLoaded {
+					t.Fatalf("withdrawn candidate lookup = %#v, want absent", candidateLookup)
+				}
+			}
+			if err := publication.Withdraw(context.Background()); err != nil {
+				t.Fatalf("duplicate Withdraw: %v", err)
+			}
+		})
+	}
+}
+
 func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
 	_, err := newTestRuntimeContextManager(t, nil,
 		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),

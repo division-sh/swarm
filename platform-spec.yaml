@@ -10795,7 +10795,9 @@ flow_model:
         supervisor-local readiness or runtime pointers are not alternate visibility owners. A quiesce timeout or failed
         candidate activation remains a mutating failure: recovery finishes quiescing, fully stops the failed candidate, restores
         both the predecessor source-set head and every survivor grant/admission, and publishes a freshly restored predecessor
-        before readiness returns. If bounded recovery cannot safely restore, the context remains unavailable and the process
+        before readiness returns. Failure after candidate context publication first withdraws and drains that exact candidate
+        through RuntimeContextManager; only then may recovery restore the predecessor source-set head, survivor generations,
+        and a fresh predecessor runtime. If bounded recovery cannot safely restore, the context remains unavailable and the process
         capability remains retained. Manager-backed deactivation propagates the caller's
         configured shutdown grace rather than substituting runtime defaults.
       fail_closed:
