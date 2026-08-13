@@ -215,27 +215,39 @@ func executeOperatorEventPublication(
 				return apiidempotency.Completion{}, err
 			}
 			params.EventName = resolvedEventName
-			if params.NewRunCreated {
-				resolution := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
-				switch resolution.Kind {
-				case eventPublicationEndpointOrdinary:
-					if resolution.FlowID != "" {
-						endpoint, err := runtimebus.NewOrdinaryFlowAPIEventPublicationEndpoint(selectedOpts.Source, resolution.FlowID, resolvedEventName)
+			resolution := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
+			switch resolution.Kind {
+			case eventPublicationEndpointOrdinary:
+				if resolution.FlowID == "" {
+					if selectedOpts.Source != nil && selectedOpts.Source.FlowHasInputEvent("", resolvedEventName) {
+						endpoint, err := runtimebus.NewRootInputAPIEventPublicationEndpoint(selectedOpts.Source, resolvedEventName)
 						if err != nil {
 							return apiidempotency.Completion{}, err
 						}
 						params.APIEventEndpoint = &endpoint
 					}
-				case eventPublicationEndpointTemplate:
+				} else {
+					endpoint, err := runtimebus.NewOrdinaryFlowAPIEventPublicationEndpoint(selectedOpts.Source, resolution.FlowID, resolvedEventName)
+					if err != nil {
+						return apiidempotency.Completion{}, err
+					}
+					params.APIEventEndpoint = &endpoint
+				}
+			case eventPublicationEndpointTemplate:
+				if params.NewRunCreated {
 					params.PublicInputEndpoint = &resolution.Endpoint
 					endpoint, err := runtimebus.NewTemplateAPIEventPublicationEndpoint(selectedOpts.Source, resolution.Endpoint)
 					if err != nil {
 						return apiidempotency.Completion{}, err
 					}
 					params.APIEventEndpoint = &endpoint
-				case eventPublicationEndpointInvalid, eventPublicationEndpointInvalidTemplate:
+				}
+			case eventPublicationEndpointInvalid, eventPublicationEndpointInvalidTemplate:
+				if params.NewRunCreated {
 					return apiidempotency.Completion{}, resolution.ApplicationError(requestedEventName)
-				default:
+				}
+			default:
+				if params.NewRunCreated {
 					return apiidempotency.Completion{}, errors.New("event publication endpoint resolution is incomplete")
 				}
 			}
@@ -851,6 +863,10 @@ type EventRecipientPlanChecker interface {
 	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
 }
 
+type apiEventRecipientPlanChecker interface {
+	CheckAPIEventPublishRecipientPlan(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint) (runtimebus.PublishRecipientPlan, error)
+}
+
 func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
 	checker := opts.RecipientPlans
 	if checker == nil {
@@ -866,7 +882,22 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 	if err != nil {
 		return err
 	}
-	plan, err := checker.CheckPublishRecipientPlan(ctx, publication)
+	var plan runtimebus.PublishRecipientPlan
+	if params.APIEventEndpoint != nil {
+		apiChecker, ok := checker.(apiEventRecipientPlanChecker)
+		if !ok {
+			return NewApplicationError(EventPublishFailedCode, true, map[string]any{
+				"event_name": params.EventName,
+				"event_id":   params.EventID,
+				"run_id":     params.RunID,
+				"phase":      "publish",
+				"reason":     "recipient planning unavailable: event publisher does not expose typed API endpoint planning",
+			})
+		}
+		plan, err = apiChecker.CheckAPIEventPublishRecipientPlan(ctx, publication, params.APIEventEndpoint)
+	} else {
+		plan, err = checker.CheckPublishRecipientPlan(ctx, publication)
+	}
 	if err != nil {
 		if cfg.publishError != nil {
 			return cfg.publishError(params, err)
