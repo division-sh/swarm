@@ -381,7 +381,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	contractsPath := scaffoldConformanceArchetype(t, "zero-agent-automation")
+	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
 
 	var db *sql.DB
 	var configPath string
@@ -423,7 +423,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		t.Fatalf("%s derived scenario runtime is incomplete", backend)
 	}
 
-	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: "automation", Input: "request"})
+	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: "fulfillment", Input: "request"})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("%s compile negative selector plan: plans=%d err=%v", backend, len(plans), err)
 	}
@@ -438,8 +438,8 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	}
 	beforeMismatch := loadScenarioMutationCounts(t, db, backend)
 	rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"bundle_hash": bundleHash, "event_name": "automation.requested",
-		"payload":         map[string]any{"chat_id": "1001", "text": "must not publish"},
+		"bundle_hash": bundleHash, "event_name": "fulfillment.requested",
+		"payload":         map[string]any{"order_id": "must-not-publish"},
 		"idempotency_key": "derived-effective-source-mismatch-" + string(backend),
 		"scenario_execution": map[string]any{
 			"profile_id": selector.ProfileID, "profile_digest": selector.ProfileDigest,
@@ -458,7 +458,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		"bundle_hash": bundleHash, "run_id": setupRunID,
 		"idempotency_key": "derived-setup-effective-source-mismatch-" + string(backend),
 		"entities": []any{map[string]any{
-			"alias": "subject", "entity_id": setupEntityID, "flow_instance": "automation",
+			"alias": "subject", "entity_id": setupEntityID, "flow_instance": "fulfillment",
 			"entity_type": "subject", "current_state": "ready", "fields": map[string]any{},
 		}},
 		"scenario_execution": map[string]any{
@@ -476,7 +476,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
 	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
-		"test", "--derive", "automation", "--input", "request",
+		"test", "--derive", "fulfillment", "--input", "request",
 		"--contracts", contractsPath, "--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "20s", "--poll-interval", "25ms",
@@ -487,7 +487,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	if elapsed := time.Since(started); elapsed >= 60*time.Second {
 		t.Fatalf("%s derived scenario took %s, want under 60s", backend, elapsed)
 	}
-	if !strings.Contains(stdout.String(), "scenario ok: derived:automation/request") || strings.TrimSpace(stderr.String()) != "" {
+	if !strings.Contains(stdout.String(), "scenario ok: derived:fulfillment/request") || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("%s derived output stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
 	}
 	requireExactScenarioExecutionProfile(t, db, backend, rt.EffectiveSourceIdentity)
