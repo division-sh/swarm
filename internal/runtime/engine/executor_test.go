@@ -302,6 +302,7 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold", Mode: "template"},
 		Path:  "component-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeTemplate,
 			Pins: runtimecontracts.FlowPins{
 				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"repo_scaffold.repo_scaffolded"}},
 				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"component.scaffolded"}},

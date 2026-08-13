@@ -260,7 +260,7 @@ pins:
       - {name: partner_ack, event: inbound.partner_ack, source: external}
   outputs: {events: []}
 `,
-		"flows/matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n  records:\n    type: map[text]json\n    initial: {}\n",
+		"flows/matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
 		"flows/matrix/types.yaml":    "{}\n", "flows/matrix/policy.yaml": "{}\n", "flows/matrix/tools.yaml": "{}\n", "flows/matrix/agents.yaml": "{}\n",
 		"flows/matrix/events.yaml": inboundAdmissionEvents(),
 		"flows/matrix/nodes.yaml":  inboundAdmissionNodes(),

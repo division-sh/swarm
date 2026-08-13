@@ -69,6 +69,34 @@ func TestRegisteredToolSemanticReconstructionIsAbsent(t *testing.T) {
 	})
 }
 
+func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *testing.T) {
+	strictAllowed := map[string]struct{}{
+		"internal/runtime/authoringview/view.go":                                   {},
+		"internal/runtime/bootverify/workflow_composition_connect_checks.go":       {},
+		"internal/runtime/bootverify/workflow_contained_state_operation_checks.go": {},
+		"internal/runtime/bootverify/workflow_singleton_coordinator_checks.go":     {},
+		"internal/runtime/contracts/workflow_contract_wave1_accessors.go":          {},
+		"internal/runtime/core/pinrouting/connect_route_plan.go":                   {},
+	}
+	inspectProductionGo(t, func(path string, file *ast.File) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.SelectorExpr:
+				if ident, ok := typed.X.(*ast.Ident); ok && ident.Name == "ref" && typed.Sel.Name == "Mode" {
+					t.Errorf("%s reads raw ProjectFlowRef.Mode as behavioral authority; consume the admitted effective mode", path)
+				}
+			case *ast.CallExpr:
+				if calledFunctionName(typed.Fun) == "ResolveFlowSingletonCoordinator" {
+					if _, ok := strictAllowed[path]; !ok {
+						t.Errorf("%s calls strict singleton coordinator owner outside the finite usage-demand ledger", path)
+					}
+				}
+			}
+			return true
+		})
+	})
+}
+
 func TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization(t *testing.T) {
 	closed := map[string]reflect.Type{
 		"ToolInputSchema":               reflect.TypeOf(runtimecontracts.ToolInputSchema{}),

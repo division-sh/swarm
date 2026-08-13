@@ -142,10 +142,7 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 			if flowID == "" {
 				return nil, fmt.Errorf("%s standing activation requires non-empty flow id", location)
 			}
-			if strings.TrimSpace(ref.Mode) != runtimecontracts.FlowModeSingleton {
-				return nil, fmt.Errorf("%s activation: standing requires mode: singleton", location)
-			}
-			if _, err := bundle.ResolveFlowSingletonCoordinator(flowID); err != nil {
+			if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
 				return nil, fmt.Errorf("%s standing singleton is invalid: %w", location, err)
 			}
 			decl := StandingTargetDeclaration{

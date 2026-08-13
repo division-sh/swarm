@@ -817,6 +817,7 @@ fanout-node:
 				name: "dead-event-schema-auto-emit",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
+						mode: "template",
 						schema: `
 name: support
 mode: template
@@ -8056,6 +8057,7 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 }
 
 type deadEventSchemaFlowFiles struct {
+	mode   string
 	schema string
 	events string
 	agents string
@@ -8094,7 +8096,11 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 	if len(flowIDs) > 0 {
 		packageYAML += "flows:\n"
 		for _, flowID := range flowIDs {
-			packageYAML += "  - id: " + flowID + "\n    flow: " + flowID + "\n    mode: static\n"
+			mode := strings.TrimSpace(opts.flows[flowID].mode)
+			if mode == "" {
+				mode = runtimecontracts.FlowModeStatic
+			}
+			packageYAML += "  - id: " + flowID + "\n    flow: " + flowID + "\n    mode: " + mode + "\n"
 		}
 	}
 

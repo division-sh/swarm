@@ -18,6 +18,8 @@ const (
 	SingletonCoordinatorPilotUndeclaredTarget
 	SingletonCoordinatorPilotUnsupportedOperation
 	SingletonCoordinatorPilotBadListIndex
+	SingletonCoordinatorPilotDemandProjection
+	SingletonCoordinatorPilotStatelessFanIn
 )
 
 // CopySingletonCoordinatorPilot materializes the canonical singleton
@@ -44,6 +46,10 @@ flows:
 
 func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonCoordinatorPilotVariant) {
 	t.Helper()
+	if variant == SingletonCoordinatorPilotStatelessFanIn {
+		writeStatelessFanInSingletonCoordinatorFlow(t, root)
+		return
+	}
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/schema.yaml", `
 name: coordinator
 mode: singleton
@@ -74,12 +80,16 @@ types:
     ref: text
     action: text
 `)
-	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", `
+	entities := `
 coordinator_state:
   coordinator_id: text
   lead_index: map[text]LeadScore
   audit_log: "[AuditEntry]"
-`)
+`
+	if variant == SingletonCoordinatorPilotDemandProjection {
+		entities += "  unused_index: map[text]json\n"
+	}
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", entities)
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/events.yaml", `
 lead.observed:
   coordinator_id: text
@@ -89,7 +99,7 @@ lead.observed:
   followup_audit: AuditEntry
   corrected_audit: AuditEntry
 `)
-	writeSingletonCoordinatorFile(t, root, "flows/coordinator/nodes.yaml", `
+	nodes := `
 coordinator-indexer:
   id: coordinator-indexer
   execution_type: system_node
@@ -101,7 +111,44 @@ coordinator-indexer:
           coordinator_id: payload.coordinator_id
       data_accumulation:
         writes:
-`+singletonCoordinatorWritesYAML(t, variant))
+` + singletonCoordinatorWritesYAML(t, variant)
+	if variant == SingletonCoordinatorPilotDemandProjection {
+		nodes += `      fan_out:
+        items_from: entity.audit_log
+        as: entry
+        identity: entry.ref
+        emit: lead.observed
+`
+	}
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/nodes.yaml", nodes)
+}
+
+func writeStatelessFanInSingletonCoordinatorFlow(t testing.TB, root string) {
+	t.Helper()
+	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
+		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", "coordinator", name), "{}\n")
+	}
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/schema.yaml", `
+name: coordinator
+mode: singleton
+pins:
+  inputs:
+    events:
+      - name: job_received
+        event: job.received
+        source: harness
+        resolution:
+          mode: fan-in
+          aggregation: stream
+          window: payload.vertical_id
+          dedup_by: event.id
+          singleton: coordinator
+  outputs:
+    events: []
+`)
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", "coordinator_state: {}\n")
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/events.yaml", "job.received:\n  vertical_id: text\n")
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/nodes.yaml", "{}\n")
 }
 
 func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPilotVariant) string {
@@ -148,6 +195,10 @@ func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPi
             index: -1
             value:
               ref: payload.corrected_audit
+`
+	case SingletonCoordinatorPilotDemandProjection:
+		return `          - source_field: audit
+            target_field: audit_log
 `
 	default:
 		t.Fatalf("unsupported singleton coordinator pilot variant %d", variant)

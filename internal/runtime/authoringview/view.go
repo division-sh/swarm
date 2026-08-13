@@ -461,6 +461,10 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 
 func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, agentNames map[authoringAgentNameKey]string) ([]FlowView, error) {
 	opsByFlow := containedOperationsByFlow(source, bundle)
+	demandsByFlow := map[string][]runtimebootverify.SingletonCoordinatorDemand{}
+	for _, demand := range runtimebootverify.BuildSingletonCoordinatorDemandProjection(source) {
+		demandsByFlow[demand.FlowID] = append(demandsByFlow[demand.FlowID], demand)
+	}
 	refsByFlow := packageFlowRefsByID(bundle)
 	views := bundle.FlowViews()
 	out := make([]FlowView, 0, len(views))
@@ -517,10 +521,14 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			}
 		}
 		if strings.TrimSpace(schema.Mode) == runtimecontracts.FlowModeSingleton {
-			if singleton, err := bundle.ResolveFlowSingletonCoordinator(flowID); err == nil {
-				item.SingletonCoordinator = singletonCoordinatorView(singleton, flow.Paths.SchemaFile)
-			} else {
+			if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
 				item.SingletonError = err.Error()
+			} else if len(demandsByFlow[flowID]) > 0 {
+				if singleton, err := bundle.ResolveFlowSingletonCoordinator(flowID); err == nil {
+					item.SingletonCoordinator = singletonCoordinatorView(singleton, flow.Paths.SchemaFile)
+				} else {
+					item.SingletonError = err.Error()
+				}
 			}
 		}
 		item.ContainedOperations = opsByFlow[flowID]

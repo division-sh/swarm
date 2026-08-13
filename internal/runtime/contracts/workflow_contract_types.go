@@ -1406,6 +1406,11 @@ type TemplateInstanceContract struct {
 	PrimaryEntity PrimaryEntityContract
 }
 
+type SingletonContract struct {
+	FlowID        string
+	PrimaryEntity PrimaryEntityContract
+}
+
 type SingletonCoordinatorContract struct {
 	FlowID         string
 	PrimaryEntity  PrimaryEntityContract

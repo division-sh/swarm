@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_ValidatesSingletonCoordinatorWithContainedState(t *testing.T) {
@@ -28,7 +29,7 @@ pins:
 	}
 }
 
-func TestRun_RejectsSingletonCoordinatorBackedOnlyByAgentMemory(t *testing.T) {
+func TestRun_AllowsStatelessSingletonWithIndependentAgentMemory(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton
@@ -38,8 +39,7 @@ pins:
   outputs:
     events: []
 `, `
-coordinator_state:
-  status: text
+coordinator_state: {}
 `, `
 memory-agent:
   id: memory-agent
@@ -52,8 +52,8 @@ memory-agent:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "singleton_coordinator_validation", "agent conversation memory is not coordinator state authority") {
-		t.Fatalf("expected singleton_coordinator_validation agent-memory authority error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "singleton_coordinator_validation", "") {
+		t.Fatalf("agent memory must not create coordinator demand for a stateless singleton, got %#v", report.Errors())
 	}
 }
 
@@ -151,6 +151,54 @@ coordinator-node:
 	if !reportContains(report.Errors(), "contained_state_operation_compliance", "dynamic bracket path syntax") {
 		t.Fatalf("expected contained_state_operation_compliance dynamic target rejection, got %#v", report.Errors())
 	}
+}
+
+func TestBuildSingletonCoordinatorDemandProjection_UsesExactTypedConsumers(t *testing.T) {
+	bundle := loadCanonicalSingletonCoordinatorFixtureBundle(t, canonicalrouting.SingletonCoordinatorPilotDemandProjection)
+
+	demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
+	var write, read *SingletonCoordinatorDemand
+	for i := range demands {
+		demand := &demands[i]
+		if demand.Field == "unused_index" {
+			t.Fatalf("unused typed field created coordinator demand: %#v", demand)
+		}
+		if demand.Field != "audit_log" || demand.NodeID != "coordinator-indexer" || demand.EventType != "lead.observed" || demand.SourceFile == "" {
+			continue
+		}
+		if demand.Kind == "handler.data_accumulation" {
+			write = demand
+		}
+		if demand.Kind == "entity_read.fan_out.items_from" {
+			read = demand
+		}
+	}
+	if write == nil || read == nil {
+		t.Fatalf("typed demand projection = %#v, want exact direct write and structured fan_out read", demands)
+	}
+	if !write.HasWriteIndex || write.WriteIndex != 0 {
+		t.Fatalf("direct write demand location = %#v, want writes[0]", write)
+	}
+}
+
+func TestRun_FanInDemandRejectsStatelessSingletonAtInputRow(t *testing.T) {
+	bundle := loadCanonicalSingletonCoordinatorFixtureBundle(t, canonicalrouting.SingletonCoordinatorPilotStatelessFanIn)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "composition_connect_validation", "coordinator demand requires at least one typed contained map/list field") {
+		t.Fatalf("fan-in stateless singleton errors = %#v, want exact input-row coordinator demand failure", report.Errors())
+	}
+}
+
+func loadCanonicalSingletonCoordinatorFixtureBundle(t *testing.T, variant canonicalrouting.SingletonCoordinatorPilotVariant) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := repoRootForBootverifyTest(t)
+	root := canonicalrouting.CopySingletonCoordinatorPilot(t, variant)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
 }
 
 func loadSingletonCoordinatorFixtureBundle(t *testing.T, flowSchema, flowEntities, flowAgents, flowNodes string) *runtimecontracts.WorkflowContractBundle {

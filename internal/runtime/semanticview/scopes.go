@@ -79,10 +79,7 @@ func RootExecutionFlowID(source Source) string {
 }
 
 func flowModeFromView(view runtimecontracts.FlowContractView) string {
-	if mode := strings.TrimSpace(view.Schema.Mode); mode != "" {
-		return mode
-	}
-	return strings.TrimSpace(view.Paths.Mode)
+	return strings.TrimSpace(view.Schema.Mode)
 }
 
 func owningFlowIDFromView(view *runtimecontracts.FlowContractView) string {

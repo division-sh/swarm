@@ -11,7 +11,18 @@ import (
 
 func checkContainedStateOperationCompliance(c *checkerContext) []Finding {
 	findings := make([]Finding, 0)
+	bundle, _ := semanticview.Bundle(c.source)
 	for _, ref := range wave1ContainedStateOperations(c.source) {
+		if schema, ok := c.source.FlowSchemaByID(ref.FlowID); ok && strings.TrimSpace(schema.Mode) == runtimecontracts.FlowModeSingleton {
+			if bundle == nil {
+				findings = append(findings, containedStateOperationFinding(ref, "singleton coordinator owner is unavailable"))
+				continue
+			}
+			if _, err := bundle.ResolveFlowSingletonCoordinator(ref.FlowID); err != nil {
+				findings = append(findings, containedStateOperationFinding(ref, fmt.Sprintf("singleton coordinator demand is unsatisfied: %v", err)))
+				continue
+			}
+		}
 		contract, ok := entityruntime.ResolveForFlow(c.source, ref.FlowID)
 		if !ok {
 			findings = append(findings, containedStateOperationFinding(ref, fmt.Sprintf("flow %s has no declared entity contract", defaultFlowLabel(ref.FlowID))))
@@ -42,11 +53,12 @@ func checkContainedStateOperationCompliance(c *checkerContext) []Finding {
 }
 
 type wave1ContainedStateOperationRef struct {
-	FlowID    string
-	NodeID    string
-	EventType string
-	Kind      string
-	Write     runtimecontracts.WorkflowDataWrite
+	FlowID     string
+	NodeID     string
+	EventType  string
+	Kind       string
+	WriteIndex int
+	Write      runtimecontracts.WorkflowDataWrite
 }
 
 func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedStateOperationRef {
@@ -85,16 +97,17 @@ func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedS
 
 func wave1HandlerContainedStateOperations(flowID, nodeID, eventType, kind string, writes []runtimecontracts.WorkflowDataWrite) []wave1ContainedStateOperationRef {
 	out := make([]wave1ContainedStateOperationRef, 0)
-	for _, write := range writes {
+	for writeIndex, write := range writes {
 		if !write.IsContainedOperation() {
 			continue
 		}
 		out = append(out, wave1ContainedStateOperationRef{
-			FlowID:    flowID,
-			NodeID:    nodeID,
-			EventType: eventType,
-			Kind:      kind + ".data_accumulation",
-			Write:     write,
+			FlowID:     flowID,
+			NodeID:     nodeID,
+			EventType:  eventType,
+			Kind:       kind + ".data_accumulation",
+			WriteIndex: writeIndex,
+			Write:      write,
 		})
 	}
 	return out
@@ -104,7 +117,7 @@ func containedStateOperationFinding(ref wave1ContainedStateOperationRef, detail 
 	return Finding{
 		CheckID:  "contained_state_operation_compliance",
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s %s op %q target %q invalid: %s", defaultFlowLabel(ref.FlowID), ref.NodeID, ref.EventType, ref.Kind, ref.Write.Operation, ref.Write.Target(), strings.TrimSpace(detail)),
+		Message:  fmt.Sprintf("flow %s node %s handler %s %s write[%d] op %q target %q invalid: %s", defaultFlowLabel(ref.FlowID), ref.NodeID, ref.EventType, ref.Kind, ref.WriteIndex, ref.Write.Operation, ref.Write.Target(), strings.TrimSpace(detail)),
 		Location: ref.NodeID,
 	}
 }

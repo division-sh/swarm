@@ -14,6 +14,32 @@ type PrimaryEntityContract struct {
 	Types      TypeCatalogDocument
 }
 
+func ResolveEffectiveFlowMode(flowID, packageMode, schemaMode string) (string, error) {
+	flowID = strings.TrimSpace(flowID)
+	packageMode = strings.ToLower(strings.TrimSpace(packageMode))
+	schemaMode = strings.ToLower(strings.TrimSpace(schemaMode))
+	for _, declared := range []struct {
+		source string
+		mode   string
+	}{
+		{source: "package.yaml", mode: packageMode},
+		{source: "schema.yaml", mode: schemaMode},
+	} {
+		switch declared.mode {
+		case "", FlowModeStatic, FlowModeTemplate, FlowModeSingleton:
+		default:
+			return "", fmt.Errorf("INVALID-FLOW-MODE: flow %s %s mode %q is unsupported; use static, template, or singleton", defaultPrimaryEntityFlowLabel(flowID), declared.source, declared.mode)
+		}
+	}
+	if packageMode != "" && schemaMode != "" && packageMode != schemaMode {
+		return "", fmt.Errorf("INVALID-FLOW-MODE: flow %s package.yaml mode %q contradicts schema.yaml mode %q", defaultPrimaryEntityFlowLabel(flowID), packageMode, schemaMode)
+	}
+	if schemaMode != "" {
+		return schemaMode, nil
+	}
+	return packageMode, nil
+}
+
 func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (TemplateInstanceContract, error) {
 	flowID = strings.TrimSpace(flowID)
 	label := defaultPrimaryEntityFlowLabel(flowID)
@@ -52,41 +78,57 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 	}, nil
 }
 
-func (b *WorkflowContractBundle) ResolveFlowSingletonCoordinator(flowID string) (SingletonCoordinatorContract, error) {
+func (b *WorkflowContractBundle) ResolveFlowSingleton(flowID string) (SingletonContract, error) {
 	flowID = strings.TrimSpace(flowID)
 	label := defaultPrimaryEntityFlowLabel(flowID)
 	if b == nil {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s singleton coordinator is unavailable: bundle is nil", label)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s singleton is unavailable: bundle is nil", label)
 	}
 	if flowID == "" {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow <root> cannot declare singleton coordinator ownership; singleton coordinators are child flow contracts")
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow <root> cannot declare singleton cardinality; singleton flows are child flow contracts")
 	}
 	schema, ok := b.FlowSchemas[flowID]
 	if !ok {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s singleton coordinator is unavailable: schema not found", flowID)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s singleton is unavailable: schema not found", flowID)
 	}
 	if mode := strings.TrimSpace(schema.Mode); mode != FlowModeSingleton {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s is not mode: singleton", flowID)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s is not mode: singleton", flowID)
 	}
 	if !schema.Instance.Empty() {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s mode: singleton must not declare template instance", flowID)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s mode: singleton must not declare template instance", flowID)
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s primary entity required for singleton coordinator state: %w", flowID, err)
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s requires exactly one primary entity: %w", flowID, err)
 	}
+	if _, err := singletonCoordinatorContainedFields(primary); err != nil {
+		return SingletonContract{}, fmt.Errorf("INVALID-SINGLETON: flow %s invalid typed entity state: %w", flowID, err)
+	}
+	return SingletonContract{FlowID: flowID, PrimaryEntity: primary}, nil
+}
+
+func (b *WorkflowContractBundle) ResolveFlowSingletonCoordinator(flowID string) (SingletonCoordinatorContract, error) {
+	singleton, err := b.ResolveFlowSingleton(flowID)
+	if err != nil {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: %w", err)
+	}
+	primary := singleton.PrimaryEntity
 	contained, err := singletonCoordinatorContainedFields(primary)
 	if err != nil {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s invalid contained coordinator state: %w", flowID, err)
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s invalid contained coordinator state: %w", singleton.FlowID, err)
 	}
 	if len(contained) == 0 {
-		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s mode: singleton must declare at least one typed contained map/list field on primary entity %s; agent conversation memory is not coordinator state authority", flowID, primary.EntityType)
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s coordinator demand requires at least one typed contained map/list field on primary entity %s; agent conversation memory is not coordinator state authority", singleton.FlowID, primary.EntityType)
 	}
 	return SingletonCoordinatorContract{
-		FlowID:         flowID,
+		FlowID:         singleton.FlowID,
 		PrimaryEntity:  primary,
 		ContainedState: contained,
 	}, nil
+}
+
+func SingletonContainedFields(primary PrimaryEntityContract) ([]SingletonCoordinatorContainedField, error) {
+	return singletonCoordinatorContainedFields(primary)
 }
 
 func singletonCoordinatorContainedFields(primary PrimaryEntityContract) ([]SingletonCoordinatorContainedField, error) {
