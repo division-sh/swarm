@@ -239,12 +239,22 @@ func TestRuntimeProjectSupervisorRejectsExecutionPostureChangeBeforeQuiesceOrPub
 }
 
 func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *testing.T) {
-	projectRoot := writeProjectRoot(t)
+	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	if err != nil {
+		t.Fatalf("NewSwarmWorkflowModule: %v", err)
+	}
 	var captured runtimepkg.RuntimeDeps
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		captured = deps
 		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+		if contractsRoot != projectRoot {
+			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
+		}
+		return module, bundle, nil
+	}
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	loads := 0
@@ -253,9 +263,13 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 		if source == nil || catalog == nil {
 			t.Fatal("channel reload compiler received nil source or accepted trigger catalog")
 		}
-		plan := packs.SatisfactionPlan{}
-		binding := packs.OutboundBindingPlan{}
-		return cliapp.ChannelPackLoad{Plans: []packs.SatisfactionPlan{plan}, Bindings: []packs.OutboundBindingPlan{binding}}, nil
+		cfg := &config.Config{Channels: config.ChannelsConfig{
+			Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
+			Bindings: map[string]config.ChannelBindingConfig{
+				"ops": {Pack: "provider.telegram.hitl_channel", Destination: "42"},
+			},
+		}}
+		return cliapp.LoadConfiguredChannelPacks(context.Background(), cliapp.RepoRoot(), cliapp.RuntimeConfigLoadResult{Config: cfg}, source.PlatformSpec(), catalog, nil, nil)
 	})
 
 	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
@@ -2125,7 +2139,29 @@ func newSupervisorForLoadProjectFailureTest(
 		return lifecycle, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
 	if createRuntime != nil {
-		supervisor.createRuntime = createRuntime
+		supervisor.createRuntime = func(ctx context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+			rt, err := createRuntime(ctx, deps)
+			if err != nil || rt == nil || rt.EffectiveSourceIdentity.Validate() == nil {
+				return rt, err
+			}
+			projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+				WorkflowModule: deps.Options.WorkflowModule, BundleSourceFact: deps.Options.BundleSourceFact,
+				ProviderTriggerCatalog: deps.Options.ProviderTriggerCatalog, ChannelPlans: deps.Options.ChannelPlans,
+				ChannelOutboundBindings: deps.Options.ChannelOutboundBindings,
+			})
+			if err != nil {
+				return nil, err
+			}
+			catalog, err := scenarioexecution.NewCatalog(projection.Identity(), nil)
+			if err != nil {
+				return nil, err
+			}
+			rt.Options.BundleSourceFact = deps.Options.BundleSourceFact
+			rt.Options.WorkflowModule = projection.WorkflowModule()
+			rt.EffectiveSourceIdentity = projection.Identity()
+			rt.ScenarioProfileCatalog = catalog
+			return rt, nil
+		}
 	}
 	return supervisor
 }
@@ -2234,19 +2270,23 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSo
 	}
 }
 
-func TestRuntimeProjectSupervisorPublishesSchemaOnlyProviderTriggerImport(t *testing.T) {
+func TestRuntimeProjectSupervisorPrevalidatesProjectedSourceAndPublishesExactRuntime(t *testing.T) {
+	t.Setenv("TELEGRAM_BOT_TOKEN", "builder-replacement-proof")
 	projectRoot := writeGeneratedTelegramScenarioFixture(t, "http://127.0.0.1:1")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(projectRoot, "package.yaml"), `
 name: schema-only-provider-trigger-replacement
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
+connector_packs:
+  imports:
+    - {provider: telegram, tool: telegram.send_message}
 provider_trigger_events:
   imports:
     - {provider: telegram, event: inbound.telegram.text_message}
 flows:
   - {id: telegram-chat, flow: telegram-chat, mode: template}
 `)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	module, _, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
 	}
@@ -2260,23 +2300,50 @@ flows:
 	cfg := &config.Config{}
 	cfg.Runtime.ExecutionPosture = executionposture.Live
 	candidateCatalog := testProviderTriggerCatalog(t)
-	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(ctx context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+	channelCfg := &config.Config{Channels: config.ChannelsConfig{
+		Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
+		Bindings: map[string]config.ChannelBindingConfig{
+			"ops": {Pack: "provider.telegram.hitl_channel", Destination: "42"},
+		},
+	}}
+	rawSource := module.SemanticSource()
+	if rawValidationErr := newBuilderProjectSourceValidator(cfg)(context.Background(), rawSource, candidateCatalog); rawValidationErr == nil || !strings.Contains(rawValidationErr.Error(), "missing from event catalog") {
+		t.Fatalf("production validation of raw replacement = %v, want missing imported event before projection", rawValidationErr)
+	}
+	var ready atomic.Bool
+	supervisor := newRuntimeProjectSupervisor(
+		cliapp.RepoRoot(), runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()), cfg, stores, &ready,
+		cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"},
+		nil, nil, candidateCatalog, "", nil, nil, nil,
+	)
+	supervisor.executionPosture = executionposture.Live
+	supervisor.processWorkOwner = newSupervisorTestProcessOwner(t)
+	supervisor.runtimeInstanceID = "11111111-1111-4111-8111-111111111111"
+	supervisor.createRuntime = func(ctx context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		deps.Options.LLMRuntime = runtimellm.NoopRuntime{}
 		deps.Options.DisablePersistentStartupRecovery = true
 		return runtimepkg.NewRuntime(ctx, deps)
-	})
-	supervisor.stores = stores
-	supervisor.cfg = cfg
-	supervisor.runtimeInstanceID = "11111111-1111-4111-8111-111111111111"
-	supervisor.processWorkOwner = newSupervisorTestProcessOwner(t)
-	supervisor.initStateStores = initializeStateStores
-	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
-		if contractsRoot != projectRoot {
-			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
-		}
-		return module, bundle, nil
+	}
+	var workspaceSource semanticview.Source
+	supervisor.newWorkspaces = func(_ storeBundle, _ string, semanticSource semanticview.Source, _ cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
+		workspaceSource = semanticSource
+		return stubWorkspaceLifecycle{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
+	var candidateChannelLoad cliapp.ChannelPackLoad
+	supervisor.SetChannelPackLoader(func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
+		var loadErr error
+		candidateChannelLoad, loadErr = cliapp.LoadConfiguredChannelPacks(ctx, cliapp.RepoRoot(), cliapp.RuntimeConfigLoadResult{Config: channelCfg}, source.PlatformSpec(), catalog, nil, nil)
+		return candidateChannelLoad, loadErr
+	})
+	if _, declared := rawSource.EventEntry("inbound.telegram.text_message"); declared {
+		t.Fatal("raw replacement source unexpectedly owns imported Telegram event")
+	}
+	for _, toolID := range []string{"telegram.send_message", "channel.ops.deliver"} {
+		if _, declared := rawSource.ToolEntries()[toolID]; declared {
+			t.Fatalf("raw replacement source unexpectedly owns projected tool %q", toolID)
+		}
+	}
 
 	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
 		t.Fatalf("OpenProject: %v", err)
@@ -2286,6 +2353,17 @@ flows:
 			t.Errorf("CloseProject: %v", closeErr)
 		}
 	}()
+	for label, projectedSource := range map[string]semanticview.Source{"published": supervisor.CurrentSource(), "workspace": workspaceSource} {
+		if projectedSource == nil {
+			t.Fatalf("%s source was not observed", label)
+		}
+		requireProviderTriggerEventSource(t, projectedSource, "inbound.telegram.text_message")
+		for _, toolID := range []string{"telegram.send_message", "channel.ops.deliver"} {
+			if _, declared := projectedSource.ToolEntries()[toolID]; !declared {
+				t.Fatalf("%s source omitted projected tool %q", label, toolID)
+			}
+		}
+	}
 	source := supervisor.CurrentSource()
 	generation := requireProviderTriggerEventSource(t, source, "inbound.telegram.text_message")
 	if !generation.Equal(candidateCatalog.Generation()) {
@@ -2304,6 +2382,9 @@ flows:
 	replacementIdentity := supervisor.currentBundleIdentity
 	supervisor.mu.RUnlock()
 	replacementRuntime := supervisor.CurrentRuntime()
+	if replacementRuntime.ScenarioProfileCatalog == nil || !replacementRuntime.ScenarioProfileCatalog.EffectiveSourceIdentity().Equal(replacementRuntime.EffectiveSourceIdentity) {
+		t.Fatal("replacement runtime did not retain the exact effective-source scenario profile catalog")
+	}
 	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailabilityStore, runtimepkg.BundleContext{
 		BundleSourceFact: replacementFact,
 		BundleIdentity:   replacementIdentity,
@@ -2317,6 +2398,11 @@ flows:
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	supervisor.SetRuntimeContextManager(manager, replacementFact, replacementIdentity)
+	lookup := manager.LookupBundleHashStatus(replacementFact.BundleHash())
+	if !lookup.Loaded() || lookup.Context.ScenarioProfileCatalog != replacementRuntime.ScenarioProfileCatalog || !lookup.Context.EffectiveSourceIdentity.Equal(replacementRuntime.EffectiveSourceIdentity) {
+		t.Fatalf("published replacement profile catalog/identity = %#v, want exact runtime projection", lookup)
+	}
+	publishedContextRuntime := lookup.Context.Runtime
 
 	publication := apiv1.EventPublicationOptions{
 		ExecutionPosture: replacementRuntime.ExecutionPosture,
@@ -2375,6 +2461,29 @@ flows:
 	if delivery.SubscriberType != "node" || delivery.SubscriberID != "telegram-input-observer" ||
 		delivery.Target.FlowID != "telegram-chat" || !strings.HasPrefix(delivery.Target.FlowInstance, "telegram-chat/") || delivery.Target.EntityID == "" {
 		t.Fatalf("replacement event delivery = %#v, want exact telegram-chat template target", delivery)
+	}
+
+	predecessorSource := supervisor.CurrentSource()
+	predecessorRuntime := supervisor.CurrentRuntime()
+	predecessorCatalog := predecessorRuntime.ScenarioProfileCatalog
+	supervisor.SetChannelPackLoader(func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
+		conflicting := candidateChannelLoad
+		conflicting.Bindings = append(append([]packs.OutboundBindingPlan(nil), candidateChannelLoad.Bindings...), candidateChannelLoad.Bindings...)
+		return conflicting, nil
+	})
+	if _, reloadErr := supervisor.ReloadProject(context.Background(), projectRoot); reloadErr == nil || !strings.Contains(reloadErr.Error(), `duplicate channel runtime tool "channel.ops.`) {
+		t.Fatalf("ReloadProject error = %v, want duplicate projected channel tool rejection", reloadErr)
+	}
+	lookup = manager.LookupBundleHashStatus(replacementFact.BundleHash())
+	contextRuntime := (*runtimepkg.Runtime)(nil)
+	contextCatalog := (*scenarioexecution.Catalog)(nil)
+	if lookup.Context != nil {
+		contextRuntime = lookup.Context.Runtime
+		contextCatalog = lookup.Context.ScenarioProfileCatalog
+	}
+	if !supervisor.ready.Load() || supervisor.CurrentRuntime() != predecessorRuntime || !reflect.DeepEqual(supervisor.CurrentSource(), predecessorSource) ||
+		!lookup.Loaded() || contextRuntime != publishedContextRuntime || contextCatalog != predecessorCatalog {
+		t.Fatalf("failed projected replacement disturbed predecessor: ready=%v runtime_same=%v source_same=%v context_runtime_same=%v context_catalog_same=%v lookup=%#v", supervisor.ready.Load(), supervisor.CurrentRuntime() == predecessorRuntime, reflect.DeepEqual(supervisor.CurrentSource(), predecessorSource), contextRuntime == publishedContextRuntime, contextCatalog == predecessorCatalog, lookup)
 	}
 }
 
