@@ -72,22 +72,37 @@ func inspectStaticAgentFrame(ctx context.Context, catalog BundleCatalogReadStore
 		return agentframe.Inspection{}, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "static inspection forbids root and flow_instance selectors"})
 	}
 
-	result, err := catalog.ListBundleCatalogAgents(ctx, bundleHash)
-	if errors.Is(err, bundlecatalog.ErrNotFound) {
-		return agentframe.Inspection{}, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
-	}
-	if err != nil {
-		return agentframe.Inspection{}, err
-	}
 	wantFlow := flow
 	if wantFlow == "root" {
 		wantFlow = ""
 	}
 	matches := make([]bundlecatalog.AgentDefinition, 0, 1)
-	for _, definition := range result.Agents {
-		if definition.AgentID == agentID && definition.FlowInstance == wantFlow {
-			matches = append(matches, definition)
+	cursor := ""
+	seenCursors := map[string]struct{}{}
+	for {
+		result, err := catalog.ListBundleCatalogAgents(ctx, bundleHash, bundlecatalog.AgentListOptions{
+			Limit: bundlecatalog.MaxAgentListLimit, Cursor: cursor,
+		})
+		if errors.Is(err, bundlecatalog.ErrNotFound) {
+			return agentframe.Inspection{}, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
 		}
+		if err != nil {
+			return agentframe.Inspection{}, err
+		}
+		for _, definition := range result.Agents {
+			if definition.AgentID == agentID && definition.FlowInstance == wantFlow {
+				matches = append(matches, definition)
+			}
+		}
+		nextCursor := strings.TrimSpace(result.NextCursor)
+		if nextCursor == "" {
+			break
+		}
+		if _, seen := seenCursors[nextCursor]; seen {
+			return agentframe.Inspection{}, fmt.Errorf("static agent frame catalog pagination repeated a cursor")
+		}
+		seenCursors[nextCursor] = struct{}{}
+		cursor = nextCursor
 	}
 	if len(matches) == 0 {
 		return agentframe.Inspection{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
