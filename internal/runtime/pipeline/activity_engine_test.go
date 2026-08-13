@@ -152,11 +152,13 @@ func TestPrivateChannelActivityTargetCarriesOpaqueGenerationAndExecutionValue(t 
 	if err != nil {
 		t.Fatalf("plan generation: %v", err)
 	}
-	target, err := NewChannelActivityTarget(tool, generation)
+	credentialKeys := map[string]string{"provider_token": "telegram_hitl_bot"}
+	target, err := NewChannelActivityTargetWithCredentials(tool, generation, credentialKeys)
 	if err != nil {
 		t.Fatalf("NewChannelActivityTarget: %v", err)
 	}
 	headers["X-Test"] = "caller mutation"
+	credentialKeys["provider_token"] = "caller-mutation"
 	snapshot, ok := target.Tool()
 	if !ok {
 		t.Fatal("private target lost admitted tool")
@@ -168,7 +170,8 @@ func TestPrivateChannelActivityTargetCarriesOpaqueGenerationAndExecutionValue(t 
 	httpSpec.Headers["X-Test"] = "readback mutation"
 	snapshot, _ = target.Tool()
 	httpSpec, _ = snapshot.HTTP()
-	if httpSpec.Headers["X-Test"] != "owner" || !target.Generation().Equal(generation) {
+	storeKey, mapped := target.CredentialStoreKey("provider_token")
+	if httpSpec.Headers["X-Test"] != "owner" || !target.Generation().Equal(generation) || !mapped || storeKey != "telegram_hitl_bot" {
 		t.Fatalf("private target leaked authority: http=%#v generation=%q", httpSpec, target.Generation().Diagnostic())
 	}
 }

@@ -1389,7 +1389,16 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 	}
 	flowID := intent.FlowID.String()
 	for _, key := range keys {
-		storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
+		storeKey := ""
+		mapped := false
+		if d.coordinator != nil {
+			if target, private := d.coordinator.channelActivityTools[intent.Tool]; private {
+				storeKey, mapped = target.CredentialStoreKey(key)
+			}
+		}
+		if !mapped {
+			storeKey, mapped = semanticview.CredentialStoreKeyForFlow(source, flowID, key)
+		}
 		if mapped && storeKey == "" {
 			return nil, nil, fmt.Errorf("credential %q is not declared and bound for imported package flow %s", key, flowID)
 		}

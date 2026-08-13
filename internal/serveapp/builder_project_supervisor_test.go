@@ -485,7 +485,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	}
 	source := semanticview.Wrap(bundle)
 	catalog := testProviderTriggerCatalog(t)
-	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore) {
+	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore, processIngressCredentialStore) {
 		persistence := &processIngressProofStore{}
 		eventsStore := &processIngressEventStore{}
 		persistence.store = eventsStore
@@ -505,7 +505,8 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			}
 		})
 		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
-		gateway.SetCredentialStore(processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"})
+		credentialStore := processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"}
+		gateway.SetCredentialStore(credentialStore)
 		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
 		if err != nil {
 			t.Fatalf("CompileAdmission(%s): %v", alias, err)
@@ -517,12 +518,12 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
 				InstanceID: alias, EntityID: entityID, Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
-		}, persistence, eventsStore
+		}, persistence, eventsStore, credentialStore
 	}
 	hashA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-	contextA, persistenceA, eventsA := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
-	contextB, persistenceB, eventsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
+	contextA, persistenceA, eventsA, _ := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
+	contextB, persistenceB, eventsB, credentialsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
 	installed, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
@@ -552,6 +553,23 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	}
 	if got := eventsB.events[0].RunID(); got != contextB.StandingTargets[0].RunID {
 		t.Fatalf("selected event run_id = %q, want %q", got, contextB.StandingTargets[0].RunID)
+	}
+
+	credentialsB["webhook_signing.telegram"] = "telegram-secret-v2"
+	rotatedBody := `{"update_id":100,"message":{"message_id":8,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"rotated"}}`
+	stale := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(rotatedBody))
+	stale.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	staleRecorder := httptest.NewRecorder()
+	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(staleRecorder, stale)
+	if staleRecorder.Code != http.StatusUnauthorized || len(eventsB.events) != 2 {
+		t.Fatalf("stale signing secret status/events = %d/%d, want 401/2", staleRecorder.Code, len(eventsB.events))
+	}
+	current := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(rotatedBody))
+	current.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v2")
+	currentRecorder := httptest.NewRecorder()
+	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(currentRecorder, current)
+	if currentRecorder.Code != http.StatusAccepted || len(eventsB.events) != 4 {
+		t.Fatalf("current signing secret status/events = %d/%d, want 202/4", currentRecorder.Code, len(eventsB.events))
 	}
 }
 

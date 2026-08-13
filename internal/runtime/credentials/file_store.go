@@ -113,23 +113,32 @@ func (s *FileStore) Delete(_ context.Context, key string) error {
 }
 
 func (s *FileStore) Inspect(_ context.Context, key string) (Metadata, error) {
+	snapshot, err := s.Snapshot(context.Background(), key)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return snapshot.Metadata(), nil
+}
+
+func (s *FileStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, error) {
 	key = strings.TrimSpace(key)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc, err := s.loadLocked()
 	if err != nil {
-		return Metadata{}, err
+		return AtomicSnapshot{}, err
 	}
-	meta := Metadata{
+	snapshot := AtomicSnapshot{
 		Key:      key,
 		Writable: true,
 	}
 	if item, ok := doc.Entries[key]; ok {
-		meta.Present = true
-		meta.Source = SourceFile
-		meta.UpdatedAt = timePtr(item.UpdatedAt)
+		snapshot.Present = true
+		snapshot.Source = SourceFile
+		snapshot.UpdatedAt = timePtr(item.UpdatedAt)
+		snapshot.value = item.Value
 	}
-	return meta, nil
+	return snapshot, nil
 }
 
 func (s *FileStore) loadLocked() (fileCredentialSet, error) {

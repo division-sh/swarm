@@ -94,6 +94,71 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	}
 }
 
+func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *testing.T) {
+	repo := RepoRoot()
+	base := &config.Config{
+		ProviderTriggers: config.ProviderTriggersConfig{Packs: config.ProviderTriggerPacksConfig{
+			PlatformDirs: []string{"packs/provider-triggers/telegram"},
+		}},
+		Channels: config.ChannelsConfig{
+			Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
+			Bindings: map[string]config.ChannelBindingConfig{
+				"hitl": {
+					Pack: "provider.telegram.hitl_channel", Destination: "-100123",
+					Credentials: map[string]string{"telegram_bot_token": "telegram_hitl_bot"},
+					Register:    "ingress:support:telegram:telegram",
+				},
+			},
+		},
+	}
+	load := func(t *testing.T, cfg *config.Config) (ChannelPackLoad, error) {
+		t.Helper()
+		result := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
+		triggers, err := LoadConfiguredProviderTriggerPacks(repo, result)
+		if err != nil {
+			t.Fatalf("LoadConfiguredProviderTriggerPacks: %v", err)
+		}
+		spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
+		if err != nil {
+			t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
+		}
+		return LoadConfiguredChannelPacks(context.Background(), repo, result, spec, triggers.Catalog, channelTestCredentialStore{"telegram_hitl_bot": "secret"}, nil)
+	}
+
+	loaded, err := load(t, base)
+	if err != nil {
+		t.Fatalf("LoadConfiguredChannelPacks: %v", err)
+	}
+	if len(loaded.Bindings) != 1 || loaded.Bindings[0].RegistrationTarget() != "ingress:support:telegram:telegram" {
+		t.Fatalf("registration binding = %#v", loaded.Bindings)
+	}
+	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram_bot_token"]; got != "telegram_hitl_bot" {
+		t.Fatalf("credential mapping = %q", got)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*config.ChannelBindingConfig)
+	}{
+		{name: "missing explicit credentials", mutate: func(binding *config.ChannelBindingConfig) { binding.Credentials = nil }},
+		{name: "malformed target", mutate: func(binding *config.ChannelBindingConfig) { binding.Register = "support:telegram" }},
+		{name: "provider mismatch", mutate: func(binding *config.ChannelBindingConfig) { binding.Register = "ingress:support:telegram:slack" }},
+		{name: "unknown credential role", mutate: func(binding *config.ChannelBindingConfig) { binding.Credentials["unused"] = "value" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binding := base.Channels.Bindings["hitl"]
+			binding.Credentials = map[string]string{"telegram_bot_token": "telegram_hitl_bot"}
+			tc.mutate(&binding)
+			candidate := *base
+			candidate.Channels = base.Channels
+			candidate.Channels.Bindings = map[string]config.ChannelBindingConfig{"hitl": binding}
+			if _, err := load(t, &candidate); err == nil {
+				t.Fatal("invalid registration binding was accepted")
+			}
+		})
+	}
+}
+
 type channelTestCredentialStore map[string]string
 
 var _ runtimecredentials.Store = channelTestCredentialStore{}

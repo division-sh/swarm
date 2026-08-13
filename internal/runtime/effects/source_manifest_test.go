@@ -78,6 +78,20 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/mcp/client.go:newStdioRPCClient:process_launch:1":                                                   ownerRuntimeDependency,
 	"internal/runtime/mcp/client.go:Call:stdio_write:1":                                                                   ownerManagedAgent,
 	"internal/runtime/pipeline/activity_engine.go:executePreparedActivityHTTPTool:http_do:1":                              ownerPipelineActivity,
+	"internal/runtime/registration/provider_http.go:executeProviderRequest:http_do:1":                                     ownerOperatorInfra,
+	"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1":                                       ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:1":                                                ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:2":                                                ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:3":                                                ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:4":                                                ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:5":                                                ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:6":                                                ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Launch:process_launch:1":                                                  ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:PreflightCloudflared:process_launch:1":                                    ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:Stop:http_do:1":                                                           ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:probePublicRoute:http_do:1":                                               ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:1":                                       ownerOperatorInfra,
+	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:2":                                       ownerOperatorInfra,
 	"internal/runtime/pipeline/artifact_repo.go:runArtifactGit:process_launch:1":                                          ownerPipelineAction,
 	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:1":                 ownerPipelineAction,
 	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:1":                                ownerPipelineAction,
@@ -271,7 +285,8 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 		}
 	}
 	for primitiveKey, adapters := range primitiveAdapters {
-		if sourcePrimitiveOwners[primitiveKey] != ownerManagedAgent {
+		owner := sourcePrimitiveOwners[primitiveKey]
+		if owner != ownerManagedAgent && !serveRegistrationPrimitive(adapters, owner) {
 			t.Errorf("adapter contract %s -> %v does not name a live managed primitive", primitiveKey, adapters)
 			continue
 		}
@@ -287,6 +302,19 @@ func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 			t.Errorf("managed primitive contract %s -> %v: %v", primitiveKey, adapters, err)
 		}
 	}
+}
+
+func serveRegistrationPrimitive(adapters []string, owner primitiveOwner) bool {
+	if owner != ownerOperatorInfra || len(adapters) == 0 {
+		return false
+	}
+	for _, adapter := range adapters {
+		registration, ok := RegistrationFor(adapter)
+		if !ok || registration.Kind != KindServeRegistration {
+			return false
+		}
+	}
+	return true
 }
 
 func verifyManagedPrimitiveOrdering(root, primitiveKey string, requiresCompletionHeartbeat bool) error {

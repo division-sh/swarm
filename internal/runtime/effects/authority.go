@@ -20,6 +20,7 @@ const (
 	AuthoritySelectedContractFork AuthorityKind = "selected_contract_fork"
 	AuthorityConversationForkChat AuthorityKind = "conversation_fork_chat"
 	AuthorityStartupProbe         AuthorityKind = "startup_probe"
+	AuthorityServeRegistration    AuthorityKind = "serve_registration"
 )
 
 type UsageTargetKind string
@@ -109,19 +110,26 @@ type StartupProbeAuthority struct {
 	ExecutionAuthorityID string
 }
 
+type ServeRegistrationAuthority struct {
+	IntentID            string
+	StartupAuthorityID  string
+	StartupStateVersion uint64
+}
+
 type Authority struct {
-	Kind            AuthorityKind
-	ID              string
-	Normal          LifecycleToken
-	SelectedFork    SelectedContractForkAuthority
-	ForkChat        ConversationForkChatAuthority
-	StartupProbe    StartupProbeAuthority
-	ExecutionOwner  string
-	LeaseExpiresAt  time.Time
-	FenceGeneration uint64
-	Target          UsageTarget
-	BudgetScopes    []BudgetAdmissionScope
-	ExecutionMode   ExecutionMode
+	Kind              AuthorityKind
+	ID                string
+	Normal            LifecycleToken
+	SelectedFork      SelectedContractForkAuthority
+	ForkChat          ConversationForkChatAuthority
+	StartupProbe      StartupProbeAuthority
+	ServeRegistration ServeRegistrationAuthority
+	ExecutionOwner    string
+	LeaseExpiresAt    time.Time
+	FenceGeneration   uint64
+	Target            UsageTarget
+	BudgetScopes      []BudgetAdmissionScope
+	ExecutionMode     ExecutionMode
 }
 
 type ExecutionMode = executionmode.Mode
@@ -161,6 +169,9 @@ func (a Authority) Valid() bool {
 		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
 			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
 			nonEmpty(a.StartupProbe.ActorID, a.StartupProbe.ExecutionKind, a.StartupProbe.ExecutionAuthorityID)
+	case AuthorityServeRegistration:
+		return validUUIDs(a.ServeRegistration.IntentID, a.ServeRegistration.StartupAuthorityID) &&
+			a.ID == strings.TrimSpace(a.ServeRegistration.IntentID) && a.ServeRegistration.StartupStateVersion > 0
 	default:
 		return false
 	}
@@ -172,7 +183,7 @@ func (a Authority) Generation() uint64 {
 		return a.Normal.Generation
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
-	case AuthorityConversationForkChat:
+	case AuthorityConversationForkChat, AuthorityServeRegistration:
 		return a.FenceGeneration
 	case AuthorityStartupProbe:
 		return a.FenceGeneration
@@ -232,6 +243,10 @@ func (a Authority) Evidence() map[string]any {
 		evidence["actor_id"] = a.StartupProbe.ActorID
 		evidence["execution_kind"] = a.StartupProbe.ExecutionKind
 		evidence["execution_authority_id"] = a.StartupProbe.ExecutionAuthorityID
+	case AuthorityServeRegistration:
+		evidence["intent_id"] = a.ServeRegistration.IntentID
+		evidence["startup_authority_id"] = a.ServeRegistration.StartupAuthorityID
+		evidence["startup_state_version"] = a.ServeRegistration.StartupStateVersion
 	}
 	return evidence
 }

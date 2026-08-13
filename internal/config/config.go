@@ -60,8 +60,10 @@ type ChannelPacksConfig struct {
 }
 
 type ChannelBindingConfig struct {
-	Pack        string `yaml:"pack"`
-	Destination any    `yaml:"destination"`
+	Pack        string            `yaml:"pack"`
+	Destination any               `yaml:"destination"`
+	Credentials map[string]string `yaml:"credentials,omitempty"`
+	Register    string            `yaml:"register,omitempty"`
 }
 
 type DatabaseConfig struct {
@@ -426,6 +428,19 @@ func (c *Config) validateChannels() error {
 		}
 		if binding.Destination == nil {
 			return fmt.Errorf("channels.bindings.%s.destination is required", id)
+		}
+		for rawLogical, rawStoreKey := range binding.Credentials {
+			logical := strings.TrimSpace(rawLogical)
+			admittedKey := strings.TrimSpace(rawStoreKey)
+			if logical == "" || admittedKey == "" {
+				return fmt.Errorf("channels.bindings.%s.credentials requires non-empty logical names and credential-store keys", id)
+			}
+			if logical != rawLogical || admittedKey != rawStoreKey {
+				return fmt.Errorf("channels.bindings.%s.credentials.%s must not contain surrounding whitespace", id, rawLogical)
+			}
+		}
+		if raw := binding.Register; raw != strings.TrimSpace(raw) {
+			return fmt.Errorf("channels.bindings.%s.register must not contain surrounding whitespace", id)
 		}
 	}
 	return nil

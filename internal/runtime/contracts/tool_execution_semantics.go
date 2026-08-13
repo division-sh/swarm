@@ -14,6 +14,7 @@ type ToolCategory uint8
 const (
 	ToolCategoryUnspecified ToolCategory = iota
 	ToolCategoryProviderConnector
+	ToolCategoryProviderRegistration
 	ToolCategoryChannelOperation
 	ToolCategoryPlatform
 	ToolCategoryHumanDecision
@@ -27,6 +28,8 @@ func ParseToolCategory(raw string) (ToolCategory, error) {
 		return ToolCategoryUnspecified, nil
 	case "provider_connector":
 		return ToolCategoryProviderConnector, nil
+	case "provider_registration":
+		return ToolCategoryProviderRegistration, nil
 	case "channel_operation":
 		return ToolCategoryChannelOperation, nil
 	case "platform":
@@ -48,6 +51,8 @@ func (c ToolCategory) String() string {
 		return ""
 	case ToolCategoryProviderConnector:
 		return "provider_connector"
+	case ToolCategoryProviderRegistration:
+		return "provider_registration"
 	case ToolCategoryChannelOperation:
 		return "channel_operation"
 	case ToolCategoryPlatform:

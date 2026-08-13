@@ -337,8 +337,8 @@ func (m ConnectorManifest) Validate() error {
 	}
 	for _, toolID := range names {
 		tool := m.Tools[toolID]
-		if !isProviderConnector(tool) {
-			return fmt.Errorf("connector manifest tool %q must declare category %q", toolID, Category)
+		if !isProviderConnector(tool) && !isProviderRegistration(tool) {
+			return fmt.Errorf("connector manifest tool %q must declare category %q or %q", toolID, Category, "provider_registration")
 		}
 		toolProvider, _, ok := splitToolID(toolID)
 		if !ok {
@@ -347,7 +347,13 @@ func (m ConnectorManifest) Validate() error {
 		if toolProvider != provider {
 			return fmt.Errorf("connector manifest tool %q provider %q does not match manifest provider %q", toolID, toolProvider, provider)
 		}
-		if errs := validateTool(toolID, tool); len(errs) > 0 {
+		var errs []error
+		if isProviderConnector(tool) {
+			errs = validateTool(toolID, tool)
+		} else {
+			errs = validateRegistrationTool(toolID, tool)
+		}
+		if len(errs) > 0 {
 			return fmt.Errorf("%s", joinValidationErrors(errs))
 		}
 	}

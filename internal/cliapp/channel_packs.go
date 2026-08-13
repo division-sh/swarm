@@ -103,6 +103,11 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		if !ok {
 			return nil, fmt.Errorf("channels.bindings.%s references unavailable channel pack %q", id, declared.Pack)
 		}
+		credentialKeys := normalizeChannelCredentialMap(declared.Credentials)
+		if err := validateChannelBindingRegistration(id, declared, plan, credentialKeys); err != nil {
+			return nil, err
+		}
+		credentialStore := mappedChannelCredentialStore{Store: staticCredentials, keys: credentialKeys}
 		requirementsByKey := map[string]packs.Requirement{}
 		requirementOwner := map[string]string{}
 		for _, operationName := range plan.OperationNames() {
@@ -111,7 +116,7 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 				return nil, fmt.Errorf("channels.bindings.%s connector operation: %w", id, err)
 			}
 			resolved, err := providerconnectors.RequirementsForTool(ctx, connectorToolID, tool, providerconnectors.CapabilityOptions{
-				StaticCredentials: staticCredentials, ManagedCredentials: managedCredentials,
+				StaticCredentials: credentialStore, ManagedCredentials: managedCredentials,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("channels.bindings.%s connector requirements: %w", id, err)
@@ -137,13 +142,103 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		for _, key := range requirementKeys {
 			requirements = append(requirements, requirementsByKey[key])
 		}
-		binding, err := packs.NewOutboundBindingPlan(id, plan, declared.Destination, requirements)
+		binding, err := packs.NewOutboundBindingPlanWithRegistration(id, plan, declared.Destination, requirements, credentialKeys, declared.Register)
 		if err != nil {
 			return nil, err
 		}
 		bindings = append(bindings, binding)
 	}
 	return bindings, nil
+}
+
+func normalizeChannelCredentialMap(input map[string]string) map[string]string {
+	out := make(map[string]string, len(input))
+	for logical, rawKey := range input {
+		out[strings.TrimSpace(logical)] = strings.TrimSpace(rawKey)
+	}
+	return out
+}
+
+func validateChannelBindingRegistration(id string, declared config.ChannelBindingConfig, plan packs.SatisfactionPlan, credentialKeys map[string]string) error {
+	expected := map[string]struct{}{}
+	for _, operationName := range plan.OperationNames() {
+		_, tool, err := plan.ConnectorOperation(operationName)
+		if err != nil {
+			return err
+		}
+		for _, logical := range tool.Credentials() {
+			expected[logical] = struct{}{}
+		}
+	}
+	register := strings.TrimSpace(declared.Register)
+	registration, hasRegistration := plan.Registration()
+	if register != "" {
+		if !hasRegistration {
+			return fmt.Errorf("channels.bindings.%s.register requires channel pack %q to declare registration", id, plan.ChannelIdentity().ID())
+		}
+		target, err := packs.ParseChannelRegistrationTarget(register)
+		if err != nil {
+			return fmt.Errorf("channels.bindings.%s.register: %w", id, err)
+		}
+		if target.Provider != registration.Provider() {
+			return fmt.Errorf("channels.bindings.%s.register provider %q conflicts with channel registration provider %q", id, target.Provider, registration.Provider())
+		}
+		for _, logical := range registration.ProviderCredentials() {
+			expected[logical] = struct{}{}
+		}
+		if len(credentialKeys) == 0 {
+			return fmt.Errorf("channels.bindings.%s.register requires an explicit complete credentials map", id)
+		}
+	}
+	for logical := range credentialKeys {
+		if _, ok := expected[logical]; !ok {
+			return fmt.Errorf("channels.bindings.%s.credentials.%s is not required by the selected channel plan", id, logical)
+		}
+	}
+	if register != "" {
+		missing := make([]string, 0)
+		for logical := range expected {
+			if strings.TrimSpace(credentialKeys[logical]) == "" {
+				missing = append(missing, logical)
+			}
+		}
+		sort.Strings(missing)
+		if len(missing) > 0 {
+			return fmt.Errorf("channels.bindings.%s.credentials is missing required mappings: %s", id, strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
+type mappedChannelCredentialStore struct {
+	runtimecredentials.Store
+	keys map[string]string
+}
+
+func (s mappedChannelCredentialStore) mapped(key string) string {
+	key = strings.TrimSpace(key)
+	if mapped := s.keys[key]; mapped != "" {
+		return mapped
+	}
+	return key
+}
+
+func (s mappedChannelCredentialStore) Get(ctx context.Context, key string) (string, bool, error) {
+	if s.Store == nil {
+		return "", false, nil
+	}
+	return s.Store.Get(ctx, s.mapped(key))
+}
+
+func (s mappedChannelCredentialStore) Inspect(ctx context.Context, key string) (runtimecredentials.Metadata, error) {
+	mapped := s.mapped(key)
+	if inspector, ok := s.Store.(runtimecredentials.Inspector); ok {
+		metadata, err := inspector.Inspect(ctx, mapped)
+		metadata.Key = strings.TrimSpace(key)
+		return metadata, err
+	}
+	_, present, err := s.Get(ctx, key)
+	return runtimecredentials.Metadata{Key: strings.TrimSpace(key), Present: present}, err
 }
 
 func appendChannelCapabilitySubjects(report *LocalPreflightReport, load ChannelPackLoad) {

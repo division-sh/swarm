@@ -269,10 +269,34 @@ func validateInterfaceField(subject string, field runtimecontracts.PackInterface
 }
 
 type ChannelManifest struct {
-	Provider    string                                      `yaml:"provider"`
-	OpaqueTypes map[string]runtimecontracts.ToolInputSchema `yaml:"opaque_types"`
-	Operations  map[string]ChannelOperationBinding          `yaml:"operations"`
-	Events      map[string]ChannelEventBinding              `yaml:"events"`
+	Provider     string                                      `yaml:"provider"`
+	OpaqueTypes  map[string]runtimecontracts.ToolInputSchema `yaml:"opaque_types"`
+	Operations   map[string]ChannelOperationBinding          `yaml:"operations"`
+	Events       map[string]ChannelEventBinding              `yaml:"events"`
+	Registration *ChannelRegistrationProfile                 `yaml:"registration,omitempty"`
+}
+
+type ChannelRegistrationProfile struct {
+	Slot        ChannelRegistrationSlot        `yaml:"slot"`
+	Credentials ChannelRegistrationCredentials `yaml:"credentials"`
+	Apply       ChannelRegistrationOperation   `yaml:"apply"`
+	Readback    ChannelRegistrationOperation   `yaml:"readback"`
+}
+
+type ChannelRegistrationSlot struct {
+	Namespace string                       `yaml:"namespace"`
+	Identify  ChannelRegistrationOperation `yaml:"identify"`
+}
+
+type ChannelRegistrationCredentials struct {
+	Provider []string `yaml:"provider"`
+	Signing  string   `yaml:"signing"`
+}
+
+type ChannelRegistrationOperation struct {
+	Tool   string                    `yaml:"tool"`
+	Input  map[string]ChannelMapping `yaml:"input,omitempty"`
+	Output map[string]ChannelMapping `yaml:"output,omitempty"`
 }
 
 type ChannelOperationBinding struct {
@@ -496,6 +520,11 @@ func validateChannelManifest(packID string, manifest ChannelManifest) error {
 			}
 		}
 	}
+	if manifest.Registration != nil {
+		if err := validateChannelRegistrationManifest(packID, *manifest.Registration); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -553,6 +582,7 @@ type SatisfactionPlan struct {
 	operations        map[string]compiledChannelOperation
 	events            map[string]compiledChannelEvent
 	constraints       map[string]runtimecontracts.ToolInputSchema
+	registration      *CompiledChannelRegistration
 	generation        plangeneration.Generation
 }
 
@@ -665,13 +695,15 @@ type compiledChannelEvent struct {
 }
 
 type OutboundBindingPlan struct {
-	id              channelPlanIdentity
-	structural      SatisfactionPlan
-	destination     semanticvalue.Value
-	requirements    []Requirement
-	runtimeTools    map[string]runtimecontracts.ToolSchemaEntry
-	runtimeToolIDs  map[string]channelPlanIdentity
-	activityTargets map[string]PrivateActivityTargetIdentity
+	id                 channelPlanIdentity
+	structural         SatisfactionPlan
+	destination        semanticvalue.Value
+	requirements       []Requirement
+	runtimeTools       map[string]runtimecontracts.ToolSchemaEntry
+	runtimeToolIDs     map[string]channelPlanIdentity
+	activityTargets    map[string]PrivateActivityTargetIdentity
+	credentialKeys     map[string]string
+	registrationTarget string
 }
 
 func (p SatisfactionPlan) ChannelIdentity() PackIdentity {
@@ -732,7 +764,31 @@ func (p OutboundBindingPlan) OperationEffectClass(name string) (runtimecontracts
 	return p.structural.OperationEffectClass(name)
 }
 
+func (p OutboundBindingPlan) Registration() (CompiledChannelRegistration, bool) {
+	return p.structural.Registration()
+}
+
+func (p OutboundBindingPlan) PlanGeneration() (plangeneration.Generation, error) {
+	return p.structural.Generation()
+}
+
+func (p OutboundBindingPlan) CredentialStoreKeys() map[string]string {
+	return cloneChannelStringMap(p.credentialKeys)
+}
+
+func (p OutboundBindingPlan) RegistrationTarget() string {
+	return strings.TrimSpace(p.registrationTarget)
+}
+
 func NewOutboundBindingPlan(id string, structural SatisfactionPlan, destination any, requirements []Requirement) (OutboundBindingPlan, error) {
+	return NewOutboundBindingPlanWithCredentials(id, structural, destination, requirements, nil)
+}
+
+func NewOutboundBindingPlanWithCredentials(id string, structural SatisfactionPlan, destination any, requirements []Requirement, credentialKeys map[string]string) (OutboundBindingPlan, error) {
+	return NewOutboundBindingPlanWithRegistration(id, structural, destination, requirements, credentialKeys, "")
+}
+
+func NewOutboundBindingPlanWithRegistration(id string, structural SatisfactionPlan, destination any, requirements []Requirement, credentialKeys map[string]string, registrationTarget string) (OutboundBindingPlan, error) {
 	bindingID, err := admitChannelPlanIdentity("channel outbound binding id", id)
 	if err != nil {
 		return OutboundBindingPlan{}, err
@@ -750,10 +806,12 @@ func NewOutboundBindingPlan(id string, structural SatisfactionPlan, destination 
 	}
 	plan := OutboundBindingPlan{
 		id: bindingID, structural: structural, destination: admitted,
-		requirements:    cloneRequirements(requirements),
-		runtimeTools:    make(map[string]runtimecontracts.ToolSchemaEntry, len(structural.operations)),
-		runtimeToolIDs:  make(map[string]channelPlanIdentity, len(structural.operations)),
-		activityTargets: make(map[string]PrivateActivityTargetIdentity, len(structural.operations)),
+		requirements:       cloneRequirements(requirements),
+		runtimeTools:       make(map[string]runtimecontracts.ToolSchemaEntry, len(structural.operations)),
+		runtimeToolIDs:     make(map[string]channelPlanIdentity, len(structural.operations)),
+		activityTargets:    make(map[string]PrivateActivityTargetIdentity, len(structural.operations)),
+		credentialKeys:     cloneChannelStringMap(credentialKeys),
+		registrationTarget: strings.TrimSpace(registrationTarget),
 	}
 	generation, err := structural.Generation()
 	if err != nil {
@@ -782,7 +840,7 @@ func NewOutboundBindingPlan(id string, structural SatisfactionPlan, destination 
 		}
 		plan.runtimeToolIDs[name] = runtimeID
 		plan.runtimeTools[runtimeID.String()] = tool
-		plan.activityTargets[name] = PrivateActivityTargetIdentity{toolID: targetID, generation: generation}
+		plan.activityTargets[name] = PrivateActivityTargetIdentity{toolID: targetID, generation: generation, credentialKeys: cloneChannelStringMap(credentialKeys)}
 	}
 	return plan, nil
 }
@@ -1178,6 +1236,12 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 			required[fieldName] = field.Required
 		}
 		plan.events[name] = compiledChannelEvent{name: eventName, event: triggerEvent, fields: fields, fieldSchema: fieldSchemas, required: required}
+	}
+	if channel.Manifest.Registration != nil {
+		plan.registration, err = compileChannelRegistration(*channel.Manifest.Registration, connector, provider)
+		if err != nil {
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q registration: %w", channel.Envelope.ID, err)
+		}
 	}
 	plan.generation, err = compileSatisfactionPlanGeneration(plan)
 	if err != nil {

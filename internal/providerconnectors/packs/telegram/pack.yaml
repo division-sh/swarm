@@ -2,14 +2,17 @@ id: provider.telegram.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:7b3f2c0e488e3ac8673c96446137fe9eb59ed8ae87e51634978fa280b4b186fa
+manifest_hash: sha256:5bfeadb4e79b483406f259a668d892b7c38a79042846732b572001708da02156
 provenance:
   source: platform
 capabilities:
   can:
     call_provider_actions:
       - telegram.answer_callback
+      - telegram.apply_webhook
       - telegram.edit_message
+      - telegram.identify_bot
+      - telegram.read_webhook
       - telegram.send_interactive
       - telegram.send_message
     lower_through_activity: true
@@ -21,6 +24,7 @@ capabilities:
 requires:
   secrets:
     - telegram_bot_token
+    - webhook_signing_secret
 tests:
   - providerconnectors/telegram_pack
   - runtime/telegram_connector_supported_surface

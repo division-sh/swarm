@@ -108,6 +108,16 @@ non-secret defaults, use [`swarm.example.yaml`](swarm.example.yaml) as the
 non-secret `swarm.yaml` reference. For contract
 credentials, use `swarm secrets set` and validate with `swarm secrets check`.
 
+For local webhook development, `swarm serve --dev --expose` owns a temporary
+public callback URL and reconciles registration declared by a configured channel
+binding. Managed exposure requires `cloudflared` 2021.7.0 or newer (`brew install
+cloudflared`). Quick-tunnel URLs are ephemeral and have no availability SLA. To
+use an externally managed HTTPS origin instead, provide both
+`--public-webhook-base-url` and an explicit loopback
+`--public-webhook-listen`; these options are development-only. The public
+listener exposes `/webhooks/*` only and never exposes API, MCP, health, or other
+control-plane routes.
+
 For credentialless end-to-end agent runs, select `llm.backend: mock` and give each
 agent one contracts-root-relative Python performance:
 

@@ -1,4 +1,22 @@
 provider: telegram
+registration:
+  slot:
+    namespace: bot_webhook
+    identify:
+      tool: telegram.identify_bot
+      output:
+        resource_id: result.bot_id
+  credentials:
+    provider: [telegram_bot_token]
+    signing: webhook_signing_secret
+  apply:
+    tool: telegram.apply_webhook
+    input:
+      callback_url: context.callback_url
+  readback:
+    tool: telegram.read_webhook
+    output:
+      callback_url: result.callback_url
 opaque_types:
   destination:
     type: string
