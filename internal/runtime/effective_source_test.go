@@ -111,6 +111,21 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 			t.Fatal("channel plan generation change retained effective source digest")
 		}
 	})
+
+	t.Run("channel destination", func(t *testing.T) {
+		plan, _ := effectiveSourceTestChannelPlans(t, repoRoot)
+		first, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := packs.NewOutboundBindingPlan("ops", plan, "43", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if digestForEffectiveSourceBindings(t, source, fact, []packs.OutboundBindingPlan{first}) == digestForEffectiveSourceBindings(t, source, fact, []packs.OutboundBindingPlan{second}) {
+			t.Fatal("channel destination change retained effective source digest")
+		}
+	})
 }
 
 func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *testing.T) {
@@ -283,6 +298,19 @@ func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact
 func digestForEffectiveSourceValue(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, plans []packs.SatisfactionPlan) string {
 	t.Helper()
 	value, err := effectiveSourceIdentityValue(source, fact, plans, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := canonicaljson.Hash(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
+func digestForEffectiveSourceBindings(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, bindings []packs.OutboundBindingPlan) string {
+	t.Helper()
+	value, err := effectiveSourceIdentityValue(source, fact, nil, bindings)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -236,7 +236,8 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 			toolValues = append(toolValues, map[string]any{"id": id, "tool": value})
 		}
 		channelValues = append(channelValues, map[string]any{
-			"kind": "outbound_binding", "id": binding.BindingID(), "generation": generation.Diagnostic(), "runtime_tools": toolValues,
+			"kind": "outbound_binding", "id": binding.BindingID(), "generation": generation.Diagnostic(),
+			"destination": binding.Destination().Interface(), "runtime_tools": toolValues,
 		})
 	}
 	sort.Slice(channelValues, func(left, right int) bool {

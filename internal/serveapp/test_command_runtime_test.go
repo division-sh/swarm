@@ -80,6 +80,45 @@ func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
 }
 
+func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "channel-projection.sqlite"))
+	rawConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channelPackDir := filepath.Join(cliapp.RepoRoot(), "packs", "channels", "telegram")
+	configured := string(rawConfig) + fmt.Sprintf(`
+channels:
+  packs:
+    platform_dirs: [%q]
+  bindings:
+    ops:
+      pack: provider.telegram.hitl_channel
+      destination: "42"
+`, channelPackDir)
+	if err := os.WriteFile(configPath, []byte(configured), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath: configPath, ContractsPath: contractsPath,
+		PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
+	})
+	process.waitForReadyLine()
+	rt := servedTestProcessRuntime(t, process)
+	if rt == nil || rt.Options.WorkflowModule == nil {
+		t.Fatal("configured channel runtime is incomplete")
+	}
+	if _, ok := rt.Options.WorkflowModule.SemanticSource().ToolEntries()["channel.ops.deliver"]; !ok {
+		t.Fatal("configured channel runtime omitted projected channel.ops.deliver tool")
+	}
+}
+
 func TestScaffoldAdmittedArchetypesRunUneditedZeroCredentialSQLite(t *testing.T) {
 	for _, archetype := range []string{"zero-agent-automation", "webhook-responder"} {
 		archetype := archetype

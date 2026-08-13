@@ -716,6 +716,10 @@ func (p OutboundBindingPlan) BindingID() string {
 	return p.id.String()
 }
 
+func (p OutboundBindingPlan) Destination() semanticvalue.Value {
+	return p.destination
+}
+
 func (p OutboundBindingPlan) OperationNames() []string {
 	return p.structural.OperationNames()
 }

@@ -19759,7 +19759,8 @@ test_specification:
           bundle hash and persisted/ephemeral provenance; every exact public input with resolved event provenance and accepted
           schema; every effective authored/imported provider connector and channel runtime tool with complete canonical schema;
           connector import/generation/provenance; provider-trigger catalog generation and imported-event provenance; and every
-          configured channel plan/binding generation. Missing required schemas or external provenance fails closed.
+          configured channel plan/binding generation and each binding's exact admitted destination. Missing required schemas
+          or external provenance fails closed.
         excluded: credentials, readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
       execution_profile:
         owner: internal/runtime/scenarioexecution
