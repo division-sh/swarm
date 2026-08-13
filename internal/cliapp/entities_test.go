@@ -266,6 +266,38 @@ func TestEntityViewJSONIsDataComplete(t *testing.T) {
 	}
 }
 
+func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
+	var stdout bytes.Buffer
+	writeEntityFullResult(&stdout, entityFull{
+		Entity: entitySummary{
+			EntityID:     "entity-1",
+			RunID:        "run-1",
+			FlowInstance: "flows/review",
+			EntityType:   "vertical",
+			CurrentState: "collecting",
+			Revision:     1,
+			CreatedAt:    "2026-05-20T01:00:00Z",
+			UpdatedAt:    "2026-05-20T01:05:00Z",
+		},
+		Fields:      map[string]any{},
+		Gates:       map[string]bool{},
+		Accumulated: map[string]any{},
+	}, entityRenderOptions{})
+
+	for _, label := range []string{"slug", "name"} {
+		found := false
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if reflect.DeepEqual(strings.Fields(line), []string{label, "-"}) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("absent %s must render as a stated dash:\n%s", label, stdout.String())
+		}
+	}
+}
+
 func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured []jsonRPCRequest
@@ -819,6 +851,9 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 			t.Fatalf("unscoped list missing %q:\n%s", want, stdout.String())
 		}
 	}
+	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "RUN", "TYPE", "STATE", "FLOW", "UPDATED"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unscoped columns = %v, want %v:\n%s", got, want, stdout.String())
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -826,25 +861,31 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("scoped code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if strings.Contains(stdout.String(), "RUN") {
-		t.Fatalf("run-scoped list should not repeat the RUN column:\n%s", stdout.String())
+	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "TYPE", "STATE", "FLOW", "UPDATED"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("run-scoped columns = %v, want %v:\n%s", got, want, stdout.String())
 	}
 }
 
 func TestEntityListFlowTruncationPreservesDistinguishingSegments(t *testing.T) {
 	sharedHash := strings.Repeat("a", 64)
-	flowA := "ingress/" + sharedHash + "/slot-1"
-	flowB := "ingress/" + sharedHash + "/slot-2"
-	renderedA := entityShortFlow(flowA)
-	renderedB := entityShortFlow(flowB)
-	if renderedA == renderedB {
-		t.Fatalf("instances differing past a shared prefix must render distinct cells:\nA=%s\nB=%s", renderedA, renderedB)
+	sharedLongPrefix := strings.Repeat("segment-", 30)
+	flowA := "ingress/" + sharedHash + "/" + sharedLongPrefix + "/slot-1"
+	flowB := "ingress/" + sharedHash + "/" + sharedLongPrefix + "/slot-2"
+	var stdout bytes.Buffer
+	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+	}}, entityListRenderOptions{runScoped: true})
+
+	rendered := stdout.String()
+	for _, want := range []string{"ingress/", "slot-1", "slot-2", "…"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered flow cells must preserve %q:\n%s", want, rendered)
+		}
 	}
-	if !strings.Contains(renderedA, "ingress/") || !strings.Contains(renderedA, "slot-1") {
-		t.Fatalf("instance-discriminating segments must stay intact:\n%s", renderedA)
-	}
-	if !strings.Contains(renderedA, "…") || !strings.Contains(renderedB, "…") {
-		t.Fatalf("hash-bearing segment must be truncated:\nA=%s\nB=%s", renderedA, renderedB)
+	lines := strings.Split(strings.TrimSpace(rendered), "\n")
+	if len(lines) != 3 || lines[1] == lines[2] {
+		t.Fatalf("pathological instances differing after rune 200 must render as distinct rows:\n%s", rendered)
 	}
 }
 

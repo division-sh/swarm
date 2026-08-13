@@ -25112,7 +25112,7 @@ cli_specification:
         required: false
         api_param: cursor
       output:
-        table: ENTITY_ID / RUN / FLOW / TYPE / STATE / REVISION / UPDATED / SLUG / NAME plus next_cursor when present
+        table: ENTITY_ID / optional RUN (omitted when --run-id scopes the query) / TYPE / STATE / FLOW / UPDATED plus next_cursor when present
         empty: No entities match the filter.
       exit_codes:
         success: 0

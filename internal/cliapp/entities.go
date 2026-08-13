@@ -537,7 +537,7 @@ func writeEntityListResult(out io.Writer, result entityListResult, opts entityLi
 		row = append(row,
 			entityDash(entityOneLine(entity.EntityType)),
 			entityDash(entityOneLine(entity.CurrentState)),
-			entityShortFlow(entityOneLine(entity.FlowInstance)),
+			entityShortFlow(entity.FlowInstance),
 			entityTimestampText(cliRelativeTimeNow(), entity.UpdatedAt, opts.verbose),
 		)
 		rows = append(rows, row)
@@ -573,12 +573,10 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 		{Label: "created", Value: entityTimestampText(now, entity.CreatedAt, opts.verbose)},
 		{Label: "updated", Value: entityTimestampText(now, entity.UpdatedAt, opts.verbose)},
 	}
-	if strings.TrimSpace(entity.Slug) != "" {
-		header = append(header, cliLabeledDetailRow{Label: "slug", Value: entityOneLine(entity.Slug)})
-	}
-	if strings.TrimSpace(entity.Name) != "" {
-		header = append(header, cliLabeledDetailRow{Label: "name", Value: entityOneLine(entity.Name)})
-	}
+	header = append(header,
+		cliLabeledDetailRow{Label: "slug", Value: entityDash(entityOneLine(entity.Slug))},
+		cliLabeledDetailRow{Label: "name", Value: entityDash(entityOneLine(entity.Name))},
+	)
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Entity " + entity.EntityID, Rows: header})
 
 	writeEntityFieldSection(out, "Fields", result.Fields, entityContentField, true)
@@ -607,11 +605,12 @@ func entityOneLine(value string) string {
 	return cliRenderOneLineValue(value)
 }
 
-// entityContentField reports whether a field key is workflow-declared content
-// (default-visible) rather than platform-injected bookkeeping. The platform key
-// set is owned by runtimecontracts.EntityFieldBookkeepingKeys, adjacent to the
-// injection sites; a platform key forgotten there shows up in default output
-// (fail-visible) instead of silently vanishing.
+// entityContentField is a temporary display classifier for entity.get's
+// undifferentiated fields map. A workflow-authored field whose name collides
+// with a platform bookkeeping key is hidden from default output, but remains
+// available under --verbose and --json. Issue #2242 tracks moving ownership to
+// the API projection so this name-based limitation and classifier can be
+// removed.
 func entityContentField(key string) bool {
 	return !runtimecontracts.IsEntityFieldBookkeepingKey(key)
 }
@@ -738,6 +737,7 @@ const entityHashSegmentMaxRunes = 12
 // so two instances differing past a shared prefix still render as distinct,
 // round-trippable cells.
 func entityShortFlow(flow string) string {
+	flow = strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(flow))
 	segments := strings.Split(strings.Trim(flow, "/"), "/")
 	for i, segment := range segments {
 		if entityHashSegmentPattern.MatchString(segment) && len(segment) > entityHashSegmentMaxRunes {
