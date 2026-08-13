@@ -63,6 +63,10 @@ func TestAgentFrameCLIRejectsSelectorConflictsBeforeAPIRequest(t *testing.T) {
 		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "review", "--root"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--root", "--flow-instance", "review/one"},
 		{"agent", "frame", "reviewer", "--scope", "effective", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--root"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", "/review/"},
+		{"agent", "frame", "reviewer", "--scope", "static", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--flow", " review "},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "/review/one/"},
+		{"agent", "frame", "reviewer", "--scope", "effective", "--flow-instance", "review/one/"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code != 2 {

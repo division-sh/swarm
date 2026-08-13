@@ -52,7 +52,7 @@ func inspectStaticAgentFrame(ctx context.Context, catalog BundleCatalogReadStore
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	flow, err := requiredStringParam(params, "flow")
+	flow, err := requiredExactAgentFramePathParam(params, "flow")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
@@ -64,7 +64,7 @@ func inspectStaticAgentFrame(ctx context.Context, catalog BundleCatalogReadStore
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	flowInstance, _, err := optionalStringParam(params, "flow_instance")
+	flowInstance, _, err := optionalExactAgentFramePathParam(params, "flow_instance")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
@@ -79,18 +79,18 @@ func inspectStaticAgentFrame(ctx context.Context, catalog BundleCatalogReadStore
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	wantFlow := strings.Trim(strings.TrimSpace(flow), "/")
+	wantFlow := flow
 	if wantFlow == "root" {
 		wantFlow = ""
 	}
 	matches := make([]bundlecatalog.AgentDefinition, 0, 1)
 	for _, definition := range result.Agents {
-		if definition.AgentID == agentID && strings.Trim(strings.TrimSpace(definition.FlowInstance), "/") == wantFlow {
+		if definition.AgentID == agentID && definition.FlowInstance == wantFlow {
 			matches = append(matches, definition)
 		}
 	}
 	if len(matches) == 0 {
-		return agentframe.Inspection{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID, "bundle_hash": bundleHash, "flow": flow})
+		return agentframe.Inspection{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 	}
 	if len(matches) != 1 {
 		return agentframe.Inspection{}, fmt.Errorf("static agent frame selector is ambiguous")
@@ -106,12 +106,12 @@ func inspectStaticAgentFrame(ctx context.Context, catalog BundleCatalogReadStore
 	}
 	return agentframe.InspectStatic(agentframe.InspectionSelector{
 		BundleHash: bundleHash,
-		Flow:       strings.Trim(strings.TrimSpace(flow), "/"),
+		Flow:       flow,
 		AgentID:    agentID,
 	}, agentframe.PreviewSeed{
 		BundleHash:     bundleHash,
 		AgentID:        agentID,
-		AuthoredFlow:   strings.Trim(strings.TrimSpace(flow), "/"),
+		AuthoredFlow:   flow,
 		Role:           definition.Role,
 		FlowID:         definition.FlowInstance,
 		Intent:         intent,
@@ -132,7 +132,7 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	flowInstance, _, err := optionalStringParam(params, "flow_instance")
+	flowInstance, _, err := optionalExactAgentFramePathParam(params, "flow_instance")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
@@ -149,12 +149,47 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	}
 	resolved, err := resolver.ResolveAgentFrameConfig(agentID, flowInstance, root)
 	if errors.Is(err, runtimemanager.ErrAgentNotFound) {
-		return agentframe.Inspection{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID, "root": root, "flow_instance": flowInstance})
+		return agentframe.Inspection{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 	}
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
 	return effectiveFrameInspection(resolved, agentID, flowInstance, root)
+}
+
+func requiredExactAgentFramePathParam(params map[string]any, name string) (string, error) {
+	value, present, err := optionalExactAgentFramePathParam(params, name)
+	if err != nil {
+		return "", err
+	}
+	if !present || value == "" {
+		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
+	}
+	return value, nil
+}
+
+func optionalExactAgentFramePathParam(params map[string]any, name string) (string, bool, error) {
+	if params == nil {
+		return "", false, nil
+	}
+	raw, present := params[name]
+	if !present || raw == nil {
+		return "", present, nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", true, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be a string"})
+	}
+	if value == "" {
+		return "", true, nil
+	}
+	if value != strings.TrimSpace(value) || value != strings.Trim(value, "/") {
+		return "", true, NewInvalidParamsError(map[string]any{
+			"field":  name,
+			"reason": "must be an exact canonical path without surrounding whitespace or leading or trailing slash",
+		})
+	}
+	return value, true, nil
 }
 
 func effectiveFrameInspection(resolved runtimemanager.AgentFrameConfig, agentID, flowInstance string, root bool) (agentframe.Inspection, error) {

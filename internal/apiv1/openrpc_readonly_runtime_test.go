@@ -32,6 +32,7 @@ func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 	root := repoRoot(t)
 	api := loadComplianceAPISpec(t, root)
 	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
+	errorSchemaValidator := newOpenRPCResultSchemaValidator(t, openRPC)
 	matrix := loadComplianceMatrix(t, filepath.Join(root, "internal", "apiv1", "testdata", "openrpc_compliance_matrix.yaml"))
 
 	methods := readOnlyHTTPRuntimeMethods(t, api, openRPC, matrix)
@@ -136,7 +137,7 @@ func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 			if calls[probe.Method] != 1 {
 				t.Fatalf("%s handler calls = %d, want 1 for declared application error", probe.Method, calls[probe.Method])
 			}
-			assertReadOnlyProbeApplicationError(t, testRegistry(t), probe.Method, resp, probe.Code)
+			assertReadOnlyProbeApplicationError(t, testRegistry(t), errorSchemaValidator, probe.Method, resp, probe.Code)
 		})
 	}
 }
@@ -1214,7 +1215,7 @@ func assertReadOnlyProbeInvalidParams(t *testing.T, methodName string, resp rpcR
 	}
 }
 
-func assertReadOnlyProbeApplicationError(t *testing.T, registry *Registry, methodName string, resp rpcResponse, code string) {
+func assertReadOnlyProbeApplicationError(t *testing.T, registry *Registry, schemaValidator openRPCResultSchemaValidator, methodName string, resp rpcResponse, code string) {
 	t.Helper()
 	if resp.JSONRPC != jsonRPCVersion {
 		t.Fatalf("%s jsonrpc = %q, want %q", methodName, resp.JSONRPC, jsonRPCVersion)
@@ -1245,6 +1246,7 @@ func assertReadOnlyProbeApplicationError(t *testing.T, registry *Registry, metho
 	if _, ok := data["correlation_id"].(string); !ok {
 		t.Fatalf("%s data.correlation_id = %#v, want string", methodName, data["correlation_id"])
 	}
+	schemaValidator.validateMethodErrorData(t, methodName, resp.Error.Code, data)
 }
 
 func cloneProbeParams(params map[string]any) map[string]any {

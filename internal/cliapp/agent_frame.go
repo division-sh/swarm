@@ -78,7 +78,10 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 			return nil, fmt.Errorf("--scope static forbids --root and --flow-instance")
 		}
 		bundleHash := strings.TrimSpace(opts.bundleHash)
-		flow := strings.Trim(strings.TrimSpace(opts.flow), "/")
+		flow, err := exactAgentFrameCLIPath(opts.flow, "--flow")
+		if err != nil {
+			return nil, err
+		}
 		if bundleHash == "" || flow == "" {
 			return nil, fmt.Errorf("--scope static requires --bundle-hash and --flow")
 		}
@@ -88,7 +91,10 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		if strings.TrimSpace(opts.bundleHash) != "" || strings.TrimSpace(opts.flow) != "" {
 			return nil, fmt.Errorf("--scope effective forbids --bundle-hash and --flow")
 		}
-		flowInstance := strings.Trim(strings.TrimSpace(opts.flowInstance), "/")
+		flowInstance, err := exactAgentFrameCLIPath(opts.flowInstance, "--flow-instance")
+		if err != nil {
+			return nil, err
+		}
 		if opts.root == (flowInstance != "") {
 			return nil, fmt.Errorf("--scope effective requires exactly one of --root or --flow-instance")
 		}
@@ -101,6 +107,16 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		return nil, fmt.Errorf("--scope must be static or effective")
 	}
 	return params, nil
+}
+
+func exactAgentFrameCLIPath(value, flag string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	if value != strings.TrimSpace(value) || value != strings.Trim(value, "/") {
+		return "", fmt.Errorf("%s must be an exact canonical path without surrounding whitespace or leading or trailing slash", flag)
+	}
+	return value, nil
 }
 
 func writeAgentFrameResult(out io.Writer, result agentframe.Inspection) {

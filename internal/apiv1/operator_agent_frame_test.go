@@ -2,6 +2,8 @@ package apiv1
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/bundlecatalog"
@@ -85,6 +87,50 @@ func TestOperatorAgentFrameRejectsMixedSelectorsBeforeEffectiveResolution(t *tes
 	}
 	if resolver.calls != 0 {
 		t.Fatalf("effective resolver calls = %d, want 0", resolver.calls)
+	}
+}
+
+func TestOperatorAgentFrameRejectsNoncanonicalPathAliasesBeforeResolution(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	catalog := &fakeBundleCatalogReadStore{}
+	resolver := &agentFrameEffectiveResolverStub{}
+	handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: catalog, Effective: resolver})["agent.frame"]
+	cases := []map[string]any{
+		{"scope": "static", "agent_id": "reviewer", "bundle_hash": bundleHash, "flow": "/review/"},
+		{"scope": "static", "agent_id": "reviewer", "bundle_hash": bundleHash, "flow": " review "},
+		{"scope": "effective", "agent_id": "reviewer", "flow_instance": "/review/one/"},
+		{"scope": "effective", "agent_id": "reviewer", "flow_instance": "review/one/"},
+	}
+	for _, params := range cases {
+		_, err := handler(context.Background(), Request{Params: params})
+		var invalid *InvalidParamsError
+		if !errors.As(err, &invalid) {
+			t.Fatalf("params %#v error = %T %v, want invalid params", params, err, err)
+		}
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("effective resolver calls = %d, want 0", resolver.calls)
+	}
+}
+
+func TestOperatorAgentFrameNotFoundDetailsMatchDeclaredSchema(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	catalog := &fakeBundleCatalogReadStore{agents: map[string]bundlecatalog.AgentsResult{bundleHash: {}}}
+	resolver := &agentFrameEffectiveResolverStub{err: runtimemanager.ErrAgentNotFound}
+	handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: catalog, Effective: resolver})["agent.frame"]
+	for _, params := range []map[string]any{
+		{"scope": "static", "agent_id": "missing", "bundle_hash": bundleHash, "flow": "review"},
+		{"scope": "effective", "agent_id": "missing", "root": true},
+	} {
+		_, err := handler(context.Background(), Request{Params: params})
+		var appErr *ApplicationError
+		if !errors.As(err, &appErr) || appErr.Code != AgentNotFoundCode {
+			t.Fatalf("params %#v error = %T %v, want %s", params, err, err, AgentNotFoundCode)
+		}
+		want := map[string]any{"agent_id": "missing"}
+		if !reflect.DeepEqual(appErr.Details, want) {
+			t.Fatalf("params %#v details = %#v, want %#v", params, appErr.Details, want)
+		}
 	}
 }
 

@@ -84,9 +84,8 @@ type PreviewSeed struct {
 
 func InspectStatic(selector InspectionSelector, seed PreviewSeed) (Inspection, error) {
 	selector.BundleHash = strings.TrimSpace(selector.BundleHash)
-	selector.Flow = strings.Trim(strings.TrimSpace(selector.Flow), "/")
 	selector.AgentID = strings.TrimSpace(selector.AgentID)
-	if selector.BundleHash == "" || selector.Flow == "" || selector.AgentID == "" || selector.Root || selector.FlowInstance != "" {
+	if selector.BundleHash == "" || !exactInspectionPath(selector.Flow) || selector.AgentID == "" || selector.Root || selector.FlowInstance != "" {
 		return Inspection{}, fmt.Errorf("static frame inspection requires exact bundle_hash, flow, and agent_id only")
 	}
 	seed.BundleHash = selector.BundleHash
@@ -99,8 +98,7 @@ func InspectStatic(selector InspectionSelector, seed PreviewSeed) (Inspection, e
 
 func InspectEffective(selector InspectionSelector, seed PreviewSeed) (Inspection, error) {
 	selector.AgentID = strings.TrimSpace(selector.AgentID)
-	selector.FlowInstance = strings.Trim(strings.TrimSpace(selector.FlowInstance), "/")
-	if selector.AgentID == "" || selector.BundleHash != "" || selector.Flow != "" || selector.Root == (selector.FlowInstance != "") {
+	if selector.AgentID == "" || selector.BundleHash != "" || selector.Flow != "" || selector.Root == (selector.FlowInstance != "") || (!selector.Root && !exactInspectionPath(selector.FlowInstance)) {
 		return Inspection{}, fmt.Errorf("effective frame inspection requires agent_id and exactly one of root or flow_instance")
 	}
 	if seed.AgentIdentity == nil {
@@ -121,6 +119,10 @@ func InspectEffective(selector InspectionSelector, seed PreviewSeed) (Inspection
 		return Inspection{}, fmt.Errorf("effective frame selector does not match concrete agent identity")
 	}
 	return inspect(InspectionEffective, selector, seed)
+}
+
+func exactInspectionPath(value string) bool {
+	return value != "" && value == strings.TrimSpace(value) && value == strings.Trim(value, "/")
 }
 
 func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSeed) (Inspection, error) {

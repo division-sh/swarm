@@ -3,6 +3,7 @@ package agentframe
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -135,13 +136,16 @@ type Event struct {
 	ChainDepth    int             `json:"chain_depth"`
 	ExecutionMode string          `json:"execution_mode"`
 	Payload       json.RawMessage `json:"payload"`
-	EntityID      string          `json:"entity_id,omitempty"`
-	FlowInstance  string          `json:"flow_instance,omitempty"`
-	Scope         string          `json:"scope,omitempty"`
-	Source        Route           `json:"source"`
-	Target        Route           `json:"target"`
-	TargetSet     []Route         `json:"target_set"`
-	RoutingSource RoutingSource   `json:"routing_source"`
+	// PayloadBytesBase64 binds the exact admitted bytes even when an outer JSON
+	// encoder compacts the payload value for provider transport.
+	PayloadBytesBase64 string        `json:"payload_bytes_base64"`
+	EntityID           string        `json:"entity_id,omitempty"`
+	FlowInstance       string        `json:"flow_instance,omitempty"`
+	Scope              string        `json:"scope,omitempty"`
+	Source             Route         `json:"source"`
+	Target             Route         `json:"target"`
+	TargetSet          []Route       `json:"target_set"`
+	RoutingSource      RoutingSource `json:"routing_source"`
 }
 
 type CapabilityBinding struct {
@@ -435,10 +439,11 @@ func projectEvent(event events.Event) (Event, error) {
 	if !event.ExecutionMode().Valid() {
 		return Event{}, fmt.Errorf("execution frame requires admitted event execution mode")
 	}
-	payload, err := canonicalPayload(event.Payload())
-	if err != nil {
-		return Event{}, fmt.Errorf("event payload: %w", err)
+	payload := event.Payload()
+	if !json.Valid(payload) {
+		return Event{}, fmt.Errorf("event payload is not valid JSON")
 	}
+	payload = append(json.RawMessage(nil), payload...)
 	envelope := event.NormalizedEnvelope()
 	targets := make([]Route, 0, len(envelope.TargetSet))
 	for _, target := range envelope.TargetSet {
@@ -448,7 +453,7 @@ func projectEvent(event events.Event) (Event, error) {
 	return Event{
 		ID: event.ID(), Type: string(event.Type()), ProducerType: string(producer.Type()), ProducerID: producer.ID(),
 		TaskID: event.TaskID(), RunID: event.RunID(), ParentEventID: event.ParentEventID(), ChainDepth: event.ChainDepth(),
-		ExecutionMode: string(event.ExecutionMode()), Payload: payload, EntityID: event.EntityID(), FlowInstance: event.FlowInstance(),
+		ExecutionMode: string(event.ExecutionMode()), Payload: payload, PayloadBytesBase64: base64.StdEncoding.EncodeToString(payload), EntityID: event.EntityID(), FlowInstance: event.FlowInstance(),
 		Scope: string(event.Scope()), Source: projectRoute(envelope.Source), Target: projectRoute(envelope.Target), TargetSet: targets,
 		RoutingSource: RoutingSource{Kind: source.Kind().StorageCode(), Route: projectRoute(source.Route()), Authority: source.Authority().StorageCode()},
 	}, nil
@@ -560,6 +565,13 @@ func (f Frame) Validate() error {
 	}
 	if !f.Turn.Kind.Valid() || f.Turn.Capability.SurfaceID == "" || f.Turn.Capability.PlanFingerprint == "" {
 		return fmt.Errorf("execution frame turn is incomplete")
+	}
+	if !json.Valid(f.Turn.Event.Payload) {
+		return fmt.Errorf("execution frame event payload is not valid JSON")
+	}
+	exactPayload, err := base64.StdEncoding.DecodeString(f.Turn.Event.PayloadBytesBase64)
+	if err != nil || !bytes.Equal(exactPayload, f.Turn.Event.Payload) {
+		return fmt.Errorf("execution frame event payload bytes do not match exact admitted payload evidence")
 	}
 	if err := validatePresenceFact("lifecycle stage", f.Turn.Lifecycle.Stage, true); err != nil {
 		return err

@@ -237,8 +237,8 @@ type AgentFrameConfig struct {
 // selected through the broader runtime convenience resolver.
 func (am *AgentManager) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (AgentFrameConfig, error) {
 	agentID = strings.TrimSpace(agentID)
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if agentID == "" || root == (flowInstance != "") {
+	flowInstanceIsExact := root || exactAgentFrameFlowInstance(flowInstance)
+	if agentID == "" || root == (flowInstance != "") || !flowInstanceIsExact {
 		return AgentFrameConfig{}, fmt.Errorf("agent frame selection requires agent_id and exactly one of root or flow_instance")
 	}
 	var matches []runtimeactors.AgentConfig
@@ -2167,4 +2167,8 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runti
 			})
 		}
 	}
+}
+
+func exactAgentFrameFlowInstance(value string) bool {
+	return value != "" && value == strings.TrimSpace(value) && value == strings.Trim(value, "/")
 }
