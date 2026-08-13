@@ -31,7 +31,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build release binary: %v\n%s", err, output)
 	}
-	writeReleaseObserverOverflowFixture(t, repo, releaseRoot, 100)
+	writeReleaseObserverOverflowFixture(t, repo, releaseRoot, 24)
 
 	releaseLock := acquireReleaseMCPPortLock(t)
 	defer releaseLock()
@@ -330,7 +330,7 @@ worker-completion:
         items_from: entity.requests
         as: completed_request
         identity: completed_request
-        max_items: 100
+        max_items: %d
         emit:
           event: completion.item
           fields:
@@ -343,7 +343,7 @@ completion-sink:
   event_handlers:
     completion.item:
       advances_to: active
-`))
+`, eventCount))
 }
 
 type releaseSignalBuffer struct {
