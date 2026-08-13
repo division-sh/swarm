@@ -739,7 +739,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
 	}
-	loaded.module = projection.WorkflowModule()
 	loaded.source = projection.Source()
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
