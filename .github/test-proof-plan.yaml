@@ -23,6 +23,7 @@ special_packages:
   - github.com/division-sh/swarm/internal/runtime
   - github.com/division-sh/swarm/internal/store
   - github.com/division-sh/swarm/internal/testcatalog
+  - github.com/division-sh/swarm/internal/testpostgres
   - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
 profiles:
   pr-common:
@@ -38,6 +39,7 @@ profiles:
       - store-runtime-full-02
       - store-runtime-full-03
       - store-runtime-full-04
+      - testpostgres-full
   pr-escalated:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -51,6 +53,7 @@ profiles:
       - store-runtime-full-02
       - store-runtime-full-03
       - store-runtime-full-04
+      - testpostgres-full
   full:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -64,6 +67,7 @@ profiles:
       - store-runtime-full-02
       - store-runtime-full-03
       - store-runtime-full-04
+      - testpostgres-full
   nightly:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -77,6 +81,7 @@ profiles:
       - store-runtime-full-02
       - store-runtime-full-03
       - store-runtime-full-04
+      - testpostgres-full
 units:
   catalog-required-inventory:
     packages:
@@ -141,6 +146,12 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[R-Z].*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  testpostgres-full:
+    packages:
+      - github.com/division-sh/swarm/internal/testpostgres
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
