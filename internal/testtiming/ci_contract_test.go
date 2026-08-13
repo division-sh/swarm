@@ -180,10 +180,12 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		runtimePackage            = "github.com/division-sh/swarm/internal/runtime"
 		storePackage              = "github.com/division-sh/swarm/internal/store"
 		runtimePersistencePackage = "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+		testPostgresPackage       = "github.com/division-sh/swarm/internal/testpostgres"
 	)
 	runtimeIsSpecial := false
 	storeIsSpecial := false
 	runtimePersistenceIsSpecial := false
+	testPostgresIsSpecial := false
 	for _, pkg := range policy.SpecialPackages {
 		if pkg == runtimePackage {
 			runtimeIsSpecial = true
@@ -194,6 +196,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		if pkg == runtimePersistencePackage {
 			runtimePersistenceIsSpecial = true
 		}
+		if pkg == testPostgresPackage {
+			testPostgresIsSpecial = true
+		}
 	}
 	if !runtimeIsSpecial {
 		t.Fatal("internal/runtime must remain isolated from broad package co-scheduling")
@@ -203,6 +208,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	if !runtimePersistenceIsSpecial {
 		t.Fatal("internal/store/internal/runtimepersistence must remain isolated from broad package co-scheduling")
+	}
+	if !testPostgresIsSpecial {
+		t.Fatal("internal/testpostgres must remain isolated from broad package co-scheduling")
 	}
 	runtimeUnit, ok := policy.Units["runtime-full"]
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
@@ -222,9 +230,14 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		storeRuntimePatterns = append(storeRuntimePatterns, regexp.MustCompile(unit.Run))
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "store", "internal", "runtimepersistence"), storeRuntimePatterns)
+	testPostgresUnit, ok := policy.Units["testpostgres-full"]
+	if !ok || !slices.Equal(testPostgresUnit.Packages, []string{testPostgresPackage}) || testPostgresUnit.Run != "" || testPostgresUnit.CountMode != "count-1" || testPostgresUnit.BudgetClass != "broad" {
+		t.Fatalf("testpostgres-full unit = %#v, want complete isolated test-manager proof", testPostgresUnit)
+	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
 		foundStore := false
+		foundTestPostgres := false
 		foundStoreRuntime := map[string]bool{}
 		for _, unit := range policy.Profiles[profileName].Units {
 			if unit == "runtime-full" {
@@ -232,6 +245,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			}
 			if unit == "store-full" {
 				foundStore = true
+			}
+			if unit == "testpostgres-full" {
+				foundTestPostgres = true
 			}
 			for _, storeRuntimeUnit := range storeRuntimeUnits {
 				if unit == storeRuntimeUnit {
@@ -244,6 +260,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		if !foundStore {
 			t.Errorf("profile %s does not include store-full", profileName)
+		}
+		if !foundTestPostgres {
+			t.Errorf("profile %s does not include testpostgres-full", profileName)
 		}
 		for _, storeRuntimeUnit := range storeRuntimeUnits {
 			if !foundStoreRuntime[storeRuntimeUnit] {
