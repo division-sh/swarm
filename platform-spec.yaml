@@ -1233,6 +1233,10 @@ contract_formats:
           or root/flow `auto_emit_on_create`, but it MUST NOT generate producer-scoped auto-wire route patterns.
           Direct parent connect proof proves the input is satisfied, but concrete delivery authority remains the connect
           RoutePlan, not a raw subscription fallback.
+          A RouteTable root_input_flow node route is executable only for an admitted root_ingress event, including a
+          source-validated API publication that produces that class. A child, operator-injected, replay, runtime, or
+          platform event with the same event name cannot acquire external-input receiver authority and MUST fail before
+          event-delivery or receiver mutation.
         retired_paths: |
           Unique same-name sibling output-pin inference is retired as producer-pattern authority. `swarm.source: external`
           on events.yaml is not input-pin producer proof; it remains external metadata for non-input event roles such as
@@ -1286,6 +1290,10 @@ contract_formats:
             Exact and wildcard receiver subscriptions are expanded over the receiver flow's finite declared input-event catalog
             before typed recipient admission. Raw wildcard patterns never enter the exact compiled endpoint matcher, and events
             outside that declared catalog cannot acquire connect recipient authority.
+            Compiled receiver endpoints retain an exhaustive root, external-ingress, static, singleton, or template
+            execution mode. A singleton endpoint cannot be flattened to static and recovered later from path, descriptor,
+            handler, or source facts. The durable connect execution claim binds that receiver mode together with the exact
+            source endpoint, receiver endpoint, edge, target, and recipient.
           finite_variant_boundary: |
             Routing-source kind and authority, delivery-recipient kind, compiled target and resolution kind, failure,
             fan-in aggregation, and reply role are immutable integer-backed named constants. They MUST NOT store their
@@ -1322,7 +1330,10 @@ contract_formats:
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
             settlement, lifecycle, warning, or reply mutation. A nested static receiver without a distinct selected row may
             consume only the already-admitted current DeliveryRoute target when compiled topology proves shared structural
-            ownership. Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
+            ownership. That permission is one opaque proof minted by the compiled graph from the exact source endpoint,
+            receiver endpoint mode, edge, target blueprint, and current owner; a boolean, route-created fact, duplicate-intent
+            OR, path relationship, or source/current entity agreement cannot substitute for it. Exact equal proofs may
+            deduplicate, while absent or conflicting proofs fail closed. Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
             identity. Duplicate, restart, selected-fork, historical replay, claim/scan, settlement, handler execution, and
             public observation preserve the originally stamped target variant and AgentIdentity without current-owner
             re-resolution.
@@ -4447,9 +4458,13 @@ engine:
         ParentRoute of the instance that created the child only when the emit has no lowered parent connect route.
       static_child_no_instance: Nested static child flows that are not template/dynamic instances have no persisted ParentRoute
         row. When such a child emits a pin-declared output without a lowered parent connect route, the runtime may target
-        only the current delivery entity route. Eligibility requires the
-        resolved flow scope path to be nested. This exception must not read inbound event.source as structural parent authority
+        only the exact typed target on the admitted current DeliveryRoute. Eligibility requires the resolved flow scope path
+        to be nested and the current delivery target to be complete and entity-owning. This exception must not read inbound
+        event identity, RoutingSource, actor identity, a partial route, or an entity-only value as structural parent authority
         and does not satisfy ParentRoute metadata for template/dynamic instances.
+      lowered_connect_precedence: An emit with any lowered connect plan preserves producer origin, causal lineage, and
+        RoutingSource but remains receiver-targetless until EventBus evaluates that compiled plan. Engine and tool callers
+        MUST NOT stamp ParentRoute, current-delivery, source, inbound, or actor identity as the connect receiver target.
       parent_to_child: Parent-to-child routing is never inferred structurally in v1. The parent must use canonical parent
         connect topology with receiver-owned scalar instance/carry/resolution.
       grandchildren: A grandchild's structural pin output routes to its immediate parent only. Multi-level retargeting is v2.

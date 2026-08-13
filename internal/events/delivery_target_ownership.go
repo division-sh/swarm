@@ -13,6 +13,7 @@ const (
 	deliveryTargetExistingEntity deliveryTargetOwnershipKind = iota + 1
 	deliveryTargetMaterializingEntity
 	deliveryTargetEntitylessReceiver
+	deliveryTargetOwnershipKindCount
 )
 
 // DeliveryTargetOwnership is the complete receiver-owned target fact for one

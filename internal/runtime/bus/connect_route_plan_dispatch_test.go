@@ -38,6 +38,7 @@ import (
 
 type connectRoutePlanTestFlow struct {
 	id           string
+	path         string
 	mode         string
 	inputs       []runtimecontracts.FlowInputEventPin
 	outputs      []runtimecontracts.FlowOutputEventPin
@@ -692,7 +693,10 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 		To:   "consumer.deploy_completed",
 	})
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	interceptor := &connectRoutePlanNodeInterceptor{}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Interceptors: []EventInterceptor{interceptor},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -743,6 +747,9 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	}
 	if got := store.receipts[eventID]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+	if got := interceptor.Count(); got != 1 {
+		t.Fatalf("existing-owner handler executions = %d, want 1", got)
 	}
 	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil {
@@ -1028,6 +1035,10 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 	}
 }
 
+func TestEventBusCompiledNestedStaticSharesExactStructuralOwner(t *testing.T) {
+	TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t)
+}
+
 func TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBeforePersistence(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
 	store := newTargetRouteMemoryStore()
@@ -1119,6 +1130,10 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	if !containsString(live, "scout-node") || !containsString(internal, "scout-node") || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want persisted singleton receiver owner", live, internal, replayRoutes)
 	}
+}
+
+func TestEventBusRootToSingletonMaterializesReceiverOwnedTarget(t *testing.T) {
+	TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTarget(t)
 }
 
 func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *testing.T) {
@@ -4539,6 +4554,10 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	workflowName := ""
 	rootEntities := runtimecontracts.EntityContractsDocument{}
 	for _, flow := range flows {
+		flowPath := strings.Trim(strings.TrimSpace(flow.path), "/")
+		if flowPath == "" {
+			flowPath = flow.id
+		}
 		schema := runtimecontracts.FlowSchemaDocument{
 			Mode: flow.mode,
 			Pins: runtimecontracts.FlowPins{
@@ -4555,7 +4574,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 		view := runtimecontracts.FlowContractView{
 			Paths:  runtimecontracts.FlowContractPaths{ID: flow.id, Flow: flow.id},
 			Schema: schema,
-			Path:   flow.id,
+			Path:   flowPath,
 			Agents: flow.agents,
 			Nodes:  flow.nodes,
 		}
@@ -4577,7 +4596,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 				Kind:    "agent",
 				FlowID:  flow.id,
 				LocalID: logicalID,
-				Path:    flow.id,
+				Path:    flowPath,
 				Full:    "test://" + flow.id + "/" + logicalID,
 			}
 		}

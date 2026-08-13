@@ -158,6 +158,7 @@ const (
 	RoutingSourceConcreteTemplateInstance
 	RoutingSourceFlowOwnedControl
 	RoutingSourcePlatformControl
+	routingSourceKindCount
 )
 
 type RoutingSourceAuthority uint8

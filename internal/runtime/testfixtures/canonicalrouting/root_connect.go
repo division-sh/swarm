@@ -52,6 +52,40 @@ pins:
 	return root
 }
 
+// CopyRootOutputSingletonConnect owns the canonical first-delivery
+// root-to-singleton target-ownership proof.
+func CopyRootOutputSingletonConnect(t testing.TB) string {
+	t.Helper()
+	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	writeClosedVariantFile(t, root, "package.yaml", `name: root-output-singleton-connect
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: consumer
+    flow: consumer
+    mode: singleton
+connect:
+  - from: .root_ready
+    to: consumer.ready
+`)
+	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
+mode: singleton
+pins:
+  inputs:
+    events:
+      - name: ready
+        event: root.ready
+`, "root.ready:\n  entity_id: text\n", "consumer_state:\n  entity_id: text\n", `consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to: [root.ready]
+  event_handlers:
+    root.ready:
+      create_entity: true
+`)
+	return root
+}
+
 // CopyRootAutoEmitKeyCarries owns the fixed root output key/carries proof used
 // by boot verification. It is not an open overlay surface.
 func CopyRootAutoEmitKeyCarries(t testing.TB) string {

@@ -18,6 +18,9 @@ func TestDeliveryTargetOwnershipRoundTripsClosedVariants(t *testing.T) {
 		{name: "materializing entity", owner: MustMaterializingEntityTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/two", EntityID: entityID})},
 		{name: "entityless receiver", owner: MustEntitylessReceiverTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/three"})},
 	}
+	if got, want := len(tests), int(deliveryTargetOwnershipKindCount-1); got != want {
+		t.Fatalf("covered ownership variants = %d, want all %d closed variants", got, want)
+	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			raw, err := json.Marshal(test.owner)

@@ -244,7 +244,7 @@ func withConnectSourceMode(endpoint ConnectRoutePlanEndpoint, mode string) Conne
 }
 
 func TestCompiledConnectEndpointPreservesReceiverModeMatrix(t *testing.T) {
-	for _, test := range []struct {
+	tests := []struct {
 		name      string
 		root      bool
 		mode      string
@@ -256,13 +256,57 @@ func TestCompiledConnectEndpointPreservesReceiverModeMatrix(t *testing.T) {
 		{name: "static", mode: runtimecontracts.FlowModeStatic, wantKind: connectEndpointStaticFlow, assertion: ConnectRoutePlanEndpoint.IsStatic},
 		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, wantKind: connectEndpointSingletonFlow, assertion: ConnectRoutePlanEndpoint.IsSingleton},
 		{name: "template", mode: runtimecontracts.FlowModeTemplate, wantKind: connectEndpointTemplateFlow, assertion: ConnectRoutePlanEndpoint.IsTemplate},
-	} {
+	}
+	if got, want := len(tests), int(connectEndpointKindCount-1); got != want {
+		t.Fatalf("covered endpoint variants = %d, want all %d closed variants", got, want)
+	}
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, test.root, "receiver", "receiver", test.mode, "input", "work.ready", "receiver/work.ready", "", nil)
 			if endpoint.kind != test.wantKind || !test.assertion(endpoint) {
 				t.Fatalf("endpoint mode = %d, want %d", endpoint.kind, test.wantKind)
 			}
 		})
+	}
+}
+
+func TestCompiledConnectEndpointModeCoverageIsExhaustive(t *testing.T) {
+	TestCompiledConnectEndpointPreservesReceiverModeMatrix(t)
+}
+
+func TestConnectExecutionClaimIncludesReceiverMode(t *testing.T) {
+	plan := ConnectRoutePlan{
+		source: newConnectRoutePlanEndpoint(
+			ConnectEndpointRoleProducer, true, "", "", "root", "ready", "work.ready", "work.ready", "", nil,
+		),
+		receiver: newConnectRoutePlanEndpoint(
+			ConnectEndpointRoleConsumer, false, "receiver", "receiver", runtimecontracts.FlowModeStatic,
+			"ready", "work.ready", "receiver/work.ready", "", nil,
+		),
+		targetKind: ConnectTargetKindTarget, resolutionKind: ConnectResolutionStatic,
+		target: events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver"},
+	}
+	route := ConnectDeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("receiver-node"),
+		Target: events.RouteIdentity{
+			FlowID: "receiver", FlowInstance: "receiver", EntityID: eventtest.UUID("receiver-owner"),
+		},
+		Handler: MustConnectReceiverHandler("receiver", "receiver-node"),
+	}
+	staticClaim, err := ConnectExecutionClaim(plan, route)
+	if err != nil {
+		t.Fatalf("mint static receiver claim: %v", err)
+	}
+	plan.receiver = newConnectRoutePlanEndpoint(
+		ConnectEndpointRoleConsumer, false, "receiver", "receiver", runtimecontracts.FlowModeSingleton,
+		"ready", "work.ready", "receiver/work.ready", "", nil,
+	)
+	singletonClaim, err := ConnectExecutionClaim(plan, route)
+	if err != nil {
+		t.Fatalf("mint singleton receiver claim: %v", err)
+	}
+	if staticClaim.Equal(singletonClaim) {
+		t.Fatal("connect execution claim ignored the receiver ownership mode")
 	}
 }
 
@@ -377,6 +421,14 @@ func TestConnectRoutePlanStructuralTargetOwnerProofMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConnectRoutePlanStructuralTargetOwnerEligibilityMatrix(t *testing.T) {
+	TestConnectRoutePlanStructuralTargetOwnerProofMatrix(t)
+}
+
+func TestConnectRoutePlanRootToNestedStaticUsesStructuralTargetOwner(t *testing.T) {
+	TestConnectRoutePlanStructuralTargetOwnerProofMatrix(t)
 }
 
 func TestConnectSourceEndpointMatchesRejectsStaticEventWhenSourceRouteContradicts(t *testing.T) {

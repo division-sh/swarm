@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -25,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -153,6 +156,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			})
 			portfolio = loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
 			activation = loadFanInBarrierActivation(t, portfolio, periodID)
+			requireFanInBarrierReportTargets(t, ctx, backend, db, 2, events.RouteIdentity{
+				FlowID: "portfolio", FlowInstance: "portfolio", EntityID: runtimeflowidentity.EntityID("portfolio"),
+			})
 			if portfolio.CurrentState != "complete" || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed barrier = state:%s activation:%#v", portfolio.CurrentState, activation)
 			}
@@ -164,11 +170,128 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 	}
 }
 
+func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.CopyRootOutputSingletonConnect(t),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load root-to-singleton conformance fixture: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+	}{
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
+				backend := storetest.StartSQLiteRuntimeStore(t)
+				return backend, storetest.DatabaseForTest(backend)
+			},
+		},
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend, db := tc.setup(t)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			seedFanInBarrierRun(t, ctx, backend, db, runID)
+			runtime := newFanInBarrierRuntime(t, backend, db, source)
+			sourceEntityID := eventtest.UUID("root-to-singleton-source-" + tc.name)
+			sourceRoute := events.RouteIdentity{
+				FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: sourceEntityID,
+			}.Normalized()
+			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient("root-producer"),
+				Target:    events.MustExistingEntityTarget(sourceRoute),
+			})
+			routingSource, err := events.NewRootRoutingSource(sourceEntityID)
+			if err != nil {
+				t.Fatalf("construct root source: %v", err)
+			}
+			eventID := uuid.NewString()
+			parentEventID := uuid.NewString()
+			parent := eventtest.ExistingRunRootIngress(
+				parentEventID, events.EventType("custom.root"), "root-producer", "", json.RawMessage(`{"proof":"causal-parent"}`), 0,
+				runID, events.EnvelopeForEntityID(events.EventEnvelope{}, sourceEntityID), time.Now().UTC().Add(-time.Second),
+			)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, backend, parent, nil, runtimepipelineobligation.ScopeDirect)
+			event := eventtest.ChildForProducerWithRoutingSource(
+				eventID, events.EventType("root.ready"), eventtest.Producer(events.EventProducerNode, "root-producer"), "",
+				json.RawMessage(`{"entity_id":"consumer-one"}`), 0,
+				events.EventLineage{RunID: runID, ParentEventID: parentEventID, ExecutionMode: executionmode.Live},
+				events.EventEnvelope{}, routingSource, time.Now().UTC(),
+			)
+			wantRoute := events.RouteIdentity{
+				FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"),
+			}.Normalized()
+			wantOwner := events.MustMaterializingEntityTarget(wantRoute)
+			if sourceEntityID == wantRoute.EntityID {
+				t.Fatal("root source and singleton receiver identities must remain distinguishable")
+			}
+			if instance, found, err := runtime.pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("consumer")); err != nil || found {
+				t.Fatalf("singleton receiver must not exist before first delivery: found:%t instance:%#v err:%v", found, instance, err)
+			}
+			plan, err := runtime.bus.CheckPublishRecipientPlan(ctx, event)
+			if err != nil {
+				t.Fatalf("preflight root-to-singleton conformance delivery: %v", err)
+			}
+			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != wantOwner || plan.DeliveryRoutes[0].ConnectClaim.Empty() {
+				t.Fatalf("root-to-singleton plan = failure:%q routes:%#v, want exact materializing receiver", plan.TargetFailure, plan.DeliveryRoutes)
+			}
+			if err := runtime.bus.PublishAcknowledged(ctx, event); err != nil {
+				t.Fatalf("publish root-to-singleton conformance delivery: %v", err)
+			}
+			waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 10*time.Second)
+			defer cancel()
+			if err := runtime.bus.WaitForQuiescence(waitCtx); err != nil {
+				t.Fatalf("wait for root-to-singleton execution: %v", err)
+			}
+			routes, err := backend.ListEventDeliveryRoutes(ctx, eventID)
+			if err != nil {
+				t.Fatalf("load root-to-singleton routes: %v", err)
+			}
+			if len(routes) != 1 || routes[0].Target != wantOwner || !routes[0].ConnectClaim.Equal(plan.DeliveryRoutes[0].ConnectClaim) {
+				t.Fatalf("persisted root-to-singleton routes = %#v, want exact preflight owner and claim", routes)
+			}
+			instance, found, err := runtime.pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("consumer"))
+			if err != nil {
+				t.Fatalf("load materialized singleton receiver: %v", err)
+			}
+			if !found || strings.TrimSpace(fmt.Sprint(instance.Metadata["entity_id"])) != wantRoute.EntityID {
+				t.Fatalf("materialized singleton receiver = found:%t instance:%#v, want entity %s", found, instance, wantRoute.EntityID)
+			}
+			view, err := backend.LoadOperatorEvent(ctx, eventID)
+			if err != nil {
+				t.Fatalf("load public root-to-singleton event: %v", err)
+			}
+			if view.NoDelivery != nil || len(view.DeadLetters) != 0 || len(view.Deliveries) != 1 ||
+				view.Deliveries[0].Target.Kind != wantOwner.Code() || view.Deliveries[0].Target.EntityID != wantRoute.EntityID {
+				t.Fatalf("public root-to-singleton projection = %#v, want one successful materializing receiver", view)
+			}
+		})
+	}
+}
+
 func TestFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.T) {
 	testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t)
 }
 
 func TestEventRouteSettlementRestartPreservesExactTargetOwner(t *testing.T) {
+	testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t)
+}
+
+func TestNestedCrossFlowTargetOwnershipRestartAndDuplicateOnBothBackends(t *testing.T) {
 	testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t)
 }
 
@@ -690,6 +813,7 @@ func requireFanInBarrierReportTargets(
 	if len(eventIDs) != wantCount {
 		t.Fatalf("fan-in report event count = %d, want %d", len(eventIDs), wantCount)
 	}
+	sourceEntities := make(map[string]struct{}, len(eventIDs))
 	for _, eventID := range eventIDs {
 		routes, err := backend.ListEventDeliveryRoutes(ctx, eventID)
 		if err != nil {
@@ -704,6 +828,25 @@ func requireFanInBarrierReportTargets(
 		if !matched {
 			t.Fatalf("fan-in report routes for %s = %#v, want exact selected target %#v", eventID, routes, wantTarget.Normalized())
 		}
+		view, err := backend.LoadOperatorEvent(ctx, eventID)
+		if err != nil {
+			t.Fatalf("load public fan-in report %s: %v", eventID, err)
+		}
+		snapshot, err := view.EventSnapshot()
+		if err != nil {
+			t.Fatalf("load fan-in report snapshot %s: %v", eventID, err)
+		}
+		sourceRoute := snapshot.RoutingSource().Route().Normalized()
+		if sourceRoute.FlowID != "operating" || sourceRoute.FlowInstance == "" || sourceRoute.EntityID == "" {
+			t.Fatalf("fan-in report source for %s = %#v, want exact concrete operating owner", eventID, sourceRoute)
+		}
+		if sourceRoute.EntityID == wantTarget.EntityID {
+			t.Fatalf("fan-in report %s copied source entity %s into receiver ownership", eventID, sourceRoute.EntityID)
+		}
+		sourceEntities[sourceRoute.EntityID] = struct{}{}
+	}
+	if len(sourceEntities) != wantCount {
+		t.Fatalf("fan-in report source entities = %#v, want %d distinguishable child owners", sourceEntities, wantCount)
 	}
 }
 

@@ -849,7 +849,16 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 		live[recipient.Recipient.ID()] = struct{}{}
 	}
 	for _, subscriber := range routed {
-		if subscriber.routeSource != subscriberRouteSourceSubscription || !subscriber.Recipient.IsNode() {
+		if !subscriber.Recipient.IsNode() {
+			continue
+		}
+		if subscriber.routeSource == subscriberRouteSourceRootInputFlow && evt.AdmissionClass() != events.EventAdmissionRootIngress {
+			return fmt.Errorf(
+				"routed root-input node %q at %q matched target-free event %q without root_ingress admission",
+				subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), evt.Type(),
+			)
+		}
+		if subscriber.routeSource != subscriberRouteSourceSubscription {
 			continue
 		}
 		if _, ok := authorized[subscriber.Recipient]; ok {
@@ -942,6 +951,9 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 }
 
 func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
+	if evt.AdmissionClass() != events.EventAdmissionRootIngress {
+		return false
+	}
 	if !subscriber.Recipient.IsNode() {
 		return false
 	}
