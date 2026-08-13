@@ -75,6 +75,7 @@ const (
 	registrationPhasePrelaunch         registrationPhase = "pre_launch"
 	registrationPhasePendingSettlement registrationPhase = "pending_settlement"
 	registrationPhaseVerified          registrationPhase = "verified"
+	registrationPhaseOutcomeUncertain  registrationPhase = "outcome_uncertain"
 )
 
 type registrationState struct {
@@ -82,6 +83,7 @@ type registrationState struct {
 	SelectedBase string
 	LastVerified *registrationIntent
 	Attempt      *registrationAttempt
+	Terminal     *registrationIntent
 	Phase        registrationPhase
 	Failure      string
 }
@@ -99,6 +101,9 @@ type registrationIntent struct {
 	CredentialEpochs     map[string]string
 	Applied              bool
 	Matched              bool
+	EffectOperationID    string
+	EffectAttemptID      string
+	EffectAttemptOrdinal int
 	Pending              runtimeregistration.PendingApply
 	HasPending           bool
 }
@@ -205,6 +210,49 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	return nil
 }
 
+// PrepareStartupHandoff settles every predecessor-owned live registration
+// attempt before startup authority can move to a replacement runtime.
+func (c *ProviderRegistrationController) PrepareStartupHandoff(ctx context.Context) error {
+	if c == nil {
+		return fmt.Errorf("provider registration controller is required")
+	}
+	c.reconcileMu.Lock()
+	defer c.reconcileMu.Unlock()
+
+	snapshot := c.snapshot.capture()
+	keys := make([]string, 0, len(snapshot.registrations))
+	for key := range snapshot.registrations {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		state := snapshot.registrations[key]
+		switch state.Phase {
+		case registrationPhaseNoAttempt, registrationPhaseVerified, registrationPhaseOutcomeUncertain:
+			continue
+		case registrationPhasePrelaunch:
+			return fmt.Errorf("provider registration %s has an unresolved pre-launch attempt; startup handoff is refused", key)
+		case registrationPhasePendingSettlement:
+			candidate, err := c.admitReadbackCandidate(ctx, state)
+			if err != nil {
+				if settleErr := c.terminalizePendingReadback(ctx, key, state, err); settleErr != nil {
+					return fmt.Errorf("terminalize provider registration %s before startup handoff: %w", key, settleErr)
+				}
+				continue
+			}
+			if err := c.refreshReadback(ctx, candidate, state, true); err != nil {
+				settled, _ := c.snapshot.state(key)
+				if settled.Phase != registrationPhaseOutcomeUncertain {
+					return fmt.Errorf("settle provider registration %s before startup handoff: %w", key, err)
+				}
+			}
+		default:
+			return fmt.Errorf("provider registration %s has unsupported lifecycle phase %q", key, state.Phase)
+		}
+	}
+	return nil
+}
+
 func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, exposure Generation, pair RegistrationPair) (admittedPair, error) {
 	key := pairKey(pair)
 	if key == "" || !pair.PlanGeneration.Valid() || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
@@ -213,30 +261,13 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
 		return admittedPair{}, fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
 	}
-	provider := make(map[string]runtimecredentials.AdmittedSnapshot, len(pair.Registration.ProviderCredentials()))
-	credentials := make(map[string]any, len(pair.Registration.ProviderCredentials()))
-	for _, logical := range pair.Registration.ProviderCredentials() {
-		storeKey := pair.CredentialKeys[logical]
-		if storeKey == "" {
-			return admittedPair{}, fmt.Errorf("provider registration pair %s credential %q has no explicit store-key mapping", key, logical)
-		}
-		snapshot, err := c.opts.CredentialOwner.Observe(ctx, storeKey)
-		if err != nil {
-			return admittedPair{}, err
-		}
-		if !snapshot.Present {
-			return admittedPair{}, fmt.Errorf("provider registration pair %s credential %q is missing", key, storeKey)
-		}
-		provider[logical] = snapshot
-		credentials[logical] = snapshot.CredentialValue()
-	}
-	signingKey := strings.TrimSpace(pair.Target.SigningCredentialKey)
-	signing, err := c.opts.CredentialOwner.Observe(ctx, signingKey)
+	provider, signing, err := c.admitCredentials(ctx, pair)
 	if err != nil {
 		return admittedPair{}, err
 	}
-	if !signing.Present {
-		return admittedPair{}, fmt.Errorf("provider registration pair %s signing credential %q is missing", key, signingKey)
+	credentials := make(map[string]any, len(provider))
+	for logical, snapshot := range provider {
+		credentials[logical] = snapshot.CredentialValue()
 	}
 	identify, err := pair.Registration.Operation(packs.RegistrationOperationIdentify)
 	if err != nil {
@@ -263,11 +294,55 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 	return admittedPair{pair: pair, provider: provider, signing: signing, slotID: slotID, base: base}, nil
 }
 
+func (c *ProviderRegistrationController) admitCredentials(ctx context.Context, pair RegistrationPair) (map[string]runtimecredentials.AdmittedSnapshot, runtimecredentials.AdmittedSnapshot, error) {
+	key := pairKey(pair)
+	provider := make(map[string]runtimecredentials.AdmittedSnapshot, len(pair.Registration.ProviderCredentials()))
+	for _, logical := range pair.Registration.ProviderCredentials() {
+		storeKey := pair.CredentialKeys[logical]
+		if storeKey == "" {
+			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q has no explicit store-key mapping", key, logical)
+		}
+		snapshot, err := c.opts.CredentialOwner.Observe(ctx, storeKey)
+		if err != nil {
+			return nil, runtimecredentials.AdmittedSnapshot{}, err
+		}
+		if !snapshot.Present {
+			return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s credential %q is missing", key, storeKey)
+		}
+		provider[logical] = snapshot
+	}
+	signingKey := strings.TrimSpace(pair.Target.SigningCredentialKey)
+	signing, err := c.opts.CredentialOwner.Observe(ctx, signingKey)
+	if err != nil {
+		return nil, runtimecredentials.AdmittedSnapshot{}, err
+	}
+	if !signing.Present {
+		return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s signing credential %q is missing", key, signingKey)
+	}
+	return provider, signing, nil
+}
+
+func (c *ProviderRegistrationController) admitReadbackCandidate(ctx context.Context, state registrationState) (admittedPair, error) {
+	active := state.activeIntent()
+	if active == nil || active.BaseFingerprint == "" || active.SlotID == "" {
+		return admittedPair{}, fmt.Errorf("provider registration pending readback identity is incomplete")
+	}
+	provider, signing, err := c.admitCredentials(ctx, state.Pair)
+	if err != nil {
+		return admittedPair{}, err
+	}
+	return admittedPair{pair: state.Pair, provider: provider, signing: signing, slotID: active.SlotID, base: active.BaseFingerprint}, nil
+}
+
 func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair) error {
 	key := pairKey(candidate.pair)
 	state, _ := c.snapshot.state(key)
 	state.Pair = candidate.pair
 	state.SelectedBase = candidate.base
+	if state.Phase == registrationPhaseOutcomeUncertain && state.Terminal != nil && state.Terminal.BaseFingerprint == candidate.base {
+		c.publishState(key, state)
+		return nil
+	}
 	state.Failure = ""
 	if state.Attempt != nil && state.Attempt.Intent.BaseFingerprint == candidate.base {
 		if state.Phase == registrationPhasePendingSettlement {
@@ -293,6 +368,7 @@ func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, expo
 		return err
 	}
 	state.Attempt = &registrationAttempt{Intent: intent}
+	state.Terminal = nil
 	state.Phase = registrationPhasePrelaunch
 	c.publishState(key, state)
 	return c.launchAttempt(ctx, exposure, startup, candidate, state)
@@ -367,6 +443,10 @@ func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, expo
 	if result.Pending != nil {
 		intent.Pending = *result.Pending
 		intent.HasPending = true
+		attempt := result.Pending.Attempt()
+		intent.EffectOperationID = attempt.OperationID
+		intent.EffectAttemptID = attempt.AttemptID
+		intent.EffectAttemptOrdinal = attempt.Ordinal
 	}
 	state.Attempt.Intent = intent
 	state.Phase = registrationPhasePendingSettlement
@@ -391,19 +471,15 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 		c.publishState(key, state)
 		return err
 	}
-	readback, err := candidate.pair.Registration.Operation(packs.RegistrationOperationReadback)
-	if err != nil {
-		state.Failure = err.Error()
-		c.publishState(key, state)
-		return err
+	readback, readErr := candidate.pair.Registration.Operation(packs.RegistrationOperationReadback)
+	var input map[string]any
+	if readErr == nil {
+		input, readErr = readback.Prepare(map[string]any{})
 	}
-	input, err := readback.Prepare(map[string]any{})
-	if err != nil {
-		state.Failure = err.Error()
-		c.publishState(key, state)
-		return err
+	var result any
+	if readErr == nil {
+		result, readErr = c.opts.HTTP.Read(ctx, readback.ToolID(), readback.Tool(), input, candidateCredentials(candidate))
 	}
-	result, readErr := c.opts.HTTP.Read(ctx, readback.ToolID(), readback.Tool(), input, candidateCredentials(candidate))
 	exact := false
 	if readErr == nil {
 		projected, projectErr := readback.Project(result)
@@ -416,9 +492,9 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 			}
 		}
 	}
-	if intent.HasPending && exact {
+	if intent.HasPending {
 		pending := intent.Pending
-		if settleErr := pending.SettleReadback(ctx, true, nil); settleErr != nil {
+		if settleErr := pending.SettleReadback(ctx, exact, readErr); settleErr != nil {
 			intent.Pending = pending
 			state.setActiveIntent(intent, fromAttempt)
 			state.Failure = settleErr.Error()
@@ -426,6 +502,16 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 			return settleErr
 		}
 		intent.HasPending = false
+		intent.Pending = runtimeregistration.PendingApply{}
+		if !exact {
+			intent.Matched = false
+			state.Terminal = &intent
+			state.Attempt = nil
+			state.Phase = registrationPhaseOutcomeUncertain
+			state.Failure = readErr.Error()
+			c.publishState(key, state)
+			return readErr
+		}
 	}
 	if readErr != nil {
 		intent.Matched = false
@@ -442,8 +528,31 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 	intent.HasPending = false
 	state.LastVerified = &intent
 	state.Attempt = nil
+	state.Terminal = nil
 	state.Phase = registrationPhaseVerified
 	state.Failure = ""
+	c.publishState(key, state)
+	return nil
+}
+
+func (c *ProviderRegistrationController) terminalizePendingReadback(ctx context.Context, key string, state registrationState, cause error) error {
+	if state.Attempt == nil || !state.Attempt.Intent.HasPending {
+		return fmt.Errorf("provider registration pending settlement has no live durable attempt")
+	}
+	intent := cloneRegistrationIntent(state.Attempt.Intent)
+	pending := intent.Pending
+	if err := pending.SettleReadback(ctx, false, cause); err != nil {
+		state.Failure = err.Error()
+		c.publishState(key, state)
+		return err
+	}
+	intent.HasPending = false
+	intent.Pending = runtimeregistration.PendingApply{}
+	intent.Matched = false
+	state.Terminal = &intent
+	state.Attempt = nil
+	state.Phase = registrationPhaseOutcomeUncertain
+	state.Failure = cause.Error()
 	c.publishState(key, state)
 	return nil
 }
@@ -507,6 +616,10 @@ func (s registrationState) activeIntent() *registrationIntent {
 		intent := cloneRegistrationIntent(s.Attempt.Intent)
 		return &intent
 	}
+	if s.Terminal != nil {
+		intent := cloneRegistrationIntent(*s.Terminal)
+		return &intent
+	}
 	if s.LastVerified != nil {
 		intent := cloneRegistrationIntent(*s.LastVerified)
 		return &intent
@@ -553,6 +666,10 @@ func cloneRegistrationState(source registrationState) registrationState {
 	}
 	if source.Attempt != nil {
 		out.Attempt = &registrationAttempt{Intent: cloneRegistrationIntent(source.Attempt.Intent)}
+	}
+	if source.Terminal != nil {
+		intent := cloneRegistrationIntent(*source.Terminal)
+		out.Terminal = &intent
 	}
 	return out
 }

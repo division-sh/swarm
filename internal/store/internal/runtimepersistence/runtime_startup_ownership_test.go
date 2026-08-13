@@ -3,16 +3,32 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/providerconnectors"
+	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
+	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +41,82 @@ type startupAuthorityParityStore interface {
 	runtimestartupownership.Recorder
 	runtimeeffects.Store
 	runtimeeffects.RecoveryStore
+}
+
+type selectedRegistrationSettlementStore struct {
+	startupAuthorityParityStore
+	mu       sync.Mutex
+	failNext bool
+}
+
+func (s *selectedRegistrationSettlementStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
+	s.mu.Lock()
+	if s.failNext {
+		s.failNext = false
+		s.mu.Unlock()
+		return fmt.Errorf("injected provider-registration settlement persistence failure")
+	}
+	s.mu.Unlock()
+	return s.startupAuthorityParityStore.SettleExternalAttempt(ctx, settlement)
+}
+
+func (s *selectedRegistrationSettlementStore) failNextSettlement() {
+	s.mu.Lock()
+	s.failNext = true
+	s.mu.Unlock()
+}
+
+type selectedTelegramRegistrationTransport struct {
+	mu          sync.Mutex
+	applyCount  int
+	currentURL  string
+	readbackURL string
+	readbackErr error
+}
+
+func (t *selectedTelegramRegistrationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch {
+	case strings.HasSuffix(request.URL.Path, "/getMe"):
+		return selectedRegistrationResponse(http.StatusOK, `{"ok":true,"result":{"id":42}}`), nil
+	case strings.HasSuffix(request.URL.Path, "/setWebhook"):
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		t.currentURL = strings.TrimSpace(fmt.Sprint(body["url"]))
+		t.applyCount++
+		return selectedRegistrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
+	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
+		if t.readbackErr != nil {
+			return nil, t.readbackErr
+		}
+		callback := t.currentURL
+		if t.readbackURL != "" {
+			callback = t.readbackURL
+		}
+		raw, err := json.Marshal(map[string]any{"ok": true, "result": map[string]any{"url": callback}})
+		if err != nil {
+			return nil, err
+		}
+		return selectedRegistrationResponse(http.StatusOK, string(raw)), nil
+	default:
+		return nil, fmt.Errorf("unexpected Telegram registration request %s", request.URL)
+	}
+}
+
+func (t *selectedTelegramRegistrationTransport) setReadback(url string, err error) {
+	t.mu.Lock()
+	t.readbackURL = strings.TrimSpace(url)
+	t.readbackErr = err
+	t.mu.Unlock()
+}
+
+func (t *selectedTelegramRegistrationTransport) applies() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.applyCount
 }
 
 func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
@@ -290,6 +382,285 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 	}
 }
 
+func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
+	registrationPlan := selectedStoreTelegramRegistrationPlan(t)
+	tests := []struct {
+		name  string
+		store func(*testing.T) (startupAuthorityParityStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
+				_, db, _ := testutil.StartPostgres(t)
+				return admitTestPostgresStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				return store, store.backend.ConstructionHandle()
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			selected, db := tc.store(t)
+			lease, err := selected.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("registration-controller-predecessor"))
+			if err != nil {
+				t.Fatalf("AcquireRuntimeStartupOwnership: %v", err)
+			}
+			t.Cleanup(func() { _ = lease.Release(testAuthorActivityContext()) })
+			startup, err := lease.Authority()
+			if err != nil {
+				t.Fatalf("predecessor authority: %v", err)
+			}
+
+			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatalf("NewFileStore: %v", err)
+			}
+			for key, value := range map[string]string{"bot": "selected-token-v1", "signing": "selected-signing-v1"} {
+				if err := credentialStore.Set(ctx, key, value); err != nil {
+					t.Fatalf("set credential %s: %v", key, err)
+				}
+			}
+			credentials, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+			if err != nil {
+				t.Fatalf("NewSnapshotOwner: %v", err)
+			}
+			faulting := &selectedRegistrationSettlementStore{startupAuthorityParityStore: selected, failNext: true}
+			transport := &selectedTelegramRegistrationTransport{}
+			readiness := runtimepublicingress.NewReadinessOwner(true)
+			now := time.Date(2026, 8, 13, 14, 0, 0, 0, time.UTC)
+			controller, err := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
+				CredentialOwner: credentials, EffectsStore: faulting,
+				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+				StartupAuthority: func() (runtimestartupownership.Authority, error) { return startup, nil },
+				Readiness:        readiness, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatalf("NewProviderRegistrationController: %v", err)
+			}
+			exposure := runtimepublicingress.Generation{
+				ID: uuid.NewString(), Mode: runtimepublicingress.ModeExternalOrigin,
+				PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now,
+			}
+			setSelectedStoreExposure(readiness, exposure, startup, now)
+			readiness.SetRuntimeReady(true)
+			pair := selectedStoreRegistrationPair(t, registrationPlan)
+
+			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
+				t.Fatal("initial settlement persistence failure returned nil")
+			}
+			operationID, attemptID, ordinal := selectedStoreLatestProviderRegistrationAttempt(t, ctx, db)
+			if operationID == "" || attemptID == "" || ordinal != 1 || transport.applies() != 1 {
+				t.Fatalf("pending identity/apply = %q/%q/%d/%d", operationID, attemptID, ordinal, transport.applies())
+			}
+			if got := selectedStoreAttemptState(t, ctx, db, attemptID); got != string(runtimeeffects.StateResponseObserved) {
+				t.Fatalf("pending durable state=%q, want response_observed", got)
+			}
+			pending := readiness.Snapshot(now)
+			if pending.PublicIngressReady || len(pending.Registrations) != 1 || pending.Registrations[0].Phase != "pending_settlement" {
+				t.Fatalf("pending process state = %#v", pending)
+			}
+
+			faulting.failNextSettlement()
+			if err := controller.PrepareStartupHandoff(ctx); err == nil {
+				t.Fatal("handoff barrier accepted an uncommitted settlement")
+			}
+			predecessorAuthority := testServeRegistrationAuthorityFromIdentity(startup, pending.Registrations[0].IntentID)
+			if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, predecessorAuthority); err != nil || !current {
+				t.Fatalf("failed barrier predecessor authority current=%v err=%v", current, err)
+			}
+			if got := selectedStoreAttemptState(t, ctx, db, attemptID); got != string(runtimeeffects.StateResponseObserved) || transport.applies() != 1 {
+				t.Fatalf("failed barrier state/apply=%q/%d", got, transport.applies())
+			}
+
+			if err := controller.PrepareStartupHandoff(ctx); err != nil {
+				t.Fatalf("PrepareStartupHandoff exact settlement: %v", err)
+			}
+			if got := selectedStoreAttemptState(t, ctx, db, attemptID); got != string(runtimeeffects.StateSettled) {
+				t.Fatalf("pre-handoff durable state=%q, want settled", got)
+			}
+			if transport.applies() != 1 {
+				t.Fatalf("pre-handoff barrier resent apply: %d", transport.applies())
+			}
+
+			handoff, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
+				CandidateOwnerID: "registration-controller-successor", CandidateBootID: uuid.NewString(), CandidateBundleHash: testCanonicalBundleHash,
+			})
+			if err != nil {
+				t.Fatalf("PrepareHandoff: %v", err)
+			}
+			if _, err := handoff.MarkProbesSettled(ctx, nil); err != nil {
+				t.Fatalf("MarkProbesSettled: %v", err)
+			}
+			if _, err := handoff.Commit(ctx); err != nil {
+				t.Fatalf("Commit: %v", err)
+			}
+			startup, err = handoff.Finalize(ctx)
+			if err != nil {
+				t.Fatalf("Finalize: %v", err)
+			}
+			if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, testServeRegistrationAuthorityFromIdentity(startup, pending.Registrations[0].IntentID)); err != nil || !current {
+				t.Fatalf("successor registration authority current=%v err=%v", current, err)
+			}
+			setSelectedStoreExposure(readiness, exposure, startup, now)
+			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+				t.Fatalf("successor verified rebind: %v", err)
+			}
+			verified := readiness.Snapshot(now)
+			if !verified.PublicIngressReady || verified.Registrations[0].Phase != "verified" || transport.applies() != 1 {
+				t.Fatalf("successor verified state/apply = %#v/%d", verified, transport.applies())
+			}
+			if !controller.CallbackCurrent(ctx, pair.Target.Alias, pair.Target.Provider, selectedStoreCallbackToken(verified.Registrations[0].CallbackURL)) {
+				t.Fatal("successor callback admission did not consume rebound currentness")
+			}
+
+			if err := credentialStore.Set(ctx, "signing", "selected-signing-v2"); err != nil {
+				t.Fatalf("rotate signing credential for mismatch: %v", err)
+			}
+			now = now.Add(time.Second)
+			transport.setReadback("https://hooks.example.test/stale", nil)
+			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
+				t.Fatal("mismatched readback returned nil")
+			}
+			_, mismatchAttempt, mismatchOrdinal := selectedStoreLatestProviderRegistrationAttempt(t, ctx, db)
+			if mismatchAttempt == attemptID || mismatchOrdinal != 1 || selectedStoreAttemptState(t, ctx, db, mismatchAttempt) != string(runtimeeffects.StateOutcomeUncertain) {
+				t.Fatalf("mismatch attempt identity/state = %q/%d/%s", mismatchAttempt, mismatchOrdinal, selectedStoreAttemptState(t, ctx, db, mismatchAttempt))
+			}
+			mismatch := readiness.Snapshot(now)
+			if mismatch.PublicIngressReady || mismatch.Registrations[0].Phase != "outcome_uncertain" || transport.applies() != 2 {
+				t.Fatalf("mismatch process state/apply = %#v/%d", mismatch, transport.applies())
+			}
+			transport.setReadback("", nil)
+			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil || transport.applies() != 2 {
+				t.Fatalf("same-base mismatch reconcile/apply = %v/%d", err, transport.applies())
+			}
+
+			if err := credentialStore.Set(ctx, "signing", "selected-signing-v3"); err != nil {
+				t.Fatalf("rotate signing credential for unavailable readback: %v", err)
+			}
+			now = now.Add(time.Second)
+			transport.setReadback("", fmt.Errorf("provider readback unavailable"))
+			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
+				t.Fatal("unavailable readback returned nil")
+			}
+			_, unavailableAttempt, unavailableOrdinal := selectedStoreLatestProviderRegistrationAttempt(t, ctx, db)
+			if unavailableAttempt == mismatchAttempt || unavailableOrdinal != 1 || selectedStoreAttemptState(t, ctx, db, unavailableAttempt) != string(runtimeeffects.StateOutcomeUncertain) {
+				t.Fatalf("unavailable attempt identity/state = %q/%d/%s", unavailableAttempt, unavailableOrdinal, selectedStoreAttemptState(t, ctx, db, unavailableAttempt))
+			}
+			unavailable := readiness.Snapshot(now)
+			if unavailable.PublicIngressReady || unavailable.Registrations[0].Phase != "outcome_uncertain" || transport.applies() != 3 {
+				t.Fatalf("unavailable process state/apply = %#v/%d", unavailable, transport.applies())
+			}
+			if err := controller.Reconcile(ctx, exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil || transport.applies() != 3 {
+				t.Fatalf("same-base unavailable reconcile/apply = %v/%d", err, transport.applies())
+			}
+		})
+	}
+}
+
+func selectedStoreTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRegistration {
+	t.Helper()
+	repo := filepath.Clean(filepath.Join("..", "..", "..", ".."))
+	version, err := platform.PlatformVersion()
+	if err != nil {
+		t.Fatalf("PlatformVersion: %v", err)
+	}
+	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("load platform spec: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := snapshot.Decode(&spec); err != nil {
+		t.Fatalf("decode platform spec: %v", err)
+	}
+	registry, err := packs.NewInterfaceRegistry(spec)
+	if err != nil {
+		t.Fatalf("NewInterfaceRegistry: %v", err)
+	}
+	channels, err := packs.LoadChannelPackDirs(version, "platform", filepath.Join(repo, "packs", "channels", "telegram"))
+	if err != nil || len(channels) != 1 {
+		t.Fatalf("load Telegram channel: count=%d err=%v", len(channels), err)
+	}
+	triggers, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(version, []string{filepath.Join(repo, "packs", "provider-triggers", "telegram")}, nil)
+	if err != nil {
+		t.Fatalf("load Telegram trigger: %v", err)
+	}
+	var connector packs.ConnectorPackDescriptor
+	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
+		if candidate.Identity.ID() == "provider.telegram.connector" {
+			connector = candidate
+			break
+		}
+	}
+	plan, err := packs.CompileChannel(registry, channels[0], triggers.PackDescriptors(), []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatalf("CompileChannel: %v", err)
+	}
+	registration, ok := plan.Registration()
+	if !ok {
+		t.Fatal("Telegram registration plan is missing")
+	}
+	return registration
+}
+
+func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChannelRegistration) runtimepublicingress.RegistrationPair {
+	t.Helper()
+	planGeneration, err := plangeneration.FromCanonicalValue(map[string]any{"binding": "selected-store-telegram"})
+	if err != nil {
+		t.Fatalf("plan generation: %v", err)
+	}
+	return runtimepublicingress.RegistrationPair{
+		BindingID: "selected-store-telegram", PlanGeneration: planGeneration, Registration: registration,
+		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
+		Target: runtimepublicingress.RegistrationTarget{
+			Selector: "ingress:support:telegram:telegram", BundleHash: testCanonicalBundleHash,
+			ServiceID: "selected-store-service", PackageKey: "support", FlowID: "telegram", Alias: "support", Provider: "telegram",
+			Generation: 1, PublicationSequence: 1,
+			AdmissionPlanGeneration: triggergeneration.FromCanonicalBytes([]byte("selected-store-registration-admission")),
+			SigningCredentialKey:    "signing",
+		},
+	}
+}
+
+func setSelectedStoreExposure(readiness *runtimepublicingress.ReadinessOwner, exposure runtimepublicingress.Generation, startup runtimestartupownership.Authority, now time.Time) {
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
+		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
+		StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(runtimepublicingress.EvidenceTTL),
+	})
+}
+
+func selectedStoreLatestProviderRegistrationAttempt(t *testing.T, ctx context.Context, db *sql.DB) (string, string, int) {
+	t.Helper()
+	var operationID, attemptID string
+	var ordinal int
+	query := `SELECT operation_id::text, attempt_id::text, attempt_ordinal FROM runtime_external_effect_attempts WHERE adapter='provider_registration' ORDER BY authorized_at DESC, attempt_ordinal DESC LIMIT 1`
+	if err := db.QueryRowContext(ctx, query).Scan(&operationID, &attemptID, &ordinal); err != nil {
+		query = `SELECT operation_id, attempt_id, attempt_ordinal FROM runtime_external_effect_attempts WHERE adapter='provider_registration' ORDER BY authorized_at DESC, attempt_ordinal DESC LIMIT 1`
+		if err := db.QueryRowContext(ctx, query).Scan(&operationID, &attemptID, &ordinal); err != nil {
+			t.Fatalf("query latest provider registration attempt: %v", err)
+		}
+	}
+	return operationID, attemptID, ordinal
+}
+
+func selectedStoreCallbackToken(callbackURL string) string {
+	request, err := http.NewRequest(http.MethodPost, callbackURL, nil)
+	if err != nil {
+		return ""
+	}
+	return request.URL.Query().Get("swarm_callback_generation")
+}
+
+func selectedRegistrationResponse(status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}
+}
+
 func installExternalEffectAttemptFault(t *testing.T, db *sql.DB, postgres bool, operation, attemptID, state string) func() {
 	t.Helper()
 	name := "fail_effect_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -331,7 +702,10 @@ func selectedStoreExternalEffectCount(t *testing.T, ctx context.Context, db *sql
 }
 
 func testServeRegistrationAuthority(startup runtimestartupownership.Authority) runtimeeffects.Authority {
-	intentID := uuid.NewString()
+	return testServeRegistrationAuthorityFromIdentity(startup, uuid.NewString())
+}
+
+func testServeRegistrationAuthorityFromIdentity(startup runtimestartupownership.Authority, intentID string) runtimeeffects.Authority {
 	return runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityServeRegistration, ID: intentID,
 		ExecutionOwner: startup.OwnerID, LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: startup.Generation,

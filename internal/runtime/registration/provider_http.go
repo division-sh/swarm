@@ -90,10 +90,9 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 	if err != nil {
 		return ApplyResult{Pending: pending}, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_response_unconfirmed", providerRegistrationSource, "validate_response", map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err)
 	}
-	if err := handle.Succeed(ctx, map[string]any{"status": response.StatusCode}); err != nil {
-		return ApplyResult{Output: output, Pending: pending}, err
-	}
-	return ApplyResult{Output: output, Acknowledged: true}, nil
+	// Provider acknowledgment is not authoritative registration state. Keep the
+	// durable attempt live until readback proves the exact callback intent.
+	return ApplyResult{Output: output, Pending: pending, Acknowledged: true}, nil
 }
 
 func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause error) error {
@@ -112,7 +111,26 @@ func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause err
 	if cause == nil {
 		return fmt.Errorf("provider registration readback is not exact")
 	}
-	return cause
+	failureErr := runtimefailures.Wrap(
+		runtimefailures.ClassOutcomeUncertain,
+		"provider_registration_readback_unconfirmed",
+		providerRegistrationSource,
+		"settle_readback",
+		map[string]any{"authority": "provider_readback", "matched": false},
+		cause,
+	)
+	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
+	return p.handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{
+		"authority": "provider_readback",
+		"matched":   false,
+	})
+}
+
+func (p *PendingApply) Attempt() runtimeeffects.Attempt {
+	if p == nil || p.handle == nil {
+		return runtimeeffects.Attempt{}
+	}
+	return p.handle.Attempt()
 }
 
 func prepareProviderRequest(toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any) (runtimecontracts.PreparedToolHTTPRequest, []string, error) {
