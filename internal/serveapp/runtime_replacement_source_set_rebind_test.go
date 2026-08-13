@@ -2,7 +2,9 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -93,6 +96,8 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			predecessor := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-predecessor", "alpha-worker"), runtimeContextTestHash("a"))
 			survivor := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-survivor", "beta-worker"), runtimeContextTestHash("b"))
 			candidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-candidate", "gamma-worker"), runtimeContextTestHash("c"))
+			restoredCandidate := newRuntime(candidate.root, candidate.hash)
+			failedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-failed-candidate", "delta-worker"), runtimeContextTestHash("d"))
 
 			coordinates := []runtimeagenttopology.SourceCoordinate{
 				{BundleHash: predecessor.hash, BundleSource: "ephemeral"},
@@ -206,6 +211,61 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 			if !persistedSurvivor {
 				t.Fatal("persisted survivor lifecycle row was not found")
+			}
+
+			var publicationHooks atomic.Int32
+			supervisor.SetRuntimePublishedHook(func(context.Context) error {
+				if publicationHooks.Add(1) == 1 {
+					return errors.New("public ingress reconciliation failed")
+				}
+				return nil
+			})
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
+				return restoredCandidate.rt, restoredCandidate.rt.WorkOccurrence(), nil
+			}
+			_, replacementErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, failedCandidate.root, failedCandidate.source, failedCandidate.bundle, failedCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: failedCandidate.hash}, failedCandidate.rt, failedCandidate.rt.WorkOccurrence(),
+			)
+			if replacementErr == nil || !strings.Contains(replacementErr.Error(), "public ingress reconciliation failed") {
+				t.Fatalf("post-publication replacement error = %v, want public ingress failure", replacementErr)
+			}
+			if publicationHooks.Load() != 2 {
+				t.Fatalf("publication hooks = %d, want failed candidate plus restored predecessor", publicationHooks.Load())
+			}
+			if !ready.Load() || supervisor.CurrentRuntime() != restoredCandidate.rt || supervisor.CurrentProject().ProjectDir != candidate.root {
+				t.Fatalf("restored supervisor state = ready:%v runtime:%p project:%#v", ready.Load(), supervisor.CurrentRuntime(), supervisor.CurrentProject())
+			}
+			if lookup := contexts.LookupBundleHashStatus(candidate.hash); !lookup.Loaded() {
+				t.Fatalf("restored predecessor context = %#v, want loaded", lookup)
+			}
+			if lookup := contexts.LookupBundleHashStatus(failedCandidate.hash); lookup.Found {
+				t.Fatalf("failed published candidate context = %#v, want withdrawn", lookup)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("survivor after post-publication rollback = %#v, want loaded", lookup)
+			}
+			restoredPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || restoredPlan.Revision != currentPlan.Revision {
+				t.Fatalf("restored source set = exists:%v revision:%s want:%s err:%v", exists, restoredPlan.Revision, currentPlan.Revision, err)
+			}
+			agents, err = stores.ManagerStore.LoadAgents(ctx)
+			if err != nil {
+				t.Fatalf("read topology after post-publication rollback: %v", err)
+			}
+			var restoredGamma, restoredBeta bool
+			for _, agent := range agents {
+				switch agent.Config.ID {
+				case "gamma-worker":
+					restoredGamma = agent.LifecyclePhase == "running"
+				case "beta-worker":
+					restoredBeta = agent.LifecyclePhase == "running"
+				case "delta-worker":
+					t.Fatalf("failed candidate topology survived rollback: %#v", agent)
+				}
+			}
+			if !restoredGamma || !restoredBeta {
+				t.Fatalf("restored topology = gamma:%v beta:%v", restoredGamma, restoredBeta)
 			}
 
 			deactivated := contexts.DeactivateBundleHashWithOptions(

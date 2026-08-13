@@ -87,18 +87,25 @@ type runtimeContextEntry struct {
 }
 
 type replacementPublication struct {
-	existingHash        string
-	bundleHash          string
-	entry               *runtimeContextEntry
-	context             BundleContext
-	runtime             *Runtime
-	workOwner           *worklifetime.RuntimeOccurrence
-	standing            map[string]*worklifetime.StandingOccurrence
-	parkedStanding      map[string]*runtimepipeline.ParkedOccurrence
-	survivingContexts   map[string]*BundleContext
-	admissionGeneration triggergeneration.Generation
-	installedSubjects   []packs.Subject
-	capabilitySubjects  []packs.Subject
+	existingHash                   string
+	bundleHash                     string
+	entry                          *runtimeContextEntry
+	predecessorContext             BundleContext
+	predecessorRuntime             *Runtime
+	predecessorWorkOwner           *worklifetime.RuntimeOccurrence
+	context                        BundleContext
+	runtime                        *Runtime
+	workOwner                      *worklifetime.RuntimeOccurrence
+	standing                       map[string]*worklifetime.StandingOccurrence
+	parkedStanding                 map[string]*runtimepipeline.ParkedOccurrence
+	survivingContexts              map[string]*BundleContext
+	predecessorSurvivors           map[string]*BundleContext
+	admissionGeneration            triggergeneration.Generation
+	installedSubjects              []packs.Subject
+	capabilitySubjects             []packs.Subject
+	predecessorAdmissionGeneration triggergeneration.Generation
+	predecessorInstalledSubjects   []packs.Subject
+	predecessorCapabilitySubjects  []packs.Subject
 }
 
 // PreparedRuntimeContextReplacement is a fully validated, executable
@@ -109,6 +116,7 @@ type PreparedRuntimeContextReplacement struct {
 	manager     *RuntimeContextManager
 	publication *replacementPublication
 	published   bool
+	withdrawn   bool
 	discarded   bool
 }
 
@@ -270,10 +278,10 @@ func (p *PreparedRuntimeContextReplacement) Discard() error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.published {
+	if p.published && !p.withdrawn {
 		return errors.New("published runtime context replacement cannot be discarded")
 	}
-	if p.discarded {
+	if p.discarded || p.withdrawn {
 		return nil
 	}
 	p.discarded = true
@@ -287,6 +295,36 @@ func (p *PreparedRuntimeContextReplacement) Discard() error {
 		}
 	}
 	return discardErr
+}
+
+// Withdraw removes a published candidate through the same fencing and drain
+// path used for ordinary replacement, then restores the predecessor as the
+// sole unavailable replacement target. The caller may only restart and publish
+// the predecessor after this operation succeeds.
+func (p *PreparedRuntimeContextReplacement) Withdraw(ctx context.Context) error {
+	if p == nil {
+		return errors.New("prepared runtime context replacement is required")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.withdrawn {
+		return nil
+	}
+	if !p.published || p.discarded || p.manager == nil || p.publication == nil {
+		return errors.New("runtime context replacement is not published")
+	}
+	publication := p.publication
+	predecessor := publication.predecessorContext
+	predecessor.Runtime = publication.predecessorRuntime
+	predecessor.WorkOwner = publication.predecessorWorkOwner
+	if _, err := p.manager.BeginBundleHashReplacement(ctx, publication.bundleHash, predecessor); err != nil {
+		return fmt.Errorf("withdraw published candidate runtime context: %w", err)
+	}
+	if err := p.manager.restoreWithdrawnReplacementPredecessor(publication); err != nil {
+		return err
+	}
+	p.withdrawn = true
+	return nil
 }
 
 // RuntimeContextUse is the only execution-bearing result produced by the
@@ -1749,16 +1787,66 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 	if err != nil {
 		return nil, err
 	}
+	predecessorContext := *entry.context
 	return &replacementPublication{
-		existingHash:   existingHash,
-		bundleHash:     contextDef.BundleHash(),
-		entry:          entry,
-		context:        copied,
-		runtime:        runtimeOwner,
-		workOwner:      workOwner,
-		standing:       standing,
-		parkedStanding: copyParkedStandingOccurrences(entry.parkedStanding),
+		existingHash:                   existingHash,
+		bundleHash:                     contextDef.BundleHash(),
+		entry:                          entry,
+		predecessorContext:             predecessorContext,
+		predecessorRuntime:             entry.runtime,
+		predecessorWorkOwner:           entry.workOwner,
+		context:                        copied,
+		runtime:                        runtimeOwner,
+		workOwner:                      workOwner,
+		standing:                       standing,
+		parkedStanding:                 copyParkedStandingOccurrences(entry.parkedStanding),
+		predecessorAdmissionGeneration: m.admissionGeneration,
+		predecessorInstalledSubjects:   packs.CloneSubjects(m.installedTriggerSubjects),
+		predecessorCapabilitySubjects:  packs.CloneSubjects(m.capabilitySubjects),
 	}, nil
+}
+
+func (m *RuntimeContextManager) restoreWithdrawnReplacementPredecessor(publication *replacementPublication) error {
+	if m == nil || publication == nil || publication.entry == nil {
+		return errors.New("withdrawn runtime replacement predecessor is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	candidate := m.contexts[publication.bundleHash]
+	if candidate == nil || candidate.state != RuntimeContextStateUnloaded || candidate.cause != RuntimeContextCauseReplacing || candidate.runtime != publication.runtime {
+		return fmt.Errorf("published candidate runtime context %s did not remain withdrawn", publication.bundleHash)
+	}
+	parked := copyParkedStandingOccurrences(candidate.parkedStanding)
+	if publication.existingHash != publication.bundleHash {
+		delete(m.contexts, publication.bundleHash)
+		for i, bundleHash := range m.order {
+			if bundleHash == publication.bundleHash {
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				break
+			}
+		}
+		m.contexts[publication.existingHash] = publication.entry
+		m.order = append(m.order, publication.existingHash)
+		sort.Strings(m.order)
+	}
+	predecessor := publication.predecessorContext
+	publication.entry.context = &predecessor
+	publication.entry.runtime = publication.predecessorRuntime
+	publication.entry.workOwner = publication.predecessorWorkOwner
+	publication.entry.standing = nil
+	publication.entry.parkedStanding = parked
+	publication.entry.state = RuntimeContextStateUnloaded
+	publication.entry.cause = RuntimeContextCauseReplacing
+	for bundleHash, contextDef := range publication.predecessorSurvivors {
+		if surviving := m.contexts[bundleHash]; surviving != nil && surviving.context != nil {
+			copied := *contextDef
+			surviving.context = &copied
+		}
+	}
+	m.admissionGeneration = publication.predecessorAdmissionGeneration
+	m.installedTriggerSubjects = packs.CloneSubjects(publication.predecessorInstalledSubjects)
+	m.capabilitySubjects = packs.CloneSubjects(publication.predecessorCapabilitySubjects)
+	return nil
 }
 
 func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *replacementPublication) {
@@ -1915,8 +2003,11 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublicationWithAdmis
 		return nil, err
 	}
 	publication.survivingContexts = make(map[string]*BundleContext, len(survivingTargets))
+	publication.predecessorSurvivors = make(map[string]*BundleContext, len(survivingTargets))
 	for bundleHash, targets := range survivingTargets {
 		if surviving := m.contexts[strings.TrimSpace(bundleHash)]; surviving != nil && runtimeContextEntryLoaded(surviving) {
+			previous := *surviving.context
+			publication.predecessorSurvivors[strings.TrimSpace(bundleHash)] = &previous
 			copied := *surviving.context
 			copied.StandingTargets = append([]StandingTarget(nil), targets...)
 			publication.survivingContexts[strings.TrimSpace(bundleHash)] = &copied

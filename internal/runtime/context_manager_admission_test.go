@@ -196,6 +196,26 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 					t.Fatalf("changed-hash predecessor still registered: %#v", stale)
 				}
 			}
+			if err := prepared.Withdraw(context.Background()); err != nil {
+				t.Fatalf("Withdraw: %v", err)
+			}
+			predecessorLookup := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+			if predecessorLookup.Loaded() || predecessorLookup.Cause != RuntimeContextCauseReplacing {
+				t.Fatalf("withdrawn replacement predecessor = %#v, want unavailable replacing", predecessorLookup)
+			}
+			if changedHash {
+				if stale := manager.LookupBundleHashStatus(candidateHash); stale.Found {
+					t.Fatalf("withdrawn changed-hash candidate still registered: %#v", stale)
+				}
+			}
+			if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
+				t.Fatalf("restored process generation = %q, want %q", got.Diagnostic(), oldCatalog.Generation().Diagnostic())
+			}
+			survivorLookup := manager.LookupIngress("survivor", "acme")
+			if !survivorLookup.Loaded() || !survivorLookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
+				t.Fatalf("restored survivor admission = %#v, want old generation", survivorLookup)
+			}
+			assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), oldCatalog.Generation(), 2)
 		})
 	}
 }

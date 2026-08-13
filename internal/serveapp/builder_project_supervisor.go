@@ -898,8 +898,29 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		}
 		oldContextDef := *oldContext
 		s.mu.RLock()
+		oldRoot := s.currentRoot
+		oldSource := s.currentSource
+		oldBundle := s.currentBundle
 		oldRT := s.currentRT
+		oldFact := s.currentBundleSourceFact
+		oldIdentity := s.currentBundleIdentity
+		oldProviderTriggers := s.providerTriggers
+		oldChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
+		oldChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
 		s.mu.RUnlock()
+		restoreSupervisorPredecessor := func() {
+			s.mu.Lock()
+			s.currentRoot = oldRoot
+			s.currentSource = oldSource
+			s.currentBundle = oldBundle
+			s.currentRT = oldRT
+			s.currentBundleSourceFact = oldFact
+			s.currentBundleIdentity = oldIdentity
+			s.providerTriggers = oldProviderTriggers
+			s.channelPlans = append([]packs.SatisfactionPlan(nil), oldChannelPlans...)
+			s.channelBindings = append([]packs.OutboundBindingPlan(nil), oldChannelBindings...)
+			s.mu.Unlock()
+		}
 		s.setReady(false)
 		s.mu.RLock()
 		beforeStartupHandoff := s.beforeStartupHandoff
@@ -1027,7 +1048,12 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 				s.pendingReplacement = nil
 			}
 			s.mu.Unlock()
-			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
+			withdrawErr := publication.Withdraw(context.Background())
+			shutdownErr := s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
+			if withdrawErr != nil || shutdownErr != nil {
+				return s.CurrentProject(), errors.Join(err, withdrawErr, shutdownErr)
+			}
+			restoreSupervisorPredecessor()
 			return s.CurrentProject(), restoreAfterSurvivorCommit(err)
 		}
 		return s.CurrentProject(), nil
