@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -2166,37 +2168,151 @@ func TestEventBusPublish_RootInputFlowRejectsInternalSameNameBeforePersistence(t
 	}
 }
 
-func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
-	source := semanticview.Wrap(routedRootInputFlowNodeBundle())
-	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
-	if err != nil {
-		t.Fatalf("construct exact operator API endpoint: %v", err)
-	}
+func TestEventBusPublish_RootInputFlowRejectsExplicitlyTargetedInternalSameNameBeforePersistence(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	wantRoute := events.RouteIdentity{
-		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("operator-root-input-owner"),
+	target := events.RouteIdentity{
+		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("targeted-root-input-owner"),
 	}.Normalized()
-	store.setTargetOwnerRoutes(wantRoute)
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	store.setTargetOwnerRoutes(target)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
+	})
 	if err != nil {
-		t.Fatalf("create EventBus: %v", err)
+		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	event := eventtest.OperatorInjected(
-		uuid.NewString(), events.EventType("thing.created"), "operator", "", []byte(`{"proof":"typed-api-endpoint"}`), 0,
-		uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
+	runID := uuid.NewString()
+	sourceRoute := events.RouteIdentity{
+		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("targeted-root-input-source"),
+	}.Normalized()
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
+	envelope = events.EnvelopeForTargetRoute(envelope, target)
+	evt := eventtest.PersistedChildForProducer(
+		uuid.NewString(), events.EventType("thing.created"),
+		eventtest.Producer(events.EventProducerNode, "foreign-node"), "", []byte(`{}`), 0,
+		runID, uuid.NewString(), envelope, time.Now().UTC(),
 	)
 
-	plan, err := eventBus.CheckAPIEventPublishRecipientPlan(context.Background(), event, &endpoint)
-	if err != nil {
-		t.Fatalf("preflight exact operator API endpoint: %v", err)
+	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("CheckPublishRecipientPlan error = %v, want explicit-target root-input admission refusal", err)
 	}
-	want := events.MustExistingEntityTarget(wantRoute)
-	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "entity-writer" || plan.DeliveryRoutes[0].Target != want {
-		t.Fatalf("operator API delivery routes = %#v, want exact validation receiver %#v", plan.DeliveryRoutes, want)
+	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("Publish error = %v, want explicit-target root-input admission refusal", err)
 	}
-	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil || !strings.Contains(err.Error(), "root-input") {
-		t.Fatalf("unadmitted operator preflight error = %v, want root-input admission refusal", err)
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
+		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
+		t.Fatalf("rejected targeted root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
 	}
+}
+
+func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
+	for _, explicitTarget := range []bool{false, true} {
+		name := "target_free"
+		if explicitTarget {
+			name = "explicit_exact_target"
+		}
+		t.Run(name, func(t *testing.T) {
+			bundle := routedRootInputFlowNodeBundle()
+			if explicitTarget {
+				addRoutedRootInputFlowNodeSibling(bundle)
+			}
+			source := semanticview.Wrap(bundle)
+			endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
+			if err != nil {
+				t.Fatalf("construct exact operator API endpoint: %v", err)
+			}
+			wantRoute := events.RouteIdentity{
+				FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("operator-root-input-owner-" + name),
+			}.Normalized()
+			unselectedRoute := events.RouteIdentity{
+				FlowID: "audit", FlowInstance: "audit", EntityID: eventtest.UUID("operator-root-input-unselected-" + name),
+			}.Normalized()
+			lifecycleStore := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+				targetRouteMemoryStore: newTargetRouteMemoryStore(),
+			}}
+			store := &apiEventPublicationMemoryStore{connectRoutePlanLifecycleStore: lifecycleStore}
+			store.setTargetOwnerRoutes(wantRoute, unselectedRoute)
+			eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("create EventBus: %v", err)
+			}
+			lifecycleStore.bus = eventBus
+			envelope := events.EventEnvelope{}
+			if explicitTarget {
+				envelope = events.EnvelopeForTargetRoute(envelope, wantRoute)
+			}
+			eventID := uuid.NewString()
+			event := eventtest.OperatorInjected(
+				eventID, events.EventType("thing.created"), "operator", "", []byte(`{"proof":"typed-api-endpoint"}`), 0,
+				uuid.NewString(), nil, envelope, time.Now().UTC(),
+			)
+
+			plan, err := eventBus.CheckAPIEventPublishRecipientPlan(context.Background(), event, &endpoint)
+			if err != nil {
+				t.Fatalf("preflight exact operator API endpoint: %v", err)
+			}
+			want := events.MustExistingEntityTarget(wantRoute)
+			if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "entity-writer" || plan.DeliveryRoutes[0].Target != want {
+				t.Fatalf("operator API delivery routes = %#v, want exact validation receiver %#v", plan.DeliveryRoutes, want)
+			}
+			if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil || !strings.Contains(err.Error(), "root-input") {
+				t.Fatalf("unadmitted operator preflight error = %v, want root-input admission refusal", err)
+			}
+			completion, replay, err := eventBus.PublishAPIEventAcknowledged(
+				testAuthorActivityContext(context.Background()), event, &endpoint,
+				apiidempotency.Request{
+					Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "root-input-" + name, RequestHash: "root-input-request-" + name,
+				},
+				apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)},
+			)
+			if err != nil {
+				t.Fatalf("publish exact operator API endpoint: %v", err)
+			}
+			if replay || completion.ResourceID != eventID {
+				t.Fatalf("operator API completion = %#v replay=%t, want fresh %s", completion, replay, eventID)
+			}
+			if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Recipient.ID() != "entity-writer" || routes[0].Target != want {
+				t.Fatalf("persisted operator API routes = %#v, want only exact selected validation receiver %#v", routes, want)
+			}
+			if got := store.events[eventID].TargetRoute().Normalized(); explicitTarget && got != wantRoute {
+				t.Fatalf("persisted explicitly targeted operator API event target = %#v, want %#v", got, wantRoute)
+			} else if !explicitTarget && !got.Empty() {
+				t.Fatalf("persisted target-free operator API event target = %#v, want immutable target-free payload", got)
+			}
+		})
+	}
+}
+
+func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContractBundle) {
+	audit := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "audit", Flow: "audit"},
+		Path:  "audit",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "static",
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"audit-writer": {
+				ID:            "audit-writer",
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{"thing.created"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"thing.created": existingOwnerHandlerFixture(),
+				},
+			},
+		},
+	}
+	validation := bundle.FlowTree.Root.Children[0]
+	bundle.FlowTree.Root.Children = []runtimecontracts.FlowContractView{validation, audit}
+	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{
+		"validation": &bundle.FlowTree.Root.Children[0],
+		"audit":      &bundle.FlowTree.Root.Children[1],
+	}
+	bundle.Semantics.FlowInputs["audit"] = []string{"thing.created"}
+	bundle.FlowSchemas["audit"] = audit.Schema
 }
 
 func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -511,4 +512,452 @@ func TestEventBusCrossFlowTargetOwnerFailsClosedBeforeMutation(t *testing.T) {
 	t.Run("mixed exact and wildcard cross flow", TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersistence)
 	t.Run("descendant without connect", TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence)
 	t.Run("missing or ambiguous root owner", TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelectedOwnerBeforeMutation)
+}
+
+func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemainOpen(t *testing.T) {
+	const (
+		pingEvent = "work.ping"
+		pongEvent = "work.pong"
+	)
+	childHandler := existingOwnerHandlerFixture()
+	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+		id: "boomerang", path: "left/worker", mode: runtimecontracts.FlowModeSingleton,
+		inputs:  []runtimecontracts.FlowInputEventPin{{Name: "ping", Event: pingEvent}},
+		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "pong", Event: pongEvent}},
+		nodes: map[string]runtimecontracts.SystemNodeContract{
+			"boomerang-worker": {
+				ID: "boomerang-worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{pingEvent: childHandler},
+			},
+		},
+	}}, []runtimecontracts.FlowPackageConnect{
+		{From: ".ping", To: "boomerang.ping"},
+		{From: "boomerang.pong", To: ".pong"},
+	})
+	bundle.Semantics.Name = "boomerang-root"
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+		Inputs: runtimecontracts.FlowInputPins{
+			Events: []string{pongEvent}, EventPins: []runtimecontracts.FlowInputEventPin{{Name: "pong", Event: pongEvent}},
+		},
+		Outputs: runtimecontracts.FlowOutputPins{
+			Events: []string{pingEvent}, EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "ping", Event: pingEvent}},
+		},
+	}}
+	rootHandler := existingOwnerHandlerFixture()
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"root-boomerang": {
+			ID: "root-boomerang", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{pongEvent: rootHandler},
+		},
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{pingEvent: {}, pongEvent: {}}
+	bundle.FlowTree.Root.Schema = *bundle.RootSchema
+	bundle.FlowTree.Root.Nodes = bundle.Nodes
+	bundle.Semantics.FlowInputs[""] = []string{pongEvent}
+	bundle.Semantics.FlowOutputs[""] = []string{pingEvent}
+	bundle.Semantics.FlowInputEventPins[""] = append([]runtimecontracts.FlowInputEventPin(nil), bundle.RootSchema.Pins.Inputs.EventPins...)
+	bundle.Semantics.FlowOutputEventPins[""] = append([]runtimecontracts.FlowOutputEventPin(nil), bundle.RootSchema.Pins.Outputs.EventPins...)
+	bundle.Semantics.NodeHandlers["root-boomerang"] = map[string]runtimecontracts.SystemNodeEventHandler{pongEvent: rootHandler}
+
+	runID := uuid.NewString()
+	rootRoute := events.RouteIdentity{
+		FlowID: bundle.Semantics.Name, FlowInstance: runID, EntityID: eventtest.UUID("boomerang-root-owner"),
+	}.Normalized()
+	childRoute := events.RouteIdentity{
+		FlowID: "boomerang", FlowInstance: "left/worker", EntityID: eventtest.UUID("boomerang-child-owner"),
+	}.Normalized()
+	if rootRoute.EntityID == childRoute.EntityID {
+		t.Fatal("boomerang root and child owners must remain distinguishable")
+	}
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwnerRoutes(rootRoute, childRoute)
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	if err != nil {
+		t.Fatalf("create boomerang EventBus: %v", err)
+	}
+	childDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, "boomerang-worker")
+	rootDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, "root-boomerang")
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	rootCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("root-fan-out"), Target: events.MustExistingEntityTarget(rootRoute),
+	})
+	childCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{Target: events.MustExistingEntityTarget(childRoute)})
+	rootSource, err := events.NewRootRoutingSource(rootRoute.EntityID)
+	if err != nil {
+		t.Fatalf("construct root routing source: %v", err)
+	}
+	childSource, err := events.NewStaticFlowRoutingSource(childRoute)
+	if err != nil {
+		t.Fatalf("construct child routing source: %v", err)
+	}
+
+	firstID := uuid.NewString()
+	first := eventtest.RunCreatingRootIngressWithRoutingSource(
+		firstID, events.EventType(pingEvent), "root-producer", "", []byte(`{"turn":1}`), 0, runID, "",
+		events.EventEnvelope{}, rootSource, time.Now().UTC(),
+	)
+	if err := eventBus.Publish(rootCtx, first); err != nil {
+		t.Fatalf("publish first root-to-child leg: %v", err)
+	}
+	firstChild := requireOpenTargetOwnerDelivery(t, childDeliveries, "first boomerang child leg")
+	if got := firstChild.HandoffRoute().Target; got != events.MustExistingEntityTarget(childRoute) {
+		t.Fatalf("first child target = %#v, want exact child owner %#v", got, childRoute)
+	}
+
+	pongID := uuid.NewString()
+	pong := eventtest.ChildForProducerWithRoutingSource(
+		pongID, events.EventType("left/worker/"+pongEvent), eventtest.Producer(events.EventProducerNode, "boomerang-worker"), "",
+		[]byte(`{"turn":1}`), 0, events.EventLineage{RunID: runID, ParentEventID: firstID, ExecutionMode: executionmode.Live},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, childRoute), childSource, time.Now().UTC(),
+	)
+	if err := eventBus.Publish(childCtx, pong); err != nil {
+		t.Fatalf("publish child-to-root return leg: %v", err)
+	}
+	rootReturn := requireOpenTargetOwnerDelivery(t, rootDeliveries, "boomerang root return")
+	if got := rootReturn.HandoffRoute().Target; got != events.MustExistingEntityTarget(rootRoute) {
+		t.Fatalf("root return target = %#v, want exact root owner %#v", got, rootRoute)
+	}
+
+	secondID := uuid.NewString()
+	second := eventtest.ChildForProducerWithRoutingSource(
+		secondID, events.EventType(pingEvent), eventtest.Producer(events.EventProducerNode, "root-producer"), "",
+		[]byte(`{"turn":2}`), 0, events.EventLineage{RunID: runID, ParentEventID: pongID, ExecutionMode: executionmode.Live},
+		events.EventEnvelope{}, rootSource, time.Now().UTC(),
+	)
+	if err := eventBus.Publish(rootCtx, second); err != nil {
+		t.Fatalf("publish reentrant root-to-child leg: %v", err)
+	}
+	secondChild := requireOpenTargetOwnerDelivery(t, childDeliveries, "reentrant boomerang child leg")
+	if got := secondChild.HandoffRoute().Target; got != events.MustExistingEntityTarget(childRoute) {
+		t.Fatalf("reentrant child target = %#v, want same exact child owner %#v", got, childRoute)
+	}
+	if firstChild.Event().ID() == secondChild.Event().ID() || firstChild.HandoffRoute().ConnectClaim.Empty() || secondChild.HandoffRoute().ConnectClaim.Empty() || rootReturn.HandoffRoute().ConnectClaim.Empty() {
+		t.Fatalf("boomerang deliveries lost distinct event identity or exact connect claims: first=%#v root=%#v second=%#v", firstChild.HandoffRoute(), rootReturn.HandoffRoute(), secondChild.HandoffRoute())
+	}
+	for _, delivery := range []*LocalDelivery{secondChild, rootReturn, firstChild} {
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete boomerang delivery %s: %v", delivery.Event().ID(), err)
+		}
+	}
+	for _, eventID := range []string{firstID, pongID, secondID} {
+		routes := store.routes[eventID]
+		settlement, ok := store.settlements[eventID]
+		if len(routes) != 1 || !ok || !settlement.Delivered() || settlement.NoDelivery() {
+			t.Fatalf("boomerang event %s routes/settlement = %#v/%#v, want one delivered exact route", eventID, routes, settlement)
+		}
+		if err := settlement.Validate(routes); err != nil {
+			t.Fatalf("validate boomerang settlement %s: %v", eventID, err)
+		}
+	}
+}
+
+func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *testing.T) {
+	const eventName = "work.ready"
+	producer := connectRoutePlanTestFlow{
+		id: "producer", mode: runtimecontracts.FlowModeStatic,
+		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "ready", Event: eventName}},
+	}
+	receiver := func(id, mode string, handler runtimecontracts.SystemNodeEventHandler) connectRoutePlanTestFlow {
+		return connectRoutePlanTestFlow{
+			id: id, path: "fanout/" + id, mode: mode,
+			inputs: []runtimecontracts.FlowInputEventPin{{Name: "ready", Event: eventName}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				id + "-node": {ID: id + "-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: handler}},
+			},
+		}
+	}
+	existing := receiver("existing", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
+	materializing := receiver("materializing", runtimecontracts.FlowModeSingleton, runtimecontracts.SystemNodeEventHandler{CreateEntity: true})
+	entityless := receiver("entityless", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
+	poison := receiver("poison", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
+	connect := func(id string) runtimecontracts.FlowPackageConnect {
+		return runtimecontracts.FlowPackageConnect{From: "producer.ready", To: id + ".ready"}
+	}
+	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("mixed-owner-source")}.Normalized()
+	existingRoute := events.RouteIdentity{FlowID: "existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()
+	poisonedStore := newTargetRouteMemoryStore()
+	poisonedStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
+	poisonedBundle := connectRoutePlanTestBundle(
+		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless, poison},
+		[]runtimecontracts.FlowPackageConnect{connect("existing"), connect("materializing"), connect("entityless"), connect("poison")},
+	)
+	poisonedBus, err := newScopedTestEventBus(poisonedStore, EventBusOptions{ContractBundle: semanticview.Wrap(poisonedBundle)})
+	if err != nil {
+		t.Fatalf("create poisoned fan-out EventBus: %v", err)
+	}
+	runID := uuid.NewString()
+	ctx := runtimedelivery.WithRoute(runtimecorrelation.WithRunID(context.Background(), runID), events.DeliveryRoute{Target: events.MustExistingEntityTarget(sourceRoute)})
+	eventID := uuid.NewString()
+	event := connectRoutePlanStaticProducerEvent(
+		eventID, events.EventType("producer/"+eventName), "", "", []byte(`{"proof":"mixed-owner"}`), 0, runID, "",
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), time.Now().UTC(),
+	)
+	if _, err := poisonedBus.CheckPublishRecipientPlan(ctx, event); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+		t.Fatalf("poisoned fan-out preflight error = %v, want missing required owner", err)
+	}
+	if err := poisonedBus.Publish(ctx, event); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+		t.Fatalf("poisoned fan-out publish error = %v, want missing required owner", err)
+	}
+	if len(poisonedStore.events) != 0 || len(poisonedStore.routes) != 0 || len(poisonedStore.settlements) != 0 || len(poisonedStore.scopes) != 0 || len(poisonedStore.receipts) != 0 || len(poisonedStore.flowRoutes) != 0 {
+		t.Fatalf("poisoned fan-out partially mutated durable state: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
+			poisonedStore.events, poisonedStore.routes, poisonedStore.settlements, poisonedStore.scopes, poisonedStore.receipts, poisonedStore.flowRoutes)
+	}
+
+	legalStore := newTargetRouteMemoryStore()
+	legalStore.setTargetOwnerRoutes(sourceRoute, existingRoute)
+	legalBundle := connectRoutePlanTestBundle(
+		[]connectRoutePlanTestFlow{producer, existing, materializing, entityless},
+		[]runtimecontracts.FlowPackageConnect{connect("existing"), connect("materializing"), connect("entityless")},
+	)
+	interceptor := &connectRoutePlanNodeInterceptor{}
+	legalBus, err := newScopedTestEventBus(legalStore, EventBusOptions{
+		ContractBundle: semanticview.Wrap(legalBundle), Interceptors: []EventInterceptor{interceptor},
+	})
+	if err != nil {
+		t.Fatalf("create legal mixed-owner EventBus: %v", err)
+	}
+	plan, err := legalBus.CheckPublishRecipientPlan(ctx, event)
+	if err != nil {
+		t.Fatalf("legal mixed-owner preflight: %v", err)
+	}
+	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 3 {
+		t.Fatalf("legal mixed-owner preflight failure/routes = %q/%#v, want three exact owners", plan.TargetFailure, plan.DeliveryRoutes)
+	}
+	wantOwners := map[string]events.DeliveryTargetOwnership{
+		"existing-node": events.MustExistingEntityTarget(existingRoute),
+		"materializing-node": events.MustMaterializingEntityTarget(events.RouteIdentity{
+			FlowID: "materializing", FlowInstance: "fanout/materializing", EntityID: runtimeflowidentity.EntityID("fanout/materializing"),
+		}),
+		"entityless-node": events.MustEntitylessReceiverTarget(events.RouteIdentity{
+			FlowID: "entityless", FlowInstance: "fanout/entityless",
+		}),
+	}
+	for _, route := range plan.DeliveryRoutes {
+		want, ok := wantOwners[route.Recipient.ID()]
+		if !ok || route.Target != want || route.ConnectClaim.Empty() {
+			t.Fatalf("legal mixed-owner route = %#v, want exact classified owner from %#v", route, wantOwners)
+		}
+	}
+	if err := legalBus.Publish(ctx, event); err != nil {
+		t.Fatalf("publish legal mixed-owner fan-out: %v", err)
+	}
+	if interceptor.Count() != 3 {
+		t.Fatalf("legal mixed-owner executions = %d, want 3", interceptor.Count())
+	}
+	if routes := legalStore.routes[eventID]; len(routes) != 3 {
+		t.Fatalf("persisted legal mixed-owner routes = %#v, want 3", routes)
+	} else {
+		for _, route := range routes {
+			if want := wantOwners[route.Recipient.ID()]; route.Target != want || route.ConnectClaim.Empty() {
+				t.Fatalf("persisted legal mixed-owner route = %#v, want exact classified owner", route)
+			}
+		}
+	}
+	settlement, ok := legalStore.settlements[eventID]
+	if !ok || !settlement.Delivered() || settlement.NoDelivery() {
+		t.Fatalf("legal mixed-owner settlement = %#v, want delivered", settlement)
+	}
+	if err := settlement.Validate(legalStore.routes[eventID]); err != nil {
+		t.Fatalf("validate legal mixed-owner settlement: %v", err)
+	}
+}
+
+func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, canonicalrouting.CopyTargetOwnerDiamond(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load two-level fan-out diamond fixture: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	runID := uuid.NewString()
+	rootRoute := events.RouteIdentity{
+		FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("root-source-entity"),
+	}.Normalized()
+	leftRoute := events.RouteIdentity{
+		FlowID: "branch", FlowInstance: "branch/left", EntityID: eventtest.UUID("diamond-left-parent"),
+	}.Normalized()
+	rightRoute := events.RouteIdentity{
+		FlowID: "branch", FlowInstance: "branch/right", EntityID: eventtest.UUID("diamond-right-parent"),
+	}.Normalized()
+	hostileRoute := events.RouteIdentity{
+		FlowID: "hostile", FlowInstance: "unrelated/worker/result", EntityID: eventtest.UUID("diamond-hostile-owner"),
+	}.Normalized()
+	store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{
+			{InstanceID: "left", EntityID: leftRoute.EntityID, FlowInstance: leftRoute.FlowInstance, FlowTemplate: "branch", AddressFields: map[string]string{"entity.branch_id": "left"}},
+			{InstanceID: "right", EntityID: rightRoute.EntityID, FlowInstance: rightRoute.FlowInstance, FlowTemplate: "branch", AddressFields: map[string]string{"entity.branch_id": "right"}},
+		},
+	}}
+	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute)
+	interceptor := &connectRoutePlanNodeInterceptor{}
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, TemplateInstanceActivator: store.Activate, Interceptors: []EventInterceptor{interceptor},
+	})
+	if err != nil {
+		t.Fatalf("create diamond EventBus: %v", err)
+	}
+	store.bus = eventBus
+	for _, identity := range []runtimeflowidentity.Route{
+		runtimeflowidentity.DeriveRoute("branch", "left"),
+		runtimeflowidentity.DeriveRoute("branch", "right"),
+	} {
+		if err := eventBus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			t.Fatalf("materialize diamond branch route %s: %v", identity.InstancePath, err)
+		}
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	rootCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{Target: events.MustExistingEntityTarget(rootRoute)})
+	rootSource, err := events.NewRootRoutingSource(rootRoute.EntityID)
+	if err != nil {
+		t.Fatalf("construct diamond root source: %v", err)
+	}
+	parents := []struct {
+		name  string
+		route events.RouteIdentity
+	}{
+		{name: "left", route: leftRoute},
+		{name: "right", route: rightRoute},
+	}
+	for _, parent := range parents {
+		eventID := uuid.NewString()
+		event := eventtest.RunCreatingRootIngressWithRoutingSource(
+			eventID, events.EventType("branch.start"), "root-fan-out", "", []byte(fmt.Sprintf(`{"branch_id":%q}`, parent.name)),
+			0, runID, "", events.EventEnvelope{}, rootSource, time.Now().UTC(),
+		)
+		plan, err := eventBus.CheckPublishRecipientPlan(rootCtx, event)
+		if err != nil {
+			t.Fatalf("preflight root-to-%s concrete branch: %v", parent.name, err)
+		}
+		want := events.MustExistingEntityTarget(parent.route)
+		if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want || plan.DeliveryRoutes[0].ConnectClaim.Empty() {
+			t.Fatalf("root-to-%s plan = failure:%q routes:%#v, want exact concrete branch %#v", parent.name, plan.TargetFailure, plan.DeliveryRoutes, want)
+		}
+		if err := eventBus.Publish(rootCtx, event); err != nil {
+			t.Fatalf("publish root-to-%s concrete branch: %v", parent.name, err)
+		}
+		if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Target != want || routes[0].ConnectClaim.Empty() {
+			t.Fatalf("persisted root-to-%s route = %#v, want exact concrete branch", parent.name, routes)
+		}
+	}
+
+	var branchDeliveryIDs []string
+	for _, parent := range parents {
+		parentSource, err := events.NewConcreteTemplateInstanceRoutingSource(parent.route)
+		if err != nil {
+			t.Fatalf("construct %s concrete branch source: %v", parent.name, err)
+		}
+		parentCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+			Recipient: events.MustNodeDeliveryRecipient("branch-worker-" + parent.name), Target: events.MustExistingEntityTarget(parent.route),
+		})
+		eventID := uuid.NewString()
+		branchDeliveryIDs = append(branchDeliveryIDs, eventID)
+		event := eventtest.ChildForProducerWithRoutingSource(
+			eventID, events.EventType("branch/"+parent.name+"/work.ready"), eventtest.Producer(events.EventProducerNode, "branch-worker-"+parent.name), "",
+			[]byte(fmt.Sprintf(`{"branch_id":%q}`, parent.name)), 0,
+			events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+			events.EnvelopeForSourceRoute(events.EventEnvelope{}, parent.route), parentSource, time.Now().UTC(),
+		)
+		plan, err := eventBus.CheckPublishRecipientPlan(parentCtx, event)
+		if err != nil {
+			t.Fatalf("preflight %s second-level fan-out: %v", parent.name, err)
+		}
+		if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 2 {
+			t.Fatalf("%s second-level plan = failure:%q routes:%#v, want static plus singleton", parent.name, plan.TargetFailure, plan.DeliveryRoutes)
+		}
+		var staticSeen, singletonSeen bool
+		for _, route := range plan.DeliveryRoutes {
+			if route.ConnectClaim.Empty() {
+				t.Fatalf("%s second-level route lacks exact connect claim: %#v", parent.name, route)
+			}
+			if strings.Contains(route.Recipient.ID(), "static-result") {
+				staticSeen = true
+				if route.Target.Code() != "existing_entity" || route.Target.Route().EntityID != parent.route.EntityID || route.Target.Route().FlowInstance != "branch/static-result" {
+					t.Fatalf("%s nested static target = %s %#v, want parent-shared existing owner %#v", parent.name, route.Target.Code(), route.Target.Route(), parent.route)
+				}
+			} else if strings.Contains(route.Recipient.ID(), "singleton-result") {
+				singletonSeen = true
+				wantPath := "branch/singleton-result"
+				if route.Target.Code() != "materializing_entity" || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
+					t.Fatalf("%s nested singleton target = %s %#v, want materializing %q", parent.name, route.Target.Code(), route.Target.Route(), wantPath)
+				}
+				if route.Target.Route().EntityID == parent.route.EntityID || route.Target.Route().EntityID == rootRoute.EntityID {
+					t.Fatalf("%s singleton reused parent/root owner: %#v", parent.name, route.Target.Route())
+				}
+			} else {
+				t.Fatalf("%s second-level fan-out reached unrelated same-leaf receiver: %#v", parent.name, route)
+			}
+		}
+		if !staticSeen || !singletonSeen {
+			t.Fatalf("%s second-level routes = %#v, want one static and one singleton", parent.name, plan.DeliveryRoutes)
+		}
+		if err := eventBus.Publish(parentCtx, event); err != nil {
+			t.Fatalf("publish %s second-level fan-out: %v", parent.name, err)
+		}
+		if routes := store.routes[eventID]; len(routes) != 2 {
+			t.Fatalf("persisted %s second-level routes = %#v, want 2", parent.name, routes)
+		} else {
+			for _, route := range routes {
+				if route.ConnectClaim.Empty() || strings.Contains(route.Recipient.ID(), "hostile") {
+					t.Fatalf("persisted %s route captured hostile receiver or lost claim: %#v", parent.name, route)
+				}
+			}
+		}
+	}
+
+	for _, parent := range parents {
+		parentSource, err := events.NewConcreteTemplateInstanceRoutingSource(parent.route)
+		if err != nil {
+			t.Fatalf("construct %s convergence source: %v", parent.name, err)
+		}
+		parentCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+			Recipient: events.MustNodeDeliveryRecipient("branch-worker-" + parent.name), Target: events.MustExistingEntityTarget(parent.route),
+		})
+		for branch := 0; branch < 2; branch++ {
+			eventID := uuid.NewString()
+			event := eventtest.ChildForProducerWithRoutingSource(
+				eventID, events.EventType("branch/"+parent.name+"/branch.done"), eventtest.Producer(events.EventProducerNode, fmt.Sprintf("result-%d", branch)), "",
+				[]byte(fmt.Sprintf(`{"branch_id":%q,"result":%d}`, parent.name, branch)), 0,
+				events.EventLineage{RunID: runID, ParentEventID: branchDeliveryIDs[branch], ExecutionMode: executionmode.Live},
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, parent.route), parentSource, time.Now().UTC(),
+			)
+			plan, err := eventBus.CheckPublishRecipientPlan(parentCtx, event)
+			if err != nil {
+				t.Fatalf("preflight %s convergence branch %d: %v", parent.name, branch, err)
+			}
+			want := events.MustExistingEntityTarget(rootRoute)
+			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want || plan.DeliveryRoutes[0].ConnectClaim.Empty() {
+				t.Fatalf("%s convergence branch %d plan = failure:%q routes:%#v, want exact root owner", parent.name, branch, plan.TargetFailure, plan.DeliveryRoutes)
+			}
+			if err := eventBus.Publish(parentCtx, event); err != nil {
+				t.Fatalf("publish %s convergence branch %d: %v", parent.name, branch, err)
+			}
+		}
+	}
+	if got := interceptor.Count(); got != 10 {
+		t.Fatalf("diamond executions = %d, want 2 parent + 4 nested + 4 root convergence with no hostile capture", got)
+	}
+	for eventID, routes := range store.routes {
+		settlement, ok := store.settlements[eventID]
+		if !ok || !settlement.Delivered() || settlement.NoDelivery() {
+			t.Fatalf("diamond event %s settlement = %#v, want delivered", eventID, settlement)
+		}
+		if err := settlement.Validate(routes); err != nil {
+			t.Fatalf("validate diamond settlement %s: %v", eventID, err)
+		}
+	}
+}
+
+func requireOpenTargetOwnerDelivery(t testing.TB, deliveries <-chan *LocalDelivery, label string) *LocalDelivery {
+	t.Helper()
+	select {
+	case delivery := <-deliveries:
+		if delivery == nil {
+			t.Fatalf("%s: queued delivery is nil", label)
+		}
+		return delivery
+	default:
+		t.Fatalf("%s: expected queued delivery", label)
+		return nil
+	}
 }
