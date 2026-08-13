@@ -203,7 +203,7 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
-	if err := validateRoutedNodeDeliveryAuthority(evt, routing.RoutedRecipients, routePlan); err != nil {
+	if err := validateRoutedNodeDeliveryAuthority(ctx, evt, routing.RoutedRecipients, routePlan); err != nil {
 		return RoutePlan{}, err
 	}
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
@@ -834,18 +834,25 @@ func routedImportBoundaryNoTargetNodeDeliveryIntents(evt events.Event, routed []
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerScopedNodeRoute)
 }
 
-func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, plan RoutePlan) error {
+func validateRoutedNodeDeliveryAuthority(ctx context.Context, evt events.Event, routed []Subscriber, plan RoutePlan) error {
 	if len(routed) == 0 {
 		return nil
 	}
 	hasExplicitTargets := len(eventDeliveryTargetRoutes(evt)) > 0
-	authorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
-	apiAuthorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
-	for _, intent := range plan.DeliveryIntents {
-		if intent.Recipient.IsNode() {
-			authorized[intent.Recipient] = struct{}{}
+	authorized := make(map[routedSubscriberAuthorityKey]struct{}, len(plan.DeliveryIntents))
+	apiAuthorized := make(map[routedSubscriberAuthorityKey]struct{}, len(plan.DeliveryIntents))
+	for _, subscriber := range routed {
+		if !subscriber.Recipient.IsNode() {
+			continue
+		}
+		key := newRoutedSubscriberAuthorityKey(evt, subscriber)
+		for _, intent := range plan.DeliveryIntents {
+			if !routePlanIntentAuthorizesRoutedSubscriber(intent, key, subscriber) {
+				continue
+			}
+			authorized[key] = struct{}{}
 			if intent.Producer == routeIntentProducerAPIEventPublication {
-				apiAuthorized[intent.Recipient] = struct{}{}
+				apiAuthorized[key] = struct{}{}
 			}
 		}
 	}
@@ -857,12 +864,16 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}
+		key := newRoutedSubscriberAuthorityKey(evt, subscriber)
+		selectedByExplicitTarget := !hasExplicitTargets || eventTargetsRoutedSubscriber(evt, subscriber)
 		if subscriber.routeSource == subscriberRouteSourceRootInputFlow && evt.AdmissionClass() != events.EventAdmissionRootIngress {
-			if _, ok := apiAuthorized[subscriber.Recipient]; ok {
+			if !selectedByExplicitTarget {
 				continue
 			}
-			if _, planned := authorized[subscriber.Recipient]; hasExplicitTargets && !planned {
-				continue
+			if routedAPIEventPublicationAuthorizesSubscriber(ctx, evt, subscriber) {
+				if _, ok := apiAuthorized[key]; ok {
+					continue
+				}
 			}
 			return fmt.Errorf(
 				"routed root-input node %q at %q matched event %q without root_ingress or typed API admission",
@@ -875,7 +886,7 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 		if subscriber.routeSource != subscriberRouteSourceSubscription {
 			continue
 		}
-		if _, ok := authorized[subscriber.Recipient]; ok {
+		if _, ok := authorized[key]; ok {
 			continue
 		}
 		if _, ok := live[subscriber.Recipient.ID()]; ok {
@@ -887,6 +898,49 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 		)
 	}
 	return nil
+}
+
+type routedSubscriberAuthorityKey struct {
+	recipient   events.DeliveryRecipient
+	path        string
+	routeSource subscriberRouteSource
+	handler     runtimepipeline.DeliveryTargetHandler
+}
+
+func newRoutedSubscriberAuthorityKey(evt events.Event, subscriber Subscriber) routedSubscriberAuthorityKey {
+	return routedSubscriberAuthorityKey{
+		recipient:   subscriber.Recipient,
+		path:        strings.Trim(strings.TrimSpace(subscriber.Path), "/"),
+		routeSource: subscriber.routeSource,
+		handler:     routedSubscriberTargetHandler(subscriber, evt.Type()),
+	}
+}
+
+func routePlanIntentAuthorizesRoutedSubscriber(
+	intent RoutePlanDeliveryIntent,
+	key routedSubscriberAuthorityKey,
+	subscriber Subscriber,
+) bool {
+	if !intent.Recipient.IsNode() || intent.Recipient != key.recipient || !intent.Handler.Equal(key.handler) {
+		return false
+	}
+	if key.path == "" {
+		return true
+	}
+	target := intent.TargetBlueprint.Normalized()
+	if target.Empty() {
+		target = intent.TargetOwnership.Route().Normalized()
+	}
+	return routeMatchesInternalSubscriber(target, subscriber)
+}
+
+func eventTargetsRoutedSubscriber(evt events.Event, subscriber Subscriber) bool {
+	for _, target := range eventDeliveryTargetRoutes(evt) {
+		if routeMatchesInternalSubscriber(target, subscriber) {
+			return true
+		}
+	}
+	return false
 }
 
 func routedNodeTargetRoute(evt events.Event, targetFlowInstance string) events.RouteIdentity {
@@ -939,51 +993,13 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 	if len(routed) == 0 {
 		return nil
 	}
-	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
-	if !ok || admission.eventType != evt.Type() {
-		return nil
-	}
 	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
-	targets := eventDeliveryTargetRoutes(evt)
 	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() {
+		if !routedAPIEventPublicationAuthorizesSubscriber(ctx, evt, subscriber) {
 			continue
-		}
-		if len(targets) > 0 {
-			matched := false
-			for _, target := range targets {
-				matched = matched || routeMatchesInternalSubscriber(target, subscriber)
-			}
-			if !matched {
-				continue
-			}
 		}
 		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 		flowID := strings.TrimSpace(subscriber.handlerFlowID)
-		switch subscriber.routeSource {
-		case subscriberRouteSourceSubscription:
-			if admission.kind != apiEventPublicationEndpointOrdinaryFlow || flowID != admission.flowID || path != admission.flowPath {
-				continue
-			}
-		case subscriberRouteSourceRootInputFlow:
-			if evt.AdmissionClass() != events.EventAdmissionOperatorInjected {
-				continue
-			}
-			switch admission.kind {
-			case apiEventPublicationEndpointOrdinaryFlow:
-				if flowID != admission.flowID || path != admission.flowPath {
-					continue
-				}
-			case apiEventPublicationEndpointRootInput:
-				if flowID == "" || path == "" {
-					continue
-				}
-			default:
-				continue
-			}
-		default:
-			continue
-		}
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: subscriber.Recipient,
 			TargetBlueprint: events.RouteIdentity{
@@ -995,6 +1011,39 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 		})
 	}
 	return normalizeRoutePlanDeliveryIntents(out)
+}
+
+func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, evt events.Event, subscriber Subscriber) bool {
+	if !subscriber.Recipient.IsNode() {
+		return false
+	}
+	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
+	if !ok || admission.eventType != evt.Type() {
+		return false
+	}
+	if len(eventDeliveryTargetRoutes(evt)) > 0 && !eventTargetsRoutedSubscriber(evt, subscriber) {
+		return false
+	}
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	flowID := strings.TrimSpace(subscriber.handlerFlowID)
+	switch subscriber.routeSource {
+	case subscriberRouteSourceSubscription:
+		return admission.kind == apiEventPublicationEndpointOrdinaryFlow && flowID == admission.flowID && path == admission.flowPath
+	case subscriberRouteSourceRootInputFlow:
+		if evt.AdmissionClass() != events.EventAdmissionOperatorInjected {
+			return false
+		}
+		switch admission.kind {
+		case apiEventPublicationEndpointOrdinaryFlow:
+			return flowID == admission.flowID && path == admission.flowPath
+		case apiEventPublicationEndpointRootInput:
+			return flowID != "" && path != ""
+		default:
+			return false
+		}
+	default:
+		return false
+	}
 }
 
 func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {

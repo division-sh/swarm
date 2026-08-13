@@ -2205,6 +2205,166 @@ func TestEventBusPublish_RootInputFlowRejectsExplicitlyTargetedInternalSameNameB
 	}
 }
 
+func TestEventBusPublish_ExplicitTargetSelectsOrdinaryFlowWithoutAuthorizingSameIDRootInputSibling(t *testing.T) {
+	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
+	ordinaryTarget := events.RouteIdentity{
+		FlowID: "ordinary", FlowInstance: "ordinary", EntityID: eventtest.UUID("duplicate-id-ordinary-owner"),
+	}.Normalized()
+	rootInputTarget := events.RouteIdentity{
+		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("duplicate-id-root-input-owner"),
+	}.Normalized()
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwnerRoutes(ordinaryTarget, rootInputTarget)
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routes})
+	if err != nil {
+		t.Fatalf("create duplicate-ID EventBus: %v", err)
+	}
+	sourceRoute := events.RouteIdentity{
+		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("duplicate-id-ordinary-source"),
+	}.Normalized()
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
+	envelope = events.EnvelopeForTargetRoute(envelope, ordinaryTarget)
+	eventID := uuid.NewString()
+	event := eventtest.PersistedChildForProducer(
+		eventID, events.EventType("thing.created"), eventtest.Producer(events.EventProducerNode, "foreign-node"), "",
+		[]byte(`{"scope":"ordinary"}`), 0, uuid.NewString(), uuid.NewString(), envelope, time.Now().UTC(),
+	)
+
+	plan, err := eventBus.CheckPublishRecipientPlan(context.Background(), event)
+	if err != nil {
+		t.Fatalf("preflight exact ordinary target with duplicate-ID root-input sibling: %v", err)
+	}
+	want := events.MustExistingEntityTarget(ordinaryTarget)
+	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "shared-writer" || plan.DeliveryRoutes[0].Target != want {
+		t.Fatalf("ordinary scoped routes = %#v, want only shared-writer at %#v", plan.DeliveryRoutes, want)
+	}
+	if err := eventBus.Publish(context.Background(), event); err != nil {
+		t.Fatalf("publish exact ordinary target with duplicate-ID root-input sibling: %v", err)
+	}
+	if persisted := store.routes[eventID]; len(persisted) != 1 || persisted[0].Target != want {
+		t.Fatalf("persisted ordinary scoped routes = %#v, want only %#v", persisted, want)
+	}
+}
+
+func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMutation(t *testing.T) {
+	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
+	ordinaryTarget := events.RouteIdentity{
+		FlowID: "ordinary", FlowInstance: "ordinary", EntityID: eventtest.UUID("duplicate-id-hostile-ordinary-owner"),
+	}.Normalized()
+	rootInputTarget := events.RouteIdentity{
+		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("duplicate-id-hostile-root-input-owner"),
+	}.Normalized()
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwnerRoutes(ordinaryTarget, rootInputTarget)
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routes})
+	if err != nil {
+		t.Fatalf("create hostile duplicate-ID EventBus: %v", err)
+	}
+	sourceRoute := events.RouteIdentity{
+		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("duplicate-id-hostile-source"),
+	}.Normalized()
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
+	envelope = events.EnvelopeForTargetRoute(envelope, rootInputTarget)
+	event := eventtest.PersistedChildForProducer(
+		uuid.NewString(), events.EventType("thing.created"), eventtest.Producer(events.EventProducerNode, "foreign-node"), "",
+		[]byte(`{"scope":"root-input"}`), 0, uuid.NewString(), uuid.NewString(), envelope, time.Now().UTC(),
+	)
+
+	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("duplicate-ID root-input preflight error = %v, want typed admission refusal", err)
+	}
+	if err := eventBus.Publish(context.Background(), event); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("duplicate-ID root-input publish error = %v, want typed admission refusal", err)
+	}
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
+		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
+		t.Fatalf("rejected duplicate-ID root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+	}
+}
+
+func TestEventBusRootInputAPIExplicitTargetPersistsOnlySelectedSameIDScopedRoute(t *testing.T) {
+	bundle := routedRootInputFlowNodeBundle()
+	addRoutedRootInputFlowNodeSibling(bundle)
+	source := semanticview.Wrap(bundle)
+	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
+	if err != nil {
+		t.Fatalf("construct duplicate-ID root-input API endpoint: %v", err)
+	}
+	selected := events.RouteIdentity{
+		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("duplicate-id-api-selected"),
+	}.Normalized()
+	unselected := events.RouteIdentity{
+		FlowID: "audit", FlowInstance: "audit", EntityID: eventtest.UUID("duplicate-id-api-unselected"),
+	}.Normalized()
+	lifecycleStore := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+	}}
+	store := &apiEventPublicationMemoryStore{connectRoutePlanLifecycleStore: lifecycleStore}
+	store.setTargetOwnerRoutes(selected, unselected)
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("create duplicate-ID root-input API EventBus: %v", err)
+	}
+	lifecycleStore.bus = eventBus
+	eventID := uuid.NewString()
+	event := eventtest.OperatorInjected(
+		eventID, events.EventType("thing.created"), "operator", "", []byte(`{"proof":"duplicate-id-api"}`), 0,
+		uuid.NewString(), nil, events.EnvelopeForTargetRoute(events.EventEnvelope{}, selected), time.Now().UTC(),
+	)
+
+	plan, err := eventBus.CheckAPIEventPublishRecipientPlan(context.Background(), event, &endpoint)
+	if err != nil {
+		t.Fatalf("preflight duplicate-ID root-input API target: %v", err)
+	}
+	want := events.MustExistingEntityTarget(selected)
+	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "entity-writer" || plan.DeliveryRoutes[0].Target != want {
+		t.Fatalf("duplicate-ID API routes = %#v, want only selected scoped route %#v", plan.DeliveryRoutes, want)
+	}
+	completion, replay, err := eventBus.PublishAPIEventAcknowledged(
+		testAuthorActivityContext(context.Background()), event, &endpoint,
+		apiidempotency.Request{Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "duplicate-id-api", RequestHash: "duplicate-id-api-request"},
+		apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)},
+	)
+	if err != nil {
+		t.Fatalf("publish duplicate-ID root-input API target: %v", err)
+	}
+	if replay || completion.ResourceID != eventID {
+		t.Fatalf("duplicate-ID API completion = %#v replay=%t, want fresh %s", completion, replay, eventID)
+	}
+	if persisted := store.routes[eventID]; len(persisted) != 1 || persisted[0].Target != want {
+		t.Fatalf("persisted duplicate-ID API routes = %#v, want only %#v", persisted, want)
+	}
+}
+
+func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *testing.T) {
+	_, routes := duplicateIDScopedRootInputAuthorityFixture(t)
+	ordinary := routes.routes["thing.created"][0]
+	rootInput := routes.rootInputRoutes["thing.created"][0]
+	event := eventtest.OperatorInjected(
+		uuid.NewString(), events.EventType("thing.created"), "operator", "", nil, 0,
+		uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	intent := RoutePlanDeliveryIntent{
+		Recipient: ordinary.Recipient,
+		TargetBlueprint: events.RouteIdentity{
+			FlowID: "ordinary", FlowInstance: "ordinary",
+		},
+		Handler:  routedSubscriberTargetHandler(ordinary, event.Type()),
+		Producer: routeIntentProducerInternalTargetRoute,
+		Persist:  true,
+	}
+
+	ordinaryKey := newRoutedSubscriberAuthorityKey(event, ordinary)
+	if !routePlanIntentAuthorizesRoutedSubscriber(intent, ordinaryKey, ordinary) {
+		t.Fatal("planned ordinary-flow intent did not authorize its exact subscriber scope")
+	}
+	rootInputKey := newRoutedSubscriberAuthorityKey(event, rootInput)
+	if routePlanIntentAuthorizesRoutedSubscriber(intent, rootInputKey, rootInput) {
+		t.Fatal("planned ordinary-flow intent transferred authority to duplicate-ID root-input sibling")
+	}
+}
+
 func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
 	for _, explicitTarget := range []bool{false, true} {
 		name := "target_free"
@@ -2295,8 +2455,8 @@ func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContract
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"audit-writer": {
-				ID:            "audit-writer",
+			"entity-writer": {
+				ID:            "entity-writer",
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"thing.created"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -2313,6 +2473,73 @@ func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContract
 	}
 	bundle.Semantics.FlowInputs["audit"] = []string{"thing.created"}
 	bundle.FlowSchemas["audit"] = audit.Schema
+}
+
+func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Source, *RouteTable) {
+	t.Helper()
+	flow := func(id string) runtimecontracts.FlowContractView {
+		return runtimecontracts.FlowContractView{
+			Path: id, Paths: runtimecontracts.FlowContractPaths{ID: id, Flow: id},
+			Schema: runtimecontracts.FlowSchemaDocument{
+				Mode: "static",
+				Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}}},
+			},
+			Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
+			Nodes: map[string]runtimecontracts.SystemNodeContract{
+				"shared-writer": {
+					ID: "shared-writer", ExecutionType: "system_node", SubscribesTo: []string{"thing.created"},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()},
+				},
+			},
+		}
+	}
+	ordinary := flow("ordinary")
+	validation := flow("validation")
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{ordinary, validation}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInputs: map[string][]string{"validation": {"thing.created"}},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"ordinary": &root.Children[0], "validation": &root.Children[1],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"ordinary": ordinary.Schema, "validation": validation.Schema,
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	ordinaryHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, "ordinary", "shared-writer")
+	if err != nil {
+		t.Fatalf("admit ordinary duplicate-ID handler: %v", err)
+	}
+	rootInputHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, "validation", "shared-writer")
+	if err != nil {
+		t.Fatalf("admit root-input duplicate-ID handler: %v", err)
+	}
+	routes := newRouteTable(source)
+	routes.routes = map[string][]Subscriber{
+		"thing.created": {{
+			Recipient: events.MustNodeDeliveryRecipient("shared-writer"), Path: "ordinary", MatchPattern: "thing.created",
+			routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "thing.created", handlerFlowID: "ordinary",
+			handlerNodeID: "shared-writer", targetHandler: ordinaryHandler,
+		}},
+	}
+	routes.rootInputRoutes = map[string][]Subscriber{
+		"thing.created": {{
+			Recipient: events.MustNodeDeliveryRecipient("shared-writer"), Path: "validation", MatchPattern: "thing.created",
+			routeSource: subscriberRouteSourceRootInputFlow, LocalizedEvent: "thing.created", handlerFlowID: "validation",
+			handlerNodeID: "shared-writer", targetHandler: rootInputHandler,
+		}},
+	}
+	routes.patterns = nil
+	routes.eventPath = map[string]struct{}{"thing.created": {}}
+	return source, routes
 }
 
 func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(t *testing.T) {
