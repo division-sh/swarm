@@ -74,7 +74,11 @@ func (authorActivityHeadFailureEventStore) ListAuthorActivity(context.Context, r
 	return runtimeauthoractivity.ListResult{}, errors.New("author activity list must not run after head failure")
 }
 
-func (r telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (r telegramPhraseBotLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, managedCall runtimellm.ManagedCall) (*runtimellm.Response, error) {
+	message, err := managedCall.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
 	if r.onContinue != nil {
 		if err := r.onContinue(ctx, session, message); err != nil {
 			return nil, err
@@ -94,17 +98,8 @@ func (r telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, sessio
 			SessionID: session.ID, CapabilitySurface: &observed,
 		}, nil
 	}
-	const payloadPrefix = "- payload: "
-	start := strings.Index(message.Content, payloadPrefix)
-	if start < 0 {
-		return nil, fmt.Errorf("phrase-bot input has no event payload")
-	}
-	raw := message.Content[start+len(payloadPrefix):]
-	if end := strings.IndexByte(raw, '\n'); end >= 0 {
-		raw = raw[:end]
-	}
 	var payload map[string]any
-	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder := json.NewDecoder(strings.NewReader(string(managedCall.Frame().Turn.Event.Payload)))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode phrase-bot event payload: %w", err)
@@ -126,6 +121,14 @@ func (r telegramPhraseBotLLMRuntime) ContinueSession(ctx context.Context, sessio
 		Message:   runtimellm.Message{Role: "assistant", ToolCalls: []runtimellm.ToolCall{call}},
 		ToolCalls: []runtimellm.ToolCall{call}, SessionID: session.ID, CapabilitySurface: &observed,
 	}, nil
+}
+
+func (telegramPhraseBotLLMRuntime) ContinueForkChatSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ForkChatCall) (*runtimellm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 
 func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, *runtimellm.Session) error {

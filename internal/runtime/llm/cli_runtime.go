@@ -209,7 +209,23 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 	return s, nil
 }
 
-func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *ClaudeCLIRuntime) ContinueManagedSession(ctx context.Context, s *Session, call ManagedCall) (*Response, error) {
+	message, err := validateManagedCall(ctx, s, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, s, message)
+}
+
+func (r *ClaudeCLIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
+	message, err := validateForkChatCall(ctx, s, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, s, message)
+}
+
+func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}

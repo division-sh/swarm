@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -56,7 +57,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	if err != nil {
 		return nil, err
 	}
-	systemPrompt, err := providerPrompt.Text()
+	providerContract, err := llm.RequireProviderContract("", modelRuntime)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,21 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		}
 		return nil, fmt.Errorf("invalid memory plan for agent %s: %w", agentLabel, err)
 	}
-	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, cfg.Memory, maxTurns, modelRuntime)
+	c, err := llm.NewManagedConversation(agentframe.SessionSeed{
+		AgentIdentity:  cfg.Identity,
+		Role:           cfg.Role,
+		FlowID:         cfg.FlowID,
+		Intent:         cfg.Intent,
+		Criteria:       append([]string(nil), cfg.Criteria...),
+		ProviderPrompt: providerPrompt,
+		RuntimeMode:    providerContract.RuntimeMode,
+		Provider:       providerContract.Provider,
+		Transport:      string(providerContract.Transport),
+		Model:          cfg.ResolvedModel,
+	}, "", tools, cfg.Memory, maxTurns, modelRuntime)
+	if err != nil {
+		return nil, err
+	}
 	c.SetToolExecutor(toolExecutor)
 	return &LLMAgent{
 		cfg:           cfg,
@@ -142,8 +157,8 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 		}
 	}
 
-	input := formatEventForAgent(a.cfg, evt, a.conversation.Tools)
-	resp, err := a.conversation.Step(ctx, input)
+	turn := agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: evt}
+	resp, err := a.conversation.RunManaged(ctx, turn)
 	if err != nil && a.shouldRetryAfterTaskScopeReset(err) {
 		a.conversation.Reset()
 		scopeKey := strings.TrimSpace(taskScopeKeyForEvent(evt))
@@ -151,7 +166,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 			a.conversation.TaskID = scopeKey
 			a.scopeKey = scopeKey
 		}
-		resp, err = a.conversation.Step(ctx, input)
+		resp, err = a.conversation.RunManaged(ctx, turn)
 	}
 	if err != nil {
 		return nil, err
@@ -296,17 +311,30 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	}
 	directiveText := strings.TrimSpace(directive.Directive)
 	evt := directive.Event
+	turnMode, err := admitAgentTurnExecutionMode(a.cfg, evt)
+	if err != nil {
+		return "", err
+	}
 	a.prepareConversationForInvocation(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
+	ctx = runtimeeffects.WithExecutionMode(ctx, turnMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), Agent: a.cfg.Identity})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 	a.applyTurnToolDefinitions(ctx)
+	frameDirective := &agentframe.Directive{
+		Identity: strings.TrimSpace(evt.ID()),
+		Text:     directiveText,
+		Source:   strings.TrimSpace(directive.Source),
+		Operator: strings.TrimSpace(directive.OperatorID),
+	}
 	beforeMessages := len(a.conversation.Messages)
-	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt, a.conversation.Tools))
+	resp, err := a.conversation.RunManaged(ctx, agentframe.TurnDraft{
+		Kind: agentframe.TurnBoardDirective, Event: evt, Directive: frameDirective,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -315,14 +343,17 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	}
 
 	beforeRemediation := len(a.conversation.Messages)
-	resp, err = a.conversation.Step(ctx, boardDirectiveRemediationPrompt(directiveText, strings.TrimSpace(resp.Message.Content)))
+	resp, err = a.conversation.RunManaged(ctx, agentframe.TurnDraft{
+		Kind: agentframe.TurnRemediation, Event: evt, ParentFrameID: a.conversation.LastFrameID(),
+		Directive: frameDirective, Remediation: &agentframe.Remediation{Reason: "directive_completed_without_action"},
+	})
 	if err != nil {
 		return "", err
 	}
 	if boardDirectiveSatisfied(recorder, a.conversation.Messages[beforeRemediation:]) {
 		return strings.TrimSpace(resp.Message.Content), nil
 	}
-	return "", fmt.Errorf("directive completed without taking action; assistant response: %s", strings.TrimSpace(resp.Message.Content))
+	return "", fmt.Errorf("directive completed without taking action")
 }
 
 func boardDirectiveSatisfied(recorder *runtimebus.EmittedEventsRecorder, delta []llm.Message) bool {
@@ -337,58 +368,21 @@ func boardDirectiveSatisfied(recorder *runtimebus.EmittedEventsRecorder, delta [
 	return false
 }
 
-func boardDirectiveRemediationPrompt(directive, assistantText string) string {
-	directive = strings.TrimSpace(directive)
-	assistantText = strings.TrimSpace(assistantText)
-	var b strings.Builder
-	b.WriteString("The previous reply described an intended action but did not take one.\n")
-	b.WriteString("You must act now using tools. If the directive should trigger workflow execution, call the appropriate emit_* tool in this turn.\n")
-	b.WriteString("Do not explain what you plan to do. Do it.\n")
-	if directive != "" {
-		b.WriteString("\nOriginal directive:\n")
-		b.WriteString(directive)
-	}
-	if assistantText != "" {
-		b.WriteString("\n\nPrevious reply:\n")
-		b.WriteString(assistantText)
-	}
-	return b.String()
-}
-
 func toolMessageHasSuccessfulResult(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return false
 	}
-	var items []map[string]any
-	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+	items, err := agentframe.DecodeProviderToolResults(raw)
+	if err != nil {
 		return false
 	}
 	for _, item := range items {
-		if ok, exists := item["ok"].(bool); exists && ok {
+		if item.OK {
 			return true
 		}
 	}
 	return false
-}
-
-func formatEventForAgent(cfg models.AgentConfig, evt events.Event, _ []llm.ToolDefinition) string {
-	payload := strings.TrimSpace(string(evt.Payload()))
-	if payload == "" {
-		payload = "{}"
-	}
-	return fmt.Sprintf(
-		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.",
-		cfg.ID,
-		cfg.Role,
-		cfg.FlowID,
-		evt.ID(),
-		evt.Type(),
-		evt.SourceAgent(),
-		evt.TaskID(),
-		evt.EntityID(),
-		payload,
-	)
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {

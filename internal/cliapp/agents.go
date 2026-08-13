@@ -201,6 +201,7 @@ func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.AddCommand(
 		newAgentsListCommand(opts),
 		newAgentViewCommand(opts),
+		newAgentFrameCommand(opts),
 		newAgentDiagnoseCommand(opts),
 		newAgentDeliveriesCommand(opts),
 		newAgentRestartCommand(opts),

@@ -2,10 +2,14 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -13,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
@@ -47,9 +52,12 @@ func TestObserveMockRuntimeCapabilitySurfaceBindsExactInterpreterInput(t *testin
 
 func TestExecuteMockCompletionUsesPythonAndCanonicalCompletionAuthority(t *testing.T) {
 	source := []byte(`
+import json
+
 def handle(input):
     assert input["round"] == 1
-    assert input["event"]["type"] == "message.received"
+    frame = json.loads(input["messages"][-1]["content"])
+    assert frame["event"]["type"] == "message.received"
     assert input["tools"][0]["name"] == "echo"
     return {"calls": [{"name": "echo", "arguments": {"text": "hello"}}], "usage": {"input_tokens": 7, "output_tokens": 3}}
 `)
@@ -60,7 +68,7 @@ def handle(input):
 		ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Mock: mockperformance.Performance{Kind: "python", SourcePath: "mocks/assistant.py", Source: source, Digest: pythonSourceDigest(source)},
 	}
-	request := []byte(`{"event":{"type":"message.received"},"messages":[],"tools":[{"name":"echo","schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
+	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"echo","schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
 	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{{
 		Name: "echo", Schema: map[string]any{"type": "object", "required": []any{"text"}, "properties": map[string]any{"text": map[string]any{"type": "string"}}, "additionalProperties": false},
 	}}, request)
@@ -72,6 +80,45 @@ def handle(input):
 	}
 	if err := harness.RequireState("mock_python", runtimeeffects.StateResponseObserved); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMockManagedRequestConsumesCanonicalExecutionFrame(t *testing.T) {
+	source := []byte(`
+import json
+
+def handle(input):
+    frame = json.loads(input["messages"][-1]["content"])
+    assert frame["kind"] == "initial"
+    assert frame["event"]["type"] == "work.requested"
+    assert "event" not in input
+    return {"text": "done", "usage": {"input_tokens": 5, "output_tokens": 2}}
+`)
+	harness := effecttest.New()
+	registry := sessions.NewInMemoryRegistry(time.Second)
+	runtime := NewMockRuntime(&config.Config{}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness))
+	ctx := testManagedConversationContext(t, harness, "mock-agent", "mock/inst-1", "worker")
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	actor.ExecutionMode = runtimeeffects.ExecutionModeMock
+	actor.Mock = mockperformance.Performance{Kind: "python", SourcePath: "mocks/agent.py", Source: source, Digest: pythonSourceDigest(source)}
+	ctx = runtimeactors.WithActor(ctx, actor)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
+	conversation := newTestManagedConversation(t, "mock-agent", "mock/inst-1", "worker", nil, testMemory(), 2, runtime)
+	conversation.SetToolExecutor(openAIToolExecutor{})
+	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("mock-agent")})
+	if err != nil {
+		t.Fatalf("RunManaged: %v", err)
+	}
+	if response.Message.Content != "done" {
+		t.Fatalf("response = %#v, want done", response)
+	}
+	settlements := harness.CompletionSettlementsForAdapter("mock_python")
+	var input mockCompletionInput
+	if len(settlements) == 1 && settlements[0].AgentTurn != nil {
+		_ = json.Unmarshal(settlements[0].AgentTurn.RequestPayload, &input)
+	}
+	if len(settlements) != 1 || settlements[0].AgentTurn == nil || len(input.Messages) != 1 || !strings.Contains(input.Messages[0].Content, `"kind":"initial"`) {
+		t.Fatalf("mock settlements = %#v, want one canonical frame request", settlements)
 	}
 }
 

@@ -134,14 +134,36 @@ func (f RuntimeFactory) buildProfile(profile llmselection.Profile) (Runtime, err
 	return runtime, nil
 }
 
-// NoopRuntime is useful in early bootstrap phases and tests.
-type NoopRuntime struct{}
-
-func (NoopRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "noop", AgentID: agentID, Memory: agentmemory.PlatformDefault()}, nil
+// NoopRuntime is useful in early bootstrap phases and tests. Its provider
+// contract is explicit so a test double cannot silently impersonate a
+// differently selected backend.
+type NoopRuntime struct {
+	contract ProviderContract
 }
 
-func (NoopRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {
+func NewNoopRuntime(contract ProviderContract) NoopRuntime {
+	return NoopRuntime{contract: contract}
+}
+
+func (r NoopRuntime) ProviderContract() ProviderContract { return r.contract }
+
+func (NoopRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+	return &Session{
+		ID: "noop", AgentID: agentID, SystemPrompt: systemPrompt,
+		Tools: append([]ToolDefinition(nil), tools...), Memory: agentmemory.PlatformDefault(),
+	}, nil
+}
+
+func (NoopRuntime) ContinueManagedSession(_ context.Context, _ *Session, call ManagedCall) (*Response, error) {
+	message, err := call.providerMessage()
+	if err != nil {
+		return nil, err
+	}
+	return &Response{Message: Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
+}
+
+func (NoopRuntime) ContinueForkChatSession(_ context.Context, _ *Session, call ForkChatCall) (*Response, error) {
+	message := call.providerMessage()
 	return &Response{Message: Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 

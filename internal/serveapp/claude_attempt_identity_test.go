@@ -17,6 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -154,10 +156,29 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 		Agent: a.config.Identity,
 	})
 	if a.conversation == nil {
-		a.conversation = runtimellm.NewConversation(a.config.ID, a.config.CanonicalFlowPath(), "Reply exactly ok.", nil, a.config.Memory, 25, a.runtime)
+		providerPrompt, err := a.config.ProviderPrompt(runtimeagentintent.RuntimeEnvironmentContext())
+		if err != nil {
+			return nil, err
+		}
+		providerContract := a.runtime.ProviderContract()
+		a.conversation, err = runtimellm.NewManagedConversation(runtimeagentframe.SessionSeed{
+			AgentIdentity:  a.config.Identity,
+			Role:           a.config.Role,
+			FlowID:         a.config.FlowID,
+			Intent:         a.config.Intent,
+			Criteria:       append([]string{}, a.config.Criteria...),
+			ProviderPrompt: providerPrompt,
+			RuntimeMode:    providerContract.RuntimeMode,
+			Provider:       providerContract.Provider,
+			Transport:      string(providerContract.Transport),
+			Model:          a.config.ResolvedModel,
+		}, a.config.CanonicalFlowPath(), nil, a.config.Memory, 25, a.runtime)
+		if err != nil {
+			return nil, err
+		}
 		a.conversation.SetToolExecutor(claudeAttemptProofToolExecutor{})
 	}
-	_, err := a.conversation.Step(ctx, "Reply exactly ok.")
+	_, err := a.conversation.RunManaged(ctx, runtimeagentframe.TurnDraft{Kind: runtimeagentframe.TurnInitial, Event: evt})
 	return nil, err
 }
 

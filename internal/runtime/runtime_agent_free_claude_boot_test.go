@@ -32,7 +32,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
+		LLMRuntime:     claudeNoopLLMRuntime{},
 	}})
 
 	if err != nil {
@@ -52,7 +52,7 @@ func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
-		LLMRuntime:     noopLLMRuntime{},
+		LLMRuntime:     claudeNoopLLMRuntime{},
 	}})
 
 	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
@@ -93,7 +93,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
+		LLMRuntime:     claudeNoopLLMRuntime{},
 	}})
 
 	if err == nil {
@@ -113,7 +113,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
-		LLMRuntime:     noopLLMRuntime{},
+		LLMRuntime:     claudeNoopLLMRuntime{},
 		WorkspaceLifecycle: claudeStartupWorkspaceStub{
 			target: &workspace.Target{Container: "swarm-agent-recovered-agent", Workdir: "/workspace"},
 		},
@@ -142,7 +142,7 @@ func TestNewRuntimeToolGatewayRequiresBindingToken(t *testing.T) {
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:          false,
 		WorkflowModule:     loadAgentFreeRuntimeWorkflowModule(t),
-		LLMRuntime:         noopLLMRuntime{},
+		LLMRuntime:         claudeNoopLLMRuntime{},
 		EnableToolGateway:  true,
 		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", ""),
 	}})

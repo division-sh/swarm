@@ -319,6 +319,16 @@ mutating_api_parity_ledger:
       idempotency replay, persisted entity state/mutation rows on an event-created
       run, and generic settlement postconditions.
 operator_read_api_parity_ledger:
+  - method: agent.frame
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentFrameInspectionScopesUseCanonicalProjection}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+    notes: >
+      Exact static/effective frame inspection consumes the bundle catalog and
+      runtime manager projection, not selected persistence-store rows; backend
+      selection therefore cannot change frame semantics.
   - method: agent.delivery_diagnostics
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]

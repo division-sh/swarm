@@ -273,7 +273,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	if _, err := runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"}); err == nil {
+	if _, err := runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}); err == nil {
 		t.Fatal("ContinueSession succeeded after ambiguous provider status")
 	}
 	if got := requests.Load(); got != 1 {

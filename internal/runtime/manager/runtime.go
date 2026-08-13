@@ -226,6 +226,45 @@ func (am *AgentManager) ResolveAgentConfig(agentID, flowInstance string) (runtim
 	return execution.Config, nil
 }
 
+type AgentFrameConfig struct {
+	Config       runtimeactors.AgentConfig
+	BundleHash   string
+	BundleSource string
+}
+
+// ResolveAgentFrameConfig performs exact operator inspection selection. Root
+// and flow-instance coordinates are explicit so same-slug siblings cannot be
+// selected through the broader runtime convenience resolver.
+func (am *AgentManager) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (AgentFrameConfig, error) {
+	agentID = strings.TrimSpace(agentID)
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if agentID == "" || root == (flowInstance != "") {
+		return AgentFrameConfig{}, fmt.Errorf("agent frame selection requires agent_id and exactly one of root or flow_instance")
+	}
+	var matches []runtimeactors.AgentConfig
+	for _, cfg := range am.ListAgentConfigs() {
+		identity, err := cfg.ConcreteIdentity()
+		if err != nil || identity.AgentID() != agentID {
+			continue
+		}
+		if (root && identity.Route.Presence == runtimeagentidentity.RouteRoot) || (!root && identity.FlowInstance() == flowInstance) {
+			matches = append(matches, cfg)
+		}
+	}
+	if len(matches) == 0 {
+		return AgentFrameConfig{}, fmt.Errorf("%w: exact agent frame selector", ErrAgentNotFound)
+	}
+	if len(matches) != 1 {
+		return AgentFrameConfig{}, fmt.Errorf("agent frame selector is ambiguous")
+	}
+	fact := am.semanticReadinessSource.fact
+	if err := fact.Validate(); err != nil {
+		return AgentFrameConfig{}, fmt.Errorf("agent frame bundle source: %w", err)
+	}
+	bundleHash, bundleSource := fact.StorageValues()
+	return AgentFrameConfig{Config: matches[0], BundleHash: bundleHash, BundleSource: bundleSource}, nil
+}
+
 func (am *AgentManager) getAgentConfigIdentity(identity runtimeagentidentity.Identity) (runtimeactors.AgentConfig, bool) {
 	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
 	return execution.Config, ok

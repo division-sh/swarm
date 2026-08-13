@@ -169,7 +169,23 @@ func (r *OpenAIResponsesRuntime) StartSession(ctx context.Context, agentID, syst
 	return s, nil
 }
 
-func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *OpenAIResponsesRuntime) ContinueManagedSession(ctx context.Context, s *Session, call ManagedCall) (*Response, error) {
+	message, err := validateManagedCall(ctx, s, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, s, message)
+}
+
+func (r *OpenAIResponsesRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
+	message, err := validateForkChatCall(ctx, s, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, s, message)
+}
+
+func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -555,32 +571,20 @@ func openAIResponsesFunctionCallInputs(calls []ToolCall) []openAIResponsesFuncti
 }
 
 func openAIResponsesToolResultItems(content string) []any {
-	if strings.TrimSpace(content) == "" {
-		return nil
-	}
-	var entries []map[string]any
-	if err := json.Unmarshal([]byte(content), &entries); err != nil {
-		return nil
-	}
-	items := make([]any, 0, len(entries))
-	for _, entry := range entries {
-		id, _ := entry["tool_call_id"].(string)
-		id = strings.TrimSpace(id)
-		raw, err := json.Marshal(entry)
-		if err != nil {
-			continue
-		}
-		if id == "" {
+	results := providerToolResults(content)
+	items := make([]any, 0, len(results))
+	for _, result := range results {
+		if result.CallID == "" {
 			items = append(items, openAIResponsesMessageInput{
 				Role:    "user",
-				Content: "Tool result:\n" + string(raw),
+				Content: "Tool result:\n" + result.Payload,
 			})
 			continue
 		}
 		items = append(items, openAIResponsesFunctionCallOutputInput{
 			Type:   "function_call_output",
-			CallID: id,
-			Output: string(raw),
+			CallID: result.CallID,
+			Output: result.Payload,
 		})
 	}
 	return items

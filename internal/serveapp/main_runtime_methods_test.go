@@ -33,7 +33,10 @@ func (r servedEventPublishBlockingLLMRuntime) StartSession(ctx context.Context, 
 	}, nil
 }
 
-func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (r servedEventPublishBlockingLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
+	if _, err := call.ProviderMessage(ctx, session); err != nil {
+		return nil, err
+	}
 	if r.started != nil {
 		select {
 		case r.started <- struct{}{}:
@@ -73,7 +76,10 @@ func (r servedSessionCleanupProofLLMRuntime) StartSession(ctx context.Context, a
 	}, nil
 }
 
-func (r servedSessionCleanupProofLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
+func (r servedSessionCleanupProofLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
+	if _, err := call.ProviderMessage(ctx, session); err != nil {
+		return nil, err
+	}
 	if r.store == nil || session == nil {
 		return nil, r.reportFailure(errors.New("served session cleanup proof requires store and session"))
 	}
@@ -180,7 +186,11 @@ func (servedLiveAgentProofLLMRuntime) StartSession(ctx context.Context, agentID 
 	}, nil
 }
 
-func (r servedLiveAgentProofLLMRuntime) ContinueSession(ctx context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (r servedLiveAgentProofLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
 	if r.calls != nil {
 		r.calls.Add(1)
 	}
@@ -208,7 +218,7 @@ func (r servedLiveAgentProofLLMRuntime) ContinueSession(ctx context.Context, ses
 		return nil, err
 	}
 	return &runtimellm.Response{
-		Message:   runtimellm.Message{Role: "tool", Content: `[{"ok":true,"result":"handled live agent event"}]`},
+		Message:   runtimellm.Message{Role: "tool", Content: `{"kind":"tool_continuation","tool_result":[{"ok":true,"result":"handled live agent event"}]}`},
 		SessionID: sessionID, CapabilitySurface: &observed,
 	}, nil
 }

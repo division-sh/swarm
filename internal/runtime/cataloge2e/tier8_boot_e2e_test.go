@@ -138,7 +138,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 		newScriptedLLMRuntime(),
 		processOwner,
 	)
-	deps.Options.LLMRuntime = runtimellm.NoopRuntime{}
+	deps.Options.LLMRuntime = runtimellm.NewNoopRuntime(runtimellm.AnthropicAPIProviderContract())
 	deps.Options.ProviderCredentials = tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key")
 	rt, err := runtime.NewRuntime(testAuthorActivityContext(context.Background()), deps)
 	if err != nil {

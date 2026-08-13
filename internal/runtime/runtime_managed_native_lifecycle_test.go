@@ -287,7 +287,7 @@ func TestRuntimeStart_ReplacementGrantSettlesManagedNativePreflightBeforeAdmissi
 	predecessorDeps.Options = RuntimeOptions{
 		SelfCheck:                        false,
 		WorkflowModule:                   loadAgentFreeRuntimeWorkflowModule(t),
-		LLMRuntime:                       llm.NoopRuntime{},
+		LLMRuntime:                       llm.NewNoopRuntime(llm.AnthropicAPIProviderContract()),
 		DisablePersistentStartupRecovery: true,
 	}
 	predecessor, err := newScopedTestRuntime(t, ctx, predecessorDeps)

@@ -103,6 +103,12 @@ func RequireProviderContract(runtimeMode string, runtime Runtime) (ProviderContr
 	if err := contract.Validate(); err != nil {
 		return ProviderContract{}, err
 	}
+	if _, ok := runtime.(ManagedSessionRuntime); !ok {
+		return ProviderContract{}, fmt.Errorf("llm runtime %T does not implement the typed managed-call boundary", runtime)
+	}
+	if _, ok := runtime.(ForkChatSessionRuntime); !ok {
+		return ProviderContract{}, fmt.Errorf("llm runtime %T does not implement the typed fork-chat boundary", runtime)
+	}
 	if contract.Persistence.PersistsConversationSnapshots {
 		if _, ok := runtime.(ConversationSnapshotPersister); !ok {
 			return ProviderContract{}, fmt.Errorf("llm runtime %T declares conversation snapshot persistence but does not implement it", runtime)

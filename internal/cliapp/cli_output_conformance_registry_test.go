@@ -42,6 +42,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm run status":                   {Constructor: "newStatusCommand", Runner: "runDiagnosticRunCommand"},
 	"swarm run fork":                     {Constructor: "newForkCommand", Runner: "runForkCommand"},
 	"swarm agent view":                   {Constructor: "newAgentViewCommand", Runner: "runAgentViewCommand"},
+	"swarm agent frame":                  {Constructor: "newAgentFrameCommand", Runner: "runAgentFrameCommand"},
 	"swarm agent diagnose":               {Constructor: "newAgentDiagnoseCommand", Runner: "runAgentDiagnoseCommand"},
 	"swarm agent deliveries":             {Constructor: "newAgentDeliveriesCommand", Runner: "runAgentDeliveriesCommand"},
 	"swarm health":                       {Constructor: "newHealthCommand", Runner: "runDiagnosticHealthCommand"},
@@ -126,6 +127,7 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 }
 
 var cliOutputExpectedFactOwners = map[string]string{
+	"swarm agent frame":      "/v1/rpc agent.frame",
 	"swarm bundle list":      "/v1/rpc bundle.list",
 	"swarm bundle show":      "/v1/rpc bundle.get",
 	"swarm bundle agents":    "/v1/rpc bundle.agents",

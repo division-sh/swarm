@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -112,7 +111,23 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 	return session, nil
 }
 
-func (r *MockRuntime) ContinueSession(ctx context.Context, session *Session, message Message) (*Response, error) {
+func (r *MockRuntime) ContinueManagedSession(ctx context.Context, session *Session, call ManagedCall) (*Response, error) {
+	message, err := validateManagedCall(ctx, session, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, session, message)
+}
+
+func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Session, call ForkChatCall) (*Response, error) {
+	message, err := validateForkChatCall(ctx, session, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, session, message)
+}
+
+func (r *MockRuntime) continueSession(ctx context.Context, session *Session, message Message) (*Response, error) {
 	if session == nil {
 		return nil, errors.New("nil session")
 	}
@@ -224,26 +239,14 @@ func (r *MockRuntime) persistConversation(ctx context.Context, session *Session)
 }
 
 type mockCompletionInput struct {
-	Event        *mockCompletionEvent `json:"event,omitempty"`
-	SystemPrompt string               `json:"system_prompt"`
-	Messages     []Message            `json:"messages"`
-	Tools        []ToolDefinition     `json:"tools"`
-	ToolResults  []Message            `json:"tool_results"`
-	Round        int                  `json:"round"`
+	SystemPrompt string           `json:"system_prompt"`
+	Messages     []Message        `json:"messages"`
+	Tools        []ToolDefinition `json:"tools"`
+	ToolResults  []Message        `json:"tool_results"`
+	Round        int              `json:"round"`
 }
 
-type mockCompletionEvent struct {
-	ID          string          `json:"id"`
-	Type        string          `json:"type"`
-	SourceAgent string          `json:"source_agent"`
-	TaskID      string          `json:"task_id,omitempty"`
-	RunID       string          `json:"run_id"`
-	EntityID    string          `json:"entity_id,omitempty"`
-	Flow        string          `json:"flow_instance,omitempty"`
-	Payload     json.RawMessage `json:"payload"`
-}
-
-func buildMockRequest(ctx context.Context, session *Session, message Message) (mockCompletionInput, error) {
+func buildMockRequest(_ context.Context, session *Session, message Message) (mockCompletionInput, error) {
 	messages := append([]Message(nil), session.Messages...)
 	messages = append(messages, message)
 	input := mockCompletionInput{
@@ -252,16 +255,6 @@ func buildMockRequest(ctx context.Context, session *Session, message Message) (m
 	for _, item := range messages {
 		if strings.EqualFold(strings.TrimSpace(item.Role), "tool") {
 			input.ToolResults = append(input.ToolResults, item)
-		}
-	}
-	if event, ok := runtimebus.InboundEventFromContext(ctx); ok {
-		payload := event.Payload()
-		if len(payload) == 0 {
-			payload = json.RawMessage(`{}`)
-		}
-		input.Event = &mockCompletionEvent{
-			ID: event.ID(), Type: string(event.Type()), SourceAgent: event.SourceAgent(), TaskID: event.TaskID(), RunID: event.RunID(),
-			EntityID: event.EntityID(), Flow: event.FlowInstance(), Payload: append(json.RawMessage(nil), payload...),
 		}
 	}
 	return input, nil

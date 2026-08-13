@@ -1387,26 +1387,30 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 
 const selectedForkCapabilityProofQuiescenceTimeout = 15 * time.Second
 
-func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapabilityAuthority(t *testing.T) {
+func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing.T) {
 	tests := []struct {
 		name          string
 		backend       string
 		credentialEnv string
 		adapter       string
 		model         string
-		response      string
+		initial       string
+		continuation  string
 	}{
 		{
 			name: "anthropic", backend: llmselection.BackendAnthropic, credentialEnv: "ANTHROPIC_API_KEY", adapter: "anthropic_api", model: "claude-selected-fork",
-			response: `{"model":"claude-selected-fork","usage":{"input_tokens":11,"output_tokens":3},"content":[{"type":"tool_use","id":"emit-1","name":"emit_task_completed","input":{}}]}`,
+			initial:      `{"model":"claude-selected-fork","usage":{"input_tokens":11,"output_tokens":3},"content":[{"type":"tool_use","id":"lookup-1","name":"lookup_data","input":{"query":"status"}}]}`,
+			continuation: `{"model":"claude-selected-fork","usage":{"input_tokens":13,"output_tokens":4},"content":[{"type":"tool_use","id":"emit-1","name":"emit_task_completed","input":{}}]}`,
 		},
 		{
 			name: "openai_compatible", backend: llmselection.BackendOpenAICompatible, credentialEnv: llmselection.OpenAICompatibleCredentialEnv, adapter: "openai_compatible", model: "gpt-selected-fork",
-			response: `{"model":"gpt-selected-fork","choices":[{"message":{"role":"assistant","content":"completed","tool_calls":[{"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}`,
+			initial:      `{"model":"gpt-selected-fork","choices":[{"message":{"role":"assistant","tool_calls":[{"id":"lookup-1","type":"function","function":{"name":"lookup_data","arguments":"{\"query\":\"status\"}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14}}`,
+			continuation: `{"model":"gpt-selected-fork","choices":[{"message":{"role":"assistant","content":"completed","tool_calls":[{"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}}]}}],"usage":{"prompt_tokens":13,"completion_tokens":4,"total_tokens":17}}`,
 		},
 		{
 			name: "openai_responses", backend: llmselection.BackendOpenAIResponses, credentialEnv: llmselection.OpenAIResponsesCredentialEnv, adapter: "openai_responses", model: "gpt-selected-fork",
-			response: `{"id":"resp-selected-fork","model":"gpt-selected-fork","output":[{"id":"emit-1","type":"function_call","call_id":"emit-1","name":"emit_task_completed","arguments":"{}"}],"usage":{"input_tokens":11,"output_tokens":3,"total_tokens":14}}`,
+			initial:      `{"id":"resp-selected-fork-1","model":"gpt-selected-fork","output":[{"id":"lookup-1","type":"function_call","call_id":"lookup-1","name":"lookup_data","arguments":"{\"query\":\"status\"}"}],"usage":{"input_tokens":11,"output_tokens":3,"total_tokens":14}}`,
+			continuation: `{"id":"resp-selected-fork-2","model":"gpt-selected-fork","output":[{"id":"emit-1","type":"function_call","call_id":"emit-1","name":"emit_task_completed","arguments":"{}"}],"usage":{"input_tokens":13,"output_tokens":4,"total_tokens":17}}`,
 		},
 	}
 
@@ -1416,7 +1420,14 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			ctx := runForkTestContext(t)
 			repoRoot := runForkExecutionRepoRoot(t)
-			contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+			lookupCalls := atomic.Int32{}
+			lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				lookupCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"status":"ready"}`))
+			}))
+			defer lookup.Close()
+			contractsRoot := selectedForkFrameContracts(t, repoRoot, lookup.URL)
 			loader := ContractBundleSourceLoader{RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: contractsRoot})
 			if err != nil {
@@ -1426,17 +1437,26 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 
 			var providerCalls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				providerCalls.Add(1)
+				ordinal := providerCalls.Add(1)
 				var request map[string]any
 				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 					t.Errorf("decode %s provider request: %v", tc.name, err)
 				}
 				requestJSON, _ := json.Marshal(request)
-				if !strings.Contains(string(requestJSON), `"emit_task_completed"`) {
-					t.Errorf("%s provider request omits exact delivered tool: %s", tc.name, requestJSON)
+				if !jsonValueContains(request, "emit_task_completed") || !jsonValueContains(request, "lookup_data") {
+					t.Errorf("%s provider request omits exact delivered tools: %s", tc.name, requestJSON)
+				}
+				wantKind := `"kind":"initial"`
+				response := tc.initial
+				if ordinal == 2 {
+					wantKind = `"kind":"tool_continuation"`
+					response = tc.continuation
+				}
+				if ordinal > 2 || !jsonValueContains(request, wantKind) {
+					t.Errorf("%s provider request %d omits %s frame: %s", tc.name, ordinal, wantKind, requestJSON)
 				}
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tc.response))
+				_, _ = w.Write([]byte(response))
 			}))
 			defer provider.Close()
 
@@ -1495,7 +1515,7 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 				`, result.Materialization.ForkRunID).Scan(&deliveryFailure)
 				t.Fatalf("ExecuteSelectedContractRunFork: %v\nlatest agent delivery: %s\nlatest receipt failure: %s\nlatest dead letter failure: %s", err, deliveryFailure, receiptFailure, deadLetterFailure)
 			}
-			if providerCalls.Load() != 1 {
+			if providerCalls.Load() != 2 || lookupCalls.Load() != 1 {
 				var deliveryDiagnostic string
 				var runtimeDiagnostic string
 				_ = db.QueryRowContext(ctx, `
@@ -1518,11 +1538,84 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 					WHERE run_id = $1::uuid
 					  AND event_name = 'platform.runtime_log'
 				`, result.Materialization.ForkRunID).Scan(&runtimeDiagnostic)
-				t.Fatalf("provider calls = %d, want 1; deliveries=%s; runtime=%s", providerCalls.Load(), deliveryDiagnostic, runtimeDiagnostic)
+				t.Fatalf("provider calls=%d lookup calls=%d, want 2/1; deliveries=%s; runtime=%s", providerCalls.Load(), lookupCalls.Load(), deliveryDiagnostic, runtimeDiagnostic)
 			}
-			assertSelectedForkProviderCapabilityEvidence(t, ctx, db, result, tc.adapter)
+			assertSelectedForkProviderCapabilityEvidence(t, ctx, db, result, tc.adapter, 2)
 		})
 	}
+}
+
+func selectedForkFrameContracts(t testing.TB, repoRoot, lookupURL string) string {
+	t.Helper()
+	source := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
+	root := filepath.Join(t.TempDir(), "contracts")
+	if err := os.CopyFS(root, os.DirFS(source)); err != nil {
+		t.Fatalf("copy selected-fork frame contracts: %v", err)
+	}
+	agents := `test-agent:
+  id: test-agent
+  model: regular
+  intent: prompts/test-agent.md
+  subscriptions:
+    - task.assigned
+  emit_events:
+    - task.completed
+  tools:
+    - lookup_data
+`
+	tools := `lookup_data:
+  description: Look up selected-fork status.
+  handler_type: http
+  http:
+    method: POST
+    url: __LOOKUP_URL__
+  input_schema:
+    type: object
+    properties:
+      query:
+        type: string
+    required:
+      - query
+    additionalProperties: false
+  output_schema:
+    type: object
+    properties:
+      status:
+        type: string
+    required:
+      - status
+    additionalProperties: false
+  response_success:
+    kind: http_status_2xx
+`
+	if err := os.WriteFile(filepath.Join(root, "agents.yaml"), []byte(agents), 0o644); err != nil {
+		t.Fatalf("write selected-fork frame agents: %v", err)
+	}
+	tools = strings.ReplaceAll(tools, "__LOOKUP_URL__", lookupURL)
+	if err := os.WriteFile(filepath.Join(root, "tools.yaml"), []byte(tools), 0o644); err != nil {
+		t.Fatalf("write selected-fork frame tools: %v", err)
+	}
+	return root
+}
+
+func jsonValueContains(value any, needle string) bool {
+	switch typed := value.(type) {
+	case string:
+		return strings.Contains(typed, needle)
+	case []any:
+		for _, item := range typed {
+			if jsonValueContains(item, needle) {
+				return true
+			}
+		}
+	case map[string]any:
+		for key, item := range typed {
+			if strings.Contains(key, needle) || jsonValueContains(item, needle) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type selectedForkProviderRedirectTransport struct {
@@ -1531,6 +1624,9 @@ type selectedForkProviderRedirectTransport struct {
 }
 
 func (t selectedForkProviderRedirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !strings.EqualFold(req.URL.Hostname(), "api.anthropic.com") {
+		return t.base.RoundTrip(req)
+	}
 	redirected := req.Clone(req.Context())
 	redirected.URL = new(url.URL)
 	*redirected.URL = *req.URL
@@ -1557,7 +1653,7 @@ func selectedForkAPIProviderConfig(backend, model, baseURL string) *config.Confi
 	return cfg
 }
 
-func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Context, db *sql.DB, result SelectedContractExecutionResult, adapter string) {
+func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Context, db *sql.DB, result SelectedContractExecutionResult, adapter string, wantTurns int) {
 	t.Helper()
 	proof := result.ForkLocalRuntimeContainer
 	if proof == nil || proof.RuntimeExecutionID == "" || proof.RuntimeGeneration == 0 || proof.AuthorityExecutionOwner == "" {
@@ -1578,12 +1674,11 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 	`, proof.RuntimeExecutionID, proof.RuntimeGeneration).Scan(&operationCount); err != nil {
 		t.Fatalf("count selected completion operations: %v", err)
 	}
-	if operationCount != 1 {
-		t.Fatalf("selected completion operations = %d, want 1", operationCount)
+	if operationCount != wantTurns {
+		t.Fatalf("selected completion operations = %d, want %d", operationCount, wantTurns)
 	}
 
-	var attemptSurfaceID, turnSurfaceID, rawSurface, planFingerprint string
-	if err := db.QueryRowContext(ctx, `
+	rows, err := db.QueryContext(ctx, `
 		SELECT a.capability_surface_id::text, t.capability_surface_id::text, s.surface::text,
 		       o.capability_plan_fingerprint
 		FROM runtime_external_effect_attempts a
@@ -1598,32 +1693,45 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 		  AND t.run_id = $5::uuid
 		  AND t.agent_id = 'test-agent'
 		  AND t.usage_exactness = 'exact'
-		  AND t.input_tokens = 11
-		  AND t.output_tokens = 3
-	`, proof.RuntimeExecutionID, adapter, proof.RuntimeGeneration, proof.AuthorityExecutionOwner, result.Materialization.ForkRunID).Scan(
-		&attemptSurfaceID, &turnSurfaceID, &rawSurface, &planFingerprint,
-	); err != nil {
+		ORDER BY t.created_at, t.turn_id
+	`, proof.RuntimeExecutionID, adapter, proof.RuntimeGeneration, proof.AuthorityExecutionOwner, result.Materialization.ForkRunID)
+	if err != nil {
 		t.Fatalf("load selected completion capability evidence: %v", err)
 	}
-	if attemptSurfaceID == "" || attemptSurfaceID != turnSurfaceID {
-		t.Fatalf("capability surface attempt=%q turn=%q, want one exact identity", attemptSurfaceID, turnSurfaceID)
+	defer rows.Close()
+	turnCount := 0
+	for rows.Next() {
+		turnCount++
+		var attemptSurfaceID, turnSurfaceID, rawSurface, planFingerprint string
+		if err := rows.Scan(&attemptSurfaceID, &turnSurfaceID, &rawSurface, &planFingerprint); err != nil {
+			t.Fatalf("scan selected completion capability evidence: %v", err)
+		}
+		if attemptSurfaceID == "" || attemptSurfaceID != turnSurfaceID {
+			t.Fatalf("capability surface attempt=%q turn=%q, want one exact identity", attemptSurfaceID, turnSurfaceID)
+		}
+		var surface managedcapabilities.Surface
+		if err := json.Unmarshal([]byte(rawSurface), &surface); err != nil {
+			t.Fatalf("decode selected completion capability surface: %v", err)
+		}
+		if surface.ID != attemptSurfaceID || surface.ActorID != "test-agent" || surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork || surface.Authority.ExecutionAuthorityID != proof.RuntimeExecutionID || surface.Authority.RunID != result.Materialization.ForkRunID {
+			t.Fatalf("selected completion capability surface = %#v", surface)
+		}
+		if names := surface.EffectiveNames(); !slices.Equal(names, []string{"emit_task_completed", "lookup_data"}) {
+			t.Fatalf("selected completion effective tools = %#v, want [emit_task_completed lookup_data]", names)
+		}
+		wantFingerprint, err := surface.PlanFingerprint()
+		if err != nil {
+			t.Fatalf("selected completion plan fingerprint: %v", err)
+		}
+		if planFingerprint != wantFingerprint {
+			t.Fatalf("operation plan fingerprint = %q, want %q", planFingerprint, wantFingerprint)
+		}
 	}
-	var surface managedcapabilities.Surface
-	if err := json.Unmarshal([]byte(rawSurface), &surface); err != nil {
-		t.Fatalf("decode selected completion capability surface: %v", err)
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate selected completion capability evidence: %v", err)
 	}
-	if surface.ID != attemptSurfaceID || surface.ActorID != "test-agent" || surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork || surface.Authority.ExecutionAuthorityID != proof.RuntimeExecutionID || surface.Authority.RunID != result.Materialization.ForkRunID {
-		t.Fatalf("selected completion capability surface = %#v", surface)
-	}
-	if names := surface.EffectiveNames(); !slices.Equal(names, []string{"emit_task_completed"}) {
-		t.Fatalf("selected completion effective tools = %#v, want [emit_task_completed]", names)
-	}
-	wantFingerprint, err := surface.PlanFingerprint()
-	if err != nil {
-		t.Fatalf("selected completion plan fingerprint: %v", err)
-	}
-	if planFingerprint != wantFingerprint {
-		t.Fatalf("operation plan fingerprint = %q, want %q", planFingerprint, wantFingerprint)
+	if turnCount != wantTurns {
+		t.Fatalf("selected completion evidence rows = %d, want %d", turnCount, wantTurns)
 	}
 }
 
@@ -2862,14 +2970,10 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	}
 }
 
-type selectedContractCleanupRuntime struct{}
+type selectedContractCleanupRuntime struct{ runtimellm.NoopRuntime }
 
-func (selectedContractCleanupRuntime) StartSession(context.Context, string, string, []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
-	return &runtimellm.Session{}, nil
-}
-
-func (selectedContractCleanupRuntime) ContinueSession(context.Context, *runtimellm.Session, runtimellm.Message) (*runtimellm.Response, error) {
-	return &runtimellm.Response{}, nil
+func (selectedContractCleanupRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
 }
 
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {

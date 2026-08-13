@@ -93,6 +93,21 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
+  - method: agent.frame
+    transport: http
+    required_params: [scope, agent_id]
+    declared_errors: [AGENT_NOT_FOUND, BUNDLE_NOT_FOUND]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentFrameInspectionScopesUseCanonicalProjection}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    idempotency: {status: not_applicable}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentFrameInspectionScopesUseCanonicalProjection}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
   - method: agent.list
     transport: http
     required_params: []

@@ -360,7 +360,11 @@ func newRuntimeSetBackedManager(t *testing.T, backend string, store ManagerPersi
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend(%s): %v", backend, err)
 	}
-	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, runtimellm.NoopRuntime{})
+	contract := runtimellm.AnthropicAPIProviderContract()
+	if profile.ID == llmselection.BackendOpenAIResponses {
+		contract = runtimellm.OpenAIResponsesProviderContract()
+	}
+	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, runtimellm.NewNoopRuntime(contract))
 	if err != nil {
 		t.Fatalf("NewAgentRuntimeSet(%s): %v", backend, err)
 	}

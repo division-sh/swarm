@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -64,7 +65,7 @@ func (e *firstTurnWorkflowToolExec) ToolCapabilitiesForActor(_ runtimeactors.Age
 	return toolcapabilities.NewSet(caps)
 }
 
-func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t *testing.T) {
+func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
@@ -150,14 +151,16 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 			"size_bytes": len(huge),
 		},
 	}
-	conv := NewConversation(
+	tools := []ToolDefinition{
+		{Name: "emit_category_assessed"},
+		{Name: "read_file"},
+	}
+	conv := newTestManagedConversation(
+		t,
 		"market-research-agent",
-		"task-1",
-		"system prompt",
-		[]ToolDefinition{
-			{Name: "emit_category_assessed"},
-			{Name: "read_file"},
-		},
+		"market/inst-1",
+		"market_research",
+		tools,
 		testMemory(),
 		4,
 		runtime,
@@ -165,21 +168,15 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	conv.SetToolExecutor(exec)
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
-	ctx := llmTestWorkContext(t, runtimebus.WithEmittedEventsRecorder(
-		withTestMemory(runtimeactors.WithActor(effects.CompletionContext("claude-supported-read-file"), runtimeactors.AgentConfig{
-			ID:       "market-research-agent",
-			FlowPath: "market/inst-1",
-			Memory:   testMemory(),
-			NativeTools: runtimeactors.NativeToolConfig{
-				FileIO: true,
-			},
-		}), "market-research-agent", "market/inst-1"),
-		recorder,
-	))
+	ctx := testManagedConversationContext(t, effects, "market-research-agent", "market/inst-1", "market_research")
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	actor.NativeTools = runtimeactors.NativeToolConfig{FileIO: true}
+	ctx = runtimeactors.WithActor(ctx, actor)
+	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 
-	resp, err := conv.Step(ctx, "scan the file")
+	resp, err := conv.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("market-research-agent")})
 	if err != nil {
-		t.Fatalf("Step: %v", err)
+		t.Fatalf("RunManaged: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected final response")
@@ -217,8 +214,11 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	if err != nil {
 		t.Fatalf("read tool-result stdin: %v", err)
 	}
-	var payload []map[string]any
-	if err := json.Unmarshal(secondInput, &payload); err != nil {
+	if !bytes.Contains(secondInput, []byte(`"kind":"tool_continuation"`)) {
+		t.Fatalf("second stdin does not contain canonical continuation frame: %s", secondInput)
+	}
+	payload, err := decodeTestToolResultEntries(secondInput)
+	if err != nil {
 		t.Fatalf("unmarshal second stdin: %v", err)
 	}
 	if len(payload) != 1 {
@@ -353,8 +353,8 @@ func runFirstTurnFakeDockerHelper() int {
 }
 
 func isReadFileToolResultPayload(input []byte) bool {
-	var payload []map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(input), &payload); err != nil {
+	payload, err := decodeTestToolResultEntries(input)
+	if err != nil {
 		return false
 	}
 	for _, entry := range payload {
@@ -364,6 +364,22 @@ func isReadFileToolResultPayload(input []byte) bool {
 		}
 	}
 	return false
+}
+
+func decodeTestToolResultEntries(input []byte) ([]map[string]any, error) {
+	entries, err := agentframe.DecodeProviderToolResults(string(bytes.TrimSpace(input)))
+	if err != nil {
+		return nil, err
+	}
+	payload := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		var value map[string]any
+		if err := json.Unmarshal(entry.Payload, &value); err != nil {
+			return nil, err
+		}
+		payload = append(payload, value)
+	}
+	return payload, nil
 }
 
 func shellQuote(s string) string {

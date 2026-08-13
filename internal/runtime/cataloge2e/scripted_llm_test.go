@@ -89,7 +89,14 @@ func (*scriptedLLMRuntime) PersistConversationSnapshot(context.Context, *llm.Ses
 	return nil
 }
 
-func (r *scriptedLLMRuntime) ContinueSession(ctx context.Context, session *llm.Session, message llm.Message) (*llm.Response, error) {
+func (r *scriptedLLMRuntime) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	frame := call.Frame()
+	eventType := strings.TrimSpace(frame.Turn.Event.Type)
+	entityID := strings.TrimSpace(frame.Turn.Event.EntityID)
 	if r == nil {
 		return nil, fmt.Errorf("scripted llm runtime is nil")
 	}
@@ -105,8 +112,8 @@ func (r *scriptedLLMRuntime) ContinueSession(ctx context.Context, session *llm.S
 	steps := append([]scriptedAgentFixtureStep(nil), r.agentEventFlow[agentID]...)
 	r.mu.Unlock()
 	if !ok {
-		if response, ok = scriptedResponseForMessage(steps, message.Content); !ok {
-			if response, ok = defaultScriptedResponseForTools(session, message.Content); !ok {
+		if response, ok = scriptedResponseForEvent(steps, eventType, entityID); !ok {
+			if response, ok = defaultScriptedResponseForTools(session, eventType); !ok {
 				response = llm.Response{
 					Message: llm.Message{Role: "assistant", Content: ""},
 				}
@@ -130,8 +137,15 @@ func (r *scriptedLLMRuntime) ContinueSession(ctx context.Context, session *llm.S
 	return &response, nil
 }
 
-func scriptedResponseForMessage(steps []scriptedAgentFixtureStep, content string) (llm.Response, bool) {
-	eventType, entityID := parseAgentEventMessage(content)
+func (r *scriptedLLMRuntime) ContinueForkChatSession(ctx context.Context, session *llm.Session, call llm.ForkChatCall) (*llm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
+}
+
+func scriptedResponseForEvent(steps []scriptedAgentFixtureStep, eventType, entityID string) (llm.Response, bool) {
 	if eventType == "" {
 		return llm.Response{}, false
 	}
@@ -155,11 +169,10 @@ func scriptedResponseForMessage(steps []scriptedAgentFixtureStep, content string
 	return llm.Response{}, false
 }
 
-func defaultScriptedResponseForTools(session *llm.Session, content string) (llm.Response, bool) {
+func defaultScriptedResponseForTools(session *llm.Session, eventType string) (llm.Response, bool) {
 	if session == nil {
 		return llm.Response{}, false
 	}
-	eventType, _ := parseAgentEventMessage(content)
 	if strings.TrimSpace(eventType) == "" {
 		return llm.Response{}, false
 	}
@@ -180,19 +193,6 @@ func defaultScriptedResponseForTools(session *llm.Session, content string) (llm.
 			Arguments: map[string]any{},
 		}},
 	}, true
-}
-
-func parseAgentEventMessage(content string) (eventType, entityID string) {
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "- type:"):
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "- type:"))
-		case strings.HasPrefix(line, "- entity_id:"):
-			entityID = strings.TrimSpace(strings.TrimPrefix(line, "- entity_id:"))
-		}
-	}
-	return strings.TrimSpace(eventType), strings.TrimSpace(entityID)
 }
 
 func substituteFixturePayload(payload map[string]any, entityID string) map[string]any {

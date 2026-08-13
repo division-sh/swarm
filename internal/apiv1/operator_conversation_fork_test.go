@@ -755,7 +755,11 @@ func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, sys
 	return &runtimellm.Session{ID: "forkchat-runtime-session", AgentID: agentID}, nil
 }
 
-func (r *forkChatScriptedRuntime) ContinueSession(_ context.Context, _ *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (r *forkChatScriptedRuntime) ContinueForkChatSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ForkChatCall) (*runtimellm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
 	r.messages = append(r.messages, message)
 	if len(r.responses) == 0 {
 		return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "done"}}, nil

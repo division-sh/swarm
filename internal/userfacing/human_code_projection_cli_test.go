@@ -469,6 +469,10 @@ type cliHumanCodeRawOutputAllowance struct {
 }
 
 var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
+	"agent_frame.go\x00writeAgentFrameResult": {
+		Names:  []string{"status"},
+		Reason: "execution-frame presence is a resolved/unresolved projection marker, not a registered runtime lifecycle status family",
+	},
 	"bundle.go\x00writeBundleDeleteHuman": {
 		Names:  []string{"status"},
 		Reason: "bundle.delete mutation outcome is not a registered run/agent/delivery status family",

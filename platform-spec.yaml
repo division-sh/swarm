@@ -10317,6 +10317,88 @@ agent_intent_model:
     - Operator run/flow cancellation remains a separate operational capability.
   operator_forkchat_boundary: Operator selected-fork conversation chat is an explicit sandbox and never becomes a managed
     agent intent declaration, artifact, or persistence source.
+agent_execution_frame:
+  status: canonical_closed_runtime_owner
+  promoted_by: '#2032'
+  canonical_owner: platform-spec.yaml#agent_execution_frame
+  implementation_owner: internal/runtime/agentframe
+  version: agent-execution-frame.v1
+  authority_rule: >
+    Every managed provider turn consumes exactly one immutable AgentExecutionFrame completed after provider-turn authority,
+    pre-dispatch capability planning, and bundle-source admission, and before any provider adapter is invoked. The frame is
+    the single transport-neutral semantic input to API, CLI, OpenAI-compatible, Responses, and mock adapters. Adapters may
+    render their transport request from the frame but may not reconstruct intent, event, capability, provenance, directive,
+    remediation, lifecycle, or provider facts from mutable stores, payload heuristics, prompt text, or pack sidecars.
+  identity:
+    frame_id: '`agent-frame:v1:<provider-turn-authority UUID>`; one provider-turn authority creates one frame occurrence.'
+    content_hash: >
+      `agent-frame-content:v1:sha256:<64 lowercase hex>` over deterministic compact JSON containing version,
+      session contract, and turn context. Validation recomputes the hash before adapter dispatch.
+    parent_frame_id: Required for tool continuations and remediation turns and absent for initial and board-directive turns.
+  session_contract:
+    immutable_facts:
+    - admitted bundle hash and exact persisted or ephemeral source
+    - complete concrete agent identity
+    - role and authored flow identity
+    - resolved business-intent artifact and identity
+    - canonical criteria references plus criteria identity bound to the bundle
+    - canonical provider-visible prompt assembled from intent, criteria, and generated environment context
+    - resolved runtime mode, provider, transport, and optional model
+    criteria_identity: >
+      `agent-criteria:v1:sha256:<64 lowercase hex>` over deterministic compact JSON containing the admitted bundle hash and
+      canonical criteria references. Runtime-only, reordered, duplicated, or mismatched criteria fail closed.
+  turn_context:
+    closed_kinds: [initial, tool_continuation, board_directive, remediation]
+    admitted_event: >
+      Initial, continuation, board, and remediation frames retain the typed admitted event projection including event and
+      producer identities, run/task/parent/depth/execution-mode facts, exact payload bytes, source/target/target-set routes,
+      flow/entity scope, and canonical routing-source authority. Provider prompts are not an event identity owner.
+    capability_plan: >
+      The frame records only the pre-dispatch managed capability surface identity, plan fingerprint, authorized candidates,
+      exact DefinitionHash values, authorization class, context requirement, and evidence bindings. Provider-visible,
+      executor-started, effect-settled, or other post-call evidence is forbidden from this pre-dispatch frame.
+    tool_continuation: Stores a canonical typed tool-result JSON value and renders the provider tool-result message from that
+      value. Raw assistant prose is not a continuation owner.
+    board_directive: Stores typed directive identity, text, source, and operator facts. A follow-up remediation frame stores
+      only its typed reason and parent frame identity; it does not copy prior assistant prose into a second semantic owner.
+    lifecycle_and_pack: >
+      Stage, loop revision, and pack provenance are explicit typed facts when a canonical owner supplies them and are the
+      literal object `{status: unresolved}` otherwise. Absence must never be replaced with guesses from payloads, names,
+      paths, mutable stores, or prompt sidecars.
+  provider_boundaries:
+    managed_call: >
+      ManagedSessionRuntime accepts only the sealed ManagedCall carrying a validated AgentExecutionFrame and exact managed
+      provider-turn/capability authorities. The old raw managed ContinueSession/Step boundary is unsupported.
+    fork_chat_call: >
+      ForkChatSessionRuntime accepts only the sealed ForkChatCall and exact fork-chat authority. Fork chat may not carry or
+      satisfy managed frame/capability authority. Startup probe remains a distinct boundary. Noop implements interface shape
+      only and is not execution proof.
+  occurrence_sequence:
+  - admit typed event, directive, or tool result
+  - resolve the immutable session contract and provider contract
+  - create exact provider-turn authority
+  - compute the pre-dispatch capability plan
+  - admit the exact bundle-source fact
+  - complete and validate AgentExecutionFrame
+  - invoke one typed managed adapter call
+  - record provider/call/effect evidence outside the immutable frame
+  inspection:
+    owner: api_specification.method_catalog.agent.frame
+    static_selector: Exact bundle_hash, authored flow (`root` for root), and agent_id. Runtime identity, bundle source,
+      provider selection, and every turn-occurrence field are unresolved.
+    effective_selector: Exact agent_id plus exactly one of root=true or full flow_instance. Bundle source, concrete identity,
+      and resolved provider are present; every turn-occurrence field remains unresolved because no occurrence was selected.
+    rule: >
+      Static and effective inspection consume the same agentframe projection used by execution. They do not query turn
+      history, synthesize an occurrence, inspect mutable provider evidence, or reconstruct prompt semantics in API or CLI.
+  retired_surfaces:
+  - production raw managed Runtime.ContinueSession
+  - production Conversation.Step and StepWithRole
+  - AppendResult and AppendFeedback managed prompt mutation
+  - local event formatter and board-remediation prompt formatter
+  - adapter-specific intent/event/capability context assembly
+  - inferred lifecycle or pack provenance
+  compatibility: None. Swarm is pre-1.0; old selected stores and raw managed call surfaces are unsupported.
 flow_model:
   description: A Flow is the universal building block. Every level of the system is a flow — from the root flow down to the
     smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate
@@ -21371,6 +21453,10 @@ cli_specification:
             display_projection: full
             display_shortening_eligible: false
         input_rows:
+          agent_frame_agent: {command: swarm agent frame, selector: 'arg:agent-id', family: agent, mode: full_only}
+          agent_frame_bundle_hash: {command: swarm agent frame, selector: 'flag:bundle-hash', family: bundle, mode: full_only}
+          agent_frame_flow_instance: {command: swarm agent frame, selector: 'flag:flow-instance', family: flow_instance, mode: full_only}
+          agent_frame_flow: {command: swarm agent frame, selector: 'flag:flow', family: none, mode: different_concept, scope_rule: authored canonical flow path}
           agent_view_agent: {command: swarm agent view, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
           agent_view_flow_instance: {command: swarm agent view, selector: 'flag:flow-instance', family: flow_instance, mode: full_only}
           agent_diagnose_agent: {command: swarm agent diagnose, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
@@ -21996,6 +22082,13 @@ cli_specification:
               classification: shared_output
               fact_owner: /v1/rpc agent.get
               json_shape: agent.get AgentDetail result object
+              quiet_values:
+              - agent_id
+            agent_frame:
+              command: swarm agent frame
+              classification: shared_output
+              fact_owner: /v1/rpc agent.frame
+              json_shape: agent.frame AgentExecutionFrameInspection result object
               quiet_values:
               - agent_id
             agent_diagnose:
@@ -24645,6 +24738,35 @@ cli_specification:
       - invalid args/flags make zero API calls
       - --json, --quiet, --no-color, and --json/--quiet collision consume the shared output owner
       - output remains refs-only; no conversation.current_for_agent, conversation.get, transcript, direct DB/store/runtime/EventBus/agentcontrol, or legacy endpoint usage
+    agent_frame:
+      command: swarm agent frame <agent-id> --scope <static|effective> [selector] [--json|--quiet] [--no-color]
+      group: run_operate
+      tier: should_have
+      implementation_status: implemented
+      owner: /v1/rpc agent.frame
+      behavior: >
+        Read-only exact execution-frame inspection. Static requires --bundle-hash and --flow and forbids runtime selectors.
+        Effective requires exactly one of --root or --flow-instance and forbids static selectors. The CLI renders only the
+        AgentExecutionFrameInspection returned by the API and never reads bundles, runtime state, provider evidence, turn
+        history, files, databases, or event payloads to reconstruct frame facts locally.
+      output:
+        human: Labeled execution-frame detail with agent, scope, version, bundle, flow, intent identity, criteria identity, provider resolution, and turn resolution.
+        json: --json emits AgentExecutionFrameInspection exactly, with no CLI wrapper.
+        quiet: --quiet emits canonical agent_id.
+        no_color: --no-color consumes the shared color owner without changing machine output.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        not_found_errors: [AGENT_NOT_FOUND, BUNDLE_NOT_FOUND]
+      proof_expectations:
+      - static sends only scope, agent_id, bundle_hash, and authored flow
+      - effective sends only scope, agent_id, and exactly one exact runtime selector
+      - selector conflicts fail before API client construction or request
+      - all occurrence fields remain explicit unresolved values in static and effective inspection
+      - no local frame reconstruction or alternate prompt/event/capability owner
     agent_diagnose:
       command: swarm agent diagnose <agent-id> [--queue-limit <n>] [--queue-cursor <cursor>] [--json|--quiet] [--no-color]
       group: run_operate
@@ -28353,6 +28475,261 @@ api_specification:
             $ref: '#/components/schemas/SessionRef'
           last_turn_ref:
             $ref: '#/components/schemas/TurnRef'
+      AgentFramePresenceString:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {type: string}
+      AgentFrameUnresolvedFact:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {type: string}
+      AgentFrameIdentity:
+        type: object
+        additionalProperties: false
+        required: [name, route]
+        properties:
+          name:
+            type: object
+            additionalProperties: false
+            required: [agent_id, owner, source]
+            properties:
+              agent_id: {type: string, minLength: 1}
+              owner: {type: string, minLength: 1}
+              source: {type: string, enum: [declared, runtime_created]}
+          route:
+            type: object
+            additionalProperties: false
+            required: [presence, scope_key, instance_id, instance_path]
+            properties:
+              presence: {type: string, enum: [root, present]}
+              scope_key: {type: string}
+              instance_id: {type: string}
+              instance_path: {type: string}
+      AgentFrameIdentityPresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {$ref: '#/components/schemas/AgentFrameIdentity'}
+      AgentFrameProvider:
+        type: object
+        additionalProperties: false
+        required: [runtime_mode, provider, transport]
+        properties:
+          runtime_mode: {type: string, minLength: 1}
+          provider: {type: string, minLength: 1}
+          transport: {type: string, minLength: 1}
+          model: {type: string}
+      AgentFrameProviderPresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {$ref: '#/components/schemas/AgentFrameProvider'}
+      AgentFrameRoute:
+        type: object
+        additionalProperties: false
+        properties:
+          flow_instance: {type: string}
+          entity_id: {type: string}
+          flow_id: {type: string}
+      AgentFrameEvent:
+        type: object
+        additionalProperties: false
+        required: [id, type, producer_type, producer_id, run_id, chain_depth, execution_mode, payload, source, target, target_set, routing_source]
+        properties:
+          id: {type: string, minLength: 1}
+          type: {type: string, minLength: 1}
+          producer_type: {type: string, minLength: 1}
+          producer_id: {type: string, minLength: 1}
+          task_id: {type: string}
+          run_id: {type: string, minLength: 1}
+          parent_event_id: {type: string}
+          chain_depth: {type: integer, minimum: 0}
+          execution_mode: {$ref: '#/components/schemas/ExecutionMode'}
+          payload:
+            oneOf:
+            - {type: object, additionalProperties: true}
+            - {type: array, items: {oneOf: [{type: object, additionalProperties: true}, {type: array, items: {type: string}}, {type: string}, {type: number}, {type: boolean}, {type: 'null'}]}}
+            - {type: string}
+            - {type: number}
+            - {type: boolean}
+            - {type: 'null'}
+          entity_id: {type: string}
+          flow_instance: {type: string}
+          scope: {type: string}
+          source: {$ref: '#/components/schemas/AgentFrameRoute'}
+          target: {$ref: '#/components/schemas/AgentFrameRoute'}
+          target_set:
+            type: array
+            items: {$ref: '#/components/schemas/AgentFrameRoute'}
+          routing_source:
+            type: object
+            additionalProperties: false
+            required: [kind, route]
+            properties:
+              kind: {type: string, minLength: 1}
+              route: {$ref: '#/components/schemas/AgentFrameRoute'}
+              authority: {type: string}
+      AgentFrameCapabilityBinding:
+        type: object
+        additionalProperties: false
+        required: [kind, exact_name, required_evidence_kind]
+        properties:
+          kind: {type: string, minLength: 1}
+          exact_name: {type: string, minLength: 1}
+          required_evidence_kind: {type: string, minLength: 1}
+      AgentFrameCapability:
+        type: object
+        additionalProperties: false
+        required: [name, definition_hash, bindings]
+        properties:
+          name: {type: string, minLength: 1}
+          definition_hash: {type: string, minLength: 1}
+          kind: {type: string}
+          context_requirement: {type: string}
+          authorization_class: {type: string}
+          bindings:
+            type: array
+            items: {$ref: '#/components/schemas/AgentFrameCapabilityBinding'}
+      AgentFrameCapabilityPlan:
+        type: object
+        additionalProperties: false
+        required: [surface_id, plan_fingerprint, authorized_candidates]
+        properties:
+          surface_id: {type: string, minLength: 1}
+          plan_fingerprint: {type: string, minLength: 1}
+          authorized_candidates:
+            type: array
+            items: {$ref: '#/components/schemas/AgentFrameCapability'}
+      AgentFrameDirective:
+        type: object
+        additionalProperties: false
+        required: [identity, text]
+        properties:
+          identity: {type: string, minLength: 1}
+          text: {type: string, minLength: 1}
+          source: {type: string}
+          operator: {type: string}
+      AgentFrameRemediation:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties:
+          reason: {type: string, minLength: 1}
+      AgentFrameTurnKindPresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {type: string, enum: [initial, tool_continuation, board_directive, remediation]}
+      AgentFrameEventPresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {$ref: '#/components/schemas/AgentFrameEvent'}
+      AgentFrameCapabilityPlanPresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {$ref: '#/components/schemas/AgentFrameCapabilityPlan'}
+      AgentFrameDirectivePresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {$ref: '#/components/schemas/AgentFrameDirective'}
+      AgentFrameRemediationPresence:
+        type: object
+        additionalProperties: false
+        required: [status]
+        properties:
+          status: {type: string, enum: [resolved, unresolved]}
+          value: {$ref: '#/components/schemas/AgentFrameRemediation'}
+      AgentExecutionFrameInspection:
+        type: object
+        additionalProperties: false
+        required: [version, scope, selector, session_contract, turn_context]
+        properties:
+          version: {type: string, const: agent-execution-frame.v1}
+          scope: {type: string, enum: [static, effective]}
+          selector:
+            type: object
+            additionalProperties: false
+            required: [agent_id]
+            properties:
+              bundle_hash: {type: string}
+              flow: {type: string}
+              agent_id: {type: string, minLength: 1}
+              root: {type: boolean}
+              flow_instance: {type: string}
+          session_contract:
+            type: object
+            additionalProperties: false
+            required: [bundle_hash, bundle_source, agent_id, authored_flow, agent_identity, intent, criteria, provider, provider_prompt]
+            properties:
+              bundle_hash: {type: string, pattern: '^bundle-v1:sha256:[a-f0-9]{64}$'}
+              bundle_source: {$ref: '#/components/schemas/AgentFramePresenceString'}
+              agent_id: {type: string, minLength: 1}
+              authored_flow: {type: string}
+              agent_identity: {$ref: '#/components/schemas/AgentFrameIdentityPresence'}
+              role: {type: string}
+              flow_id: {type: string}
+              intent:
+                type: object
+                additionalProperties: false
+                required: [kind, coordinate, provenance, content, content_hash, identity]
+                properties:
+                  kind: {type: string, enum: [local, inline, import]}
+                  coordinate: {type: string, minLength: 1}
+                  provenance: {type: string, minLength: 1}
+                  content: {type: string, minLength: 1}
+                  content_hash: {type: string, pattern: '^sha256:[a-f0-9]{64}$'}
+                  identity: {type: string, pattern: '^agent-intent:v1:sha256:[a-f0-9]{64}$'}
+              criteria:
+                type: object
+                additionalProperties: false
+                required: [references, identity]
+                properties:
+                  references: {type: array, items: {type: string}}
+                  identity: {type: string, pattern: '^agent-criteria:v1:sha256:[a-f0-9]{64}$'}
+              provider: {$ref: '#/components/schemas/AgentFrameProviderPresence'}
+              provider_prompt: {type: string, minLength: 1}
+          turn_context:
+            type: object
+            additionalProperties: false
+            required: [frame_id, content_hash, kind, parent_frame_id, event, capability, directive, remediation, lifecycle, pack_provenance]
+            properties:
+              frame_id: {$ref: '#/components/schemas/AgentFramePresenceString'}
+              content_hash: {$ref: '#/components/schemas/AgentFramePresenceString'}
+              kind: {$ref: '#/components/schemas/AgentFrameTurnKindPresence'}
+              parent_frame_id: {$ref: '#/components/schemas/AgentFramePresenceString'}
+              event: {$ref: '#/components/schemas/AgentFrameEventPresence'}
+              capability: {$ref: '#/components/schemas/AgentFrameCapabilityPlanPresence'}
+              directive: {$ref: '#/components/schemas/AgentFrameDirectivePresence'}
+              remediation: {$ref: '#/components/schemas/AgentFrameRemediationPresence'}
+              lifecycle:
+                type: object
+                additionalProperties: false
+                required: [stage, loop_revision]
+                properties:
+                  stage: {$ref: '#/components/schemas/AgentFrameUnresolvedFact'}
+                  loop_revision: {$ref: '#/components/schemas/AgentFrameUnresolvedFact'}
+              pack_provenance: {$ref: '#/components/schemas/AgentFrameUnresolvedFact'}
       AgentDeliveryLifecycleState:
         type: string
         enum:
@@ -31934,6 +32311,44 @@ api_specification:
           $ref: '#/components/schemas/AgentDetail'
       errors:
       - AGENT_NOT_FOUND
+    agent.frame:
+      tier: should_have
+      description: >
+        Inspect the canonical managed agent execution-frame projection without selecting or fabricating a provider-turn
+        occurrence. Static scope requires an exact registered bundle hash, authored flow (`root` for root), and agent id.
+        Effective scope requires an exact agent id plus exactly one of root=true or a full concrete flow_instance. Static
+        runtime facts and all occurrence facts are explicit unresolved values. Effective runtime/session facts are resolved
+        from the live canonical manager owner while all occurrence facts remain explicit unresolved values. The API never
+        reconstructs frame semantics from prompts, payload heuristics, mutable provider evidence, or turn history.
+      scope:
+        required:
+        - read:agents
+      params:
+      - name: scope
+        required: true
+        schema: {type: string, enum: [static, effective]}
+      - name: agent_id
+        required: true
+        schema: {$ref: '#/components/schemas/OpaqueId'}
+      - name: bundle_hash
+        required: false
+        schema: {type: string, pattern: '^bundle-v1:sha256:[a-f0-9]{64}$'}
+      - name: flow
+        required: false
+        schema: {type: string, minLength: 1}
+      - name: root
+        required: false
+        schema: {type: boolean}
+      - name: flow_instance
+        required: false
+        schema: {type: string, minLength: 1}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/AgentExecutionFrameInspection'}
+      errors:
+      - AGENT_NOT_FOUND
+      - BUNDLE_NOT_FOUND
     agent.diagnose:
       tier: should_have
       description: |

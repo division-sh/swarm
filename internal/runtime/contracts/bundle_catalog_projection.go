@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 )
 
 const bundleCatalogProjectionVersion = "swarm.bundle.catalog.v2"
@@ -287,6 +289,20 @@ func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) ([]any, error) {
 		addStringField(def, "intent_content_hash", entry.ResolvedIntent.ContentHash)
 		addStringField(def, "intent_identity", entry.ResolvedIntent.Identity)
 		def["intent_content"] = entry.ResolvedIntent.Content
+		addStringListField(def, "criteria", entry.Criteria)
+		derivedPrompt, err := AssembleAgentPrompt(bundle, record.Source.FlowID, entry, nil)
+		if err != nil {
+			return nil, fmt.Errorf("project bundle catalog agent %q provider prompt: %w", record.LogicalID, err)
+		}
+		providerPrompt, err := runtimeagentintent.AssembleProviderPrompt(entry.ResolvedIntent, entry.Criteria, derivedPrompt, runtimeagentintent.RuntimeEnvironmentContext())
+		if err != nil {
+			return nil, fmt.Errorf("project bundle catalog agent %q provider prompt: %w", record.LogicalID, err)
+		}
+		providerPromptText, err := providerPrompt.Text()
+		if err != nil {
+			return nil, fmt.Errorf("project bundle catalog agent %q provider prompt: %w", record.LogicalID, err)
+		}
+		def["provider_prompt"] = providerPromptText
 		addStringField(def, "flow_instance", record.Source.FlowID)
 		addStringListField(def, "subscriptions", entry.Subscriptions)
 		addStringListField(def, "tools", entry.ConfiguredTools())

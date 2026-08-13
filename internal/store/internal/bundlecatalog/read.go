@@ -317,6 +317,10 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 	if err != nil {
 		return bundlecatalogcontract.AgentDefinition{}, err
 	}
+	criteria, err := optionalStringListFromMap(def, "criteria")
+	if err != nil {
+		return bundlecatalogcontract.AgentDefinition{}, err
+	}
 	intent := runtimeagentintent.Resolved{
 		Kind:        runtimeagentintent.SourceKind(stringFromMap(def, "intent_kind")),
 		Coordinate:  stringFromMap(def, "intent_source"),
@@ -344,6 +348,8 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 		IntentContentHash: intent.ContentHash,
 		IntentIdentity:    intent.Identity,
 		IntentContent:     intent.Content,
+		Criteria:          criteria,
+		ProviderPrompt:    exactStringFromMap(def, "provider_prompt"),
 		Subscriptions:     subscriptions,
 		Tools:             tools,
 	}, nil
