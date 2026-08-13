@@ -123,6 +123,32 @@ func TestRoutingSourceVariantsRequireExactClaims(t *testing.T) {
 	}
 }
 
+func TestRoutingSourceKindCoverageIsExhaustive(t *testing.T) {
+	kinds := []RoutingSourceKind{
+		RoutingSourceAbsent,
+		RoutingSourceExternalIngress,
+		RoutingSourceRoot,
+		RoutingSourceStaticFlow,
+		RoutingSourceConcreteTemplateInstance,
+		RoutingSourceFlowOwnedControl,
+		RoutingSourcePlatformControl,
+	}
+	if len(kinds) != int(routingSourceKindCount) {
+		t.Fatalf("routing-source coverage has %d variants, want %d", len(kinds), routingSourceKindCount)
+	}
+	seen := make(map[string]struct{}, len(kinds))
+	for _, kind := range kinds {
+		code := kind.StorageCode()
+		if code == "" {
+			t.Fatalf("routing-source kind %d has no storage code", kind)
+		}
+		if _, ok := seen[code]; ok {
+			t.Fatalf("routing-source storage code %q is duplicated", code)
+		}
+		seen[code] = struct{}{}
+	}
+}
+
 func TestRestoreRoutingSourceRejectsCrossVariantClaims(t *testing.T) {
 	exactFlowRoute := RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: "entity-1"}
 	for _, tc := range []struct {

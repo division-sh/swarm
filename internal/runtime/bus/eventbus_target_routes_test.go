@@ -2132,6 +2132,40 @@ func TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutI
 	}
 }
 
+func TestEventBusPublish_RootInputFlowRejectsInternalSameNameBeforePersistence(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwnerRoutes(events.RouteIdentity{
+		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("internal-root-input-owner"),
+	})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	runID := uuid.NewString()
+	sourceRoute := events.RouteIdentity{
+		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("internal-root-input-source"),
+	}.Normalized()
+	evt := eventtest.PersistedChildForProducer(
+		uuid.NewString(), events.EventType("thing.created"),
+		eventtest.Producer(events.EventProducerNode, "foreign-node"), "", []byte(`{}`), 0,
+		runID, uuid.NewString(), events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), time.Now().UTC(),
+	)
+
+	if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("CheckPublishRecipientPlan error = %v, want root-input admission refusal", err)
+	}
+	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("Publish error = %v, want root-input admission refusal", err)
+	}
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 ||
+		len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
+		t.Fatalf("rejected internal root-input publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+	}
+}
+
 func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
@@ -2319,6 +2353,7 @@ func TestEventBusPublish_NodeProducedSameFlowOutputPersistsNodeDelivery(t *testi
 
 func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
+	interceptor := &connectRoutePlanNodeInterceptor{}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		canonicalrouting.RepoRoot(t),
 		canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect),
@@ -2327,7 +2362,9 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 	if err != nil {
 		t.Fatalf("load canonical parent connect: %v", err)
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle), Interceptors: []EventInterceptor{interceptor},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2361,6 +2398,9 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 	}
 	if !deliveryRoutesContain(store.routes[evt.ID()], want) {
 		t.Fatalf("persisted parent-connect routes = %#v, want %#v", store.routes[evt.ID()], want)
+	}
+	if got := interceptor.Count(); got != 1 {
+		t.Fatalf("entityless receiver executions = %d, want 1", got)
 	}
 }
 

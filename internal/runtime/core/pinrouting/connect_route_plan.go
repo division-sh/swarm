@@ -442,6 +442,7 @@ const (
 	connectEndpointStaticFlow
 	connectEndpointSingletonFlow
 	connectEndpointTemplateFlow
+	connectEndpointKindCount
 )
 
 type connectFlowID struct{ value string }
