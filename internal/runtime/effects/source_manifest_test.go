@@ -80,6 +80,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/pipeline/activity_engine.go:executePreparedActivityHTTPTool:http_do:1":                              ownerPipelineActivity,
 	"internal/runtime/registration/provider_http.go:executeProviderRequest:http_do:1":                                     ownerOperatorInfra,
 	"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1":                                       ownerOperatorInfra,
+	"internal/runtime/publicingress/registration.go:PrepareStartupHandoff:http_do:1":                                      ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:1":                                                ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:2":                                                ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:Launch:filesystem_write:3":                                                ownerOperatorInfra,
