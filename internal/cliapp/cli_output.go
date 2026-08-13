@@ -13,11 +13,14 @@ import (
 	"github.com/division-sh/swarm/internal/userfacing"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 const (
 	cliOutputJSONFlag        = "json"
 	cliOutputJSONFlagHelp    = "Render successful output as one JSON document"
+	cliOutputYAMLFlag        = "yaml"
+	cliOutputYAMLFlagHelp    = "Render successful output as one YAML document"
 	cliOutputQuietFlag       = "quiet"
 	cliOutputQuietFlagHelp   = "Render only declared load-bearing value(s)"
 	cliOutputNoColorFlag     = "no-color"
@@ -26,6 +29,7 @@ const (
 
 type cliOutputOptions struct {
 	asJSON  bool
+	asYAML  bool
 	quiet   bool
 	noColor bool
 }
@@ -176,6 +180,10 @@ func bindCLIOutputFlags(cmd *cobra.Command, opts *cliOutputOptions) {
 	cmd.Flags().BoolVar(&opts.noColor, cliOutputNoColorFlag, false, cliOutputNoColorFlagHelp)
 }
 
+func bindCLIYAMLOutputFlag(cmd *cobra.Command, opts *cliOutputOptions) {
+	cmd.Flags().BoolVar(&opts.asYAML, cliOutputYAMLFlag, false, cliOutputYAMLFlagHelp)
+}
+
 func bindCLIOutputFlagSet(fs *flag.FlagSet, opts *cliOutputOptions) {
 	fs.BoolVar(&opts.asJSON, cliOutputJSONFlag, false, cliOutputJSONFlagHelp)
 	fs.BoolVar(&opts.quiet, cliOutputQuietFlag, false, cliOutputQuietFlagHelp)
@@ -183,8 +191,11 @@ func bindCLIOutputFlagSet(fs *flag.FlagSet, opts *cliOutputOptions) {
 }
 
 func (opts cliOutputOptions) validate() error {
-	if opts.asJSON && opts.quiet {
+	if opts.asJSON && opts.quiet && !opts.asYAML {
 		return fmt.Errorf("--json and --quiet are mutually exclusive")
+	}
+	if opts.asYAML && (opts.asJSON || opts.quiet) {
+		return fmt.Errorf("--json, --yaml, and --quiet are mutually exclusive")
 	}
 	return nil
 }
@@ -382,6 +393,21 @@ func renderCLIOutput(out, errOut io.Writer, opts cliOutputOptions, value any, te
 		}
 		if err := json.NewEncoder(out).Encode(value); err != nil {
 			return returnCLIValidationError(errOut, fmt.Errorf("render json output: %w", err))
+		}
+	case opts.asYAML:
+		if out == nil {
+			return nil
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("render yaml output: %w", err))
+		}
+		var document any
+		if err := yaml.Unmarshal(encoded, &document); err != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("render yaml output: %w", err))
+		}
+		if err := yaml.NewEncoder(out).Encode(document); err != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("render yaml output: %w", err))
 		}
 	case opts.quiet:
 		if quiet == nil {

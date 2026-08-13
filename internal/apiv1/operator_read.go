@@ -37,7 +37,7 @@ type AgentUsageReadStore = operatorread.AgentUsageReader
 type BundleCatalogReadStore interface {
 	ListBundleCatalog(context.Context, bundlecatalog.ListOptions) (bundlecatalog.ListResult, error)
 	LoadBundleCatalog(context.Context, string) (bundlecatalog.Detail, error)
-	ListBundleCatalogAgents(context.Context, string) (bundlecatalog.AgentsResult, error)
+	ListBundleCatalogAgents(context.Context, string, bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error)
 }
 
 type healthPingResult struct {
@@ -318,9 +318,26 @@ func OperatorBundleCatalogHandlers(opts BundleCatalogHandlerOptions) map[string]
 			if err != nil {
 				return nil, err
 			}
-			result, err := reads.ListBundleCatalogAgents(ctx, bundleHash)
+			listOpts, err := bundleCatalogAgentListOptionsFromParams(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			result, err := reads.ListBundleCatalogAgents(ctx, bundleHash, listOpts)
 			if errors.Is(err, bundlecatalog.ErrNotFound) {
 				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
+			}
+			if errors.Is(err, bundlecatalog.ErrInvalidCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid bundle agents cursor"})
+			}
+			var tooLarge *bundlecatalog.AgentDefinitionTooLargeError
+			if errors.As(err, &tooLarge) {
+				return nil, NewApplicationError(BundleAgentDefinitionTooLargeCode, false, map[string]any{
+					"bundle_hash":         tooLarge.BundleHash,
+					"agent_name_owner":    tooLarge.AgentNameOwner,
+					"agent_id":            tooLarge.AgentID,
+					"encoded_row_bytes":   tooLarge.EncodedRowBytes,
+					"result_byte_ceiling": tooLarge.ResultByteCeiling,
+				})
 			}
 			if err != nil {
 				return nil, err
@@ -1648,6 +1665,18 @@ func bundleCatalogListOptionsFromParams(params map[string]any) (bundlecatalog.Li
 	}
 	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
 		return bundlecatalog.ListOptions{}, err
+	}
+	return out, nil
+}
+
+func bundleCatalogAgentListOptionsFromParams(params map[string]any) (bundlecatalog.AgentListOptions, error) {
+	out := bundlecatalog.AgentListOptions{}
+	var err error
+	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
+		return bundlecatalog.AgentListOptions{}, err
+	}
+	if out.Limit, err = boundedIntegerParam(params, "limit", 1, bundlecatalog.MaxAgentListLimit); err != nil {
+		return bundlecatalog.AgentListOptions{}, err
 	}
 	return out, nil
 }

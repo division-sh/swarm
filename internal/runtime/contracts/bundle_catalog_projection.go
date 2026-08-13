@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const bundleCatalogProjectionVersion = "swarm.bundle.catalog.v1"
+const bundleCatalogProjectionVersion = "swarm.bundle.catalog.v2"
 
 type BundleCatalogProjection struct {
 	BundleHash  string
@@ -270,7 +270,11 @@ func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) ([]any, error) {
 			return nil, fmt.Errorf("project bundle catalog agent %q: %w", record.LogicalID, err)
 		}
 		def := map[string]any{
-			"agent_id": agentID,
+			"agent_id":         agentID,
+			"agent_name_owner": strings.TrimSpace(record.OwnerURI),
+		}
+		if strings.TrimSpace(record.OwnerURI) == "" {
+			return nil, fmt.Errorf("project bundle catalog agent %q is missing its canonical scoped owner", record.LogicalID)
 		}
 		addStringField(def, "role", entry.Role)
 		addStringField(def, "type", firstNonEmpty(entry.Type, entry.NodeType))

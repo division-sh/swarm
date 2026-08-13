@@ -6,9 +6,16 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("bundle not found")
-	ErrInvalidCursor = errors.New("invalid bundle catalog cursor")
-	ErrConflict      = errors.New("bundle catalog conflict")
+	ErrNotFound                = errors.New("bundle not found")
+	ErrInvalidCursor           = errors.New("invalid bundle catalog cursor")
+	ErrAgentDefinitionTooLarge = errors.New("bundle agent definition is too large")
+	ErrConflict                = errors.New("bundle catalog conflict")
+)
+
+const (
+	DefaultAgentListLimit      = 50
+	MaxAgentListLimit          = 500
+	AgentListResultByteCeiling = 768 * 1024
 )
 
 type ListOptions struct {
@@ -42,11 +49,18 @@ type Detail struct {
 }
 
 type AgentsResult struct {
-	Agents []AgentDefinition `json:"agents"`
+	Agents     []AgentDefinition `json:"agents"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+}
+
+type AgentListOptions struct {
+	Limit  int
+	Cursor string
 }
 
 type AgentDefinition struct {
 	AgentID           string   `json:"agent_id"`
+	AgentNameOwner    string   `json:"agent_name_owner"`
 	FlowInstance      string   `json:"flow_instance,omitempty"`
 	Role              string   `json:"role,omitempty"`
 	Type              string   `json:"type,omitempty"`
@@ -84,3 +98,19 @@ func (e *ConflictError) Error() string {
 }
 
 func (e *ConflictError) Is(target error) bool { return target == ErrConflict }
+
+type AgentDefinitionTooLargeError struct {
+	BundleHash        string `json:"bundle_hash"`
+	AgentNameOwner    string `json:"agent_name_owner"`
+	AgentID           string `json:"agent_id"`
+	EncodedRowBytes   int    `json:"encoded_row_bytes"`
+	ResultByteCeiling int    `json:"result_byte_ceiling"`
+}
+
+func (e *AgentDefinitionTooLargeError) Error() string {
+	return "bundle agent definition cannot fit within the result byte ceiling"
+}
+
+func (e *AgentDefinitionTooLargeError) Is(target error) bool {
+	return target == ErrAgentDefinitionTooLarge
+}

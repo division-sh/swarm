@@ -996,6 +996,7 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm agent list", "flag:role"):                       true,
 	cliIdentifierRegistryKey("swarm bundle build", "flag:output"):                   true,
 	cliIdentifierRegistryKey("swarm bundle build", "flag:report"):                   true,
+	cliIdentifierRegistryKey("swarm bundle agents", "flag:cursor"):                  true,
 	cliIdentifierRegistryKey("swarm bundle list", "flag:cursor"):                    true,
 	cliIdentifierRegistryKey("swarm bundle register", "flag:data-blob"):             true,
 	cliIdentifierRegistryKey("swarm connections callback", "flag:state"):            true,

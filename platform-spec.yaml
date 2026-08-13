@@ -16139,17 +16139,18 @@ multi_bundle_persistence:
         persisted: '`swarm serve --contracts` computes BundleHash, writes or reuses one bundles row, and stamps every new run row with bundle_hash plus bundle_source=persisted.'
         ephemeral: '`swarm serve --contracts --dev` computes the same BundleHash, writes no bundles row, and stamps every new run row with bundle_hash plus bundle_source=ephemeral.'
       content_yaml: >
-        Deterministic YAML archive named `swarm.bundle.catalog.v1`. The archive lists every non-data canonical bundle
+        Deterministic YAML archive named `swarm.bundle.catalog.v2`. The archive lists every non-data canonical bundle
         input by canonical label and stores the bundle_hash v1 canonical content bytes as base64, plus a canonical_inputs list containing all
         bundle_hash v1 labels, policies, and byte sizes. It never stores host absolute paths. Flow data/ raw entries are
         excluded from content_yaml and live only in data_blob.
       data_blob: >
         NULL when the canonical bundle has no flow data/ raw inputs. Otherwise a deterministic JSON byte archive named
-        `swarm.bundle.catalog.v1` with entries sorted by canonical label; each entry records label, byte size, and exact
+        `swarm.bundle.catalog.v2` with entries sorted by canonical label; each entry records label, byte size, and exact
         raw bytes as base64.
       parsed_json: >
         Definition-only JSON projection with projection_version, workflow name/version, canonical input labels/policies,
-        and agent definitions. Agent definitions may include agent_id, flow_instance, role, type, model,
+        and agent definitions. Agent definitions include agent_id plus the loader-owned scoped declaration coordinate
+        agent_name_owner and may include flow_instance, role, type, model, llm_backend,
         memory, memory_source, intent_kind, intent_source, intent_provenance, intent_content, intent_content_hash,
         intent_identity, subscriptions, and tools. Runtime-owned fields such as status,
         runtime_state, queues, active task, watchdog, last_tool_outcome, pending deliveries, and delivery lifecycle are
@@ -16385,8 +16386,8 @@ multi_bundle_persistence:
         result: BundleDetail
       bundle.agents:
         kind: read
-        params: bundle_hash
-        result: Agent definitions from the persisted bundle bytes
+        params: bundle_hash, limit?, cursor?
+        result: One bounded page of agent definitions from the persisted bundle bytes, with next_cursor when more remain
       bundle.register:
         kind: mutate
         params: BundleRegistrationEnvelopeV1 content_yaml, BundleRegisterDataBlobV1 data_blob?, idempotency_key?
@@ -24715,6 +24716,8 @@ cli_specification:
         prepared-envelope registration, and local contracts-directory registration, plus destructive bundle deletion
         through the canonical API owner.
         The implemented list/show/agents commands consume /v1/rpc bundle.list, bundle.get, and bundle.agents. The
+        agents command accepts optional --limit/--cursor, requests exactly one server page, and renders the canonical
+        agent_name_owner plus next_cursor in human, --json, or command-scoped --yaml output without accumulating pages. The
         implemented build command is local-only: it consumes a selected contracts root, canonical BundleHash, existing
         policy.modules validation, and the bundle_build_materialization owner to write a materialized directory plus
         build report without calling API, store, runtime, register, or test owners. The
@@ -24728,7 +24731,7 @@ cli_specification:
         bundle existence, call store/runtime/destructive reset owners, or infer deletion eligibility locally. Archive
         packaging remains split.
       proof_expectations:
-      - exact /v1/rpc bundle.list/get/agents calls with only promoted params
+      - exact /v1/rpc bundle.list/get/agents calls with only promoted params; bundle agents proves one-call limit/cursor behavior and owner/continuation output in human, JSON, and YAML modes
       - local swarm bundle build proves command shape `--contracts`, `--output`, and `--report json`; materialized output
         under <output>/<bundle-hash>; build-manifest/report fields; Wasm and Python build-step registry; source_hash
         freshness drift; Python source/ABI/runtime identity validation; case-folded reserved generated-artifact path
@@ -26170,6 +26173,7 @@ api_specification:
         additionalProperties: false
         required:
         - agent_id
+        - agent_name_owner
         - memory
         - memory_source
         - intent_kind
@@ -26181,6 +26185,10 @@ api_specification:
         properties:
           agent_id:
             $ref: '#/components/schemas/OpaqueId'
+          agent_name_owner:
+            type: string
+            minLength: 1
+            description: Canonical loader-owned scoped declaration URI; the stable identity and pagination coordinate.
           flow_instance:
             type: string
             description: Persisted flow instance/catalog path when the definition is nested under a flow.
@@ -26237,6 +26245,8 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/BundleAgentDefinition'
+          next_cursor:
+            $ref: '#/components/schemas/Cursor'
       BundleRegistrationEnvelopeV1:
         type: object
         additionalProperties: false
@@ -29507,6 +29517,29 @@ api_specification:
         properties:
           bundle_hash:
             $ref: '#/components/schemas/BundleHash'
+      BUNDLE_AGENT_DEFINITION_TOO_LARGE:
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        - agent_name_owner
+        - agent_id
+        - encoded_row_bytes
+        - result_byte_ceiling
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          agent_name_owner:
+            type: string
+            minLength: 1
+          agent_id:
+            $ref: '#/components/schemas/OpaqueId'
+          encoded_row_bytes:
+            type: integer
+            minimum: 0
+          result_byte_ceiling:
+            type: integer
+            const: 786432
       BUNDLE_DELETE_IN_PROGRESS:
         type: object
         additionalProperties: false
@@ -30095,9 +30128,10 @@ api_specification:
     bundle.agents:
       tier: should_have
       description: >
-        Return definition-only agent catalog entries projected from the persisted bundle row identified by bundle_hash. This
-        method must not read runtime agents, sessions, queues, diagnoses, active tasks, or status fields, and does not close
-        strict duplicate-slug runtime identity work.
+        Return one definition-only agent catalog page projected from the persisted bundle row identified by bundle_hash.
+        Canonical order and opaque continuation use the loader-owned agent_name_owner. The exact marshalled result,
+        including next_cursor, is at most 768 KiB. This method must not read runtime agents, sessions, queues, diagnoses,
+        active tasks, or status fields, and does not close strict duplicate-slug runtime identity work.
       scope:
         required:
         - read:bundles
@@ -30106,6 +30140,17 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/BundleHash'
+      - name: limit
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+      - name: cursor
+        required: false
+        schema:
+          $ref: '#/components/schemas/Cursor'
       result:
         name: result
         required: true
@@ -30113,6 +30158,7 @@ api_specification:
           $ref: '#/components/schemas/BundleAgentsResult'
       errors:
       - BUNDLE_NOT_FOUND
+      - BUNDLE_AGENT_DEFINITION_TOO_LARGE
     bundle.register:
       tier: should_have
       description: >

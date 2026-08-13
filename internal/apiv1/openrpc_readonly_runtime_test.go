@@ -641,6 +641,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 				readOnlyProbeBundleHash: {
 					Agents: []bundlecatalog.AgentDefinition{{
 						AgentID:           "researcher",
+						AgentNameOwner:    "swarm://flows/research/agent/researcher",
 						Role:              "research",
 						Type:              "managed",
 						Model:             "cheap",

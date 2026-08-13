@@ -40,6 +40,16 @@ type bundleHashCommandOptions struct {
 	output     cliOutputOptions
 }
 
+type bundleAgentsCommandOptions struct {
+	bundleHashCommandOptions
+
+	limit  int
+	cursor string
+
+	limitSet  bool
+	cursorSet bool
+}
+
 type bundleRegisterCommandOptions struct {
 	apiOptions rootCommandOptions
 	output     cliOutputOptions
@@ -99,7 +109,8 @@ type bundleDetail struct {
 }
 
 type bundleAgentsResult struct {
-	Agents []bundleAgentDefinition `json:"agents"`
+	Agents     []bundleAgentDefinition `json:"agents"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
 }
 
 type bundleRegistrationResult struct {
@@ -135,6 +146,7 @@ type bundleDeletePartialError struct {
 
 type bundleAgentDefinition struct {
 	AgentID           string   `json:"agent_id"`
+	AgentNameOwner    string   `json:"agent_name_owner"`
 	FlowInstance      string   `json:"flow_instance,omitempty"`
 	Role              string   `json:"role,omitempty"`
 	Type              string   `json:"type,omitempty"`
@@ -214,12 +226,14 @@ func newBundleShowCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
-	agentsOpts := bundleHashCommandOptions{apiOptions: opts}
+	agentsOpts := bundleAgentsCommandOptions{bundleHashCommandOptions: bundleHashCommandOptions{apiOptions: opts}}
 	cmd := &cobra.Command{
 		Use:   "agents <bundle-hash>",
 		Short: "List the agents a bundle declares.",
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			agentsOpts.limitSet = cmd.Flags().Changed("limit")
+			agentsOpts.cursorSet = cmd.Flags().Changed("cursor")
 			if err := agentsOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -227,7 +241,10 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List bundle hashes with `swarm bundle list`.")
+	cmd.Flags().IntVar(&agentsOpts.limit, "limit", 0, "Maximum number of agents to return, from 1 to 500")
+	cmd.Flags().StringVar(&agentsOpts.cursor, "cursor", "", "Opaque pagination cursor returned by bundle.agents")
 	bindCLIOutputFlags(cmd, &agentsOpts.output)
+	bindCLIYAMLOutputFlag(cmd, &agentsOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &agentsOpts.apiOptions)
 	return cmd
 }
@@ -367,7 +384,7 @@ func runBundleShowCommand(ctx context.Context, out, errOut io.Writer, opts bundl
 	})
 }
 
-func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bundleHashCommandOptions, rawBundleHash string) error {
+func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bundleAgentsCommandOptions, rawBundleHash string) error {
 	if strings.TrimSpace(rawBundleHash) == "" {
 		return returnCLIValidationError(errOut, fmt.Errorf("bundle hash is required"))
 	}
@@ -384,8 +401,13 @@ func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bun
 	if err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}
+	params, err := opts.pageParams()
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	params["bundle_hash"] = bundleHash
 	var result bundleAgentsResult
-	if err := client.call(ctx, bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash}, &result); err != nil {
+	if err := client.call(ctx, bundleAgentsMethod, params, &result); err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}
 	if err := validateBundleAgentsResult(result); err != nil {
@@ -480,6 +502,24 @@ func runBundleDeleteCommand(ctx context.Context, out, errOut io.Writer, opts bun
 }
 
 func (opts bundleListCommandOptions) params() (map[string]any, error) {
+	params := map[string]any{}
+	if opts.limitSet {
+		if opts.limit < 1 || opts.limit > 500 {
+			return nil, fmt.Errorf("--limit must be between 1 and 500")
+		}
+		params["limit"] = opts.limit
+	}
+	cursor, err := optionalNonEmptyFlag("--cursor", opts.cursor, opts.cursorSet)
+	if err != nil {
+		return nil, err
+	}
+	if cursor != "" {
+		params["cursor"] = cursor
+	}
+	return params, nil
+}
+
+func (opts bundleAgentsCommandOptions) pageParams() (map[string]any, error) {
 	params := map[string]any{}
 	if opts.limitSet {
 		if opts.limit < 1 || opts.limit > 500 {
@@ -727,10 +767,19 @@ func validateBundleAgentsResult(result bundleAgentsResult) error {
 	if result.Agents == nil {
 		return fmt.Errorf("malformed bundle.agents result: agents is required")
 	}
+	owners := make(map[string]struct{}, len(result.Agents))
 	for i, agent := range result.Agents {
 		if strings.TrimSpace(agent.AgentID) == "" {
 			return fmt.Errorf("malformed bundle.agents result: agents[%d].agent_id is required", i)
 		}
+		owner := strings.TrimSpace(agent.AgentNameOwner)
+		if owner == "" {
+			return fmt.Errorf("malformed bundle.agents result: agents[%d].agent_name_owner is required", i)
+		}
+		if _, exists := owners[owner]; exists {
+			return fmt.Errorf("malformed bundle.agents result: duplicate agent_name_owner %q", owner)
+		}
+		owners[owner] = struct{}{}
 	}
 	return nil
 }
@@ -940,6 +989,7 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 	for _, agent := range result.Agents {
 		rows = append(rows, []string{
 			agent.AgentID,
+			agent.AgentNameOwner,
 			agent.FlowInstance,
 			agent.Role,
 			agent.Type,
@@ -958,6 +1008,7 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 	writeCLITable(w, cliTable{
 		Columns: []cliTableColumn{
 			{Header: "AGENT", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyAgent},
+			{Header: "AGENT_NAME_OWNER"},
 			{Header: "FLOW_INSTANCE", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 			{Header: "ROLE"},
 			{Header: "TYPE"},
@@ -974,6 +1025,12 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 		},
 		Rows:         rows,
 		EmptyMessage: "No bundle agents found.",
+		FooterLines: func() []string {
+			if strings.TrimSpace(result.NextCursor) == "" {
+				return nil
+			}
+			return []string{"Next cursor: " + result.NextCursor}
+		}(),
 	})
 }
 

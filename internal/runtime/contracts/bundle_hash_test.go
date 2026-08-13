@@ -241,8 +241,9 @@ agents:
 	bundle.Agents["reviewer"] = reviewerEntry
 	bundle.scopedAgents = map[string]AgentRegistryEntry{"alpha::reviewer": reviewerEntry}
 	flow := FlowContractView{
-		Paths:  FlowContractPaths{ID: "alpha", Flow: "alpha", AgentsFile: filepath.Join(root, "flows", "alpha", "agents.yaml")},
-		Agents: map[string]AgentRegistryEntry{"reviewer": reviewerEntry},
+		Paths:     FlowContractPaths{ID: "alpha", Flow: "alpha", AgentsFile: filepath.Join(root, "flows", "alpha", "agents.yaml")},
+		Agents:    map[string]AgentRegistryEntry{"reviewer": reviewerEntry},
+		AgentURIs: map[string]string{"reviewer": "swarm://flows/alpha/agent/reviewer"},
 	}
 	bundle.FlowTree = FlowTree{Root: &flow, ByID: map[string]*FlowContractView{"alpha": &flow}}
 
@@ -769,8 +770,9 @@ func bundleHashTestBundleWithIntent(t *testing.T, root, platform, coordinate str
 	bundle := bundleHashTestBundle(root, platform)
 	bundle.projectContracts = map[string]ProjectContractView{
 		".": {
-			Paths:  ProjectPackagePaths{Key: ".", ProjectAgentsFile: filepath.Join(root, "agents.yaml")},
-			Agents: map[string]AgentRegistryEntry{"guide": {ID: "guide", ResolvedIntent: resolved}},
+			Paths:     ProjectPackagePaths{Key: ".", ProjectAgentsFile: filepath.Join(root, "agents.yaml")},
+			Agents:    map[string]AgentRegistryEntry{"guide": {ID: "guide", ResolvedIntent: resolved}},
+			AgentURIs: map[string]string{"guide": "swarm://agent/guide"},
 		},
 	}
 	return bundle
@@ -786,14 +788,16 @@ func TestBundleCatalogAgentProjectionRendersEffectiveNamesForScopedDuplicateCoor
 		t.Fatal(err)
 	}
 	flow := FlowContractView{
-		Paths:  FlowContractPaths{ID: "review", Flow: "review", AgentsFile: "/contracts/flows/review/agents.yaml"},
-		Agents: map[string]AgentRegistryEntry{"worker": {ID: "review-worker", ResolvedIntent: flowIntent}},
+		Paths:     FlowContractPaths{ID: "review", Flow: "review", AgentsFile: "/contracts/flows/review/agents.yaml"},
+		Agents:    map[string]AgentRegistryEntry{"worker": {ID: "review-worker", ResolvedIntent: flowIntent}},
+		AgentURIs: map[string]string{"worker": "swarm://flows/review/agent/worker"},
 	}
 	bundle := &WorkflowContractBundle{
 		projectContracts: map[string]ProjectContractView{
 			".": {
-				Paths:  ProjectPackagePaths{Key: ".", ProjectAgentsFile: "/contracts/agents.yaml"},
-				Agents: map[string]AgentRegistryEntry{"worker": {ID: "worker", ResolvedIntent: rootIntent}},
+				Paths:     ProjectPackagePaths{Key: ".", ProjectAgentsFile: "/contracts/agents.yaml"},
+				Agents:    map[string]AgentRegistryEntry{"worker": {ID: "worker", ResolvedIntent: rootIntent}},
+				AgentURIs: map[string]string{"worker": "swarm://agent/worker"},
 			},
 		},
 		FlowTree: FlowTree{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
@@ -812,13 +816,77 @@ func TestBundleCatalogAgentProjectionRendersEffectiveNamesForScopedDuplicateCoor
 		t.Fatalf("catalog agent ids = %#v, want scoped effective names worker and review-worker", projected)
 	}
 	seen := map[string]string{}
+	owners := map[string]struct{}{}
 	for _, raw := range projected {
 		def := raw.(map[string]any)
 		seen[def["intent_provenance"].(string)] = def["intent_content"].(string)
+		owners[def["agent_name_owner"].(string)] = struct{}{}
 	}
 	if seen[rootIntent.Provenance] != rootIntent.Content || seen[flowIntent.Provenance] != flowIntent.Content {
 		t.Fatalf("catalog intent readback = %#v, want both exact scoped artifacts", seen)
 	}
+	if len(owners) != 2 {
+		t.Fatalf("catalog owners = %#v, want distinct root and flow owners", owners)
+	}
+}
+
+func TestBundleCatalogAgentProjectionPublishesCanonicalProjectOwnersAndPackageBackedDedup(t *testing.T) {
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.worker.intent", "worker intent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := AgentRegistryEntry{ID: "worker", ResolvedIntent: intent}
+	t.Run("sibling projects", func(t *testing.T) {
+		bundle := &WorkflowContractBundle{projectContracts: map[string]ProjectContractView{
+			"packages/left": {
+				Paths:     ProjectPackagePaths{Key: "packages/left", ProjectAgentsFile: "/contracts/packages/left/agents.yaml"},
+				Agents:    map[string]AgentRegistryEntry{"worker": entry},
+				AgentURIs: map[string]string{"worker": "swarm://projects/left/agent/worker"},
+			},
+			"packages/right": {
+				Paths:     ProjectPackagePaths{Key: "packages/right", ProjectAgentsFile: "/contracts/packages/right/agents.yaml"},
+				Agents:    map[string]AgentRegistryEntry{"worker": entry},
+				AgentURIs: map[string]string{"worker": "swarm://projects/right/agent/worker"},
+			},
+		}}
+		projected, err := bundleCatalogAgentsJSON(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projected) != 2 || projected[0].(map[string]any)["agent_name_owner"] == projected[1].(map[string]any)["agent_name_owner"] {
+			t.Fatalf("sibling project projection = %#v", projected)
+		}
+	})
+
+	t.Run("package backed flow", func(t *testing.T) {
+		agentsFile := "/contracts/flows/support/agents.yaml"
+		flow := FlowContractView{
+			Paths:     FlowContractPaths{ID: "support", PackageKey: "flows/support", AgentsFile: agentsFile},
+			Agents:    map[string]AgentRegistryEntry{"worker": entry},
+			AgentURIs: map[string]string{"worker": "swarm://flows/support/agent/worker"},
+		}
+		bundle := &WorkflowContractBundle{
+			projectContracts: map[string]ProjectContractView{
+				"flows/support": {
+					Paths:     ProjectPackagePaths{Key: "flows/support", ProjectAgentsFile: agentsFile},
+					Agents:    map[string]AgentRegistryEntry{"worker": entry},
+					AgentURIs: map[string]string{"worker": "swarm://projects/flows/support/agent/worker"},
+				},
+			},
+			FlowTree: FlowTree{Root: &flow, ByID: map[string]*FlowContractView{"support": &flow}},
+		}
+		projected, err := bundleCatalogAgentsJSON(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(projected) != 1 {
+			t.Fatalf("package-backed projection = %#v, want one canonical definition", projected)
+		}
+		definition := projected[0].(map[string]any)
+		if definition["agent_name_owner"] != "swarm://projects/flows/support/agent/worker" || definition["flow_instance"] != "support" {
+			t.Fatalf("package-backed projection = %#v, want project owner with flow metadata", definition)
+		}
+	})
 }
 
 func writeBundleHashText(t *testing.T, path, contents string) {

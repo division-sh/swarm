@@ -813,7 +813,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnCorruptCrossBundl
 		Store: &fakeBundleCatalogSelectedContractSourceStore{
 			record: runbundle.BundleCatalogRuntimeRecord{
 				BundleHash:  targetHash,
-				ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\ncanonical_inputs: []\n",
+				ContentYAML: "projection_version: swarm.bundle.catalog.v2\nfiles: []\ncanonical_inputs: []\n",
 			},
 		},
 	}

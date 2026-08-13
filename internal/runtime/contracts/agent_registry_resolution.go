@@ -8,6 +8,7 @@ import (
 
 type bundleAgentRecord struct {
 	LogicalID string
+	OwnerURI  string
 	Entry     AgentRegistryEntry
 	Source    ContractItemSource
 }
@@ -15,6 +16,15 @@ type bundleAgentRecord struct {
 func bundleAgentRecords(bundle *WorkflowContractBundle) []bundleAgentRecord {
 	if bundle == nil {
 		return nil
+	}
+	projectOwners := map[string]string{}
+	for _, view := range bundle.ProjectViews() {
+		for _, logicalID := range sortedContractKeys(view.Agents) {
+			source := ContractItemSource{PackageKey: strings.TrimSpace(view.Paths.Key), Layer: "project", File: view.Paths.ProjectAgentsFile}
+			if strings.TrimSpace(source.File) != "" {
+				projectOwners[agentDeclarationRecordKey(source.File, logicalID)] = strings.TrimSpace(view.AgentURIs[logicalID])
+			}
+		}
 	}
 	flowDeclarations := map[string]struct{}{}
 	flowRecords := make([]bundleAgentRecord, 0, len(bundle.FlowTree.ByID))
@@ -31,7 +41,11 @@ func bundleAgentRecords(bundle *WorkflowContractBundle) []bundleAgentRecord {
 			if strings.TrimSpace(source.File) != "" {
 				flowDeclarations[agentDeclarationRecordKey(source.File, logicalID)] = struct{}{}
 			}
-			flowRecords = append(flowRecords, bundleAgentRecord{LogicalID: logicalID, Entry: view.Agents[logicalID], Source: source})
+			ownerURI := strings.TrimSpace(view.AgentURIs[logicalID])
+			if canonical := projectOwners[agentDeclarationRecordKey(source.File, logicalID)]; canonical != "" {
+				ownerURI = canonical
+			}
+			flowRecords = append(flowRecords, bundleAgentRecord{LogicalID: logicalID, OwnerURI: ownerURI, Entry: view.Agents[logicalID], Source: source})
 		}
 	}
 	records := make([]bundleAgentRecord, 0, len(bundle.ProjectViews())+len(bundle.FlowTree.ByID))
@@ -47,6 +61,7 @@ func bundleAgentRecords(bundle *WorkflowContractBundle) []bundleAgentRecord {
 			}
 			records = append(records, bundleAgentRecord{
 				LogicalID: logicalID,
+				OwnerURI:  strings.TrimSpace(view.AgentURIs[logicalID]),
 				Entry:     view.Agents[logicalID],
 				Source:    source,
 			})

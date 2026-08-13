@@ -19,6 +19,9 @@ func TestProjectBundleCatalogAgentDefinitionRejectsImpossibleIntentArtifact(t *t
 	}
 	base := map[string]any{
 		"agent_id":            "worker",
+		"agent_name_owner":    "swarm://agent/worker",
+		"memory":              false,
+		"memory_source":       "platform_default",
 		"intent_kind":         string(intent.Kind),
 		"intent_source":       intent.Coordinate,
 		"intent_provenance":   intent.Provenance,

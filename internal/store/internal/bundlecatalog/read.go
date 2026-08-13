@@ -7,14 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	bundlecatalogcontract "github.com/division-sh/swarm/internal/bundlecatalog"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
-	"gopkg.in/yaml.v3"
 )
 
 type bundleCatalogCursor struct {
@@ -179,19 +177,12 @@ func (s *Postgres) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHas
 	return out, nil
 }
 
-func (s *Postgres) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalogcontract.AgentsResult, error) {
+func (s *Postgres) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalogcontract.AgentListOptions) (bundlecatalogcontract.AgentsResult, error) {
 	detail, err := s.LoadBundleCatalog(ctx, bundleHash)
 	if err != nil {
 		return bundlecatalogcontract.AgentsResult{}, err
 	}
-	agents, err := projectBundleCatalogAgents(detail.ParsedJSON, detail.ContentYAML)
-	if err != nil {
-		return bundlecatalogcontract.AgentsResult{}, err
-	}
-	if agents == nil {
-		agents = []bundlecatalogcontract.AgentDefinition{}
-	}
-	return bundlecatalogcontract.AgentsResult{Agents: agents}, nil
+	return pageBundleCatalogAgents(detail.BundleHash, detail.ParsedJSON, opts)
 }
 
 type bundleCatalogScanner interface {
@@ -225,7 +216,7 @@ func (r bundleCatalogRow) toDetail() (bundlecatalogcontract.Detail, error) {
 	if err != nil {
 		return bundlecatalogcontract.Detail{}, err
 	}
-	agents, err := projectBundleCatalogAgents(parsed, r.ContentYAML)
+	agents, err := projectBundleCatalogAgents(parsed)
 	if err != nil {
 		return bundlecatalogcontract.Detail{}, err
 	}
@@ -284,155 +275,6 @@ func decodeBundleCatalogCursor(cursor string) (time.Time, string, error) {
 	return ingestedAt.UTC(), bundleHash, nil
 }
 
-func projectBundleCatalogAgents(parsed map[string]any, contentYAML string) ([]bundlecatalogcontract.AgentDefinition, error) {
-	if len(parsed) > 0 {
-		agents, found, err := extractBundleCatalogAgents(parsed)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			return agents, nil
-		}
-	}
-	contentYAML = strings.TrimSpace(contentYAML)
-	if contentYAML == "" {
-		return []bundlecatalogcontract.AgentDefinition{}, nil
-	}
-	var decoded any
-	if err := yaml.Unmarshal([]byte(contentYAML), &decoded); err != nil {
-		return nil, fmt.Errorf("bundle catalog content_yaml projection failed: %w", err)
-	}
-	root, ok := normalizeBundleYAMLValue(decoded).(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("bundle catalog content_yaml projection failed: root must be an object")
-	}
-	agents, _, err := extractBundleCatalogAgents(root)
-	if err != nil {
-		return nil, err
-	}
-	return agents, nil
-}
-
-func extractBundleCatalogAgents(root map[string]any) ([]bundlecatalogcontract.AgentDefinition, bool, error) {
-	var out []bundlecatalogcontract.AgentDefinition
-	found := false
-	if raw, ok := root["agents"]; ok {
-		found = true
-		agents, err := extractBundleCatalogAgentCollection(raw, "")
-		if err != nil {
-			return nil, true, err
-		}
-		out = append(out, agents...)
-	}
-	if raw, ok := root["flows"]; ok {
-		found = true
-		flowAgents, err := extractBundleCatalogFlowAgents(raw)
-		if err != nil {
-			return nil, true, err
-		}
-		out = append(out, flowAgents...)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].FlowInstance != out[j].FlowInstance {
-			return out[i].FlowInstance < out[j].FlowInstance
-		}
-		return out[i].AgentID < out[j].AgentID
-	})
-	if out == nil {
-		out = []bundlecatalogcontract.AgentDefinition{}
-	}
-	return out, found, nil
-}
-
-func extractBundleCatalogFlowAgents(raw any) ([]bundlecatalogcontract.AgentDefinition, error) {
-	switch flows := raw.(type) {
-	case map[string]any:
-		names := make([]string, 0, len(flows))
-		for name := range flows {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		var out []bundlecatalogcontract.AgentDefinition
-		for _, name := range names {
-			flow, ok := flows[name].(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("bundle catalog agents projection failed: flows.%s must be an object", name)
-			}
-			rawAgents, ok := flow["agents"]
-			if !ok {
-				continue
-			}
-			agents, err := extractBundleCatalogAgentCollection(rawAgents, name)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, agents...)
-		}
-		return out, nil
-	case []any:
-		var out []bundlecatalogcontract.AgentDefinition
-		for i, item := range flows {
-			flow, ok := item.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("bundle catalog agents projection failed: flows[%d] must be an object", i)
-			}
-			rawAgents, ok := flow["agents"]
-			if !ok {
-				continue
-			}
-			flowInstance := stringFromMap(flow, "flow_instance")
-			agents, err := extractBundleCatalogAgentCollection(rawAgents, flowInstance)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, agents...)
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("bundle catalog agents projection failed: flows must be an object or array")
-	}
-}
-
-func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]bundlecatalogcontract.AgentDefinition, error) {
-	switch agents := raw.(type) {
-	case map[string]any:
-		names := make([]string, 0, len(agents))
-		for name := range agents {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		out := make([]bundlecatalogcontract.AgentDefinition, 0, len(names))
-		for _, name := range names {
-			def, ok := agents[name].(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("bundle catalog agents projection failed: agents.%s must be an object", name)
-			}
-			agent, err := projectBundleCatalogAgentDefinition(name, flowInstance, def)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, agent)
-		}
-		return out, nil
-	case []any:
-		out := make([]bundlecatalogcontract.AgentDefinition, 0, len(agents))
-		for i, item := range agents {
-			def, ok := item.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("bundle catalog agents projection failed: agents[%d] must be an object", i)
-			}
-			agent, err := projectBundleCatalogAgentDefinition("", flowInstance, def)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, agent)
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("bundle catalog agents projection failed: agents must be an object or array")
-	}
-}
-
 func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[string]any) (bundlecatalogcontract.AgentDefinition, error) {
 	if _, retired := def["prompt_path"]; retired {
 		return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: RETIRED field prompt_path is not accepted; use canonical intent metadata")
@@ -440,6 +282,9 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 	for key := range def {
 		if bundleCatalogRuntimeAgentFields[key] {
 			return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: runtime field %q is not allowed", key)
+		}
+		if !bundleCatalogAgentDefinitionFields[key] {
+			return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: unknown field %q is not allowed", key)
 		}
 	}
 	if agentID == "" {
@@ -451,6 +296,18 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 	}
 	if flowInstance == "" {
 		flowInstance = stringFromMap(def, "flow_instance")
+	}
+	agentNameOwner := stringFromMap(def, "agent_name_owner")
+	if agentNameOwner == "" {
+		return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: agent_name_owner is required")
+	}
+	memory, ok := def["memory"].(bool)
+	if !ok {
+		return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: memory is required and must be a boolean")
+	}
+	memorySource := stringFromMap(def, "memory_source")
+	if memorySource == "" {
+		return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: memory_source is required")
 	}
 	subscriptions, err := optionalStringListFromMap(def, "subscriptions")
 	if err != nil {
@@ -473,13 +330,14 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 	}
 	return bundlecatalogcontract.AgentDefinition{
 		AgentID:           agentID,
+		AgentNameOwner:    agentNameOwner,
 		FlowInstance:      strings.TrimSpace(flowInstance),
 		Role:              stringFromMap(def, "role"),
 		Type:              stringFromMap(def, "type"),
 		Model:             stringFromMap(def, "model"),
 		LLMBackend:        stringFromMap(def, "llm_backend"),
-		Memory:            boolFromMap(def, "memory"),
-		MemorySource:      stringFromMap(def, "memory_source"),
+		Memory:            memory,
+		MemorySource:      memorySource,
 		IntentKind:        string(intent.Kind),
 		IntentSource:      intent.Coordinate,
 		IntentProvenance:  intent.Provenance,
@@ -506,6 +364,26 @@ var bundleCatalogRuntimeAgentFields = map[string]bool{
 	"oldest_pending_age_seconds": true,
 }
 
+var bundleCatalogAgentDefinitionFields = map[string]bool{
+	"agent_id":            true,
+	"agent_name_owner":    true,
+	"flow_instance":       true,
+	"role":                true,
+	"type":                true,
+	"model":               true,
+	"llm_backend":         true,
+	"memory":              true,
+	"memory_source":       true,
+	"intent_kind":         true,
+	"intent_source":       true,
+	"intent_provenance":   true,
+	"intent_content_hash": true,
+	"intent_identity":     true,
+	"intent_content":      true,
+	"subscriptions":       true,
+	"tools":               true,
+}
+
 func stringFromMap(values map[string]any, key string) string {
 	value, _ := values[key].(string)
 	return strings.TrimSpace(value)
@@ -513,11 +391,6 @@ func stringFromMap(values map[string]any, key string) string {
 
 func exactStringFromMap(values map[string]any, key string) string {
 	value, _ := values[key].(string)
-	return value
-}
-
-func boolFromMap(values map[string]any, key string) bool {
-	value, _ := values[key].(bool)
 	return value
 }
 
@@ -540,29 +413,4 @@ func optionalStringListFromMap(values map[string]any, key string) ([]string, err
 		out = append(out, text)
 	}
 	return out, nil
-}
-
-func normalizeBundleYAMLValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[strings.TrimSpace(key)] = normalizeBundleYAMLValue(item)
-		}
-		return out
-	case map[any]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[strings.TrimSpace(fmt.Sprint(key))] = normalizeBundleYAMLValue(item)
-		}
-		return out
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, normalizeBundleYAMLValue(item))
-		}
-		return out
-	default:
-		return value
-	}
 }

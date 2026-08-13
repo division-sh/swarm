@@ -15,7 +15,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,7 +50,8 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 			writeJSONRPCResult(t, w, req.ID, validBundleDetail(bundleHash))
 		case bundleAgentsMethod:
 			writeJSONRPCResult(t, w, req.ID, map[string]any{
-				"agents": []map[string]any{validBundleAgent("agent-alpha")},
+				"agents":      []map[string]any{validBundleAgent("agent-alpha")},
+				"next_cursor": "agent-cursor-2",
 			})
 		default:
 			t.Errorf("unexpected method %q", req.Method)
@@ -60,7 +66,7 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 	}{
 		{args: []string{"bundle", "list", "--limit", "2", "--cursor", "bundle-cursor-1"}, wantStdout: []string{bundleHash, "AGENTS", "2", "next_cursor=bundle-cursor-2"}},
 		{args: []string{"bundle", "show", bundleHash}, wantStdout: []string{"Bundle " + bundleHash, "content_yaml:", "agents:"}},
-		{args: []string{"bundle", "agents", bundleHash}, wantStdout: []string{"AGENT", "agent-alpha", "researcher", "regular", "scan.requested"}},
+		{args: []string{"bundle", "agents", bundleHash, "--limit", "1", "--cursor", "agent-cursor-1"}, wantStdout: []string{"AGENT", "AGENT_NAME_OWNER", "agent-alpha", "researcher", "regular", "scan.requested", "Next cursor: agent-cursor-2"}},
 	}
 	for _, command := range commands {
 		var stdout, stderr bytes.Buffer
@@ -86,7 +92,7 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 	}
 	assertBundleRequest(t, requests[0], bundleListMethod, map[string]any{"limit": float64(2), "cursor": "bundle-cursor-1"})
 	assertBundleRequest(t, requests[1], bundleGetMethod, map[string]any{"bundle_hash": bundleHash})
-	assertBundleRequest(t, requests[2], bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash})
+	assertBundleRequest(t, requests[2], bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash, "limit": float64(1), "cursor": "agent-cursor-1"})
 }
 
 func TestBundleCommandsJSONPreserveAPIShape(t *testing.T) {
@@ -339,6 +345,181 @@ func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
 	}
 	if _, ok := agent["model_tier"]; ok {
 		t.Fatalf("json agent contains retired model_tier field: %#v", agent)
+	}
+}
+
+func TestBundleAgentsStructuredOutputPreservesOwnerAndContinuation(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	bundleHash := validBundleHash("e")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var request jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, request.ID, map[string]any{
+			"agents":      []map[string]any{validBundleAgent("agent-alpha")},
+			"next_cursor": "agent-cursor-2",
+		})
+	}))
+	defer server.Close()
+
+	for _, format := range []string{"--json", "--yaml"} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "agents", bundleHash, format}, &stdout, &stderr, testRootCommandOptions(server))
+		if code != 0 || !strings.Contains(stdout.String(), "agent_name_owner") || !strings.Contains(stdout.String(), "agent-cursor-2") {
+			t.Fatalf("%s code=%d stderr=%s stdout=%s", format, code, stderr.String(), stdout.String())
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want exactly one per invocation", calls.Load())
+	}
+}
+
+func TestBundleAgentsUsesSQLitePagerThroughV1API(t *testing.T) {
+	ctx := context.Background()
+	setCLIAPITestToken(t, "test-token")
+	store := storetest.StartSQLiteRuntimeStore(t)
+	db := storetest.Database(store)
+	seed := func(bundleHash string, definitions []map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{
+			"projection_version": "swarm.bundle.catalog.v2",
+			"agents":             definitions,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata, ingested_at)
+			VALUES (?, 'projection_version: swarm.bundle.catalog.v2', ?, '{"source":"cli-real-pager"}', ?)
+		`, bundleHash, string(raw), time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatalf("seed bundle catalog: %v", err)
+		}
+	}
+	definition := func(agentID, owner, flowInstance, content string) map[string]any {
+		intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents."+agentID+".intent", content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := validBundleAgent(agentID)
+		result["agent_name_owner"] = owner
+		result["flow_instance"] = flowInstance
+		result["intent_kind"] = string(intent.Kind)
+		result["intent_source"] = intent.Coordinate
+		result["intent_provenance"] = intent.Provenance
+		result["intent_content_hash"] = intent.ContentHash
+		result["intent_identity"] = intent.Identity
+		result["intent_content"] = intent.Content
+		return result
+	}
+
+	identityHash := validBundleHash("7")
+	seed(identityHash, []map[string]any{
+		definition("worker", "swarm://projects/right/agent/worker", "", "right"),
+		definition("worker", "swarm://flows/review/agent/worker", "review", "flow"),
+		definition("worker", "swarm://flows/triage/agent/worker", "triage", "flow"),
+		definition("worker", "swarm://agent/worker", "", "root"),
+		definition("worker", "swarm://projects/left/agent/worker", "", "left"),
+	})
+	largeHash := validBundleHash("8")
+	seed(largeHash, []map[string]any{
+		definition("first", "swarm://agent/first", "", strings.Repeat("a", 500_000)),
+		definition("second", "swarm://agent/second", "", strings.Repeat("b", 500_000)),
+	})
+	oversizedHash := validBundleHash("9")
+	seed(oversizedHash, []map[string]any{
+		definition("oversized", "swarm://agent/oversized", "", strings.Repeat("x", bundlecatalog.AgentListResultByteCeiling)),
+	})
+
+	registry, err := apiv1.LoadRegistry(ResolvePath(RepoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("load API registry: %v", err)
+	}
+	apiHandler, err := apiv1.NewHandler(apiv1.Options{
+		Registry:   registry,
+		AuthTokens: []string{"test-token"},
+		Handlers: apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{
+			Catalog: store,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("create API handler: %v", err)
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		apiHandler.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	for _, format := range []string{"", "--yaml"} {
+		args := []string{"bundle", "agents", identityHash, "--limit", "1"}
+		if format != "" {
+			args = append(args, format)
+		}
+		before := calls.Load()
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(ctx, t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+		if code != 0 || calls.Load() != before+1 || !strings.Contains(stdout.String(), "swarm://agent/worker") || !strings.Contains(strings.ToLower(stdout.String()), "next") {
+			t.Fatalf("real %q page code=%d calls=%d stderr=%s stdout=%s", format, code, calls.Load()-before, stderr.String(), stdout.String())
+		}
+	}
+
+	var owners []string
+	cursor := ""
+	for pageNumber := 0; ; pageNumber++ {
+		args := []string{"bundle", "agents", identityHash, "--limit", "1", "--json"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		before := calls.Load()
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(ctx, t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+		if code != 0 || calls.Load() != before+1 {
+			t.Fatalf("identity page %d code=%d calls=%d stderr=%s stdout=%s", pageNumber, code, calls.Load()-before, stderr.String(), stdout.String())
+		}
+		var page bundleAgentsResult
+		if err := json.Unmarshal(stdout.Bytes(), &page); err != nil || len(page.Agents) != 1 {
+			t.Fatalf("identity page %d decode=%v page=%#v stdout=%s", pageNumber, err, page, stdout.String())
+		}
+		owners = append(owners, page.Agents[0].AgentNameOwner)
+		if page.NextCursor == "" {
+			break
+		}
+		if page.NextCursor == cursor {
+			t.Fatalf("identity page %d cursor did not advance", pageNumber)
+		}
+		cursor = page.NextCursor
+	}
+	wantOwners := []string{
+		"swarm://agent/worker",
+		"swarm://flows/review/agent/worker",
+		"swarm://flows/triage/agent/worker",
+		"swarm://projects/left/agent/worker",
+		"swarm://projects/right/agent/worker",
+	}
+	if !reflect.DeepEqual(owners, wantOwners) {
+		t.Fatalf("owners = %#v, want %#v", owners, wantOwners)
+	}
+
+	before := calls.Load()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"bundle", "agents", largeHash, "--limit", "2", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 || calls.Load() != before+1 {
+		t.Fatalf("large page code=%d calls=%d stderr=%s", code, calls.Load()-before, stderr.String())
+	}
+	var largePage bundleAgentsResult
+	if err := json.Unmarshal(stdout.Bytes(), &largePage); err != nil || len(largePage.Agents) != 1 || largePage.NextCursor == "" {
+		t.Fatalf("large page decode=%v agents=%d cursor=%q", err, len(largePage.Agents), largePage.NextCursor)
+	}
+
+	before = calls.Load()
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(ctx, t.TempDir(), []string{"bundle", "agents", oversizedHash, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code == 0 || calls.Load() != before+1 || !strings.Contains(stderr.String(), apiv1.BundleAgentDefinitionTooLargeCode) || len(stderr.String()) >= 4096 {
+		t.Fatalf("oversized code=%d calls=%d stderr_bytes=%d stderr=%s", code, calls.Load()-before, stderr.Len(), stderr.String())
 	}
 }
 
@@ -1196,6 +1377,7 @@ func validBundleDetail(bundleHash string) map[string]any {
 func validBundleAgent(agentID string) map[string]any {
 	return map[string]any{
 		"agent_id":            agentID,
+		"agent_name_owner":    "swarm://flows/default/agent/" + agentID,
 		"flow_instance":       "default",
 		"role":                "researcher",
 		"type":                "business",

@@ -261,7 +261,6 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 		"internal/runtime/manager/flow_activation.go::staticAgentsForScope":                                      {},
 		"internal/runtime/manager/flow_activation.go::staticFlowLocalEventSet":                                   {},
 		"internal/runtime/semanticview/agent_declarations.go::AgentDeclarations":                                 {},
-		"internal/runtime/semanticview/bundle_source.go::projectAgentURIs":                                       {},
 		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryFlowWildcardSubscriptions":    {},
 		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryProjectWildcardSubscriptions": {},
 		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                            {},

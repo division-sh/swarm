@@ -15,6 +15,7 @@ const (
 	BundleMismatchCode                     = "BUNDLE_MISMATCH"
 	BundleScopeRequiredCode                = "BUNDLE_SCOPE_REQUIRED"
 	BundleNotFoundCode                     = "BUNDLE_NOT_FOUND"
+	BundleAgentDefinitionTooLargeCode      = "BUNDLE_AGENT_DEFINITION_TOO_LARGE"
 	BundleUnavailableCode                  = "BUNDLE_UNAVAILABLE"
 	BundleDataIntegrityErrorCode           = "BUNDLE_DATA_INTEGRITY_ERROR"
 	BundleRegisterConflictCode             = "BUNDLE_REGISTER_CONFLICT"

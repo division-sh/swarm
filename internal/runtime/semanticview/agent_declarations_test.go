@@ -41,6 +41,10 @@ flows:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
+	project, ok := bundle.ProjectViewByKey("flows/support")
+	if !ok || strings.TrimSpace(project.AgentURIs["flow-agent"]) == "" {
+		t.Fatalf("package-backed project owner was not retained directly: %#v", project.AgentURIs)
+	}
 	source := Wrap(bundle)
 	rawOccurrences := 0
 	for _, scope := range source.ProjectScopes() {

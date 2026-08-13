@@ -29,7 +29,7 @@ func ProjectAsFlowView[PP, PM, FP, FS, N, E, A, T any](
 		Tools:     project.Tools,
 		Policy:    project.Policy,
 		NodeURIs:  map[string]string{},
-		AgentURIs: map[string]string{},
+		AgentURIs: project.AgentURIs,
 		EventURIs: map[string]string{},
 		Children:  nil,
 		Parent:    nil,
