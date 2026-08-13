@@ -98,6 +98,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			candidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-candidate", "gamma-worker"), runtimeContextTestHash("c"))
 			restoredCandidate := newRuntime(candidate.root, candidate.hash)
 			failedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-failed-candidate", "delta-worker"), runtimeContextTestHash("d"))
+			blockedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-blocked-candidate", "epsilon-worker"), runtimeContextTestHash("e"))
 
 			coordinates := []runtimeagenttopology.SourceCoordinate{
 				{BundleHash: predecessor.hash, BundleSource: "ephemeral"},
@@ -266,6 +267,53 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 			if !restoredGamma || !restoredBeta {
 				t.Fatalf("restored topology = gamma:%v beta:%v", restoredGamma, restoredBeta)
+			}
+
+			survivorManager := survivor.rt.Manager
+			var blockedHooks atomic.Int32
+			supervisor.SetRuntimePublishedHook(func(context.Context) error {
+				blockedHooks.Add(1)
+				survivor.rt.Manager = nil
+				return errors.New("public ingress reconciliation failed before survivor restore")
+			})
+			_, blockedErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, blockedCandidate.root, blockedCandidate.source, blockedCandidate.bundle, blockedCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: blockedCandidate.hash}, blockedCandidate.rt, blockedCandidate.rt.WorkOccurrence(),
+			)
+			survivor.rt.Manager = survivorManager
+			if blockedErr == nil || !strings.Contains(blockedErr.Error(), "prepare predecessor source-set survivor restoration") {
+				t.Fatalf("blocked predecessor restoration error = %v", blockedErr)
+			}
+			if blockedHooks.Load() != 1 {
+				t.Fatalf("blocked publication hooks = %d, want no predecessor publication after preparation failure", blockedHooks.Load())
+			}
+			if ready.Load() {
+				t.Fatal("supervisor became ready after predecessor survivor preparation failure")
+			}
+			blockedPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || blockedPlan.Revision == currentPlan.Revision {
+				t.Fatalf("source set after predecessor preparation failure = exists:%v revision:%s previous:%s err:%v", exists, blockedPlan.Revision, currentPlan.Revision, err)
+			}
+			var blockedSource, restoredSource bool
+			for _, source := range blockedPlan.Sources {
+				blockedSource = blockedSource || source.BundleHash == blockedCandidate.hash
+				restoredSource = restoredSource || source.BundleHash == candidate.hash
+			}
+			if !blockedSource || restoredSource {
+				t.Fatalf("source set changed before predecessor survivor preparation: %#v", blockedPlan.Sources)
+			}
+			if lookup := contexts.LookupBundleHashStatus(candidate.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
+				t.Fatalf("predecessor after failed survivor preparation = %#v, want unavailable replacing", lookup)
+			}
+			if lookup := contexts.LookupBundleHashStatus(blockedCandidate.hash); lookup.Found {
+				t.Fatalf("withdrawn blocked candidate context = %#v, want absent", lookup)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("survivor under retained candidate head = %#v, want loaded", lookup)
+			}
+			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
+			if err != nil || evidence.SourceSetRevision != blockedPlan.Revision {
+				t.Fatalf("survivor authority after failed predecessor preparation = %#v, head:%s err:%v", evidence, blockedPlan.Revision, err)
 			}
 
 			deactivated := contexts.DeactivateBundleHashWithOptions(
