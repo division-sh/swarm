@@ -866,11 +866,10 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 	}
 }
 
-func TestEntityListFlowTruncationPreservesDistinguishingSegments(t *testing.T) {
-	sharedHash := strings.Repeat("a", 64)
-	sharedLongPrefix := strings.Repeat("segment-", 30)
-	flowA := "ingress/" + sharedHash + "/" + sharedLongPrefix + "/slot-1"
-	flowB := "ingress/" + sharedHash + "/" + sharedLongPrefix + "/slot-2"
+func TestEntityListFlowIdentifiersRemainExactAndDistinct(t *testing.T) {
+	sharedPrefix := strings.Repeat("a", 63)
+	flowA := "scope/" + sharedPrefix + "1"
+	flowB := "scope/" + sharedPrefix + "2"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
 		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
@@ -878,14 +877,34 @@ func TestEntityListFlowTruncationPreservesDistinguishingSegments(t *testing.T) {
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
-	for _, want := range []string{"ingress/", "slot-1", "slot-2", "…"} {
+	for _, want := range []string{flowA, flowB} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered flow cells must preserve %q:\n%s", want, rendered)
+			t.Fatalf("rendered flow cells must preserve the exact identifier %q:\n%s", want, rendered)
 		}
+	}
+	if strings.Contains(rendered, "…") {
+		t.Fatalf("flow identifiers must not be abbreviated:\n%s", rendered)
 	}
 	lines := strings.Split(strings.TrimSpace(rendered), "\n")
 	if len(lines) != 3 || lines[1] == lines[2] {
-		t.Fatalf("pathological instances differing after rune 200 must render as distinct rows:\n%s", rendered)
+		t.Fatalf("flow identifiers sharing a long prefix must render as distinct rows:\n%s", rendered)
+	}
+}
+
+func TestEntityListFlowIdentifierSanitizesControlsWithoutTruncation(t *testing.T) {
+	flow := "scope/" + strings.Repeat("b", 64) + "\nterminal\tsegment"
+	want := "scope/" + strings.Repeat("b", 64) + " terminal segment"
+	var stdout bytes.Buffer
+	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+	}}, entityListRenderOptions{runScoped: true})
+
+	rendered := stdout.String()
+	if !strings.Contains(rendered, want) {
+		t.Fatalf("rendered flow must preserve the complete identifier while sanitizing controls; want %q:\n%s", want, rendered)
+	}
+	if strings.Contains(rendered, "\nterminal") || strings.Contains(rendered, "\t") || strings.Contains(rendered, "…") {
+		t.Fatalf("flow identifier leaked controls or was abbreviated:\n%q", rendered)
 	}
 }
 

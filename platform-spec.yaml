@@ -25112,8 +25112,14 @@ cli_specification:
         required: false
         api_param: cursor
       output:
-        table: ENTITY_ID / optional RUN (omitted when --run-id scopes the query) / TYPE / STATE / FLOW / UPDATED plus next_cursor when present
-        empty: No entities match the filter.
+        default_text:
+          table: ENTITY_ID / optional RUN (omitted when --run-id scopes the query) / TYPE / STATE / FLOW / UPDATED
+          values: Empty TYPE or STATE values render as `-`; FLOW renders the sanitized but otherwise complete flow-instance identifier; UPDATED is relative to the current time.
+          empty: No entities match the current filters.
+          pagination: A non-empty next_cursor renders below the table as `next_cursor=<cursor>`.
+        verbose: Uses the default table and appends each row's absolute RFC3339 UPDATED value to its relative timestamp.
+        json: The complete validated entity.list result object, including every returned EntitySummary field and next_cursor when present.
+        quiet: One canonical entity_id per returned entity, in API result order.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -25142,10 +25148,14 @@ cli_specification:
         api_param: run_id
         validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
       output:
-        heading: Entity <entity-id>
-        summary_line: run_id / flow / type / state / revision / created_at / updated_at
-        optional_line: slug / name with '-' for omitted optional fields
-        structured_lines: compact JSON for server-owned fields, gates, and accumulated maps
+        default_text:
+          heading: Entity <entity-id>
+          identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name and empty type/state render as `-`; timestamps are relative.
+          sections: Labeled Fields and Gates rows plus an Accumulated presence count; empty sections render explicitly as `none`; every declared false gate remains visible.
+          field_projection: Platform bookkeeping fields are omitted from the default Fields section pending the API-owned separation tracked by #2242.
+        verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and a separate Bookkeeping section.
+        json: The complete validated entity.get result object, including entity identity, fields, gates, accumulated data, and loops when present.
+        quiet: The canonical entity_id only.
       exit_codes:
         success: 0
         cli_validation: 2

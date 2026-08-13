@@ -436,7 +436,7 @@ const cliOneLineMaxRunes = 200
 // fixed constant, not terminal-width-dependent, so human output stays
 // deterministic across TTY and piped rendering.
 func cliRenderOneLineValue(value string) string {
-	value = strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(value))
+	value = cliSanitizeOneLineValue(value)
 	runes := []rune(value)
 	if len(runes) <= cliOneLineMaxRunes {
 		return value
@@ -444,11 +444,18 @@ func cliRenderOneLineValue(value string) string {
 	return string(runes[:cliOneLineMaxRunes]) + "…"
 }
 
+// cliSanitizeOneLineValue preserves the complete value while replacing
+// characters that would break terminal line discipline. Identifier columns
+// consume this helper because truncation belongs to the identifier registry.
+func cliSanitizeOneLineValue(value string) string {
+	return strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(value))
+}
+
 // cliRenderOneLineLabel sanitizes a row label and, when it exceeds the one-line
 // ceiling, retains a distinguishing suffix so two long labels sharing a common
 // prefix never render as identical rows.
 func cliRenderOneLineLabel(value string) string {
-	value = strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(value))
+	value = cliSanitizeOneLineValue(value)
 	runes := []rune(value)
 	if len(runes) <= cliOneLineMaxRunes {
 		return value
