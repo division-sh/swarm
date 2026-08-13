@@ -20,6 +20,17 @@ type agentFrameEffectiveResolverStub struct {
 	calls  int
 }
 
+type paginatedAgentFrameCatalog struct {
+	*fakeBundleCatalogReadStore
+	pages map[string]bundlecatalog.AgentsResult
+	calls []bundlecatalog.AgentListOptions
+}
+
+func (s *paginatedAgentFrameCatalog) ListBundleCatalogAgents(_ context.Context, _ string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
+	s.calls = append(s.calls, opts)
+	return s.pages[opts.Cursor], nil
+}
+
 func (s *agentFrameEffectiveResolverStub) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (runtimemanager.AgentFrameConfig, error) {
 	s.calls++
 	return s.result, s.err
@@ -74,6 +85,37 @@ func TestOperatorAgentFrameInspectionScopesUseCanonicalProjection(t *testing.T) 
 		t.Fatalf("effective bundle source = %#v", effective.Session.BundleSource)
 	}
 	assertAgentFrameOccurrenceUnresolved(t, effective)
+}
+
+func TestOperatorAgentFrameStaticInspectionConsumesBoundedCatalogPagesExhaustively(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	intent := apiTestResolvedIntent(t, "reviewer", "Review the admitted work.")
+	catalog := &paginatedAgentFrameCatalog{
+		fakeBundleCatalogReadStore: &fakeBundleCatalogReadStore{},
+		pages: map[string]bundlecatalog.AgentsResult{
+			"": {Agents: []bundlecatalog.AgentDefinition{{AgentID: "other", FlowInstance: "review"}}, NextCursor: "page-2"},
+			"page-2": {Agents: []bundlecatalog.AgentDefinition{{
+				AgentID: "reviewer", FlowInstance: "review", Role: "reviewer",
+				IntentKind: string(intent.Kind), IntentSource: intent.Coordinate, IntentProvenance: intent.Provenance,
+				IntentContent: intent.Content, IntentContentHash: intent.ContentHash, IntentIdentity: intent.Identity,
+				ProviderPrompt: agentFrameTestProviderPrompt(t, intent),
+			}}},
+		},
+	}
+	handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: catalog})["agent.frame"]
+	result, err := handler(context.Background(), Request{Params: map[string]any{
+		"scope": "static", "agent_id": "reviewer", "bundle_hash": bundleHash, "flow": "review",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection := result.(agentframe.Inspection)
+	if inspection.Session.AgentID != "reviewer" || len(catalog.calls) != 2 {
+		t.Fatalf("inspection agent=%q calls=%#v, want reviewer across two pages", inspection.Session.AgentID, catalog.calls)
+	}
+	if catalog.calls[0].Limit != bundlecatalog.MaxAgentListLimit || catalog.calls[0].Cursor != "" || catalog.calls[1].Cursor != "page-2" {
+		t.Fatalf("catalog page options = %#v, want bounded exhaustive cursor walk", catalog.calls)
+	}
 }
 
 func TestOperatorAgentFrameRejectsMixedSelectorsBeforeEffectiveResolution(t *testing.T) {

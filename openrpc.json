@@ -412,7 +412,7 @@
           }
         },
         {
-          "code": -32011,
+          "code": -32012,
           "message": "Application error: BUNDLE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
