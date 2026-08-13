@@ -105,7 +105,6 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				RunLifecycleCandidates:   selected, WorkflowPersistence: workflowPersistence,
 				RuntimeLogStore:          selected,
 				ManagerStore:             selected,
-				ManagerLifecycleStore:    selected,
 				ManagerPersistenceRoles:  externalRuntimeTestSelectedManagerRoles(selected),
 				EffectsStore:             selected,
 				CompletionStore:          selected,
@@ -123,9 +122,13 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
 			t.Cleanup(func() {
 				if err := rt.Shutdown(); err != nil {
 					t.Errorf("shutdown receiver authority runtime: %v", err)
+				}
+				if err := capability.Release(context.Background()); err != nil {
+					t.Errorf("release receiver authority process capability: %v", err)
 				}
 			})
 			if err := rt.PrepareAuthorActivityCatalog(); err != nil {

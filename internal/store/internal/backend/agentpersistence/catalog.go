@@ -2,56 +2,14 @@ package agentpersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
-
-func (s *AgentPostgresOwner) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if rec.Config.ID == "" {
-		return fmt.Errorf("agent id is required")
-	}
-	rec.Config.NormalizeEntityID()
-	rec.Config.NormalizeRuntimeDescriptor()
-	if err := agentmemory.ValidateFlowOwnership(rec.Config.Memory, rec.Config.FlowPath); err != nil {
-		return fmt.Errorf("invalid agent memory plan: %w", err)
-	}
-	projection, err := ProjectPersistedAgentConfig(rec.Config, rec.ParentAgentID)
-	if err != nil {
-		return err
-	}
-	identity, err := rec.Config.ConcreteIdentity()
-	if err != nil {
-		return err
-	}
-	identityFingerprint, err := identity.Fingerprint()
-	if err != nil {
-		return err
-	}
-
-	var startedAt any
-	if !rec.StartedAt.IsZero() {
-		startedAt = rec.StartedAt
-	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+identityFingerprint); err != nil {
-			return err
-		}
-		if err := AuthorizePostgresRawAgentTopologyMutation(txctx, tx, rec); err != nil {
-			return err
-		}
-		return s.upsertAgentSpec(txctx, tx, rec, projection, startedAt)
-	})
-}
 
 func (s *AgentPostgresOwner) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	if err := s.requireCurrentSchema(); err != nil {
@@ -62,68 +20,6 @@ func (s *AgentPostgresOwner) LoadAgents(ctx context.Context) ([]runtimemanager.P
 
 func (s *AgentPostgresOwner) LoadAgentsSpec(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return s.loadAgentsSpec(ctx)
-}
-
-func (s *AgentPostgresOwner) upsertAgentSpec(ctx context.Context, tx *sql.Tx, rec runtimemanager.PersistedAgent, projection PersistedAgentProjection, startedAt any) error {
-	const q = `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source,
-			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
-			runtime_descriptor, status, turn_count, last_active_at, created_at
-		)
-		VALUES (
-			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11, $12,
-			NULLIF($13,''), NULLIF($14,'')::uuid, $15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb,
-			$20::jsonb, $21, 0, now(), COALESCE($22, now())
-		)
-		ON CONFLICT (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance
-		) DO UPDATE SET
-			role = EXCLUDED.role,
-			model = EXCLUDED.model,
-			llm_backend = EXCLUDED.llm_backend,
-			memory_enabled = EXCLUDED.memory_enabled,
-			memory_source = EXCLUDED.memory_source,
-			parent_agent_id = EXCLUDED.parent_agent_id,
-			entity_id = EXCLUDED.entity_id,
-			config = EXCLUDED.config,
-			subscriptions = EXCLUDED.subscriptions,
-			emit_events = EXCLUDED.emit_events,
-			tools = EXCLUDED.tools,
-			permissions = EXCLUDED.permissions,
-			runtime_descriptor = EXCLUDED.runtime_descriptor,
-			status = EXCLUDED.status,
-			last_active_at = now()
-	`
-	_, err := tx.ExecContext(ctx, q,
-		projection.Identity.AgentID,
-		projection.Identity.NameOwner,
-		projection.Identity.NameSource,
-		projection.Identity.RoutePresence,
-		projection.Identity.FlowScopeKey,
-		projection.Identity.FlowInstanceID,
-		projection.Identity.FlowInstancePath,
-		projection.Role,
-		projection.Model,
-		projection.LLMBackend,
-		projection.MemoryEnabled,
-		projection.MemorySource,
-		projection.ParentAgentID,
-		projection.EntityID,
-		string(projection.ConfigJSON),
-		string(projection.SubscriptionsJSON),
-		string(projection.EmitEventsJSON),
-		string(projection.ToolsJSON),
-		string(projection.PermissionsJSON),
-		string(projection.RuntimeDescriptor),
-		agentPersistedStatus(rec.Status),
-		startedAt,
-	)
-	return err
 }
 
 func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -151,7 +47,8 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			COALESCE(permissions, '[]'::jsonb),
 			COALESCE(status, 'active'),
 			COALESCE(created_at, now()),
-			lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode
+			lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
+			topology_admission
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
@@ -167,6 +64,7 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 		var rec runtimemanager.PersistedAgent
 		var row PersistedAgentProjection
 		var lifecycleGeneration int64
+		var topologyRaw []byte
 		if err := rows.Scan(
 			&row.AgentID,
 			&row.Identity.NameOwner,
@@ -194,6 +92,7 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			&lifecycleGeneration,
 			&rec.LifecyclePhase,
 			&rec.LifecycleRunMode,
+			&topologyRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent row: %w", err)
 		}
@@ -205,6 +104,12 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 		}
 		rec.ParentAgentID = row.ParentAgentID
 		rec.LifecycleGeneration = uint64(lifecycleGeneration)
+		if err := json.Unmarshal(topologyRaw, &rec.Topology); err != nil {
+			return nil, fmt.Errorf("decode agent topology admission: %w", err)
+		}
+		if err := rec.Topology.Validate(); err != nil {
+			return nil, err
+		}
 		rec.Config = cfg
 		out = append(out, rec)
 	}
@@ -220,16 +125,6 @@ func agentModel(cfg runtimeactors.AgentConfig) (string, error) {
 		return "", err
 	}
 	return alias, nil
-}
-
-func agentPersistedType(cfg runtimeactors.AgentConfig, modelAlias string) string {
-	if v := strings.TrimSpace(cfg.Type); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(modelAlias); v != "" {
-		return v
-	}
-	return "generic"
 }
 
 func agentFlowInstance(cfg runtimeactors.AgentConfig) string {

@@ -1,0 +1,317 @@
+package serveapp
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"reflect"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/config"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
+)
+
+type failOncePostCommitBundleDeleteCapability struct {
+	runtimestartupownership.ProcessCapability
+	finalMutationCommitted atomic.Bool
+	refreshAttempts        atomic.Int32
+}
+
+func (c *failOncePostCommitBundleDeleteCapability) ApplyBundleDeleteFinalMutation(
+	ctx context.Context,
+	req runtimebundledelete.FinalMutationRequest,
+	topology *runtimeagenttopology.SourceSetCommitRequest,
+) (runtimebundledelete.FinalMutationResult, error) {
+	result, err := c.ProcessCapability.ApplyBundleDeleteFinalMutation(ctx, req, topology)
+	if err == nil && topology != nil {
+		c.finalMutationCommitted.Store(true)
+	}
+	return result, err
+}
+
+func (c *failOncePostCommitBundleDeleteCapability) IssueGenerationGrant(
+	ctx context.Context,
+	req runtimestartupownership.GrantRequest,
+) (runtimestartupownership.GenerationGrant, error) {
+	if c.finalMutationCommitted.Load() && c.refreshAttempts.Add(1) == 2 {
+		return nil, errors.New("injected post-commit survivor refresh failure")
+	}
+	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
+}
+
+func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T) {
+	ctx := context.Background()
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	selected, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	db := storetest.DatabaseForTest(selected)
+	t.Cleanup(func() { _ = db.Close() })
+	storetest.BootstrapPostgresRuntimeStore(t, selected)
+	cfg := &config.Config{}
+	stores := selectedPostgresStoreBundle(selected, db, cfg)
+
+	firstRoot := writeServeRuntimeAgentSlugFixture(t, "delete-replay-a", "alpha-worker")
+	secondRoot := writeServeRuntimeAgentSlugFixture(t, "delete-replay-b", "beta-worker")
+	thirdRoot := writeServeRuntimeAgentSlugFixture(t, "delete-replay-c", "gamma-worker")
+	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, firstRoot)
+	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, secondRoot)
+	thirdHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, thirdRoot)
+	processWorkOwner := worklifetime.NewProcess()
+	t.Cleanup(func() {
+		processWorkOwner.Retire()
+		joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := processWorkOwner.Join(joinCtx); err != nil {
+			t.Errorf("join process work owner: %v", err)
+		}
+	})
+	runtimeInstanceID := uuid.NewString()
+	providerCatalog := testProviderTriggerCatalog(t)
+
+	type runtimeFixture struct {
+		runtime *runtimepkg.Runtime
+		source  semanticview.Source
+	}
+	newRuntime := func(root, bundleHash string) runtimeFixture {
+		bundle := loadWorkflowValidationBundleAt(t, root)
+		source := semanticview.Wrap(bundle)
+		rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(stores, cfg, runtimepkg.RuntimeOptions{
+			SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
+			LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true,
+			ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,
+			BundleSourceFact:  mustServeTestPersistedBundleSourceFact(bundleHash),
+			RuntimeInstanceID: runtimeInstanceID,
+		}))
+		if err != nil {
+			t.Fatalf("NewRuntime(%s): %v", bundleHash, err)
+		}
+		return runtimeFixture{runtime: rt, source: source}
+	}
+	first := newRuntime(firstRoot, firstHash)
+	second := newRuntime(secondRoot, secondHash)
+	third := newRuntime(thirdRoot, thirdHash)
+	coordinates := []runtimeagenttopology.SourceCoordinate{
+		{BundleHash: firstHash, BundleSource: "persisted"},
+		{BundleHash: secondHash, BundleSource: "persisted"},
+		{BundleHash: thirdHash, BundleSource: "persisted"},
+	}
+	var desired []runtimeagenttopology.DesiredAgent
+	for i, fixture := range []runtimeFixture{first, second, third} {
+		compiled, err := fixture.runtime.Manager.CompileStaticTopologyDesiredAgents(fixture.source, coordinates[i])
+		if err != nil {
+			t.Fatalf("compile desired topology %d: %v", i, err)
+		}
+		desired = append(desired, compiled...)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan(coordinates, desired)
+	if err != nil {
+		t.Fatalf("NewSourceSetPlan: %v", err)
+	}
+	capability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "bundle-delete-replay-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("AcquireProcessCapability: %v", err)
+	}
+	if err := installServeSourceSet(ctx, capability, plan); err != nil {
+		t.Fatalf("install source set: %v", err)
+	}
+	installSelectedStoreTestGeneration(t, capability, first.runtime, plan, 1)
+	installSelectedStoreTestGeneration(t, capability, second.runtime, plan, 1)
+	installSelectedStoreTestGeneration(t, capability, third.runtime, plan, 1)
+	if err := first.runtime.Start(ctx); err != nil {
+		t.Fatalf("start first runtime: %v", err)
+	}
+	if err := second.runtime.Start(ctx); err != nil {
+		t.Fatalf("start second runtime: %v", err)
+	}
+	if err := third.runtime.Start(ctx); err != nil {
+		t.Fatalf("start third runtime: %v", err)
+	}
+	contexts, err := runtimepkg.NewRuntimeContextManager(nil,
+		runtimepkg.BundleContext{BundleSourceFact: first.runtime.Options.BundleSourceFact, Source: first.source, Runtime: first.runtime, WorkOwner: first.runtime.WorkOccurrence()},
+		runtimepkg.BundleContext{BundleSourceFact: second.runtime.Options.BundleSourceFact, Source: second.source, Runtime: second.runtime, WorkOwner: second.runtime.WorkOccurrence()},
+		runtimepkg.BundleContext{BundleSourceFact: third.runtime.Options.BundleSourceFact, Source: third.source, Runtime: third.runtime, WorkOwner: third.runtime.WorkOccurrence()},
+	)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, result := range contexts.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
+			if result.ShutdownErr != nil {
+				t.Errorf("shutdown runtime context %s: %v", result.BundleHash, result.ShutdownErr)
+			}
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Errorf("release process capability: %v", err)
+		}
+	})
+
+	failingCapability := &failOncePostCommitBundleDeleteCapability{ProcessCapability: capability}
+	coordinator := &runtimebundledelete.Coordinator{
+		Planner: selected, Finalizer: processOwnedBundleDeleteFinalizer{capability: failingCapability, runtimeContexts: contexts},
+		Locks: selected, RuntimeQuiescer: contexts,
+	}
+	req := runtimebundledelete.Request{
+		OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "bundle-delete-replay",
+		ReplayKeyHash: strings.Repeat("a", 64),
+		BundleHash:    firstHash, RequestedAt: time.Now().UTC(),
+	}
+	if _, err := coordinator.Execute(ctx, req); err == nil || !strings.Contains(err.Error(), "injected post-commit survivor refresh failure") {
+		t.Fatalf("first delete error = %v, want injected post-commit failure", err)
+	}
+	for _, bundleHash := range []string{secondHash, thirdHash} {
+		if lookup := contexts.LookupBundleHashStatus(bundleHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+			t.Fatalf("survivor %s after post-commit failure = %#v, want pending source-set transition", bundleHash, lookup)
+		}
+	}
+	var bundleRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bundles WHERE bundle_hash = $1`, firstHash).Scan(&bundleRows); err != nil {
+		t.Fatalf("count deleted bundle after post-commit failure: %v", err)
+	}
+	if bundleRows != 0 {
+		t.Fatalf("deleted bundle rows after post-commit failure = %d, want 0", bundleRows)
+	}
+	var replayRecorded bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT result ? 'bundle_delete_final_mutation'
+		FROM agent_topology_source_set_operations
+		WHERE operation_id = $1::uuid
+	`, req.OperationID).Scan(&replayRecorded); err != nil {
+		t.Fatalf("read final mutation replay record: %v", err)
+	}
+	if !replayRecorded {
+		t.Fatal("committed source-set operation omitted final mutation replay record")
+	}
+	changedRequest := req
+	changedRequest.OperationID = uuid.NewString()
+	changedRequest.RequestHash = "changed-bundle-delete-request"
+	changedRequest.RequestedAt = req.RequestedAt.Add(time.Minute)
+	if _, err := coordinator.Execute(ctx, changedRequest); err == nil || !strings.Contains(err.Error(), "stored request hash") {
+		t.Fatalf("changed-request replay error = %v, want stored request hash conflict", err)
+	}
+	for _, bundleHash := range []string{secondHash, thirdHash} {
+		if lookup := contexts.LookupBundleHashStatus(bundleHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+			t.Fatalf("survivor %s after changed-request replay = %#v, want pending source-set transition", bundleHash, lookup)
+		}
+	}
+	type survivorProgress struct {
+		bundleHash string
+		agentID    string
+		grants     int
+		rebinds    int
+	}
+	survivorsBeforeReplay := []survivorProgress{
+		{bundleHash: secondHash, agentID: "beta-worker"},
+		{bundleHash: thirdHash, agentID: "gamma-worker"},
+	}
+	progressedBeforeFailure := 0
+	for i := range survivorsBeforeReplay {
+		survivor := &survivorsBeforeReplay[i]
+		survivor.grants = countBundleDeleteReplayRows(t, db, `SELECT COUNT(DISTINCT grant_id) FROM runtime_generation_grants WHERE bundle_hash = $1`, survivor.bundleHash)
+		survivor.rebinds = countBundleDeleteReplayRows(t, db, `SELECT COUNT(*) FROM agent_lifecycle_operations WHERE operation_kind = 'source_set_rebind' AND agent_id = $1`, survivor.agentID)
+		switch {
+		case survivor.grants == 2 && survivor.rebinds == 1:
+			progressedBeforeFailure++
+		case survivor.grants == 1 && survivor.rebinds == 0:
+		default:
+			t.Fatalf("survivor progress before replay = %#v, want either committed or untouched", *survivor)
+		}
+	}
+	if progressedBeforeFailure != 1 {
+		t.Fatalf("survivors progressed before injected failure = %d, want 1", progressedBeforeFailure)
+	}
+
+	replayRequest := req
+	replayRequest.OperationID = uuid.NewString()
+	replayRequest.RequestedAt = req.RequestedAt.Add(2 * time.Minute)
+	replayed, err := coordinator.Execute(ctx, replayRequest)
+	if err != nil {
+		t.Fatalf("replay committed delete: %v", err)
+	}
+	if !replayed.OK || !replayed.Deleted {
+		t.Fatalf("replayed delete result = %#v, want completed deletion", replayed)
+	}
+	for _, bundleHash := range []string{secondHash, thirdHash} {
+		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
+			t.Fatalf("survivor %s after replay = %#v, want loaded", bundleHash, lookup)
+		}
+	}
+	for i := range survivorsBeforeReplay {
+		survivor := &survivorsBeforeReplay[i]
+		afterGrants := countBundleDeleteReplayRows(t, db, `SELECT COUNT(DISTINCT grant_id) FROM runtime_generation_grants WHERE bundle_hash = $1`, survivor.bundleHash)
+		afterRebinds := countBundleDeleteReplayRows(t, db, `SELECT COUNT(*) FROM agent_lifecycle_operations WHERE operation_kind = 'source_set_rebind' AND agent_id = $1`, survivor.agentID)
+		wantGrants, wantRebinds := survivor.grants, survivor.rebinds
+		if survivor.rebinds == 0 {
+			wantGrants++
+			wantRebinds++
+		}
+		if afterGrants != wantGrants || afterRebinds != wantRebinds {
+			t.Fatalf("survivor replay work for %s = grants %d->%d rebinds %d->%d, want %d/%d", survivor.bundleHash, survivor.grants, afterGrants, survivor.rebinds, afterRebinds, wantGrants, wantRebinds)
+		}
+		survivor.grants = afterGrants
+		survivor.rebinds = afterRebinds
+	}
+
+	duplicateRequest := replayRequest
+	duplicateRequest.OperationID = uuid.NewString()
+	duplicateRequest.RequestedAt = req.RequestedAt.Add(3 * time.Minute)
+	duplicate, err := coordinator.Execute(ctx, duplicateRequest)
+	if err != nil {
+		t.Fatalf("duplicate committed delete: %v", err)
+	}
+	if !reflect.DeepEqual(duplicate.FinalMutation, replayed.FinalMutation) {
+		t.Fatalf("duplicate final mutation = %#v, want stored %#v", duplicate.FinalMutation, replayed.FinalMutation)
+	}
+	for _, survivor := range survivorsBeforeReplay {
+		afterGrants := countBundleDeleteReplayRows(t, db, `SELECT COUNT(DISTINCT grant_id) FROM runtime_generation_grants WHERE bundle_hash = $1`, survivor.bundleHash)
+		afterRebinds := countBundleDeleteReplayRows(t, db, `SELECT COUNT(*) FROM agent_lifecycle_operations WHERE operation_kind = 'source_set_rebind' AND agent_id = $1`, survivor.agentID)
+		if afterGrants != survivor.grants || afterRebinds != survivor.rebinds {
+			t.Fatalf("ordinary duplicate mutated survivor %s: grants %d->%d rebinds %d->%d", survivor.bundleHash, survivor.grants, afterGrants, survivor.rebinds, afterRebinds)
+		}
+	}
+	unkeyedRequest := duplicateRequest
+	unkeyedRequest.OperationID = uuid.NewString()
+	unkeyedRequest.ReplayKeyHash = ""
+	unkeyedRequest.RequestedAt = req.RequestedAt.Add(4 * time.Minute)
+	if _, err := coordinator.Execute(ctx, unkeyedRequest); !errors.Is(err, runtimebundledelete.ErrBundleNotFound) {
+		t.Fatalf("unkeyed replay error = %v, want ErrBundleNotFound", err)
+	}
+	expiredRequest := duplicateRequest
+	expiredRequest.OperationID = uuid.NewString()
+	expiredRequest.RequestedAt = req.RequestedAt.Add(runtimebundledelete.FinalMutationReplayWindow)
+	if _, err := coordinator.Execute(ctx, expiredRequest); !errors.Is(err, runtimebundledelete.ErrBundleNotFound) {
+		t.Fatalf("expired replay error = %v, want ErrBundleNotFound", err)
+	}
+}
+
+func countBundleDeleteReplayRows(t testing.TB, db *sql.DB, query, arg string) int {
+	t.Helper()
+	var count int
+	var err error
+	if arg == "" {
+		err = db.QueryRowContext(context.Background(), query).Scan(&count)
+	} else {
+		err = db.QueryRowContext(context.Background(), query, arg).Scan(&count)
+	}
+	if err != nil {
+		t.Fatalf("count bundle delete replay rows: %v", err)
+	}
+	return count
+}

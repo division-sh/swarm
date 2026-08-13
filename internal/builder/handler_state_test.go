@@ -14,6 +14,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 type projectControlStub struct {
@@ -179,5 +180,5 @@ func builderMockConnectorSource(includeLive bool) semanticview.Source {
 	if includeLive {
 		bundle.Agents["live-agent"] = runtimecontracts.AgentRegistryEntry{ID: "live-agent", Model: llmselection.ModelAliasRegular}
 	}
-	return semanticview.Wrap(bundle)
+	return semanticviewtest.WrapRootAgents(bundle)
 }

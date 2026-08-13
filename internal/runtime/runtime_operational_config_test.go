@@ -15,7 +15,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -23,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -313,7 +314,11 @@ func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testin
 }
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T) {
-	module := loadRuntimeOwnershipWorkflowModule(t)
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+		"persisted-agent": testRuntimeWorkflowValidationAgent("persisted-agent"),
+	}
+	module := semanticOnlyWorkflowRuntime{source: semanticviewtest.WrapRootAgents(bundle)}
 	eventStore := &recoveryGuardEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress("evt-1",
@@ -323,14 +328,8 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 			runtimeflowidentity.DeriveRoute("child", "inst-1"),
 		},
 	}
-	managerStore := &recoveryGuardManagerStore{
-		agents: []runtimemanager.PersistedAgent{{
-			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
-		}},
-	}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:              eventStore,
-		ManagerStore:            managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -409,17 +408,9 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	cfg := testOperationalRuntimeConfig()
 	cfg.Runtime.RecoveryOnStartup = true
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "other-bundle")}}
-	managerStore := &recoveryDisabledManagerStore{
-		recoveryGuardManagerStore: recoveryGuardManagerStore{
-			agents: []runtimemanager.PersistedAgent{{
-				Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
-			}},
-		},
-	}
 	eventStore := &recoveryGuardEventStore{}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg,
 		EventStore:              eventStore,
-		ManagerStore:            managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
 		GenericScheduleStore:    scheduleStore,
 		TimerObligationReader:   scheduleStore,
@@ -438,9 +429,6 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	}
 	if got := scheduleStore.loadCalls.Load(); got != 0 {
 		t.Fatalf("ListActiveGenericScheduleActivations calls = %d, want 0", got)
-	}
-	if got := managerStore.loadCalls.Load(); got != 0 {
-		t.Fatalf("LoadAgents calls = %d, want 0", got)
 	}
 	if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
 		t.Fatalf("directive reconcile calls = %d, want 1 with persistent startup recovery disabled", got)

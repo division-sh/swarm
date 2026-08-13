@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 
 type operatorAgentDeliveryPageStore interface {
 	authorActivityReceiptStore
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+	agentfixture.Store
 	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error)
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error)
 }
@@ -36,7 +37,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "agent-a", "")
-			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+			if err := agentfixture.Upsert(ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),

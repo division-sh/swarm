@@ -35,9 +35,7 @@ type LLMSQLiteOwner struct {
 	nowFn                  func() time.Time
 	lifecycle              completionCandidateOwner
 	runLifecycleCandidates *runhandoff.CandidateCoordinator
-	startupMu              sync.Mutex
 	sessionMu              sync.Mutex
-	startupOwner           string
 	sessionLockTTL         time.Duration
 }
 

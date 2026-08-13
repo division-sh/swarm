@@ -287,7 +287,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
 				envelope := routeShape.envelope(entityID, auditEntityID)
-				if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+				if err := storetest.UpsertAgentFixture(ctx, f.store, runtimemanager.PersistedAgent{
 					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
 						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
@@ -466,7 +466,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			originalID := uuid.NewString()
 			createdAt := time.Unix(1700001400, 0).UTC()
 			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
-			if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+			if err := storetest.UpsertAgentFixture(ctx, f.store, runtimemanager.PersistedAgent{
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID,
 					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
@@ -739,9 +739,11 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sq
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source
+			role, model, memory_enabled, memory_source,
+			topology_authority_kind, topology_admission, execution_lifetime
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'operator-replay-test', 'operator-replay-test', TRUE, 'authored')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'operator-replay-test', 'operator-replay-test', TRUE, 'authored',
+			'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}'::jsonb, 'durable_managed')
 		ON CONFLICT (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance
@@ -758,9 +760,11 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sq
 			INSERT INTO agents (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, memory_enabled, memory_source
+				role, model, memory_enabled, memory_source,
+				topology_authority_kind, topology_admission, execution_lifetime
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'operator-replay-test', 'operator-replay-test', 1, 'authored')
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'operator-replay-test', 'operator-replay-test', 1, 'authored',
+				'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}', 'durable_managed')
 			ON CONFLICT (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance

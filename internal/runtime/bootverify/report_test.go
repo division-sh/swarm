@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -142,11 +143,25 @@ func TestFormatSurfaceFindingUsesTypedDiagnosticRendering(t *testing.T) {
 }
 
 func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
+	intent, err := runtimeagentintent.Resolve(
+		runtimeagentintent.SourceInline,
+		"inline",
+		"agents.yaml#agents.agent-1.intent",
+		"Exercise the built-in scheduler.",
+	)
+	if err != nil {
+		t.Fatalf("resolve test agent intent: %v", err)
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"agent-1": {ID: "agent-1", Tools: []string{"schedule"}, Permissions: []string{"schedule"}},
+		"agent-1": {
+			ID: "agent-1", Role: "agent-1", Model: "regular",
+			Intent:         runtimeagentintent.Source{Kind: runtimeagentintent.SourceInline, Inline: "Exercise the built-in scheduler."},
+			ResolvedIntent: intent, Subscriptions: []string{"test.event"},
+			Tools: []string{"schedule"}, Permissions: []string{"schedule"},
+		},
 	}
 	source := semanticviewtest.WrapRootAgents(bundle)
 
@@ -1007,7 +1022,7 @@ func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresAcceptedExterna
 	}
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -2040,7 +2055,8 @@ func TestRun_AllowsOmittedRequiredAgentsToInferFromAgents(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	addBootverifyAgentOwner(bundle, "analysis", "analysis", "analyzer")
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.Errors(), "required_agents_match", "") {
 		t.Fatalf("unexpected required_agents_match for omitted inferred required_agents, got %#v", report.Errors())
@@ -2148,7 +2164,7 @@ func TestRun_ReportsRootRequiredAgentSubscriptionMismatch(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.Errors(), "required_agents_match", "root required agent worker subscriptions mismatch") {
 		t.Fatalf("expected root required_agents_match subscriptions error, got %#v", report.Errors())
@@ -2172,7 +2188,7 @@ func TestRun_ReportsRootRequiredAgentEmitMismatch(t *testing.T) {
 		},
 	}
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if !reportContains(report.Errors(), "required_agents_match", "root required agent worker emits mismatch") {
 		t.Fatalf("expected root required_agents_match emits error, got %#v", report.Errors())
@@ -3587,7 +3603,7 @@ func TestRun_MapsReservedPlatformNamespaceInAgentEmitEventsToNamedCheck(t *testi
 	agent.EmitEvents = []string{"platform.forbidden"}
 	bundle.Agents["intake-agent"] = agent
 	addBootverifyAgentOwner(bundle, "", "", "intake-agent")
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -3601,7 +3617,7 @@ func TestRun_MapsInvalidNativeToolsToNamedCheck(t *testing.T) {
 	agent := bundle.Agents["intake-agent"]
 	agent.NativeTools = map[string]any{"mystery_tool": true, "bash": "yes"}
 	bundle.Agents["intake-agent"] = agent
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -4490,7 +4506,7 @@ func TestRun_RejectsHarnessInputWithInternalOrPlatformProducer(t *testing.T) {
 		markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
 		bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{ID: "lifecycle-coordinator", EmitEvents: []string{"task.feedback"}}
 		addBootverifyAgentOwner(bundle, "", "", "lifecycle-coordinator")
-		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 		if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") ||
 			!reportContains(report.Errors(), "input_pin_wiring", "internal") {
 			t.Fatalf("expected internal/harness exclusivity error, got %#v", report.Errors())
@@ -4580,7 +4596,7 @@ func TestRun_DoesNotErrorForRootAgentEmitInputProducerPath(t *testing.T) {
 	}
 	addBootverifyAgentOwner(bundle, "", "", "lifecycle-coordinator")
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 
 	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("unexpected input_pin_wiring error for root agent emit proof, got %#v", report.Errors())
@@ -4793,7 +4809,11 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 						addBootverifyAgentOwner(bundle, "", "", "retired-agent")
 					}
 
-					report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+					source := semanticview.Wrap(bundle)
+					if kind == "agent" {
+						source = semanticviewtest.WrapRootAgents(bundle)
+					}
+					report := Run(context.Background(), source, Options{})
 					if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", authored) {
 						t.Fatalf("hard invalidities = %#v, want exact qualified %s rejection", report.HardInvalidities(), kind)
 					}

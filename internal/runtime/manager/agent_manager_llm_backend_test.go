@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -22,6 +21,7 @@ import (
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
+		Topology: managerTestTopologyAdmission(t),
 		Config: managerTestAgentConfig(models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
@@ -195,9 +195,10 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 		spawned[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic}, store)
-	for _, cfg := range []models.AgentConfig{staticCfg, instantiatedCfg} {
-		if err := am.spawnAgentInternal(context.Background(), PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}, true); err != nil {
-			t.Fatalf("spawnAgentInternal(%s): %v", cfg.ID, err)
+	records, admission, plan := installManagerTestStaticTopology(t, am, store, staticCfg, instantiatedCfg)
+	for _, rec := range records {
+		if err := am.spawnAgentInternal(context.Background(), rec, true); err != nil {
+			t.Fatalf("spawnAgentInternal(%s): %v", rec.Config.ID, err)
 		}
 	}
 	assertMockProjection(t, "spawned", artifact, spawned, staticCfg.ID, instantiatedCfg.ID)
@@ -215,20 +216,29 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 		recovered[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic}, store)
-	if err := recoveryManager.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
-		t.Fatalf("Recover: %v", err)
+	if err := recoveryManager.InstallStartupTopology(store, admission, plan); err != nil {
+		t.Fatalf("install recovery topology: %v", err)
+	}
+	recoveryManager.mu.Lock()
+	recoveryManager.startupAgentsHydrated = false
+	recoveryManager.mu.Unlock()
+	if err := recoveryManager.hydratePersistedAgentExecutions(context.Background()); err != nil {
+		t.Fatalf("hydrate persisted mock agents: %v", err)
+	}
+	if _, err := recoveryManager.RecoverAfterStartupAdmission(managedExecutionTestContext(t, context.Background())); err != nil {
+		t.Fatalf("RecoverAfterStartupAdmission: %v", err)
 	}
 	assertMockProjection(t, "recovered", artifact, recovered, staticCfg.ID, instantiatedCfg.ID)
 }
 
-func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
+func TestAuthoredMockSelectionSurvivesReconfigureAndRestart(t *testing.T) {
 	artifact := capturedMockAlternative()
 	built := map[string]models.AgentConfig{}
 	am := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		built[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LLMBackend: llmselection.BackendClaudeCLI})
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ID: "mock-lifecycle-agent", Role: "worker", Model: "regular", Mock: artifact})); err != nil {
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{ID: "mock-lifecycle-agent", Role: "worker", Model: "regular", Mock: artifact})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	base, err := am.ResolveAgentConfig("mock-lifecycle-agent", "")
@@ -255,22 +265,15 @@ func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
 	}
 	assertMockProjection(t, "restart", artifact, map[string]models.AgentConfig{restarted.ID: restarted}, restarted.ID)
 
-	if err := am.SpawnEphemeralClone(restarted.Identity, "mock-lifecycle-clone"); err != nil {
-		t.Fatalf("SpawnEphemeralClone: %v", err)
-	}
-	clone, err := am.ResolveAgentConfig("mock-lifecycle-clone", "")
-	if err != nil {
-		t.Fatalf("ResolveAgentConfig(clone): %v", err)
-	}
-	assertMockProjection(t, "clone", artifact, map[string]models.AgentConfig{clone.ID: clone}, clone.ID)
-	assertMockProjection(t, "constructed", artifact, built, base.ID, clone.ID)
+	assertMockProjection(t, "constructed", artifact, built, base.ID)
 }
 
 func TestAgentRuntimeSetRecoveryRederivesUnpinnedBackendFromCurrentConfiguration(t *testing.T) {
 	store := &liveMockAlternativePersistence{}
 	initialBuilt := map[string]models.AgentConfig{}
 	initial := newRuntimeSetBackedManager(t, llmselection.BackendAnthropic, store, initialBuilt)
-	if err := initial.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ID: "backend-change-agent", Role: "worker"})); err != nil {
+	initialRecords, admission, plan := installManagerTestStaticTopology(t, initial, store, managerTestAgentConfig(models.AgentConfig{ID: "backend-change-agent", Role: "worker"}))
+	if err := initial.spawnAgentInternal(context.Background(), initialRecords[0], true); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if len(store.records) != 1 {
@@ -283,8 +286,17 @@ func TestAgentRuntimeSetRecoveryRederivesUnpinnedBackendFromCurrentConfiguration
 
 	recoveredBuilt := map[string]models.AgentConfig{}
 	recovered := newRuntimeSetBackedManager(t, llmselection.BackendOpenAIResponses, store, recoveredBuilt)
-	if err := recovered.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
-		t.Fatalf("Recover: %v", err)
+	if err := recovered.InstallStartupTopology(store, admission, plan); err != nil {
+		t.Fatalf("install recovered topology: %v", err)
+	}
+	recovered.mu.Lock()
+	recovered.startupAgentsHydrated = false
+	recovered.mu.Unlock()
+	if err := recovered.hydratePersistedAgentExecutions(context.Background()); err != nil {
+		t.Fatalf("hydrate recovered topology: %v", err)
+	}
+	if _, err := recovered.RecoverAfterStartupAdmission(managedExecutionTestContext(t, context.Background())); err != nil {
+		t.Fatalf("RecoverAfterStartupAdmission: %v", err)
 	}
 	got, err := recovered.ResolveAgentConfig("backend-change-agent", "")
 	if err != nil {
@@ -302,7 +314,7 @@ func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testin
 	store := &liveMockAlternativePersistence{}
 	built := map[string]models.AgentConfig{}
 	manager := newRuntimeSetBackedManager(t, llmselection.BackendAnthropic, store, built)
-	if err := manager.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ID: "backend-patch-agent", Role: "worker"})); err != nil {
+	if err := spawnManagerTestAgent(manager, managerTestAgentConfig(models.AgentConfig{ID: "backend-patch-agent", Role: "worker"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
@@ -370,6 +382,26 @@ type liveMockAlternativePersistence struct {
 func (s *liveMockAlternativePersistence) UpsertAgent(_ context.Context, rec PersistedAgent) error {
 	s.records = append(s.records, rec)
 	return nil
+}
+
+func (s *liveMockAlternativePersistence) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	if req.Agent != nil {
+		rec := *req.Agent
+		rec.LifecycleEpoch = req.TargetEpoch
+		rec.LifecycleGeneration = req.TargetGeneration
+		rec.LifecyclePhase = req.TargetPhase
+		rec.LifecycleRunMode = req.RunMode
+		rec.Topology = req.Topology
+		s.records = append(s.records, rec)
+	}
+	return AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, TransitionID: "11111111-1111-4111-8111-111111111111",
+		Identity: req.Identity, AgentID: req.AgentID,
+		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
+		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
+		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+	}, nil
 }
 
 func (s *liveMockAlternativePersistence) LoadAgents(context.Context) ([]PersistedAgent, error) {

@@ -312,9 +312,11 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source, status,
-				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at
+				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at,
+				topology_authority_kind, topology_admission, execution_lifetime
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'story-writer', 'regular', 'mock', FALSE, 'platform_default', 'active', 7, 3, 'running', $8)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'story-writer', 'regular', 'mock', FALSE, 'platform_default', 'active', 7, 3, 'running', $8,
+				'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}'::jsonb, 'durable_managed')
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
 			t.Fatalf("seed selected-store agent: %v", err)
@@ -327,9 +329,11 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source, status,
-				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at
+				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at,
+				topology_authority_kind, topology_admission, execution_lifetime
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'story-writer', 'regular', 'mock', 0, 'platform_default', 'active', 7, 3, 'running', ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'story-writer', 'regular', 'mock', 0, 'platform_default', 'active', 7, 3, 'running', ?,
+				'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}', 'durable_managed')
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
 		t.Fatalf("seed selected-store agent: %v", err)

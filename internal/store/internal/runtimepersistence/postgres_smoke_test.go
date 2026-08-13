@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"encoding/json"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Upsert agent + load agents.
 	controlPlaneIdentity := testAgentIdentity(t, "control-plane", "")
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "control-plane",
 			Identity:      controlPlaneIdentity,
@@ -69,7 +70,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Seed an operating agent id so routing_rules FK constraints are satisfied.
 	ceoID := "operator-" + entityID
 	ceoIdentity := testAgentIdentity(t, ceoID, "")
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            ceoID,
 			Identity:      ceoIdentity,

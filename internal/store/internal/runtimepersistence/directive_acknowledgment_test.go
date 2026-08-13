@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -47,6 +49,7 @@ type directiveIntegrationStore interface {
 	storeTestDurableEventBusStore
 	runtimeagentcontrol.DirectiveOperationStore
 	runtimemanager.ManagerPersistence
+	agentfixture.Store
 	runtimemanager.AgentDirectiveRunTargetResolver
 	runtimemanager.EventExistenceReader
 }
@@ -492,10 +495,15 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		}),
 		Status: "active",
 	}
-	if err := backend.store.UpsertAgent(testAuthorActivityContext(), rec); err != nil {
+	if err := agentfixture.Upsert(testAuthorActivityContext(), backend.store, rec); err != nil {
 		t.Fatalf("persist agent: %v", err)
 	}
-	if err := manager.RegisterEphemeralAgentForExecution(testAuthorActivityContext(), rec); err != nil {
+	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
+	if err != nil {
+		t.Fatalf("construct directive execution topology: %v", err)
+	}
+	rec.Status = "ephemeral"
+	if err := manager.MaterializeAdmittedAgentForExecution(testAuthorActivityContext(), rec); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
 	return &directiveAmbiguityHarness{

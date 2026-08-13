@@ -35,7 +35,8 @@ func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provi
 	}
 	generatedSchemas := make(map[string]struct{})
 	if source != nil {
-		for _, entry := range source.AgentEntries() {
+		for _, declaration := range semanticview.AgentDeclarations(source) {
+			entry := declaration.Entry
 			for _, eventType := range entry.EmitEvents {
 				eventType = strings.TrimSpace(eventType)
 				if eventType == "" {
@@ -59,7 +60,8 @@ func NewEmitRegistry(source semanticview.Source, provider runtimeauthority.Provi
 		toolToEvent[EmitToolName(eventType)] = eventType
 	}
 	if source != nil {
-		for _, entry := range source.AgentEntries() {
+		for _, declaration := range semanticview.AgentDeclarations(source) {
+			entry := declaration.Entry
 			for _, eventType := range entry.EmitEvents {
 				eventType = strings.TrimSpace(eventType)
 				if eventType == "" {

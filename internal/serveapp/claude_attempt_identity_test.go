@@ -103,7 +103,7 @@ type claudeAttemptProofStore interface {
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
 	runtimemanager.ManagerPersistence
-	runtimemanager.AgentLifecyclePersistence
+	storetest.AgentFixtureStore
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
@@ -194,9 +194,6 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 			dockerBin := filepath.Join(t.TempDir(), "docker")
 			calls := &atomic.Int32{}
 			manager, eventBus, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls)
-			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
-				t.Fatalf("spawn claude proof agent: %v", err)
-			}
 			runClaudeAttemptProofManager(t, manager)
 			t.Cleanup(func() { _ = manager.Shutdown() })
 
@@ -260,9 +257,6 @@ func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProvider
 			writeClaudeAttemptProofDocker(t, dockerBin)
 			calls := &atomic.Int32{}
 			manager, eventBus, coordinator := newClaudeAttemptProofManager(t, backend, dockerBin, calls)
-			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
-				t.Fatalf("spawn claude proof agent: %v", err)
-			}
 			runClaudeAttemptProofManager(t, manager)
 
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
@@ -282,20 +276,8 @@ func TestClaudePostlaunchFailurePreservesClassificationAndRestartRefusesProvider
 			}
 
 			makeClaudeAttemptProofDeliveryDueNow(t, backend, eventID)
-			if err := backend.store.UpsertAgent(claudeAttemptProofContext(), runtimemanager.PersistedAgent{
-				Config:    claudeAttemptProofAgentConfig(),
-				Status:    "active",
-				HiredBy:   "claude-attempt-proof",
-				StartedAt: time.Now().UTC(),
-			}); err != nil {
-				t.Fatalf("restore active Claude proof agent: %v", err)
-			}
 			restarted, restartedBus, _ := newClaudeAttemptProofManagerForGeneration(t, backend, dockerBin, calls, 2)
 			t.Cleanup(func() { _ = restarted.Shutdown() })
-			recoveryCtx := claudeAttemptProofAdmissionContextForGeneration(t, 2)
-			if _, err := restarted.HydrateForStartup(recoveryCtx); err != nil {
-				t.Fatalf("hydrate restarted manager: %v", err)
-			}
 			cfg := claudeAttemptProofAgentConfig()
 			if _, err := restarted.ResolveAgentConfig(cfg.ID, cfg.CanonicalFlowPath()); err != nil {
 				t.Fatalf("restarted manager did not hydrate the Claude proof agent: %v", err)
@@ -336,9 +318,6 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			writeClaudeAttemptProofDocker(t, dockerBin)
 			calls := &atomic.Int32{}
 			manager, eventBus, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls)
-			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
-				t.Fatalf("spawn Claude provider-head fault agent: %v", err)
-			}
 			runClaudeAttemptProofManager(t, manager)
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
 			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
@@ -405,10 +384,6 @@ func TestClaudeAttemptIdentitySelectedStoreMemoryAndProcessParity(t *testing.T) 
 					writeClaudeAttemptProofDocker(t, dockerBin)
 					calls := &atomic.Int32{}
 					manager, eventBus, _ := newClaudeAttemptProofManager(t, backend, dockerBin, calls, surface)
-					cfg := claudeAttemptProofAgentConfig(surface)
-					if err := manager.SpawnAgent(cfg); err != nil {
-						t.Fatalf("spawn Claude %s proof agent: %v", surface.name, err)
-					}
 					runClaudeAttemptProofManager(t, manager)
 					t.Cleanup(func() { _ = manager.Shutdown() })
 
@@ -458,7 +433,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			}, runtimemanager.AgentManagerOptions{
 				ExecutionPosture: executionposture.Live,
 				BaseContext:      claudeAttemptProofContext(),
-				LifecycleStore:   backend.store,
+				LifecycleStore:   storetest.AgentLifecycleFixture(backend.store),
 				DeliveryStore:    backend.store,
 				Sessions:         backend.sessions,
 				SessionResetter:  backend.store,
@@ -466,9 +441,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 				LLMBackend:       "claude_cli",
 				WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 			}, backend.store)
-			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
-				t.Fatalf("spawn chain-depth proof agent: %v", err)
-			}
+			installClaudeAttemptProofManagerTopology(t, backend, manager, claudeAttemptProofAgentConfig())
 			runClaudeAttemptProofManager(t, manager)
 			t.Cleanup(func() { _ = manager.Shutdown() })
 
@@ -559,7 +532,7 @@ func newClaudeAttemptProofManagerForGeneration(
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		BaseContext:      claudeAttemptProofContext(),
-		LifecycleStore:   backend.store,
+		LifecycleStore:   storetest.AgentLifecycleFixture(backend.store),
 		DeliveryStore:    backend.store,
 		SemanticSource:   claudeAttemptProofSemanticSource(),
 		Sessions:         backend.sessions,
@@ -568,7 +541,13 @@ func newClaudeAttemptProofManagerForGeneration(
 		LLMBackend:       "claude_cli",
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend.store)
+	installClaudeAttemptProofManagerTopology(t, backend, manager, claudeAttemptProofAgentConfig(surface))
 	return manager, eventBus, coordinator
+}
+
+func installClaudeAttemptProofManagerTopology(t testing.TB, backend claudeAttemptProofBackend, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
+	t.Helper()
+	registerServeTestDurableAgent(t, backend.store, manager, cfg)
 }
 
 func claudeAttemptProofSemanticSource() semanticview.Source {

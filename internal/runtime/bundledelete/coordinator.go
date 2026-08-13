@@ -64,6 +64,26 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 
 	plan, err := c.Planner.PlanBundleDelete(ctx, req)
 	if err != nil {
+		if errors.Is(err, ErrBundleNotFound) && !req.DryRun {
+			replayer, ok := c.Finalizer.(FinalMutationReplayer)
+			if !ok {
+				return Result{}, err
+			}
+			final, replayErr := replayer.ReplayBundleDeleteFinalMutation(ctx, FinalMutationRequest{
+				OperationID: req.OperationID, OperationName: c.operationName(),
+				RequestHash: req.RequestHash, ReplayKeyHash: req.ReplayKeyHash,
+				BundleHash: req.BundleHash, RequestedAt: req.RequestedAt,
+			})
+			if replayErr == nil {
+				return Result{
+					OK: true, Status: "completed", OperationName: c.operationName(),
+					BundleHash: req.BundleHash, Force: req.Force, Deleted: final.Deleted,
+					Plan:          Plan{BundleHash: req.BundleHash, PlannedAt: req.RequestedAt},
+					FinalMutation: final,
+				}, nil
+			}
+			return Result{}, replayErr
+		}
 		return Result{}, err
 	}
 	plan.PlannedAt = req.RequestedAt
@@ -157,7 +177,10 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 	}
 
 	final, err := c.Finalizer.ApplyBundleDeleteFinalMutation(ctx, FinalMutationRequest{
+		OperationID:   req.OperationID,
 		OperationName: c.operationName(),
+		RequestHash:   req.RequestHash,
+		ReplayKeyHash: req.ReplayKeyHash,
 		BundleHash:    req.BundleHash,
 		RequestedAt:   req.RequestedAt,
 	})
@@ -183,8 +206,17 @@ func (c *Coordinator) executeNonForce(ctx context.Context, req Request, result R
 		result.Status = "dry_run"
 		return result, nil
 	}
+	if c.RuntimeQuiescer == nil {
+		return Result{}, fmt.Errorf("bundle delete runtime quiescer is required")
+	}
+	if err := c.RuntimeQuiescer.QuiesceBundleRuntime(ctx, req.BundleHash); err != nil {
+		return Result{}, err
+	}
 	final, err := c.Finalizer.ApplyBundleDeleteFinalMutation(ctx, FinalMutationRequest{
+		OperationID:   req.OperationID,
 		OperationName: c.operationName(),
+		RequestHash:   req.RequestHash,
+		ReplayKeyHash: req.ReplayKeyHash,
 		BundleHash:    req.BundleHash,
 		RequestedAt:   req.RequestedAt,
 	})

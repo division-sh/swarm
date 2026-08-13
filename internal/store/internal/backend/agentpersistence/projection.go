@@ -32,6 +32,8 @@ type PersistedAgentRuntimeDescriptor struct {
 	Mock                 mockperformance.Performance    `json:"mock,omitempty"`
 	Intent               runtimeagentintent.Resolved    `json:"intent"`
 	Criteria             []string                       `json:"criteria,omitempty"`
+	FlowDataAccess       []string                       `json:"flow_data_access,omitempty"`
+	BudgetEnvelope       float64                        `json:"budget_envelope,omitempty"`
 }
 
 type PersistedAgentProjection struct {
@@ -78,6 +80,8 @@ var runtimeConfigKeys = map[string]struct{}{
 	"flow_path":               {},
 	"flow_id":                 {},
 	"flow_instance":           {},
+	"flow_data_access":        {},
+	"budget_envelope":         {},
 }
 
 var retiredAgentMemoryConfigKeys = map[string]struct{}{
@@ -103,6 +107,8 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"mock":                   {},
 	"intent":                 {},
 	"criteria":               {},
+	"flow_data_access":       {},
+	"budget_envelope":        {},
 }
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
@@ -280,6 +286,8 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		Tools:                decodeJSONStringList(row.ToolsJSON),
 		Permissions:          decodeJSONStringList(row.PermissionsJSON),
 		Criteria:             append([]string(nil), desc.Criteria...),
+		FlowDataAccess:       append([]string(nil), desc.FlowDataAccess...),
+		BudgetEnvelope:       desc.BudgetEnvelope,
 		NativeTools:          desc.NativeTools,
 		WorkspaceClass:       desc.WorkspaceClass,
 		ManagerFallback:      desc.ManagerFallback,
@@ -302,7 +310,7 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 
 func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, modelAlias, llmBackend string) ([]byte, error) {
 	desc := PersistedAgentRuntimeDescriptor{
-		Type:                 agentPersistedType(cfg, modelAlias),
+		Type:                 strings.TrimSpace(cfg.Type),
 		FlowID:               strings.TrimSpace(cfg.FlowID),
 		Model:                strings.TrimSpace(modelAlias),
 		AuthoredLLMBackend:   strings.TrimSpace(cfg.LLMBackend),
@@ -317,6 +325,8 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		Mock:                 cfg.Mock,
 		Intent:               cfg.Intent,
 		Criteria:             append([]string(nil), cfg.Criteria...),
+		FlowDataAccess:       append([]string(nil), cfg.FlowDataAccess...),
+		BudgetEnvelope:       cfg.BudgetEnvelope,
 	}
 	if !descExecutionModeMatchesBackend(llmBackend, desc.ExecutionMode) {
 		return nil, fmt.Errorf("execution_mode %q conflicts with llm_backend %q", desc.ExecutionMode, strings.TrimSpace(llmBackend))
@@ -366,9 +376,6 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDes
 	desc.Mock.Digest = strings.TrimSpace(desc.Mock.Digest)
 	desc.Mock.SourcePath = strings.TrimSpace(desc.Mock.SourcePath)
 	desc.Mock.Source = append([]byte(nil), desc.Mock.Source...)
-	if desc.Type == "" {
-		return PersistedAgentRuntimeDescriptor{}, fmt.Errorf("missing type")
-	}
 	return desc, nil
 }
 

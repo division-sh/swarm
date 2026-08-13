@@ -23,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -64,7 +65,7 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, lifecycleStore, db := tc.setup(t)
-			runtime := newStageLifecycleIdentityRuntime(t, selected, module)
+			runtime, processCapability := newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			_, activations, err := runtime.EnsureStandingTargets(testAuthorActivityContext(context.Background()))
 			if err != nil {
@@ -105,7 +106,10 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			if err := runtime.Shutdown(); err != nil {
 				t.Fatalf("shutdown before lifecycle restart: %v", err)
 			}
-			runtime = newStageLifecycleIdentityRuntime(t, selected, module)
+			if err := processCapability.Release(context.Background()); err != nil {
+				t.Fatalf("release process capability before lifecycle restart: %v", err)
+			}
+			runtime, _ = newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			_, restored, err := runtime.EnsureStandingTargets(testAuthorActivityContext(context.Background()))
 			if err != nil {
@@ -182,7 +186,7 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 	}
 }
 
-func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conformanceLoadedWorkflowModule) *runtimepkg.Runtime {
+func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conformanceLoadedWorkflowModule) (*runtimepkg.Runtime, runtimestartupownership.ProcessCapability) {
 	t.Helper()
 	cfg := &config.Config{
 		LLM:     config.LLMConfig{Backend: "anthropic"},
@@ -210,8 +214,9 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 	if err := runtime.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("prepare stage lifecycle author activity catalog: %v", err)
 	}
+	processCapability := installConformanceRuntimeStartupGrant(t, testAuthorActivityContext(context.Background()), selected, runtime)
 	t.Cleanup(func() { _ = runtime.Shutdown() })
-	return runtime
+	return runtime, processCapability
 }
 
 func startStageLifecycleIdentityRuntime(t *testing.T, runtime *runtimepkg.Runtime) {
@@ -236,7 +241,6 @@ func stageLifecycleIdentityPostgresDeps(deps runtimepkg.RuntimeDeps, selected *s
 	deps.LiveSessionAcquirer = selected
 	deps.SessionResetter = selected
 	deps.ManagerStore = selected
-	deps.ManagerLifecycleStore = selected
 	deps.ManagerLifecycleDiagnostics = selected
 	deps.ManagerPersistenceRoles = runtimemanager.PersistenceRoles{
 		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
@@ -258,7 +262,6 @@ func stageLifecycleIdentityPostgresDeps(deps runtimepkg.RuntimeDeps, selected *s
 	deps.DecisionCardHumanTasks = selected
 	deps.DecisionCardDraftExpiry = selected
 	deps.HumanTaskExpiry = selected
-	deps.StartupOwnership = selected
 	deps.MailboxStore = selected
 	deps.ToolEntityStore = selected
 	deps.HumanTaskStore = selected
@@ -282,7 +285,6 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	deps.LiveSessionAcquirer = selected
 	deps.SessionResetter = selected
 	deps.ManagerStore = selected
-	deps.ManagerLifecycleStore = selected
 	deps.ManagerLifecycleDiagnostics = selected
 	deps.ManagerPersistenceRoles = runtimemanager.PersistenceRoles{
 		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
@@ -304,7 +306,6 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	deps.DecisionCardHumanTasks = selected
 	deps.DecisionCardDraftExpiry = selected
 	deps.HumanTaskExpiry = selected
-	deps.StartupOwnership = selected
 	deps.MailboxStore = selected
 	deps.ToolEntityStore = selected
 	deps.HumanTaskStore = selected

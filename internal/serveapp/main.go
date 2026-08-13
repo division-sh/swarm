@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
@@ -146,7 +147,6 @@ type storeBundle struct {
 	SessionResetter                sessions.Resetter
 	ConversationStore              runtimellm.ConversationPersistence
 	ManagerStore                   runtimemanager.ManagerPersistence
-	ManagerLifecycleStore          runtimemanager.AgentLifecyclePersistence
 	ManagerLifecycleDiagnostics    runtimemanager.AgentLifecycleDiagnosticPersistence
 	ManagerPersistenceRoles        runtimemanager.PersistenceRoles
 	EffectsStore                   runtimeeffects.Store
@@ -235,15 +235,18 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				SessionRegistry: stores.SessionRegistry, ConversationStore: stores.ConversationStore,
 				MailboxStore: stores.MailboxStore, Workspace: req.Workspaces,
 				Credentials: req.Credentials, ManagedCredentials: req.ManagedCredentials, ProviderCredentials: req.ProviderCredentials,
+				ProcessCapability: req.ProcessCapability,
 			},
 		}
 		return selectedAPICapabilities{
 			BundleCatalog:  pg,
 			BundleRegister: pg,
 			BundleDelete: &runtimebundledelete.Coordinator{
-				Planner:            pg,
-				Cleaner:            pg,
-				Finalizer:          pg,
+				Planner: pg,
+				Cleaner: pg,
+				Finalizer: processOwnedBundleDeleteFinalizer{
+					capability: req.ProcessCapability, runtimeContexts: req.RuntimeContextManager,
+				},
 				Locks:              pg,
 				ContainerInventory: req.Workspaces,
 				Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
@@ -259,12 +262,160 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				Planner:         resetPlanner,
 				Locks:           pg,
 				Quiescer:        runtimedestructivereset.Quiescer{Store: pg},
-				Cleaner:         runtimedestructivereset.Cleaner{Store: pg},
+				Cleaner:         runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: req.ProcessCapability}},
 				Containers:      runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
 				RuntimeContexts: req.RuntimeContextManager,
 			},
 		}, nil
 	}
+}
+
+type processOwnedBundleDeleteFinalizer struct {
+	capability      runtimestartupownership.ProcessCapability
+	runtimeContexts *runtime.RuntimeContextManager
+}
+
+type processOwnedDestructiveResetStore struct {
+	capability runtimestartupownership.ProcessCapability
+}
+
+func (s processOwnedDestructiveResetStore) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest) (runtimedestructivereset.CleanupResult, error) {
+	if s.capability == nil {
+		return runtimedestructivereset.CleanupResult{}, errors.New("destructive reset requires the process topology capability")
+	}
+	if req.Result.DryRun || !req.Result.IncludeBundles {
+		return s.capability.ApplyDestructiveResetCleanup(ctx, req, nil)
+	}
+	current, exists, err := s.capability.CurrentSourceSet(ctx)
+	if err != nil {
+		return runtimedestructivereset.CleanupResult{}, err
+	}
+	if !exists {
+		return runtimedestructivereset.CleanupResult{}, errors.New("destructive reset requires an installed source set")
+	}
+	empty, err := runtimeagenttopology.EmptySourceSetPlan()
+	if err != nil {
+		return runtimedestructivereset.CleanupResult{}, err
+	}
+	topology := &runtimeagenttopology.SourceSetCommitRequest{
+		OperationID:      req.OperationID,
+		ExpectedRevision: current.Revision,
+		Plan:             empty,
+	}
+	return s.capability.ApplyDestructiveResetCleanup(ctx, req, topology)
+}
+
+func (f processOwnedBundleDeleteFinalizer) ApplyBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.FinalMutationResult, error) {
+	if f.capability == nil {
+		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete requires the process topology capability")
+	}
+	current, exists, err := f.capability.CurrentSourceSet(ctx)
+	if err != nil {
+		return runtimebundledelete.FinalMutationResult{}, err
+	}
+	if !exists {
+		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete requires an installed source set")
+	}
+	var removed *runtimeagenttopology.SourceCoordinate
+	for _, source := range current.Sources {
+		if source.BundleHash != strings.TrimSpace(req.BundleHash) {
+			continue
+		}
+		if removed != nil {
+			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete source-set identity is ambiguous")
+		}
+		copy := source
+		removed = &copy
+	}
+	if removed == nil {
+		return f.capability.ApplyBundleDeleteFinalMutation(ctx, req, nil)
+	}
+	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(current.Sources)-1)
+	for _, source := range current.Sources {
+		if source.Normalize() != removed.Normalize() {
+			sources = append(sources, source)
+		}
+	}
+	agents := make([]runtimeagenttopology.DesiredAgent, 0, len(current.Agents))
+	for _, agent := range current.Agents {
+		if agent.Source.Normalize() != removed.Normalize() {
+			agents = append(agents, agent)
+		}
+	}
+	next, err := runtimeagenttopology.NewSourceSetPlan(sources, agents)
+	if err != nil {
+		return runtimebundledelete.FinalMutationResult{}, err
+	}
+	topology := &runtimeagenttopology.SourceSetCommitRequest{
+		OperationID:      req.OperationID,
+		ExpectedRevision: current.Revision,
+		Plan:             next,
+		RemovedSource:    removed,
+	}
+	var transition *runtime.PreparedRuntimeSourceSetTransition
+	if len(next.Sources) > 0 {
+		if f.runtimeContexts == nil {
+			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete with surviving sources requires runtime context ownership")
+		}
+		transition, err = f.runtimeContexts.PrepareSourceSetTransition(ctx, next)
+		if err != nil {
+			return runtimebundledelete.FinalMutationResult{}, err
+		}
+	}
+	result, commitErr := f.capability.ApplyBundleDeleteFinalMutation(ctx, req, topology)
+	if commitErr != nil {
+		if transition != nil {
+			commitErr = errors.Join(commitErr, transition.Abort())
+		}
+		return runtimebundledelete.FinalMutationResult{}, commitErr
+	}
+	if transition != nil {
+		if err := transition.Commit(ctx, f.capability); err != nil {
+			return runtimebundledelete.FinalMutationResult{}, err
+		}
+	}
+	return result, nil
+}
+
+func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.FinalMutationResult, error) {
+	if f.capability == nil {
+		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay requires the process topology capability")
+	}
+	current, exists, err := f.capability.CurrentSourceSet(ctx)
+	if err != nil {
+		return runtimebundledelete.FinalMutationResult{}, err
+	}
+	if !exists {
+		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay requires an installed source set")
+	}
+	for _, source := range current.Sources {
+		if source.BundleHash == strings.TrimSpace(req.BundleHash) {
+			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay source is still current")
+		}
+	}
+	var transition *runtime.PreparedRuntimeSourceSetTransition
+	if len(current.Sources) > 0 {
+		if f.runtimeContexts == nil {
+			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay with surviving sources requires runtime context ownership")
+		}
+		transition, err = f.runtimeContexts.PreparePendingSourceSetTransition(ctx, current)
+		if err != nil {
+			return runtimebundledelete.FinalMutationResult{}, err
+		}
+	}
+	result, replayErr := f.capability.ApplyBundleDeleteFinalMutation(ctx, req, nil)
+	if replayErr != nil {
+		if transition != nil {
+			replayErr = errors.Join(replayErr, transition.Abort())
+		}
+		return runtimebundledelete.FinalMutationResult{}, replayErr
+	}
+	if transition != nil {
+		if err := transition.Commit(ctx, f.capability); err != nil {
+			return runtimebundledelete.FinalMutationResult{}, err
+		}
+	}
+	return result, nil
 }
 
 func selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore *store.SQLiteRuntimeStore) selectedAPIOptionalCapabilityBuilder {
@@ -377,7 +528,6 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		SessionResetter:                pg,
 		ConversationStore:              pg,
 		ManagerStore:                   pg,
-		ManagerLifecycleStore:          pg,
 		ManagerLifecycleDiagnostics:    pg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState: pg, LifecycleEffects: pg,
@@ -479,7 +629,6 @@ type serveRuntimeBundleContextRequest struct {
 	BootProgress           func(runtime.BootProgressEvent)
 	EnableToolGateway      bool
 	ToolGatewayBinding     toolgateway.Binding
-	UseStartupOwnership    bool
 	UseStartupRecovery     bool
 	RequireBundleScopeName bool
 	RuntimeInstanceID      string
@@ -518,6 +667,48 @@ func servePinnedBundleHashes(bundles []serveRuntimeBundle) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func compileServeSourceSetPlan(contexts []serveRuntimeBundleContext) (runtimeagenttopology.SourceSetPlan, error) {
+	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(contexts))
+	agents := []runtimeagenttopology.DesiredAgent{}
+	for _, contextDef := range contexts {
+		bundleHash, bundleSource := contextDef.bundleSourceFact.StorageValues()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+		if contextDef.runtime == nil || contextDef.runtime.Manager == nil {
+			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("compile source topology %s: runtime manager is required", bundleHash)
+		}
+		desired, err := contextDef.runtime.Manager.CompileStaticTopologyDesiredAgents(contextDef.loaded.source, coordinate)
+		if err != nil {
+			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("compile source topology %s: %w", bundleHash, err)
+		}
+		sources = append(sources, coordinate)
+		agents = append(agents, desired...)
+	}
+	return runtimeagenttopology.NewSourceSetPlan(sources, agents)
+}
+
+func installServeSourceSet(ctx context.Context, capability runtimestartupownership.ProcessCapability, plan runtimeagenttopology.SourceSetPlan) error {
+	current, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		return err
+	}
+	if exists && current.Revision == plan.Revision {
+		return nil
+	}
+	if !exists {
+		_, err = capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+			OperationID: uuid.NewString(),
+			Plan:        plan,
+		})
+		return err
+	}
+	_, err = capability.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+		OperationID:      uuid.NewString(),
+		ExpectedRevision: current.Revision,
+		Plan:             plan,
+	})
+	return err
 }
 
 func serveRuntimeStateStoreSummary(contexts []serveRuntimeBundleContext) string {
@@ -796,9 +987,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	runtimeDeps := req.Stores.runtimeDeps()
 	runtimeDeps.Config = req.Config
-	if !req.UseStartupOwnership {
-		runtimeDeps.StartupOwnership = nil
-	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.contractsRoot)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("load scenario derivation profiles: %w", err)
@@ -1180,7 +1368,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			BootProgress:           bootProgress,
 			EnableToolGateway:      i == 0,
 			ToolGatewayBinding:     contextToolGatewayBinding,
-			UseStartupOwnership:    i == 0,
 			UseStartupRecovery:     len(loadedBundles) == 1,
 			RequireBundleScopeName: len(loadedBundles) > 1,
 			RuntimeInstanceID:      runtimeInstanceID,
@@ -1195,6 +1382,46 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		runtimeContexts = append(runtimeContexts, contextDef)
 	}
 	primaryContext := runtimeContexts[0]
+	processSourceSet, err := compileServeSourceSetPlan(runtimeContexts)
+	if err != nil {
+		presenter.fail(5, "startup_topology", err)
+		return 3
+	}
+	if stores.StartupOwnership == nil {
+		presenter.fail(5, "startup_ownership_lease", errors.New("selected store process startup/topology owner is required"))
+		return 3
+	}
+	processCapability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+	})
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	processCapabilityShutdownOwned := false
+	defer func() {
+		if !processCapabilityShutdownOwned {
+			_ = processCapability.Release(context.Background())
+		}
+	}()
+	if err := installServeSourceSet(ctx, processCapability, processSourceSet); err != nil {
+		presenter.fail(5, "startup_topology", err)
+		return 3
+	}
+	for i := range runtimeContexts {
+		_, bundleSource := runtimeContexts[i].bundleSourceFact.StorageValues()
+		grant, grantErr := processCapability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+			BundleHash: runtimeContexts[i].bundleSourceFact.BundleHash(), BundleSource: bundleSource,
+			RuntimeInstanceID: runtimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: processSourceSet.Revision,
+		})
+		if grantErr == nil {
+			grantErr = runtimeContexts[i].runtime.InstallStartupGrant(grant)
+		}
+		if grantErr != nil {
+			presenter.fail(5, "startup_ownership_lease", grantErr)
+			return 3
+		}
+	}
 	source = primaryContext.loaded.source
 	bundle := primaryContext.loaded.bundle
 	contractsRoot := primaryContext.loaded.contractsRoot
@@ -1202,15 +1429,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	workspaces := primaryContext.workspaces
 	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
-	if err := rt.PrepareInitialStartupOwnership(ctx); err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
-		return 3
-	}
-	defer func() {
-		if err := rt.ReleasePreparedStartupOwnership(context.Background()); err != nil {
-			presenter.cleanupFailure("startup ownership release", err)
-		}
-	}()
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
 	preflightContexts, err := plannedServeRuntimeContexts(runtimeContexts)
@@ -1279,6 +1497,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Catalog, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.SetProcessCapability(processCapability)
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) {
 		return providerPackLoad.Reload()
 	}
@@ -1304,6 +1523,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	var apiServer, mcpServer *http.Server
 	var publicExposure *runtimepublicingress.Controller
 	var storyFollower *serveAuthorActivityFollower
+	processCapabilityShutdownOwned = true
 	defer func() {
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		defer cancelShutdown()
@@ -1327,7 +1547,10 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		}
 		shutdownErr = errors.Join(shutdownErr, joinErr)
 		if joinErr == nil {
-			shutdownErr = errors.Join(shutdownErr, storeOwner.CloseActivated(receipt))
+			shutdownErr = errors.Join(shutdownErr, processCapability.Release(context.Background()))
+			if shutdownErr == nil {
+				shutdownErr = errors.Join(shutdownErr, storeOwner.CloseActivated(receipt))
+			}
 		}
 		presenter.shutdown(shutdownErr)
 	}()
@@ -1345,6 +1568,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     providerCredentialStore,
 		ExecutionPosture:        rt.ExecutionPosture,
+		ProcessCapability:       processCapability,
 		RuntimeContextManager:   runtimeContextManager,
 	})
 	if err != nil {
@@ -1374,7 +1598,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
 		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore}),
-		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: stores.IdempotencyStore, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPIStore}),
 		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Mailbox: stores.MailboxAPIStore, NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment, Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
@@ -1431,12 +1655,12 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		registrationController, controllerErr := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
 			CredentialOwner: credentialOwner, EffectsStore: stores.EffectsStore,
 			HTTP: runtimeregistration.HTTPExecutor{}, Posture: rt.ExecutionPosture, RuntimeInstanceID: runtimeInstanceID,
-			StartupAuthority: func() (runtimestartupownership.Authority, error) {
+			StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) {
 				current, _, _ := supervisor.PublicIngressState()
 				if current == nil {
-					return runtimestartupownership.Authority{}, fmt.Errorf("public ingress runtime owner is unavailable")
+					return runtimestartupownership.GrantEvidence{}, fmt.Errorf("public ingress runtime owner is unavailable")
 				}
-				return current.CurrentStartupAuthority()
+				return current.CurrentStartupGrantEvidence()
 			},
 			Readiness: ready,
 		})
@@ -1464,11 +1688,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 				if current == nil {
 					return ""
 				}
-				authority, authorityErr := current.CurrentStartupAuthority()
+				authority, authorityErr := current.CurrentStartupGrantEvidence()
 				if authorityErr != nil {
 					return ""
 				}
-				return authority.AuthorityID
+				return authority.GrantID
 			},
 			OnGeneration: reconcilePublicIngress,
 			OnFatal:      func(exposureErr error) { runtimeFailure("public_ingress", exposureErr) },
@@ -2058,7 +2282,7 @@ func serveLifecycleSourceCounts(contexts []serveRuntimeBundleContext) (flows, ag
 			continue
 		}
 		flows += len(source.FlowSchemaEntries())
-		agents += len(source.AgentEntries())
+		agents += len(semanticview.AgentDeclarations(source))
 		tools += len(runtimetools.RuntimeAvailableToolNamesForSource(source))
 	}
 	return flows, agents, tools
@@ -2414,7 +2638,6 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			SessionResetter:                sqliteStore,
 			ConversationStore:              sqliteStore,
 			ManagerStore:                   sqliteStore,
-			ManagerLifecycleStore:          sqliteStore,
 			ManagerLifecycleDiagnostics:    sqliteStore,
 			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 				LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
@@ -2702,7 +2925,7 @@ func serveStateStoreSummaryAt(summaries []string, index int) string {
 
 func serveBootRegistryDetail(source semanticview.Source) string {
 	availableToolNames := runtimetools.RuntimeAvailableToolNamesForSource(source)
-	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(availableToolNames))
+	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(semanticview.AgentDeclarations(source)), len(source.ResolvedEventCatalog()), len(availableToolNames))
 }
 
 func serveBootBundleLoadDetail(fingerprint string, source semanticview.Source) string {

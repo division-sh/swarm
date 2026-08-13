@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/google/uuid"
 )
 
 const runtimeNukeIdempotencyTTL = 24 * time.Hour
@@ -65,6 +66,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 	if err != nil {
 		return nil, err
 	}
+	operationID := uuid.NewString()
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
@@ -74,7 +76,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 		TTL:            runtimeNukeIdempotencyTTL,
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		result, err := performRuntimeNuke(ctx, req, opts, dryRun, includeBundles, now)
+		result, err := performRuntimeNuke(ctx, req, opts, operationID, dryRun, includeBundles, now)
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
@@ -100,8 +102,9 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandle
 	return stored, nil
 }
 
-func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, dryRun, includeBundles bool, now time.Time) (runtimeNukeResult, error) {
+func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, operationID string, dryRun, includeBundles bool, now time.Time) (runtimeNukeResult, error) {
 	execution, err := opts.Coordinator.Execute(ctx, destructivereset.Request{
+		OperationID:       operationID,
 		ActorTokenID:      req.ActorTokenID,
 		RequestHash:       req.RequestHash,
 		DryRun:            dryRun,

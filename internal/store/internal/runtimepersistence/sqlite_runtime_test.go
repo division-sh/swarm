@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("recipients = %#v, want agent-1", recipients)
 	}
 
-	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
 			Identity:      testAgentIdentity(t, "agent-1", ""),
@@ -355,7 +356,7 @@ func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testi
 	}
 	now := time.Now().UTC()
 	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(txctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-in-pipeline-tx",
 			Identity:      testAgentIdentity(t, "agent-in-pipeline-tx", ""),
@@ -415,7 +416,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		SemanticSource:    semanticview.Wrap(bundle),
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
-		LifecycleStore:    sqliteStore,
+		LifecycleStore:    agentfixture.Lifecycle(sqliteStore),
 		DeliveryStore:     sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -469,7 +470,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		SemanticSource:    semanticview.Wrap(bundle),
 		WorkflowInstances: workflowStore,
 		LLMBackend:        "anthropic",
-		LifecycleStore:    sqliteStore,
+		LifecycleStore:    agentfixture.Lifecycle(sqliteStore),
 		DeliveryStore:     sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -1303,7 +1304,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
-	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
 			Identity:      testAgentIdentity(t, "agent-1", "global"),
@@ -1322,22 +1323,22 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 
-	startupLease, err := store.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("runtime-1"))
+	processCapability, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-1"))
 	if err != nil {
-		t.Fatalf("AcquireRuntimeStartupOwnership first: %v", err)
+		t.Fatalf("AcquireProcessCapability first: %v", err)
 	}
-	if _, err := store.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("runtime-2")); err == nil {
-		t.Fatal("AcquireRuntimeStartupOwnership second unexpectedly succeeded")
+	if _, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-2")); err == nil {
+		t.Fatal("AcquireProcessCapability second unexpectedly succeeded")
 	}
-	if err := startupLease.Release(ctx); err != nil {
-		t.Fatalf("release startup lease: %v", err)
+	if err := processCapability.Release(ctx); err != nil {
+		t.Fatalf("release process capability: %v", err)
 	}
-	successorStartupLease, err := store.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("runtime-2"))
+	successorProcessCapability, err := store.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-2"))
 	if err != nil {
-		t.Fatalf("AcquireRuntimeStartupOwnership after release: %v", err)
+		t.Fatalf("AcquireProcessCapability after release: %v", err)
 	}
-	if err := successorStartupLease.Release(ctx); err != nil {
-		t.Fatalf("release successor startup lease: %v", err)
+	if err := successorProcessCapability.Release(ctx); err != nil {
+		t.Fatalf("release successor process capability: %v", err)
 	}
 
 	identity := testAgentMemoryIdentity(t, runID, "agent-1", "global")
@@ -1620,7 +1621,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	runID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
-	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-cleanup-1",
 			Identity:      testAgentIdentity(t, "agent-cleanup-1", "global"),
@@ -1669,15 +1670,20 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 		t.Fatalf("seed stateless audit: %v", err)
 	}
 
-	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+	state, found, err := store.LoadAgentLifecycleState(ctx, identity.Agent)
+	if err != nil || !found {
+		t.Fatalf("load lifecycle state before termination: found=%v err=%v", found, err)
+	}
+	if _, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "sqlite-test-terminate-agent-cleanup-1",
-		Identity: identity.Agent, AgentID: "agent-cleanup-1", Trigger: "test", ExpectedPhase: runtimemanager.AgentLifecycleRegistered,
-		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
-		ConfigRevision: "test", RunMode: runtimemanager.AgentRunModeStopped,
+		Identity: identity.Agent, AgentID: "agent-cleanup-1", Trigger: "test",
+		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+		TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
+		ConfigRevision: state.ConfigRevision, RunMode: runtimemanager.AgentRunModeStopped,
 		Subordinate: runtimesessions.LifecycleMutationPlan{
 			Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonCancelled,
 		},
-		Now: now,
+		Topology: state.Topology, Now: now,
 	}); err != nil {
 		t.Fatalf("terminate through lifecycle authority: %v", err)
 	}

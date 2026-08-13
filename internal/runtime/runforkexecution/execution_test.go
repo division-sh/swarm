@@ -29,6 +29,7 @@ import (
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -1142,6 +1143,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -1159,6 +1161,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 			loaded.Source,
 			contractsRoot,
 		),
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability},
 	})
 	if err == nil ||
 		!strings.Contains(err.Error(), runfork.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported) ||
@@ -1194,6 +1197,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if _, ok := loaded.Source.NodeEventHandler("complete-node", "task.completed"); !ok {
 		t.Fatal("selected source omitted complete-node task.completed handler")
 	}
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1215,6 +1219,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 			contractsRoot,
 		),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
+			ProcessCapability: processCapability,
 			AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				agent.Configure(cfg)
 				return agent, nil
@@ -1417,6 +1422,7 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 			if err != nil {
 				t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 			}
+			processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
 
 			var providerCalls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1465,7 +1471,8 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 				Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{
-					Config: cfg, ProviderCredentials: providerCredentials, QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
+					Config: cfg, ProviderCredentials: providerCredentials, ProcessCapability: processCapability,
+					QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 				},
 			})
 			if err != nil {
@@ -1637,6 +1644,7 @@ func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabili
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
 
 	captureDir := t.TempDir()
 	dockerPath := filepath.Join(captureDir, "fake-docker.sh")
@@ -1747,7 +1755,7 @@ fi
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
-			Config: cfg, ProviderCredentials: providerCredentials,
+			Config: cfg, ProviderCredentials: providerCredentials, ProcessCapability: processCapability,
 			Workspace: selectedForkWorkspaceLifecycle{target: &workspace.Target{
 				Backend: workspace.BackendDocker, Container: "swarm-agent-selected-fork", Workdir: "/workspace",
 			}},
@@ -2000,8 +2008,14 @@ func TestSelectedContractForkManagedPreflightUsesExactProviderPromptAndExecutesE
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	agentCfg := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health", Model: llmselection.ModelAliasRegular})
-	if err := manager.SpawnAgent(agentCfg); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
+	topology, err := runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
+	if err != nil {
+		t.Fatalf("construct selected fork test topology: %v", err)
+	}
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, runtimemanager.PersistedAgent{
+		Config: agentCfg, Status: "ephemeral", HiredBy: "selected-fork-test", Topology: topology,
+	}); err != nil {
+		t.Fatalf("materialize selected fork test agent: %v", err)
 	}
 	executor := &selectedForkStartupProbeExecutor{}
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
@@ -2382,6 +2396,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
+	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providerCalls.Add(1)
@@ -2411,7 +2426,8 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
 			Config:              selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL),
-			ProviderCredentials: credentials, QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
+			ProviderCredentials: credentials, ProcessCapability: processCapability,
+			QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "fork_selected_contract_agent_delivery_incomplete") {
@@ -2823,6 +2839,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 					Model:         "regular",
 					Subscriptions: []string{"item.received"},
 				},
+				Topology: selectedContractTestDeclarationTopology(t),
 			}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,
@@ -4482,9 +4499,11 @@ func seedSelectedExecutionTestAgent(
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source, status, created_at
+			role, model, memory_enabled, memory_source, status, created_at,
+			topology_authority_kind, topology_admission, execution_lifetime
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'test-agent', 'tier1', TRUE, 'authored', 'active', $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'test-agent', 'tier1', TRUE, 'authored', 'active', $8,
+			'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}'::jsonb, 'durable_managed')
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed selected-execution test agent: %v", err)

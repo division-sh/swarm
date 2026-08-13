@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"strings"
 	"testing"
 	"time"
@@ -124,11 +125,11 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	}
 
 	// Active agent descriptors.
-	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	_ = agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: testAgentIdentity(t, "a", "review/inst-1"), ID: "a", Role: "a", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)}),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})
-	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	_ = agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: testAgentIdentity(t, "t", "global"), ID: "t", Role: "t", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "global", Config: []byte(`{}`)}),
 		Status: "terminated", HiredBy: "test", StartedAt: time.Now().UTC(),
 	})

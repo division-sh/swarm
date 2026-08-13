@@ -22,11 +22,13 @@ type managedStartupAuthorityStoreStub struct {
 }
 
 func TestManagedProviderPreflightAuthorityCarriesLiveExecutionIdentity(t *testing.T) {
-	startupAuthority := runtimestartupownership.Authority{
-		AuthorityID:  uuid.NewString(),
-		OwnerID:      "release-e2e-runtime-owner",
-		Generation:   7,
-		StateVersion: 11,
+	startupAuthority := runtimestartupownership.GrantEvidence{
+		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(),
+		ProcessOwnerID: "release-e2e-runtime-owner", ProcessBootID: uuid.NewString(),
+		BundleHash: runtimeTestBundleHash, BundleSource: "ephemeral",
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID, RuntimeGeneration: 7,
+		SourceSetRevision: "source-set-v7", StateVersion: 3,
+		State: runtimestartupownership.GrantProbeSettled,
 	}
 	store := &managedStartupAuthorityStoreStub{}
 	rt := &Runtime{ExecutionPosture: executionposture.Live, effectsStore: store, managedCapabilitiesStore: store}
@@ -37,11 +39,11 @@ func TestManagedProviderPreflightAuthorityCarriesLiveExecutionIdentity(t *testin
 	if preflight.ExecutionKind != managedcapabilities.ExecutionNormalAgent {
 		t.Fatalf("execution kind = %q, want %q", preflight.ExecutionKind, managedcapabilities.ExecutionNormalAgent)
 	}
-	if preflight.ExecutionAuthorityID != startupAuthority.AuthorityID {
-		t.Fatalf("execution authority id = %q, want %q", preflight.ExecutionAuthorityID, startupAuthority.AuthorityID)
+	if preflight.ExecutionAuthorityID != startupAuthority.GrantID {
+		t.Fatalf("execution authority id = %q, want %q", preflight.ExecutionAuthorityID, startupAuthority.GrantID)
 	}
-	if preflight.StartupOwnerID != startupAuthority.OwnerID || preflight.StartupGeneration != startupAuthority.Generation {
-		t.Fatalf("startup owner/generation = %q/%d, want %q/%d", preflight.StartupOwnerID, preflight.StartupGeneration, startupAuthority.OwnerID, startupAuthority.Generation)
+	if preflight.StartupOwnerID != startupAuthority.ProcessOwnerID || preflight.StartupGeneration != startupAuthority.RuntimeGeneration {
+		t.Fatalf("startup owner/generation = %q/%d, want %q/%d", preflight.StartupOwnerID, preflight.StartupGeneration, startupAuthority.ProcessOwnerID, startupAuthority.RuntimeGeneration)
 	}
 
 	probeID := uuid.NewString()
@@ -58,16 +60,16 @@ func TestManagedProviderPreflightAuthorityCarriesLiveExecutionIdentity(t *testin
 	}
 	if effectAuthority.Kind != runtimeeffects.AuthorityStartupProbe ||
 		effectAuthority.ID != probeID ||
-		effectAuthority.ExecutionOwner != startupAuthority.OwnerID ||
-		effectAuthority.FenceGeneration != startupAuthority.Generation {
+		effectAuthority.ExecutionOwner != startupAuthority.ProcessOwnerID ||
+		effectAuthority.FenceGeneration != startupAuthority.RuntimeGeneration {
 		t.Fatalf("startup probe envelope = %#v", effectAuthority)
 	}
 	if got := effectAuthority.StartupProbe; got.ProbeID != probeID ||
-		got.StartupAuthorityID != startupAuthority.AuthorityID ||
+		got.StartupAuthorityID != startupAuthority.GrantID ||
 		got.StartupStateVersion != startupAuthority.StateVersion ||
 		got.ActorID != actorID ||
 		got.ExecutionKind != string(managedcapabilities.ExecutionNormalAgent) ||
-		got.ExecutionAuthorityID != startupAuthority.AuthorityID {
+		got.ExecutionAuthorityID != startupAuthority.GrantID {
 		t.Fatalf("startup probe identity = %#v", got)
 	}
 }

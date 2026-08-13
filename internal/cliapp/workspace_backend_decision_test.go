@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -276,9 +277,6 @@ func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.
 
 func TestWorkspaceBackendCensusesScopedLiveAgentsHiddenByAmbiguousAliases(t *testing.T) {
 	source := scopedWorkspaceBackendAgentFixture(t)
-	if _, exists := source.AgentEntries()["shared-worker"]; exists {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
-	}
 	decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), source)
 	if err != nil {
 		t.Fatalf("DecideWorkspaceBackend: %v", err)
@@ -311,9 +309,6 @@ func scopedWorkspaceBackendAgentFixture(t *testing.T) semanticview.Source {
 
 func TestLocalPreflightAgentCensusIncludesOnlyAmbiguousScopedDeclarations(t *testing.T) {
 	source := scopedWorkspaceBackendAgentFixtureOptions(t, false)
-	if len(source.AgentEntries()) != 0 {
-		t.Fatalf("flattened agent aliases = %#v, want none", source.AgentEntries())
-	}
 	if !sourceDeclaresAgents(source) {
 		t.Fatal("local preflight classified scoped agent declarations as agent-free")
 	}
@@ -422,7 +417,7 @@ func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass
 func workspaceBackendTestSource(agents map[string]runtimecontracts.AgentRegistryEntry) semanticview.Source {
 	bundle := &runtimecontracts.WorkflowContractBundle{Agents: agents}
 	addTestAgentOwners(bundle)
-	return semanticview.Wrap(bundle)
+	return semanticviewtest.WrapRootAgents(bundle)
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {

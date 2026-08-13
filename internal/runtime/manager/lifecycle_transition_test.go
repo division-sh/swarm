@@ -83,7 +83,7 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 		return agent, nil
 	})
 	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.transition"),
+		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestTopologyAdmission(t),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}

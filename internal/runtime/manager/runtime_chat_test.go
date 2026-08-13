@@ -135,7 +135,7 @@ func installDirectiveTestAgent(t *testing.T, am *AgentManager, agent Agent) {
 		ExecutionMode: "live",
 		ID:            agent.ID(),
 		Identity:      directiveTestAgentIdentity(t, agent.ID()),
-	}), Status: "active", HiredBy: "test"}
+	}), Status: "active", HiredBy: "test", Topology: managerTestTopologyAdmission(t)}
 	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), rec, false, agent, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register directive test agent: %v", err)
 	}

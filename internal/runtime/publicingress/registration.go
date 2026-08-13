@@ -57,7 +57,7 @@ type RegistrationControllerOptions struct {
 	HTTP              runtimeregistration.HTTPExecutor
 	Posture           executionposture.Posture
 	RuntimeInstanceID string
-	StartupAuthority  func() (runtimestartupownership.Authority, error)
+	StartupAuthority  func() (runtimestartupownership.GrantEvidence, error)
 	Readiness         *ReadinessOwner
 	Now               func() time.Time
 }
@@ -150,7 +150,7 @@ func (c *ProviderRegistrationController) StartupCurrent(ctx context.Context, exp
 	if err != nil {
 		return false, err
 	}
-	if startup.AuthorityID != strings.TrimSpace(expectedAuthorityID) {
+	if startup.GrantID != strings.TrimSpace(expectedAuthorityID) {
 		return false, nil
 	}
 	authority := serveRegistrationAuthority(startup, uuid.NewString(), c.opts.Posture, c.opts.Now())
@@ -343,7 +343,7 @@ func (c *ProviderRegistrationController) admitReadbackCandidate(ctx context.Cont
 	return admittedPair{pair: state.Pair, provider: provider, signing: signing, slotID: active.SlotID, base: active.BaseFingerprint}, nil
 }
 
-func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair) error {
+func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair) error {
 	key := pairKey(candidate.pair)
 	state, _ := c.snapshot.state(key)
 	state.Pair = candidate.pair
@@ -383,7 +383,7 @@ func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, expo
 	return c.launchAttempt(ctx, exposure, startup, candidate, state)
 }
 
-func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair) (registrationIntent, error) {
+func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair) (registrationIntent, error) {
 	intentID := uuid.NewString()
 	token, err := randomToken(32)
 	if err != nil {
@@ -401,7 +401,7 @@ func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generati
 	}, nil
 }
 
-func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair, state registrationState) error {
+func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair, state registrationState) error {
 	key := pairKey(candidate.pair)
 	if state.Attempt == nil {
 		return fmt.Errorf("provider registration pre-launch attempt is missing")
@@ -772,13 +772,13 @@ func candidateCredentialEpochs(candidate admittedPair) map[string]string {
 	return out
 }
 
-func serveRegistrationAuthority(startup runtimestartupownership.Authority, intentID string, posture executionposture.Posture, now time.Time) runtimeeffects.Authority {
+func serveRegistrationAuthority(startup runtimestartupownership.GrantEvidence, intentID string, posture executionposture.Posture, now time.Time) runtimeeffects.Authority {
 	return runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityServeRegistration, ID: strings.TrimSpace(intentID),
-		ExecutionOwner: startup.OwnerID, LeaseExpiresAt: now.UTC().Add(5 * time.Minute), FenceGeneration: startup.Generation,
+		ExecutionOwner: startup.ProcessOwnerID, LeaseExpiresAt: now.UTC().Add(5 * time.Minute), FenceGeneration: startup.RuntimeGeneration,
 		ExecutionMode: runtimeeffects.ExecutionMode(posture.RootMode()),
 		ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
-			IntentID: strings.TrimSpace(intentID), StartupAuthorityID: startup.AuthorityID, StartupStateVersion: startup.StateVersion,
+			IntentID: strings.TrimSpace(intentID), StartupAuthorityID: startup.GrantID, StartupStateVersion: startup.StateVersion,
 		},
 	}
 }

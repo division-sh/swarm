@@ -270,7 +270,6 @@ func newStandingRuntimeContextRuntime(
 		Credentials: credentials, ProviderCredentials: credentials,
 		DisablePersistentStartupRecovery: true, LLMRuntime: runtimellm.NoopRuntime{},
 	})
-	deps.StartupOwnership = nil
 	rt, err := runtimepkg.NewRuntime(context.Background(), deps)
 	if err != nil {
 		t.Fatalf("build runtime context %s: %v", fact.BundleHash(), err)

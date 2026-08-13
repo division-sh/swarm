@@ -284,23 +284,23 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 	case runtimeeffects.AuthorityStartupProbe:
 		startup := authority.StartupProbe
 		res, err = tx.ExecContext(ctx, `
-			UPDATE runtime_startup_authority_facts SET created_at=created_at
-			WHERE authority_id=$1::uuid AND state_version=$2 AND state IN ('active','prepared')
-			  AND owner_id=$3 AND generation=$4 AND NOT EXISTS (
-			    SELECT 1 FROM runtime_startup_authority_facts newer
-			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
-			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			UPDATE runtime_generation_grants SET created_at=created_at
+			WHERE grant_id=$1::uuid AND state_version=$2 AND state IN ('prepared','probe_settled')
+			  AND process_owner_id=$3 AND runtime_generation=$4 AND NOT EXISTS (
+			    SELECT 1 FROM runtime_generation_grants newer
+			    WHERE newer.grant_id=runtime_generation_grants.grant_id
+			      AND newer.state_version>runtime_generation_grants.state_version
 			  )
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityServeRegistration:
 		startup := authority.ServeRegistration
 		res, err = tx.ExecContext(ctx, `
-			UPDATE runtime_startup_authority_facts SET created_at=created_at
-			WHERE authority_id=$1::uuid AND state_version=$2 AND state IN ('active','prepared','probe_settled','admitted','committed','finalized')
-			  AND owner_id=$3 AND generation=$4 AND NOT EXISTS (
-			    SELECT 1 FROM runtime_startup_authority_facts newer
-			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
-			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			UPDATE runtime_generation_grants SET created_at=created_at
+			WHERE grant_id=$1::uuid AND state_version=$2 AND state='admitted'
+			  AND process_owner_id=$3 AND runtime_generation=$4 AND NOT EXISTS (
+			    SELECT 1 FROM runtime_generation_grants newer
+			    WHERE newer.grant_id=runtime_generation_grants.grant_id
+			      AND newer.state_version>runtime_generation_grants.state_version
 			  )
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	default:
@@ -357,23 +357,23 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 	case runtimeeffects.AuthorityStartupProbe:
 		startup := authority.StartupProbe
 		res, err = tx.ExecContext(ctx, `
-			UPDATE runtime_startup_authority_facts SET created_at=created_at
-			WHERE authority_id=? AND state_version=? AND state IN ('active','prepared')
-			  AND owner_id=? AND generation=? AND NOT EXISTS (
-			    SELECT 1 FROM runtime_startup_authority_facts newer
-			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
-			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			UPDATE runtime_generation_grants SET created_at=created_at
+			WHERE grant_id=? AND state_version=? AND state IN ('prepared','probe_settled')
+			  AND process_owner_id=? AND runtime_generation=? AND NOT EXISTS (
+			    SELECT 1 FROM runtime_generation_grants newer
+			    WHERE newer.grant_id=runtime_generation_grants.grant_id
+			      AND newer.state_version>runtime_generation_grants.state_version
 			  )
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	case runtimeeffects.AuthorityServeRegistration:
 		startup := authority.ServeRegistration
 		res, err = tx.ExecContext(ctx, `
-			UPDATE runtime_startup_authority_facts SET created_at=created_at
-			WHERE authority_id=? AND state_version=? AND state IN ('active','prepared','probe_settled','admitted','committed','finalized')
-			  AND owner_id=? AND generation=? AND NOT EXISTS (
-			    SELECT 1 FROM runtime_startup_authority_facts newer
-			    WHERE newer.lease_authority_id=runtime_startup_authority_facts.lease_authority_id
-			      AND newer.transition_ordinal>runtime_startup_authority_facts.transition_ordinal
+			UPDATE runtime_generation_grants SET created_at=created_at
+			WHERE grant_id=? AND state_version=? AND state='admitted'
+			  AND process_owner_id=? AND runtime_generation=? AND NOT EXISTS (
+			    SELECT 1 FROM runtime_generation_grants newer
+			    WHERE newer.grant_id=runtime_generation_grants.grant_id
+			      AND newer.state_version>runtime_generation_grants.state_version
 			  )
 		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
 	default:
@@ -511,9 +511,9 @@ func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, 
 	startup := authority.StartupProbe
 	var count int
 	err := q.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM runtime_startup_authority_facts f
-		WHERE f.authority_id=$1::uuid AND f.state_version=$2 AND f.state IN ('active','prepared') AND f.owner_id=$3 AND f.generation=$4
-		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+		SELECT COUNT(*) FROM runtime_generation_grants f
+		WHERE f.grant_id=$1::uuid AND f.state_version=$2 AND f.state IN ('prepared','probe_settled') AND f.process_owner_id=$3 AND f.runtime_generation=$4
+		  AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id=f.grant_id AND newer.state_version>f.state_version)
 	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
 	return count == 1, err
 }
@@ -522,9 +522,9 @@ func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, au
 	startup := authority.StartupProbe
 	var count int
 	err := q.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM runtime_startup_authority_facts f
-		WHERE f.authority_id=? AND f.state_version=? AND f.state IN ('active','prepared') AND f.owner_id=? AND f.generation=?
-		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+		SELECT COUNT(*) FROM runtime_generation_grants f
+		WHERE f.grant_id=? AND f.state_version=? AND f.state IN ('prepared','probe_settled') AND f.process_owner_id=? AND f.runtime_generation=?
+		  AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id=f.grant_id AND newer.state_version>f.state_version)
 	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
 	return count == 1, err
 }
@@ -533,11 +533,10 @@ func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQuer
 	startup := authority.ServeRegistration
 	var count int
 	err := q.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM runtime_startup_authority_facts f
-		WHERE f.authority_id=$1::uuid AND f.state_version=$2
-		  AND f.state IN ('active','prepared','probe_settled','admitted','committed','finalized')
-		  AND f.owner_id=$3 AND f.generation=$4
-		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+		SELECT COUNT(*) FROM runtime_generation_grants f
+		WHERE f.grant_id=$1::uuid AND f.state_version=$2 AND f.state='admitted'
+		  AND f.process_owner_id=$3 AND f.runtime_generation=$4
+		  AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id=f.grant_id AND newer.state_version>f.state_version)
 	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
 	return count == 1, err
 }
@@ -546,11 +545,10 @@ func serveRegistrationAuthorityCurrentSQLite(ctx context.Context, q schemaQuerye
 	startup := authority.ServeRegistration
 	var count int
 	err := q.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM runtime_startup_authority_facts f
-		WHERE f.authority_id=? AND f.state_version=?
-		  AND f.state IN ('active','prepared','probe_settled','admitted','committed','finalized')
-		  AND f.owner_id=? AND f.generation=?
-		  AND NOT EXISTS (SELECT 1 FROM runtime_startup_authority_facts newer WHERE newer.lease_authority_id=f.lease_authority_id AND newer.transition_ordinal>f.transition_ordinal)
+		SELECT COUNT(*) FROM runtime_generation_grants f
+		WHERE f.grant_id=? AND f.state_version=? AND f.state='admitted'
+		  AND f.process_owner_id=? AND f.runtime_generation=?
+		  AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id=f.grant_id AND newer.state_version>f.state_version)
 	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
 	return count == 1, err
 }

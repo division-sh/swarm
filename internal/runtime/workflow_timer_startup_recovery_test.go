@@ -40,7 +40,7 @@ type workflowTimerStartupStore interface {
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimegenericschedule.Store
-	runtimemanager.AgentLifecyclePersistence
+	storetest.AgentFixtureStore
 	runtimemanager.ManagerPersistence
 	runtimetimerobligation.Reader
 	PipelineObligations() runtimepipelineobligation.Store
@@ -119,7 +119,6 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 				TimerObligationReader:        selected,
 				WorkflowPersistence:          workflowPersistence,
 				ManagerStore:                 selected,
-				ManagerLifecycleStore:        selected,
 				ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
 				DeliveryStore:                selected,
 				PipelineObligations:          selected.PipelineObligations(),
@@ -136,9 +135,13 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
 			t.Cleanup(func() {
 				if err := rt.Shutdown(); err != nil {
 					t.Errorf("shutdown runtime: %v", err)
+				}
+				if err := capability.Release(context.Background()); err != nil {
+					t.Errorf("release runtime process capability: %v", err)
 				}
 				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
@@ -319,7 +322,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 					RunLifecycleCandidates:       selected,
 					WorkflowPersistence:          workflowPersistence,
 					ManagerStore:                 managerStore,
-					ManagerLifecycleStore:        selected,
 					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
 					TimerObligationReader:        selected,
 					DeliveryStore:                selected,
@@ -379,12 +381,16 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				failAt:                    2,
 			}
 			restarted, restartedProcess := newRuntime(flakyManagerStore)
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
 			err = restarted.Start(ctx)
-			if err == nil || !strings.Contains(err.Error(), "hydrate manager before workflow timer restoration") {
+			if err == nil || !strings.Contains(err.Error(), "reconcile static declaration topology") {
 				shutdown("unexpected successful restart", restarted, restartedProcess)
-				t.Fatalf("Start error = %v, want workflow-timer hydration gate failure", err)
+				t.Fatalf("Start error = %v, want topology reconciliation failure before workflow-timer restoration", err)
 			}
 			shutdown("failed restart", restarted, restartedProcess)
+			if err := capability.Release(context.Background()); err != nil {
+				t.Fatalf("release failed-restart process capability: %v", err)
+			}
 
 			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("workflow-timer-startup"))
 			if err != nil {
@@ -434,7 +440,9 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
 			}
 
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
+			// This proof owns restoration through Runtime.Start, not the separate
+			// overdue-timer versus pipeline-recovery ordering tracked by #2234.
+			source := semanticview.Wrap(workflowTimerStartupRecoveryBundleWithDelay("3s"))
 			module := newRuntimeTestWorkflowModule(t, source)
 			bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
 			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
@@ -452,7 +460,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 					RunLifecycleCandidates:       selected,
 					WorkflowPersistence:          workflowPersistence,
 					ManagerStore:                 selected,
-					ManagerLifecycleStore:        selected,
 					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
 					TimerObligationReader:        selected,
 					DeliveryStore:                selected,
@@ -512,11 +519,17 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			shutdown("seed", seedRuntime, seedProcess)
 
 			restarted, restartedProcess := newRuntime()
+			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
 			if err := restarted.Start(ctx); err != nil {
 				shutdown("failed restart", restarted, restartedProcess)
 				t.Fatalf("Start restarted runtime: %v", err)
 			}
-			defer shutdown("restarted", restarted, restartedProcess)
+			defer func() {
+				shutdown("restarted", restarted, restartedProcess)
+				if err := capability.Release(context.Background()); err != nil {
+					t.Errorf("release restarted process capability: %v", err)
+				}
+			}()
 			assertBootDetail := func(name, fragment string) {
 				t.Helper()
 				for _, event := range bootProgress {
@@ -573,13 +586,17 @@ func (workflowTimerStartupLLM) ContinueSession(context.Context, *llm.Session, ll
 }
 
 func workflowTimerStartupRecoveryBundle() *runtimecontracts.WorkflowContractBundle {
+	return workflowTimerStartupRecoveryBundleWithDelay("25ms")
+}
+
+func workflowTimerStartupRecoveryBundleWithDelay(delay string) *runtimecontracts.WorkflowContractBundle {
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-startup", Version: "1", InitialStage: "waiting",
 		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}, TerminalStages: []string{"done"},
 		Timers: []runtimecontracts.WorkflowTimerContract{{
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
 			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: "25ms",
+			StartOn: "state:waiting", Delay: delay,
 		}},
 	}, Events: map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}}
 	bundle.Platform.Platform.Name = "swarm"

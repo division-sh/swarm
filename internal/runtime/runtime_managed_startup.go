@@ -23,20 +23,17 @@ type managedExecutionActivation struct {
 	ReplayErr     error
 }
 
-func (rt *Runtime) currentStartupProbeAuthority() (runtimestartupownership.Authority, error) {
+func (rt *Runtime) currentStartupProbeAuthority() (runtimestartupownership.GrantEvidence, error) {
 	if rt == nil {
-		return runtimestartupownership.Authority{}, fmt.Errorf("runtime is nil")
+		return runtimestartupownership.GrantEvidence{}, fmt.Errorf("runtime is nil")
 	}
-	if rt.pendingOwnershipHandoff != nil {
-		return rt.pendingOwnershipHandoff.Authority()
+	if rt.startupGrant == nil {
+		return runtimestartupownership.GrantEvidence{}, fmt.Errorf("runtime generation grant is missing")
 	}
-	if rt.ownershipLease == nil {
-		return runtimestartupownership.Authority{}, fmt.Errorf("runtime startup ownership authority is missing")
-	}
-	return rt.ownershipLease.Authority()
+	return rt.startupGrant.Evidence()
 }
 
-func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupownership.Authority) (ManagedProviderPreflightAuthority, error) {
+func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupownership.GrantEvidence) (ManagedProviderPreflightAuthority, error) {
 	effectStore := rt.effectsStore
 	if effectStore == nil {
 		return ManagedProviderPreflightAuthority{}, fmt.Errorf("runtime store does not implement managed external-effect persistence")
@@ -47,19 +44,19 @@ func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupown
 	}
 	return ManagedProviderPreflightAuthority{
 		ExecutionKind:        managedcapabilities.ExecutionNormalAgent,
-		ExecutionAuthorityID: authority.AuthorityID,
-		StartupOwnerID:       authority.OwnerID,
-		StartupGeneration:    authority.Generation,
+		ExecutionAuthorityID: authority.GrantID,
+		StartupOwnerID:       authority.ProcessOwnerID,
+		StartupGeneration:    authority.RuntimeGeneration,
 		EffectController:     runtimeeffects.NewController(effectStore).WithExecutionPosture(rt.ExecutionPosture),
 		CapabilityStore:      capabilityStore,
 		EffectAuthority: func(probeID, actorID string) (runtimeeffects.Authority, error) {
 			effectAuthority := runtimeeffects.Authority{
 				Kind: runtimeeffects.AuthorityStartupProbe, ID: strings.TrimSpace(probeID),
-				ExecutionOwner: authority.OwnerID, LeaseExpiresAt: time.Now().UTC().Add(15 * time.Minute), FenceGeneration: authority.Generation,
+				ExecutionOwner: authority.ProcessOwnerID, LeaseExpiresAt: time.Now().UTC().Add(15 * time.Minute), FenceGeneration: authority.RuntimeGeneration,
 				ExecutionMode: runtimeeffects.ExecutionMode(rt.ExecutionPosture.RootMode()),
 				StartupProbe: runtimeeffects.StartupProbeAuthority{
-					ProbeID: probeID, StartupAuthorityID: authority.AuthorityID, StartupStateVersion: authority.StateVersion,
-					ActorID: actorID, ExecutionKind: string(managedcapabilities.ExecutionNormalAgent), ExecutionAuthorityID: authority.AuthorityID,
+					ProbeID: probeID, StartupAuthorityID: authority.GrantID, StartupStateVersion: authority.StateVersion,
+					ActorID: actorID, ExecutionKind: string(managedcapabilities.ExecutionNormalAgent), ExecutionAuthorityID: authority.GrantID,
 				},
 			}
 			if !effectAuthority.Valid() {
@@ -70,30 +67,25 @@ func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupown
 	}, nil
 }
 
-func (rt *Runtime) settleManagedStartupPreflight(ctx context.Context, surfaceIDs []string) (runtimestartupownership.Authority, bool, error) {
-	if rt.pendingOwnershipHandoff != nil {
-		authority, err := rt.pendingOwnershipHandoff.MarkProbesSettled(ctx, surfaceIDs)
-		return authority, true, err
+func (rt *Runtime) settleManagedStartupPreflight(ctx context.Context, surfaceIDs []string) (runtimestartupownership.GrantEvidence, error) {
+	if rt.startupGrant == nil {
+		return runtimestartupownership.GrantEvidence{}, fmt.Errorf("runtime generation grant is missing")
 	}
-	if rt.ownershipLease == nil {
-		return runtimestartupownership.Authority{}, false, fmt.Errorf("runtime startup ownership lease is missing")
+	if _, err := rt.startupGrant.MarkProbesSettled(ctx, surfaceIDs); err != nil {
+		return runtimestartupownership.GrantEvidence{}, err
 	}
-	if _, err := rt.ownershipLease.MarkProbesSettled(ctx, surfaceIDs); err != nil {
-		return runtimestartupownership.Authority{}, false, err
-	}
-	authority, err := rt.ownershipLease.AdmitExecution(ctx)
-	return authority, false, err
+	return rt.startupGrant.AdmitExecution(ctx)
 }
 
-func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimestartupownership.Authority, replay bool) (managedExecutionActivation, error) {
+func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimestartupownership.GrantEvidence, replay bool) (managedExecutionActivation, error) {
 	actorFingerprint, err := rt.managedActorCensusFingerprint()
 	if err != nil {
 		return managedExecutionActivation{}, err
 	}
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
-		authority.AuthorityID,
-		authority.Generation,
+		authority.GrantID,
+		authority.RuntimeGeneration,
 		"",
 		actorFingerprint,
 		rt.Options.BundleSourceFact.BundleHash(),

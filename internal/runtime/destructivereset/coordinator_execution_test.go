@@ -12,6 +12,7 @@ func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 	now := time.Date(2026, 8, 9, 19, 0, 0, 0, time.UTC)
 	locks := &recordingLockManager{acquired: true}
 	var calls []string
+	var cleanupRequest CleanupRequest
 	coord := &Coordinator{
 		Planner: InventoryPlanner{Reader: inventoryReaderFunc(func(context.Context) (Inventory, error) {
 			calls = append(calls, "plan")
@@ -29,8 +30,9 @@ func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 			}
 			return QuiescenceResult{OperationName: DefaultOperationName, AppliedAt: now}, nil
 		}),
-		Cleaner: cleanupApplierFunc(func(context.Context, CleanupRequest) (CleanupResult, error) {
+		Cleaner: cleanupApplierFunc(func(_ context.Context, req CleanupRequest) (CleanupResult, error) {
 			calls = append(calls, "cleanup")
+			cleanupRequest = req
 			return CleanupResult{OperationName: DefaultOperationName, AppliedAt: now}, nil
 		}),
 		Containers: containerStopperFunc(func(context.Context, ContainerResetRequest) (ContainerResetResult, error) {
@@ -40,7 +42,7 @@ func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 		Now: func() time.Time { return now },
 	}
 
-	got, err := coord.Execute(context.Background(), Request{ActorTokenID: "operator", RequestHash: "hash"})
+	got, err := coord.Execute(context.Background(), Request{OperationID: destructiveResetOperationID, ActorTokenID: "operator", RequestHash: "hash"})
 	if err != nil {
 		t.Fatalf("Execute error = %v", err)
 	}
@@ -52,6 +54,21 @@ func TestCoordinatorExecutesNamedResetWorkflowUnderOneLease(t *testing.T) {
 	}
 	if locks.lease == nil || locks.lease.releases != 1 {
 		t.Fatalf("lease = %#v, want one terminal release", locks.lease)
+	}
+	if cleanupRequest.OperationID != destructiveResetOperationID {
+		t.Fatalf("cleanup operation id = %q, want %q", cleanupRequest.OperationID, destructiveResetOperationID)
+	}
+}
+
+func TestCoordinatorRejectsMissingOperationIdentityBeforeOwnerCalls(t *testing.T) {
+	locks := &recordingLockManager{acquired: true}
+	coord := &Coordinator{Planner: successfulPlanner(), Locks: locks, Quiescer: successfulQuiescer(), Cleaner: successfulCleaner(), Containers: successfulContainers()}
+	_, err := coord.Execute(context.Background(), Request{ActorTokenID: "operator", RequestHash: "hash"})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Execute error = %v, want ErrInvalidRequest", err)
+	}
+	if locks.acquires != 0 {
+		t.Fatalf("lock acquisitions = %d, want none", locks.acquires)
 	}
 }
 
@@ -77,7 +94,7 @@ func TestCoordinatorReleasesLeaseAtEveryWorkflowFailure(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			locks := &recordingLockManager{acquired: true}
 			coord := &Coordinator{Planner: test.planner, Locks: locks, Quiescer: test.quiescer, Cleaner: test.cleaner, Containers: test.containers}
-			_, err := coord.Execute(context.Background(), Request{ActorTokenID: "operator", RequestHash: "hash", DryRun: true})
+			_, err := coord.Execute(context.Background(), Request{OperationID: destructiveResetOperationID, ActorTokenID: "operator", RequestHash: "hash", DryRun: true})
 			if !errors.Is(err, stageErr) {
 				t.Fatalf("Execute error = %v, want stage failure", err)
 			}
@@ -87,6 +104,8 @@ func TestCoordinatorReleasesLeaseAtEveryWorkflowFailure(t *testing.T) {
 		})
 	}
 }
+
+const destructiveResetOperationID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 type inventoryReaderFunc func(context.Context) (Inventory, error)
 

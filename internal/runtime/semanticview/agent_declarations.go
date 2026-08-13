@@ -28,14 +28,11 @@ func (d AgentDeclaration) Label(qualified bool) string {
 }
 
 // AgentDeclarations enumerates canonical project/flow declarations directly.
-// Flattened aliases are retained only for declarations not represented by a
-// canonical scope, so ambiguous local IDs cannot disappear from a census.
 func AgentDeclarations(source Source) []AgentDeclaration {
 	if source == nil {
 		return nil
 	}
 	entries := []AgentDeclaration{}
-	representedLocalIDs := map[string]struct{}{}
 	representedDeclarations := map[string]struct{}{}
 	appendScoped := func(scopeKind, scopeID, ownerFlowID, canonicalScopeID string, agents map[string]runtimecontracts.AgentRegistryEntry, agentURIs map[string]string) {
 		keys := make([]string, 0, len(agents))
@@ -56,7 +53,6 @@ func AgentDeclarations(source Source) []AgentDeclaration {
 				continue
 			}
 			representedDeclarations[declarationKey] = struct{}{}
-			representedLocalIDs[localID] = struct{}{}
 			entries = append(entries, AgentDeclaration{
 				ScopeKind:   scopeKind,
 				ScopeID:     strings.TrimSpace(scopeID),
@@ -83,21 +79,6 @@ func AgentDeclarations(source Source) []AgentDeclaration {
 			continue
 		}
 		appendScoped("project", scope.Key, scope.OwningFlowID, scope.Key, scope.Agents, scope.AgentURIs)
-	}
-	aliases := source.AgentEntries()
-	aliasKeys := make([]string, 0, len(aliases))
-	for rawID := range aliases {
-		if id := strings.TrimSpace(rawID); id != "" {
-			aliasKeys = append(aliasKeys, rawID)
-		}
-	}
-	sort.Slice(aliasKeys, func(i, j int) bool { return strings.TrimSpace(aliasKeys[i]) < strings.TrimSpace(aliasKeys[j]) })
-	for _, rawID := range aliasKeys {
-		localID := strings.TrimSpace(rawID)
-		if _, represented := representedLocalIDs[localID]; represented {
-			continue
-		}
-		entries = append(entries, AgentDeclaration{LocalID: localID, Entry: aliases[rawID]})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Label(true) < entries[j].Label(true) })
 	return entries

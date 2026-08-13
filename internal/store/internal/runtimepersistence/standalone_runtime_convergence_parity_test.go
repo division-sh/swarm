@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
 
@@ -164,7 +165,7 @@ func standaloneRuntimeManifestationPayload(t *testing.T, eventType events.EventT
 }
 
 type standaloneConvergenceAgentStore interface {
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+	agentfixture.Store
 }
 
 func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Context, identity agentidentity.Identity) {
@@ -174,7 +175,7 @@ func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Cont
 		t.Fatalf("standalone convergence store %T cannot persist agents", selected)
 	}
 	agentID := identity.AgentID()
-	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
 			ExecutionMode: "live", Config: json.RawMessage(`{}`),

@@ -3,6 +3,7 @@ package runtimepersistence_test
 import (
 	"context"
 	"errors"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -89,11 +91,15 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),
 	}
-	if err := pg.UpsertAgent(ctx, rec); err != nil {
+	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
+	if err != nil {
+		t.Fatalf("build ephemeral topology admission: %v", err)
+	}
+	if err := agentfixture.Upsert(ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil {
-		t.Fatalf("RegisterEphemeralAgentForExecution: %v", err)
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, rec); err != nil {
+		t.Fatalf("MaterializeAdmittedAgentForExecution: %v", err)
 	}
 	request := runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:        agent.id,

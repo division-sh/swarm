@@ -835,9 +835,7 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 			t.Errorf("shutdown runtime context agent manager: %v", err)
 		}
 	})
-	if err := manager.SpawnAgent(withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"})); err != nil {
-		t.Fatalf("SpawnAgent(%s): %v", agent.id, err)
-	}
+	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
 	return manager
 }
 

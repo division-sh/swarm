@@ -532,7 +532,7 @@ func TestPostgresPipelineClaimReleasesRetainedReferenceBeforeTransactionComplete
 	assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
 }
 
-func TestPostgresStartupOwnershipUsesRetainedSessionWithPoolSizeOne(t *testing.T) {
+func TestPostgresProcessCapabilityUsesRetainedSessionWithPoolSizeOne(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := admitTestPostgresStore(t, db)
 	db.SetMaxOpenConns(1)
@@ -540,15 +540,15 @@ func TestPostgresStartupOwnershipUsesRetainedSessionWithPoolSizeOne(t *testing.T
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 5*time.Second)
 	defer cancel()
 
-	lease, err := selected.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("pool-one-owner"))
+	capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("pool-one-owner"))
 	if err != nil {
-		t.Fatalf("acquire startup ownership with pool size one: %v", err)
+		t.Fatalf("acquire process capability with pool size one: %v", err)
 	}
-	if _, err := lease.MarkProbesSettled(ctx, nil); err != nil {
-		t.Fatalf("persist startup transition on retained session: %v", err)
+	if _, _, err := capability.CurrentSourceSet(ctx); err != nil {
+		t.Fatalf("prove process capability on retained session: %v", err)
 	}
-	if err := lease.Release(ctx); err != nil {
-		t.Fatalf("release startup ownership: %v", err)
+	if err := capability.Release(ctx); err != nil {
+		t.Fatalf("release process capability: %v", err)
 	}
 	if got := db.Stats().InUse; got != 0 {
 		t.Fatalf("startup ownership pool in-use after release = %d, want 0", got)

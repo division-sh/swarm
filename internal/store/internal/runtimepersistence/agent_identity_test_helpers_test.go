@@ -3,15 +3,42 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
+
+const testAgentTopologyBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func testAgentTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
+	t.Helper()
+	admission, err := runtimeagenttopology.StaticAdmission(
+		"store-test-source-set-v1",
+		testAgentTopologyBundleHash,
+		"ephemeral",
+		runtimeagenttopology.LifetimeDurableManaged,
+	)
+	if err != nil {
+		t.Fatalf("construct test agent topology admission: %v", err)
+	}
+	return admission
+}
+
+func testAgentTopologyJSON(t testing.TB) []byte {
+	t.Helper()
+	raw, err := json.Marshal(testAgentTopologyAdmission(t))
+	if err != nil {
+		t.Fatalf("marshal test agent topology admission: %v", err)
+	}
+	return raw
+}
 
 func testAgentMemoryIdentity(t testing.TB, runID, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
@@ -108,13 +135,14 @@ func seedTestAgentRow(
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
 			role, model, llm_backend, memory_enabled, memory_source,
-			runtime_descriptor, status, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?)
+			runtime_descriptor, status, created_at,
+			topology_authority_kind, topology_admission, execution_lifetime
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'static_declaration_plan', ?, 'durable_managed')
 	`
 	args := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		memory.Enabled, string(memory.Source), projection.RuntimeDescriptor, status, now,
+		memory.Enabled, string(memory.Source), projection.RuntimeDescriptor, status, now, testAgentTopologyJSON(t),
 	}
 	if postgres {
 		query = `
@@ -122,8 +150,9 @@ func seedTestAgentRow(
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source,
-				runtime_descriptor, status, created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12)
+				runtime_descriptor, status, created_at,
+				topology_authority_kind, topology_admission, execution_lifetime
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, 'static_declaration_plan', $13::jsonb, 'durable_managed')
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

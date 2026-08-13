@@ -154,17 +154,20 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	effectsStore := &supportedRegistrationEffectStore{Harness: effecttest.New()}
 	transport := &supportedTelegramRegistrationTransport{}
 	readiness := runtimepublicingress.NewReadinessOwner(true)
-	startup, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-		OwnerID: "serve-owner", BootID: uuid.NewString(), BundleHash: bundleHash,
-	}, "test")
-	if err != nil {
-		t.Fatalf("NewColdAuthority: %v", err)
+	startup := runtimestartupownership.GrantEvidence{
+		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "serve-owner",
+		ProcessBootID: uuid.NewString(), BundleHash: bundleHash, BundleSource: "ephemeral",
+		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, SourceSetRevision: "inbound-registration-test",
+		StateVersion: 3, State: runtimestartupownership.GrantAdmitted,
+	}
+	if err := startup.Validate(); err != nil {
+		t.Fatalf("test startup grant: %v", err)
 	}
 	controller, err := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
 		CredentialOwner: credentialSnapshots, EffectsStore: effectsStore,
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-		StartupAuthority: func() (runtimestartupownership.Authority, error) { return startup, nil },
+		StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) { return startup, nil },
 		Readiness:        readiness,
 	})
 	if err != nil {
@@ -187,7 +190,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	now := time.Now().UTC()
 	exposure := runtimepublicingress.Generation{ID: uuid.NewString(), Mode: runtimepublicingress.ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 	readiness.SetRuntimeReady(true)
-	readiness.SetExposure(runtimepublicingress.ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(runtimepublicingress.EvidenceTTL)})
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(runtimepublicingress.EvidenceTTL)})
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
 		t.Fatalf("initial registration reconcile: %v", err)
 	}

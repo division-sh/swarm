@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/google/uuid"
 )
 
 func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
@@ -49,9 +50,43 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	if !owners.lastPlan.IncludeBundles || !owners.lastPlan.IncludeBundlesSet || !owners.lastQuiescence.Result.IncludeBundles || !owners.lastCleanup.Result.IncludeBundles || !owners.lastContainers.Result.IncludeBundles {
 		t.Fatalf("include_bundles default not propagated through owners: plan=%#v quiescence=%v cleanup=%v containers=%v", owners.lastPlan, owners.lastQuiescence.Result.IncludeBundles, owners.lastCleanup.Result.IncludeBundles, owners.lastContainers.Result.IncludeBundles)
 	}
+	if _, err := uuid.Parse(owners.lastPlan.OperationID); err != nil {
+		t.Fatalf("runtime.nuke operation id = %q: %v", owners.lastPlan.OperationID, err)
+	}
 	for _, bundleHash := range []string{runStartTestBundleHash, runtimeContextTestBundleHashB} {
 		if lookup := fixture.manager.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
 			t.Fatalf("dry-run unloaded runtime context %s: %#v", bundleHash, lookup)
+		}
+	}
+}
+
+func TestOperatorRuntimeNukeUsesDistinctOperationIdentityPerLogicalRequest(t *testing.T) {
+	owners := newRecordingRuntimeNukeOwners()
+	idempotency := newRecordingAPIIdempotencyStore()
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
+			Ready: func() bool { return true }, Database: fakePinger{},
+			Idempotency: idempotency, ResetCoordinator: owners,
+		}),
+	})
+
+	first := `{"jsonrpc":"2.0","id":"nuke-1","method":"runtime.nuke","params":{"dry_run":true,"idempotency_key":"identity-1"}}`
+	second := `{"jsonrpc":"2.0","id":"nuke-2","method":"runtime.nuke","params":{"dry_run":true,"idempotency_key":"identity-2"}}`
+	for _, body := range []string{first, first, second} {
+		if resp := rpcCall(t, handler, body); resp.Error != nil {
+			t.Fatalf("runtime.nuke error = %#v", resp.Error)
+		}
+	}
+	if len(owners.plans) != 2 {
+		t.Fatalf("runtime.nuke executions = %d, want 2", len(owners.plans))
+	}
+	if owners.plans[0].OperationID == owners.plans[1].OperationID {
+		t.Fatalf("separate runtime.nuke requests reused operation id %q", owners.plans[0].OperationID)
+	}
+	for i, req := range owners.plans {
+		if _, err := uuid.Parse(req.OperationID); err != nil {
+			t.Fatalf("runtime.nuke execution %d operation id = %q: %v", i, req.OperationID, err)
 		}
 	}
 }
@@ -287,6 +322,7 @@ type recordingRuntimeNukeOwners struct {
 	planErr          error
 	containerFailure string
 	lastPlan         destructivereset.Request
+	plans            []destructivereset.Request
 	lastQuiescence   destructivereset.QuiescenceRequest
 	lastCleanup      destructivereset.CleanupRequest
 	lastContainers   destructivereset.ContainerResetRequest
@@ -300,6 +336,7 @@ func newRecordingRuntimeNukeOwners() *recordingRuntimeNukeOwners {
 func (o *recordingRuntimeNukeOwners) BuildPlan(_ context.Context, req destructivereset.Request) (destructivereset.Result, bool, error) {
 	o.calls = append(o.calls, "plan")
 	o.lastPlan = req
+	o.plans = append(o.plans, req)
 	if o.planErr != nil {
 		return destructivereset.Result{}, false, o.planErr
 	}
@@ -338,7 +375,7 @@ func (o *recordingRuntimeNukeOwners) Execute(ctx context.Context, req destructiv
 	if err != nil {
 		return destructivereset.ExecutionResult{}, err
 	}
-	cleanup, err := (recordingRuntimeNukeCleaner{o}).Apply(ctx, destructivereset.CleanupRequest{Result: result, Quiescence: quiescence, ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt})
+	cleanup, err := (recordingRuntimeNukeCleaner{o}).Apply(ctx, destructivereset.CleanupRequest{OperationID: req.OperationID, Result: result, Quiescence: quiescence, ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt})
 	if err != nil {
 		return destructivereset.ExecutionResult{}, err
 	}

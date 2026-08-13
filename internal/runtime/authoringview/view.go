@@ -311,7 +311,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	if err != nil {
 		return View{}, err
 	}
-	root, err := buildRoot(bundle, agentNames)
+	root, err := buildRoot(source, bundle, agentNames)
 	if err != nil {
 		return View{}, err
 	}
@@ -425,8 +425,8 @@ func BuildRoutingTopologyWithReport(source semanticview.Source, bundle *runtimec
 	return routingtopology.WithIssues(topology, issues...)
 }
 
-func buildRoot(bundle *runtimecontracts.WorkflowContractBundle, agentNames map[authoringAgentNameKey]string) (RootView, error) {
-	rootAgents, rootAgentsFile, rootScopeID := rootAgentViewEntries(bundle)
+func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, agentNames map[authoringAgentNameKey]string) (RootView, error) {
+	rootAgents, rootAgentsFile, rootScopeID := rootAgentViewEntries(source, bundle)
 	agents, err := agentViews(rootAgents, rootAgentsFile, "project", rootScopeID, agentNames)
 	if err != nil {
 		return RootView{}, err
@@ -924,21 +924,32 @@ func authoringStringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func rootAgentViewEntries(bundle *runtimecontracts.WorkflowContractBundle) (map[string]runtimecontracts.AgentRegistryEntry, string, string) {
-	if bundle == nil {
+func rootAgentViewEntries(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) (map[string]runtimecontracts.AgentRegistryEntry, string, string) {
+	if source == nil || bundle == nil {
 		return nil, "", ""
 	}
-	for _, view := range bundle.ProjectViews() {
-		if strings.TrimSpace(view.Paths.ParentKey) == "" && view.Paths.Depth == 0 {
-			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile), strings.TrimSpace(view.Paths.Key)
+	scopes := source.ProjectScopes()
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope.OwningFlowID) == "" && scope.Depth == 0 {
+			return scope.Agents, projectAgentSourceFile(bundle, scope.Key), strings.TrimSpace(scope.Key)
 		}
 	}
-	for _, view := range bundle.ProjectViews() {
-		if strings.TrimSpace(view.Paths.ParentKey) == "" {
-			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile), strings.TrimSpace(view.Paths.Key)
+	for _, scope := range scopes {
+		if strings.TrimSpace(scope.OwningFlowID) == "" {
+			return scope.Agents, projectAgentSourceFile(bundle, scope.Key), strings.TrimSpace(scope.Key)
 		}
 	}
-	return bundle.AgentEntries(), strings.TrimSpace(bundle.Paths.ProjectAgentsFile), "."
+	return nil, "", ""
+}
+
+func projectAgentSourceFile(bundle *runtimecontracts.WorkflowContractBundle, scopeKey string) string {
+	if view, ok := bundle.ProjectViewByKey(strings.TrimSpace(scopeKey)); ok {
+		return strings.TrimSpace(view.Paths.ProjectAgentsFile)
+	}
+	if strings.TrimSpace(scopeKey) == "." {
+		return strings.TrimSpace(bundle.Paths.ProjectAgentsFile)
+	}
+	return ""
 }
 
 func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFile, scopeKind, scopeID string, names map[authoringAgentNameKey]string) ([]AgentView, error) {

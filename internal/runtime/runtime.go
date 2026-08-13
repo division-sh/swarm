@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -119,7 +120,6 @@ type RuntimeDeps struct {
 	SessionResetter                sessions.Resetter
 	ConversationStore              llm.ConversationPersistence
 	ManagerStore                   runtimemanager.ManagerPersistence
-	ManagerLifecycleStore          runtimemanager.AgentLifecyclePersistence
 	ManagerLifecycleDiagnostics    runtimemanager.AgentLifecycleDiagnosticPersistence
 	ManagerPersistenceRoles        runtimemanager.PersistenceRoles
 	EffectsStore                   runtimeeffects.Store
@@ -137,7 +137,7 @@ type RuntimeDeps struct {
 	DecisionCardHumanTasks         decisioncard.HumanTaskStore
 	DecisionCardDraftExpiry        runtimepipeline.DecisionCardDraftExpiry
 	HumanTaskExpiry                runtimepipeline.HumanTaskExpiry
-	StartupOwnership               runtimestartupownership.Store
+	StartupGrant                   runtimestartupownership.GenerationGrant
 	MailboxStore                   runtimetools.MailboxPersistence
 	ToolEntityStore                runtimetools.EntityPersistence
 	HumanTaskStore                 runtimetools.HumanTaskCardStore
@@ -219,24 +219,18 @@ type BootProgressEvent struct {
 }
 
 type Runtime struct {
+	generationMu               sync.Mutex
 	lifecycleMu                sync.Mutex
 	startCtx                   context.Context
 	cancelStart                context.CancelFunc
-	ownershipLease             runtimestartupownership.Lease
-	ownershipLeaseBorrowed     bool
-	pendingOwnershipLease      runtimestartupownership.Lease
-	pendingOwnershipOwned      bool
-	ownershipHandoffPending    bool
+	startupGrant               runtimestartupownership.GenerationGrant
 	replacementQuiesced        bool
 	workOccurrence             *worklifetime.RuntimeOccurrence
 	runLifecycleExecutor       *runtimerunlifecycle.Executor
 	runLifecycleRegistration   runtimerunlifecycle.CandidateRegistration
 	deliveryContinuations      *runtimedeliverycontinuation.Coordinator
 	deliverySignalRegistration *runtimepipeline.DeliveryContinuationSignalRegistration
-	ownerID                    string
-	bootID                     string
 	startupAdmission           managedexecution.Admission
-	pendingOwnershipHandoff    runtimestartupownership.Handoff
 	shutdownGate               shutdownAdmission
 	payloadValidator           runtimebus.PayloadValidator
 	authorActivityDescriptors  []runtimeauthoractivity.EventDescriptor
@@ -245,7 +239,6 @@ type Runtime struct {
 	authorActivityRegistrars   []AuthorActivityCatalogRegistrar
 	eventPayloadBinder         EventPayloadValidationBinder
 	inboundPayloadBinder       EventPayloadValidationBinder
-	startupOwnership           runtimestartupownership.Store
 	runLifecycleCandidates     runtimerunlifecycle.CandidateOwner
 	deliveryStore              runtimedelivery.Store
 	timerObligationReader      runtimetimerobligation.Reader
@@ -320,235 +313,218 @@ func (rt *Runtime) WorkOccurrence() *worklifetime.RuntimeOccurrence {
 	return rt.workOccurrence
 }
 
-func (rt *Runtime) CurrentStartupAuthority() (runtimestartupownership.Authority, error) {
+// CurrentStartupGrantEvidence returns the exact generation authority currently
+// installed on this runtime. It never exposes process-level release authority.
+func (rt *Runtime) CurrentStartupGrantEvidence() (runtimestartupownership.GrantEvidence, error) {
 	if rt == nil {
-		return runtimestartupownership.Authority{}, fmt.Errorf("runtime is required")
+		return runtimestartupownership.GrantEvidence{}, fmt.Errorf("runtime is required")
 	}
 	rt.lifecycleMu.Lock()
-	lease := rt.ownershipLease
+	grant := rt.startupGrant
 	rt.lifecycleMu.Unlock()
-	if lease == nil {
-		return runtimestartupownership.Authority{}, fmt.Errorf("runtime startup ownership is unavailable")
+	if grant == nil {
+		return runtimestartupownership.GrantEvidence{}, fmt.Errorf("runtime generation grant is unavailable")
 	}
-	return lease.Authority()
+	return grant.Evidence()
 }
 
-// PrepareInitialStartupOwnership acquires the selected-store lease before
-// serve-level recovery and desired-state reconciliation mutate durable state.
-// Start consumes the prepared lease instead of acquiring a second owner.
-func (rt *Runtime) PrepareInitialStartupOwnership(ctx context.Context) error {
-	if rt == nil || rt.startupOwnership == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
+// InstallStartupGrant binds one non-release-capable generation grant before
+// Start. Process composition remains the sole owner of acquisition, topology
+// mutation, generation replacement, and final selected-store release.
+func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.GenerationGrant) error {
+	if rt == nil || grant == nil {
+		return fmt.Errorf("runtime generation grant is required")
 	}
 	rt.lifecycleMu.Lock()
 	defer rt.lifecycleMu.Unlock()
-	if rt.cancelStart != nil || rt.ownershipLease != nil || rt.pendingOwnershipLease != nil {
-		return fmt.Errorf("runtime already started or has pending startup ownership")
+	if rt.cancelStart != nil || rt.startupGrant != nil {
+		return fmt.Errorf("runtime already started or has a generation grant")
 	}
-	if strings.TrimSpace(rt.ownerID) == "" {
-		rt.ownerID = newRuntimeOwnerID()
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(rt.bootID)); err != nil {
-		rt.bootID = uuid.NewString()
-	}
-	lease, err := rt.startupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID:    rt.ownerID,
-		BootID:     rt.bootID,
-		BundleHash: rt.Options.BundleSourceFact.BundleHash(),
-	})
+	evidence, err := grant.Evidence()
 	if err != nil {
 		return err
 	}
-	rt.pendingOwnershipLease = lease
-	rt.pendingOwnershipOwned = lease != nil
+	if evidence.BundleHash != rt.Options.BundleSourceFact.BundleHash() || evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
+		return fmt.Errorf("runtime generation grant does not match runtime source coordinate")
+	}
+	plan, err := grant.SourceSetPlan(context.Background())
+	if err != nil {
+		return fmt.Errorf("load generation source-set plan: %w", err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(
+		evidence.SourceSetRevision,
+		evidence.BundleHash,
+		evidence.BundleSource,
+		runtimeagenttopology.LifetimeDurableManaged,
+	)
+	if err != nil {
+		return err
+	}
+	if rt.Manager == nil {
+		return errors.New("runtime generation grant requires an agent manager")
+	}
+	if err := rt.Manager.InstallStartupTopology(grant, admission, plan); err != nil {
+		return err
+	}
+	rt.startupGrant = grant
 	return nil
 }
 
-// ReleasePreparedStartupOwnership releases an initial lease when serve-level
-// work fails before Start consumes it. It never releases replacement handoffs.
-func (rt *Runtime) ReleasePreparedStartupOwnership(ctx context.Context) error {
-	if rt == nil {
-		return nil
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	rt.lifecycleMu.Lock()
-	if !rt.pendingOwnershipOwned || rt.pendingOwnershipLease == nil {
-		rt.lifecycleMu.Unlock()
-		return nil
-	}
-	lease := rt.pendingOwnershipLease
-	rt.pendingOwnershipLease = nil
-	rt.pendingOwnershipOwned = false
-	rt.lifecycleMu.Unlock()
-	return lease.Release(ctx)
+// PreparedStaticSourceSetGenerationRefresh reserves one runtime generation and
+// all of its static lifecycle cells before process composition mutates the
+// complete source set. Commit and Abort both settle every held lock exactly
+// once.
+type PreparedStaticSourceSetGenerationRefresh struct {
+	mu              sync.Mutex
+	runtime         *Runtime
+	plan            runtimeagenttopology.SourceSetPlan
+	current         runtimestartupownership.GenerationGrant
+	currentEvidence runtimestartupownership.GrantEvidence
+	topology        *runtimemanager.PreparedStaticTopologySourceSetRebind
+	done            bool
 }
 
-type StartupOwnershipHandoff struct {
-	predecessor *Runtime
-	candidate   *Runtime
-	lease       runtimestartupownership.Lease
-	typed       runtimestartupownership.Handoff
-	active      bool
-	committed   bool
-}
-
-// PrepareStartupOwnershipHandoff authorizes a candidate only after the
-// predecessor's shared-store consumers have quiesced under its retained lease.
-func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*StartupOwnershipHandoff, error) {
-	if rt == nil || predecessor == nil || rt == predecessor {
-		return nil, nil
+// PrepareStaticSourceSetGenerationRefresh validates the successor topology
+// against the live semantic source and reserves generation/static lifecycle
+// mutation. It performs no selected-store mutation.
+func (rt *Runtime) PrepareStaticSourceSetGenerationRefresh(
+	plan runtimeagenttopology.SourceSetPlan,
+	source semanticview.Source,
+) (_ *PreparedStaticSourceSetGenerationRefresh, prepareErr error) {
+	if rt == nil || rt.Manager == nil || source == nil {
+		return nil, errors.New("runtime source-set generation refresh requires runtime, manager, and semantic source")
 	}
-	predecessor.lifecycleMu.Lock()
-	defer predecessor.lifecycleMu.Unlock()
-	rt.lifecycleMu.Lock()
-	defer rt.lifecycleMu.Unlock()
-	if predecessor.ownershipHandoffPending {
-		return nil, fmt.Errorf("runtime startup ownership handoff is already pending")
+	if err := plan.Validate(); err != nil {
+		return nil, fmt.Errorf("runtime source-set generation refresh plan: %w", err)
 	}
-	if !predecessor.replacementQuiesced {
-		return nil, fmt.Errorf("replacement predecessor must quiesce before startup ownership handoff")
-	}
-	if rt.cancelStart != nil || rt.ownershipLease != nil || rt.pendingOwnershipLease != nil {
-		return nil, fmt.Errorf("replacement runtime already started or has pending ownership")
-	}
-	lease := predecessor.ownershipLease
-	if lease == nil {
-		if rt.startupOwnership != nil {
-			return nil, fmt.Errorf("replacement runtime requires predecessor startup ownership lease")
+	rt.generationMu.Lock()
+	keepLock := false
+	defer func() {
+		if !keepLock {
+			rt.generationMu.Unlock()
 		}
-		return nil, nil
+	}()
+
+	rt.lifecycleMu.Lock()
+	current := rt.startupGrant
+	started := rt.cancelStart != nil
+	rt.lifecycleMu.Unlock()
+	if current == nil || !started {
+		return nil, errors.New("runtime source-set generation refresh requires a running generation")
 	}
-	if rt.startupOwnership == nil {
-		return nil, fmt.Errorf("replacement runtime cannot consume predecessor startup ownership lease")
-	}
-	predecessor.ownershipHandoffPending = true
-	rt.pendingOwnershipLease = lease
-	rt.pendingOwnershipOwned = false
-	typed, err := lease.PrepareHandoff(context.Background(), runtimestartupownership.HandoffRequest{
-		CandidateOwnerID: rt.ownerID, CandidateBootID: rt.bootID,
-		CandidateBundleHash: rt.Options.BundleSourceFact.BundleHash(),
-	})
+	evidence, err := current.Evidence()
 	if err != nil {
-		predecessor.ownershipHandoffPending = false
-		rt.pendingOwnershipLease = nil
 		return nil, err
 	}
-	rt.pendingOwnershipHandoff = typed
-	return &StartupOwnershipHandoff{predecessor: predecessor, candidate: rt, lease: lease, typed: typed, active: true}, nil
-}
-
-func (h *StartupOwnershipHandoff) Commit() error {
-	if h == nil || !h.active {
-		return nil
+	if evidence.State != runtimestartupownership.GrantAdmitted {
+		return nil, fmt.Errorf("runtime source-set generation refresh requires admitted grant, got %s", evidence.State)
 	}
-	if h.committed {
-		return nil
+	bundleHash, bundleSource := rt.Options.BundleSourceFact.StorageValues()
+	if evidence.BundleHash != bundleHash || evidence.BundleSource != bundleSource ||
+		evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
+		return nil, errors.New("runtime source-set generation refresh grant differs from runtime coordinate")
 	}
-	h.predecessor.lifecycleMu.Lock()
-	h.candidate.lifecycleMu.Lock()
-	if h.predecessor.ownershipLease != h.lease || h.candidate.ownershipLease != h.lease || !h.candidate.ownershipLeaseBorrowed {
-		h.candidate.lifecycleMu.Unlock()
-		h.predecessor.lifecycleMu.Unlock()
-		return fmt.Errorf("runtime startup ownership handoff state changed before commit")
-	}
-	authority, err := h.typed.Commit(context.Background())
+	admission, err := runtimeagenttopology.StaticAdmission(
+		plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged,
+	)
 	if err != nil {
-		h.candidate.lifecycleMu.Unlock()
-		h.predecessor.lifecycleMu.Unlock()
-		return err
+		return nil, err
 	}
-	h.predecessor.ownershipLease = nil
-	h.candidate.ownershipLeaseBorrowed = false
-	h.candidate.pendingOwnershipLease = nil
-	h.candidate.pendingOwnershipHandoff = nil
-	h.candidate.pendingOwnershipOwned = false
-	h.committed = true
-	startCtx := h.candidate.startCtx
-	h.candidate.lifecycleMu.Unlock()
-	h.predecessor.lifecycleMu.Unlock()
-	if _, err := h.candidate.admitManagedExecution(startCtx, authority, false); err != nil {
-		return fmt.Errorf("activate replacement managed execution after ownership commit: %w", err)
+	topology, err := rt.Manager.PrepareStaticTopologySourceSetRebind(admission, plan, source)
+	if err != nil {
+		return nil, err
 	}
-	if h.candidate.Manager != nil {
-		if err := h.candidate.Manager.Run(h.candidate.startCtx); err != nil {
-			return fmt.Errorf("start replacement managed execution after ownership commit: %w", err)
-		}
-	}
-	if h.candidate.Bus != nil {
-		if err := h.candidate.startOutboxSweeper(h.candidate.startCtx); err != nil {
-			h.candidate.emitBootProgress(17, "outbox_sweeper", "FAILED", err.Error())
-			return err
-		}
-		h.candidate.emitBootProgress(17, "outbox_sweeper", "started", "")
-	} else {
-		h.candidate.emitBootProgress(17, "outbox_sweeper", "skipped", "event bus unavailable")
-	}
-	return nil
+	keepLock = true
+	return &PreparedStaticSourceSetGenerationRefresh{
+		runtime: rt, plan: plan, current: current, currentEvidence: evidence, topology: topology,
+	}, nil
 }
 
-func (h *StartupOwnershipHandoff) Finalize() error {
-	if h == nil || !h.active || !h.committed {
-		return nil
+func (p *PreparedStaticSourceSetGenerationRefresh) Abort() {
+	if p == nil {
+		return
 	}
-	if _, err := h.typed.Finalize(context.Background()); err != nil {
-		return err
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return
 	}
-	h.predecessor.lifecycleMu.Lock()
-	h.predecessor.ownershipHandoffPending = false
-	h.predecessor.lifecycleMu.Unlock()
-	h.active = false
-	return nil
+	p.done = true
+	if p.topology != nil {
+		p.topology.Abort()
+	}
+	p.runtime.generationMu.Unlock()
 }
 
-func (h *StartupOwnershipHandoff) Rollback() error {
-	if h == nil || !h.active {
-		return nil
+// Commit rotates the selected-store generation grant and persists every
+// static topology admission through the locks acquired by Prepare. The
+// successor remains installed on a persistence failure so a later prepared
+// retry can replay the deterministic lifecycle transitions.
+func (p *PreparedStaticSourceSetGenerationRefresh) Commit(
+	ctx context.Context,
+	capability runtimestartupownership.ProcessCapability,
+) (commitErr error) {
+	if p == nil || p.runtime == nil || p.topology == nil {
+		return errors.New("prepared runtime source-set generation refresh is incomplete")
 	}
-	h.predecessor.lifecycleMu.Lock()
-	defer h.predecessor.lifecycleMu.Unlock()
-	h.candidate.lifecycleMu.Lock()
-	defer h.candidate.lifecycleMu.Unlock()
-	if h.committed {
-		if !h.candidate.replacementQuiesced {
-			return fmt.Errorf("replacement candidate must quiesce before committed ownership rollback")
-		}
-		if h.candidate.ownershipLease == h.lease {
-			h.candidate.ownershipLease = nil
-			h.candidate.ownershipLeaseBorrowed = false
-		}
-		h.predecessor.ownershipLease = h.lease
-		if _, err := h.typed.Rollback(context.Background()); err != nil {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return errors.New("prepared runtime source-set generation refresh is already settled")
+	}
+	p.done = true
+	defer p.runtime.generationMu.Unlock()
+	if capability == nil {
+		p.topology.Abort()
+		return errors.New("prepared runtime source-set generation refresh requires process capability")
+	}
+
+	successor := p.current
+	var predecessor runtimestartupownership.GenerationGrant
+	if p.currentEvidence.SourceSetRevision != p.plan.Revision {
+		var err error
+		successor, err = capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+			BundleHash: p.currentEvidence.BundleHash, BundleSource: p.currentEvidence.BundleSource,
+			RuntimeInstanceID: p.currentEvidence.RuntimeInstanceID,
+			RuntimeGeneration: p.currentEvidence.RuntimeGeneration + 1, SourceSetRevision: p.plan.Revision,
+		})
+		if err != nil {
+			p.topology.Abort()
 			return err
 		}
-		h.predecessor.ownershipHandoffPending = false
-		h.candidate.pendingOwnershipLease = nil
-		h.candidate.pendingOwnershipOwned = false
-		h.committed = false
-		h.active = false
-		return nil
+		if _, err = successor.MarkProbesSettled(ctx, p.currentEvidence.ProbeSurfaceIDs); err != nil {
+			p.topology.Abort()
+			return errors.Join(err, successor.Retire(context.Background()))
+		}
+		if _, err = successor.AdmitExecution(ctx); err != nil {
+			p.topology.Abort()
+			return errors.Join(err, successor.Retire(context.Background()))
+		}
+		predecessor = p.current
+		p.runtime.lifecycleMu.Lock()
+		if p.runtime.startupGrant != p.current || p.runtime.cancelStart == nil {
+			p.runtime.lifecycleMu.Unlock()
+			p.topology.Abort()
+			return errors.Join(errors.New("runtime generation changed during source-set refresh"), successor.Retire(context.Background()))
+		}
+		p.runtime.startupGrant = successor
+		p.runtime.lifecycleMu.Unlock()
 	}
-	if h.candidate.cancelStart == nil && h.candidate.ownershipLeaseBorrowed && h.candidate.ownershipLease == h.lease {
-		h.candidate.ownershipLease = nil
-		h.candidate.ownershipLeaseBorrowed = false
-	}
-	if h.candidate.pendingOwnershipLease == h.lease {
-		h.candidate.pendingOwnershipLease = nil
-		h.candidate.pendingOwnershipOwned = false
-	}
-	if h.candidate.pendingOwnershipHandoff == h.typed {
-		h.candidate.pendingOwnershipHandoff = nil
-	}
-	if _, err := h.typed.Rollback(context.Background()); err != nil {
+
+	evidence, err := successor.Evidence()
+	if err != nil {
+		p.topology.Abort()
 		return err
 	}
-	h.predecessor.ownershipHandoffPending = false
-	h.active = false
-	return nil
+	if evidence.SourceSetRevision != p.plan.Revision || evidence.State != runtimestartupownership.GrantAdmitted {
+		p.topology.Abort()
+		return errors.New("runtime source-set generation refresh successor is not admitted for the requested plan")
+	}
+	commitErr = p.topology.Commit(ctx, successor, evidence.GrantID)
+	if predecessor != nil {
+		commitErr = errors.Join(commitErr, predecessor.Retire(context.Background()))
+	}
+	return commitErr
 }
 
 const bootstrapSelfCheckSubscriberID = "bootstrap-self-check"
@@ -976,8 +952,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		return nil, err
 	}
 	rt := &Runtime{
-		ownerID:                   newRuntimeOwnerID(),
-		bootID:                    uuid.NewString(),
 		Config:                    cfg,
 		ExecutionPosture:          boot.ExecutionPosture,
 		EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
@@ -992,7 +966,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		authorActivityRegistrars:  append([]AuthorActivityCatalogRegistrar(nil), runtimeDeps.AuthorActivityRegistrars...),
 		eventPayloadBinder:        runtimeDeps.EventPayloadValidationBinder,
 		inboundPayloadBinder:      runtimeDeps.InboundPayloadValidationBinder,
-		startupOwnership:          runtimeDeps.StartupOwnership,
 		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
 		deliveryStore:             runtimeDeps.DeliveryStore,
 		timerObligationReader:     runtimeDeps.TimerObligationReader,
@@ -1276,15 +1249,10 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		}
 	}
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{})
-	lifecycleStore := runtimeDeps.ManagerLifecycleStore
-	if runtimeDeps.WorkflowPersistence.Configured() && lifecycleStore == nil {
-		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
-	}
 	managerOptions := runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   boot.ExecutionPosture,
 		BaseContext:        rt.authorActivityContext(context.Background()),
 		BundleSourceFact:   rt.Options.BundleSourceFact,
-		LifecycleStore:     lifecycleStore,
 		DeliveryStore:      runtimeDeps.DeliveryStore,
 		TestLifecycleProbe: opts.TestLifecycleProbe,
 		Workspaces:         rt.Workspace,
@@ -1336,6 +1304,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, managerOptions, runtimeDeps.ManagerStore)
 	managerRef = rt.Manager
+	if runtimeDeps.StartupGrant != nil {
+		if err := rt.InstallStartupGrant(runtimeDeps.StartupGrant); err != nil {
+			return nil, fmt.Errorf("install runtime generation grant: %w", err)
+		}
+	}
 
 	if runtimeDeps.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
@@ -1365,12 +1338,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
-	if strings.TrimSpace(rt.ownerID) == "" {
-		rt.ownerID = newRuntimeOwnerID()
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(rt.bootID)); err != nil {
-		rt.bootID = uuid.NewString()
-	}
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		return err
 	}
@@ -1384,56 +1351,34 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("runtime shutdown already started")
 	}
 	rt.lifecycleMu.Lock()
-	if rt.cancelStart != nil || rt.ownershipLease != nil {
+	if rt.cancelStart != nil {
 		rt.lifecycleMu.Unlock()
 		return fmt.Errorf("runtime already started")
 	}
 	startCtx, cancelStart := context.WithCancel(ctx)
-	lease := rt.pendingOwnershipLease
-	preparedOwnedLease := lease != nil && rt.pendingOwnershipOwned
-	borrowedLease := lease != nil && !preparedOwnedLease
-	if rt.startupOwnership != nil && lease == nil {
-		var err error
-		lease, err = rt.startupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
-			OwnerID: rt.ownerID, BootID: rt.bootID, BundleHash: rt.Options.BundleSourceFact.BundleHash(),
-		})
-		if err != nil {
-			rt.emitBootProgress(5, "startup_ownership_lease", "FAILED", err.Error())
-			cancelStart()
-			rt.lifecycleMu.Unlock()
-			rt.releaseAuthorActivityCatalog()
-			return err
-		}
-		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "owner="+rt.ownerID)
-	} else if borrowedLease {
-		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "handoff_owner="+rt.ownerID)
-	} else if preparedOwnedLease {
-		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "prepared_owner="+rt.ownerID)
-	} else {
-		authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
-			OwnerID: rt.ownerID, BootID: rt.bootID, BundleHash: rt.Options.BundleSourceFact.BundleHash(),
-		}, "memory")
-		if err != nil {
-			cancelStart()
-			rt.lifecycleMu.Unlock()
-			return err
-		}
-		lease, err = runtimestartupownership.NewLease(authority, nil, nil)
-		if err != nil {
-			cancelStart()
-			rt.lifecycleMu.Unlock()
-			return err
-		}
-		rt.emitBootProgress(5, "startup_ownership_lease", "ok", "memory_owner="+rt.ownerID)
+	grant := rt.startupGrant
+	if grant == nil {
+		cancelStart()
+		rt.lifecycleMu.Unlock()
+		rt.releaseAuthorActivityCatalog()
+		return fmt.Errorf("runtime generation grant is required before start")
 	}
+	grantEvidence, grantErr := grant.Evidence()
+	if grantErr != nil {
+		cancelStart()
+		rt.lifecycleMu.Unlock()
+		rt.releaseAuthorActivityCatalog()
+		return grantErr
+	}
+	if err := rt.Manager.ReconcileStaticTopologyForStartup(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+		cancelStart()
+		rt.lifecycleMu.Unlock()
+		rt.releaseAuthorActivityCatalog()
+		return fmt.Errorf("reconcile static declaration topology: %w", err)
+	}
+	rt.emitBootProgress(5, "startup_ownership_lease", "ok", "grant="+grantEvidence.GrantID)
 	rt.startCtx = startCtx
 	rt.cancelStart = cancelStart
-	rt.ownershipLease = lease
-	rt.ownershipLeaseBorrowed = borrowedLease
-	if preparedOwnedLease {
-		rt.pendingOwnershipLease = nil
-		rt.pendingOwnershipOwned = false
-	}
 	rt.replacementQuiesced = false
 	rt.lifecycleMu.Unlock()
 	started := false
@@ -1622,7 +1567,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.emitBootProgress(12, "static_agents_bootstrap", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static agents: %w", err)
 		}
-		if err := rt.Manager.EnsureStaticAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+		if err := rt.Manager.VerifyStaticAgents(rt.Options.WorkflowModule.SemanticSource()); err != nil {
 			rt.emitBootProgress(12, "static_agents_bootstrap", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static agents: %w", err)
 		}
@@ -1637,7 +1582,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.emitBootProgress(13, "flow_required_agents", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}
-		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+		if err := rt.Manager.VerifyStaticFlowRequiredAgents(rt.Options.WorkflowModule.SemanticSource()); err != nil {
 			rt.emitBootProgress(13, "flow_required_agents", "FAILED", err.Error())
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}
@@ -1685,13 +1630,13 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
-	settledAuthority, handoffPending, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
+	settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("settle managed startup preflight: %w", err)
 	}
 	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
-	if rt.Manager != nil && !handoffPending {
+	if rt.Manager != nil {
 		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery)
 		if activateErr != nil {
 			if activation.ReplayErr != nil {
@@ -1722,14 +1667,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("start managed execution loops: %w", err)
 		}
 		rt.emitBootProgress(16, "manager_event_loop_start", "ok", "")
-	} else if handoffPending {
-		rt.emitBootProgress(16, "manager_event_loop_start", "deferred", "replacement execution awaits startup ownership commit")
 	} else {
 		rt.emitBootProgress(16, "manager_event_loop_start", "skipped", "manager unavailable")
 	}
-	if handoffPending {
-		rt.emitBootProgress(17, "outbox_sweeper", "deferred", "replacement execution awaits startup ownership commit")
-	} else if rt.Bus != nil {
+	if rt.Bus != nil {
 		if err := rt.startOutboxSweeper(startCtx); err != nil {
 			rt.emitBootProgress(17, "outbox_sweeper", "FAILED", err.Error())
 			return err
@@ -1897,27 +1838,23 @@ func (rt *Runtime) Shutdown() error {
 }
 
 func (rt *Runtime) ShutdownWithOptions(opts ShutdownOptions) error {
-	return rt.stopWithOptions(opts, true)
+	return rt.stopWithOptions(opts)
 }
 
 func (rt *Runtime) QuiesceForReplacement(opts ShutdownOptions) error {
-	return rt.stopWithOptions(opts, false)
+	return rt.stopWithOptions(opts)
 }
 
-func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) error {
+func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if rt == nil {
 		return nil
 	}
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
 	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
 	}
-	rt.lifecycleMu.Lock()
-	if rt.ownershipHandoffPending {
-		rt.lifecycleMu.Unlock()
-		return fmt.Errorf("runtime startup ownership handoff is pending")
-	}
-	rt.lifecycleMu.Unlock()
 	rt.shutdownGate.Close()
 	if rt.workOccurrence != nil {
 		_ = rt.workOccurrence.Fence()
@@ -1948,14 +1885,9 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	}
 	rt.lifecycleMu.Lock()
 	cancelStart := rt.cancelStart
-	lease := rt.ownershipLease
-	borrowedLease := rt.ownershipLeaseBorrowed
+	grant := rt.startupGrant
 	rt.cancelStart = nil
 	rt.startCtx = nil
-	if releaseOwnership && borrowedLease {
-		rt.ownershipLease = nil
-		rt.ownershipLeaseBorrowed = false
-	}
 	rt.lifecycleMu.Unlock()
 	if cancelStart != nil {
 		cancelStart()
@@ -2016,17 +1948,17 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 		rt.runLifecycleRegistration.Release()
 		rt.runLifecycleRegistration = nil
 	}
-	if releaseOwnership && lease != nil && !borrowedLease {
-		if err := lease.Release(context.Background()); err != nil {
+	if grant != nil {
+		grantRetireCtx, cancelGrantRetire := context.WithTimeout(context.Background(), grace)
+		if err := grant.Retire(grantRetireCtx); err != nil {
 			shutdownErr = errors.Join(shutdownErr, err)
-		} else {
-			rt.lifecycleMu.Lock()
-			if rt.ownershipLease == lease {
-				rt.ownershipLease = nil
-				rt.ownershipLeaseBorrowed = false
-			}
-			rt.lifecycleMu.Unlock()
 		}
+		cancelGrantRetire()
+		rt.lifecycleMu.Lock()
+		if rt.startupGrant == grant {
+			rt.startupGrant = nil
+		}
+		rt.lifecycleMu.Unlock()
 	}
 	rt.lifecycleMu.Lock()
 	rt.replacementQuiesced = true
@@ -2036,7 +1968,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 }
 
 func (rt *Runtime) cleanupStartFailure() {
-	_ = rt.stopWithOptions(DefaultShutdownOptions(), true)
+	_ = rt.stopWithOptions(DefaultShutdownOptions())
 }
 
 func (rt *Runtime) Wait(ctx context.Context) {
@@ -2099,7 +2031,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 		if source := rt.Options.WorkflowModule.SemanticSource(); source != nil {
 			flowCount = len(source.FlowSchemaEntries())
 			nodeCount = len(source.NodeEntries())
-			agentCount = len(source.AgentEntries())
+			agentCount = len(semanticview.AgentDeclarations(source))
 			eventCount = len(source.ResolvedEventCatalog())
 		}
 	}

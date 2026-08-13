@@ -69,16 +69,7 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 			return projection, true
 		}
 	default:
-		if _, exists := source.AgentEntries()[strings.TrimSpace(declaration.LocalID)]; !exists {
-			return AgentContractProjection{}, false
-		}
-		projection.ContractSource = runtimecontracts.ContractItemSource{Layer: "project"}
-		if bundle, ok := Bundle(source); ok {
-			if contractSource, exists := bundle.AgentContractSource(declaration.LocalID); exists {
-				projection.ContractSource = contractSource
-			}
-		}
-		return projection, true
+		return AgentContractProjection{}, false
 	}
 	return AgentContractProjection{}, false
 }

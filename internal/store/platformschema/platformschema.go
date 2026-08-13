@@ -191,6 +191,10 @@ func platformTableOrder(name string) int {
 		return 12
 	case "run_fork_fact_revisions":
 		return 13
+	case "agent_topology_source_set_head":
+		return 13
+	case "agent_topology_source_set_operations":
+		return 13
 	case "agents":
 		return 14
 	case "agent_directive_operations":
@@ -232,6 +236,8 @@ func platformTableOrder(name string) int {
 	case "agent_sessions":
 		return 60
 	case "runtime_startup_authority_facts":
+		return 61
+	case "runtime_generation_grants":
 		return 61
 	case "managed_agent_capability_surfaces":
 		return 62

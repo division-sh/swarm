@@ -47,6 +47,31 @@ func TestPersistedAgentProjectionDoesNotRequireRuntimePromptOwnership(t *testing
 	}
 }
 
+func TestPersistedAgentProjectionRoundTripsCompleteRuntimeDescriptorWithoutInference(t *testing.T) {
+	cfg := persistedIntentTestAgent(t)
+	cfg.Type = ""
+	cfg.FlowDataAccess = []string{"customers", "orders"}
+	cfg.BudgetEnvelope = 1.25
+
+	projection, err := ProjectPersistedAgentConfig(cfg, "")
+	if err != nil {
+		t.Fatalf("ProjectPersistedAgentConfig: %v", err)
+	}
+	hydrated, err := HydratePersistedAgentConfig(projection)
+	if err != nil {
+		t.Fatalf("HydratePersistedAgentConfig: %v", err)
+	}
+	if hydrated.Type != "" {
+		t.Fatalf("hydrated type = %q, want exact empty authored fact", hydrated.Type)
+	}
+	if !reflect.DeepEqual(hydrated.FlowDataAccess, cfg.FlowDataAccess) {
+		t.Fatalf("hydrated flow data access = %#v, want %#v", hydrated.FlowDataAccess, cfg.FlowDataAccess)
+	}
+	if hydrated.BudgetEnvelope != cfg.BudgetEnvelope {
+		t.Fatalf("hydrated budget envelope = %v, want %v", hydrated.BudgetEnvelope, cfg.BudgetEnvelope)
+	}
+}
+
 func TestPersistedAgentProjectionRejectsMissingOrTamperedIntent(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
 		cfg := persistedIntentTestAgent(t)

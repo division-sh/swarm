@@ -135,7 +135,12 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},
 		},
 	}
-	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	base := Wrap(bundle)
+	source := endpointCensusRootAgentSource{Source: base, scope: ProjectScope{
+		Key: ".", Agents: bundle.Agents,
+		AgentURIs: map[string]string{"analyst": "test://endpoint-census/analyst"},
+	}}
+	census := BuildAuthoredEventEndpointCensus(source)
 	producerKinds := endpointKindSet(census.Producers())
 	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {
 		if !producerKinds[kind] {
@@ -151,6 +156,15 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 	if len(census.InputPins()) != 1 || len(census.OutputPins()) != 1 {
 		t.Fatalf("interface endpoints = inputs %#v outputs %#v", census.InputPins(), census.OutputPins())
 	}
+}
+
+type endpointCensusRootAgentSource struct {
+	Source
+	scope ProjectScope
+}
+
+func (s endpointCensusRootAgentSource) ProjectScopes() []ProjectScope {
+	return []ProjectScope{s.scope}
 }
 
 func TestResolveDeclaredInputEndpointUsesAllDeclaredIdentitiesAndFailsClosed(t *testing.T) {

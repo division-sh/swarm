@@ -11,8 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -21,9 +21,13 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 type managedNativeStartupProbeRuntime struct {
@@ -45,19 +49,40 @@ func (r *managedNativeStartupProbeRuntime) ProbeStartupVisibleToolSurface(
 }
 
 type managedNativeLifecycleStore struct {
-	*startupRecoveryManagerStore
+	*runtimeTestRetainedSession
 	*startupCapabilityStore
 	*startupEffectStore
 }
 
-func newManagedNativeLifecycleStore(agent runtimemanager.PersistedAgent) *managedNativeLifecycleStore {
-	return &managedNativeLifecycleStore{
-		startupRecoveryManagerStore: &startupRecoveryManagerStore{
-			agents: []runtimemanager.PersistedAgent{agent},
-		},
-		startupCapabilityStore: &startupCapabilityStore{},
-		startupEffectStore:     &startupEffectStore{},
+func newManagedNativeLifecycleStore(t testing.TB, agents ...runtimemanager.PersistedAgent) *managedNativeLifecycleStore {
+	t.Helper()
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "managed-native-lifecycle-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	}, "runtime_test")
+	if err != nil {
+		t.Fatalf("construct managed-native retained session: %v", err)
 	}
+	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
+	for _, rec := range agents {
+		identity, identityErr := rec.Config.ConcreteIdentity()
+		if identityErr != nil {
+			t.Fatalf("managed-native fixture identity: %v", identityErr)
+		}
+		key, keyErr := identity.Fingerprint()
+		if keyErr != nil {
+			t.Fatalf("managed-native fixture key: %v", keyErr)
+		}
+		selected.agents[key] = rec
+	}
+	return &managedNativeLifecycleStore{
+		runtimeTestRetainedSession: selected,
+		startupCapabilityStore:     &startupCapabilityStore{},
+		startupEffectStore:         &startupEffectStore{},
+	}
+}
+
+func (s *managedNativeLifecycleStore) runtimeTestStartupSession() *runtimeTestRetainedSession {
+	return s.runtimeTestRetainedSession
 }
 
 func (s *managedNativeLifecycleStore) surface(id string) (managedcapabilities.Surface, error) {
@@ -186,23 +211,17 @@ func (s *managedNativeRecoveryDeliveryStore) ScanDeliveryContinuations(
 func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	ctx := testAuthorActivityContext(context.Background())
-	managerStore := newManagedNativeLifecycleStore(managedNativeLifecycleAgent(t, "recovered-native-agent"))
+	module := managedNativeLifecycleModule(t, "recovered-native-agent")
+	managerStore := newManagedNativeLifecycleStore(t, managedNativeLifecycleAgent(t, module.SemanticSource()))
 	delivery := &managedNativeRecoveryDeliveryStore{}
-	lease := &fakeRuntimeStartupOwnershipLease{}
-	ownership := fakeRuntimeStartupOwnershipStore{
-		acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
-			return lease, nil
-		},
-	}
 	probeRuntime := &managedNativeStartupProbeRuntime{}
 	cfg := managedNativeLifecycleConfig(true)
 	deps := managedNativeLifecycleDeps(
 		managerStore,
 		delivery,
-		ownership,
 	)
 	deps.Config = cfg
-	deps.Options = managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime)
+	deps.Options = managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime, module)
 	rt, err := newScopedTestRuntime(t, ctx, deps)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -216,11 +235,11 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 		if !ok {
 			return fmt.Errorf("recovery backlog claim started without managed execution admission")
 		}
-		authority, err := rt.ownershipLease.Authority()
+		authority, err := rt.startupGrant.Evidence()
 		if err != nil {
 			return fmt.Errorf("load recovery startup authority: %w", err)
 		}
-		if authority.State != runtimestartupownership.StateAdmitted {
+		if authority.State != runtimestartupownership.GrantAdmitted {
 			return fmt.Errorf("recovery backlog claim observed startup authority state %q, want admitted", authority.State)
 		}
 		if !slices.Equal(admission.CapabilitySurfaceIDs, authority.ProbeSurfaceIDs) || len(admission.CapabilitySurfaceIDs) != 1 {
@@ -242,11 +261,11 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	if got := probeRuntime.probe.calls; !slices.Equal(got, []string{"recovered-native-agent"}) {
 		t.Fatalf("startup probe calls = %v, want recovered agent", got)
 	}
-	authority, err := rt.ownershipLease.Authority()
+	authority, err := rt.startupGrant.Evidence()
 	if err != nil {
 		t.Fatalf("startup authority: %v", err)
 	}
-	if authority.State != runtimestartupownership.StateAdmitted {
+	if authority.State != runtimestartupownership.GrantAdmitted {
 		t.Fatalf("startup authority state = %q, want admitted", authority.State)
 	}
 	if !slices.Equal(rt.startupAdmission.CapabilitySurfaceIDs, authority.ProbeSurfaceIDs) {
@@ -255,22 +274,14 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	requireManagedNativeLifecycleSurface(t, managerStore, authority.ProbeSurfaceIDs[0], "recovered-native-agent", authority)
 }
 
-func TestRuntimeStart_PreparedReplacementSettlesManagedNativePreflightBeforeCommitAdmission(t *testing.T) {
+func TestRuntimeStart_ReplacementGrantSettlesManagedNativePreflightBeforeAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	ctx := testAuthorActivityContext(context.Background())
-	managerStore := newManagedNativeLifecycleStore(managedNativeLifecycleAgent(t, "replacement-native-agent"))
+	predecessorStore := newManagedNativeLifecycleStore(t)
 	delivery := &managedNativeRecoveryDeliveryStore{}
-	lease := &fakeRuntimeStartupOwnershipLease{}
-	ownership := fakeRuntimeStartupOwnershipStore{
-		acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
-			return lease, nil
-		},
-	}
-
 	predecessorDeps := managedNativeLifecycleDeps(
-		managerStore,
+		predecessorStore,
 		delivery,
-		ownership,
 	)
 	predecessorDeps.Config = &config.Config{}
 	predecessorDeps.Options = RuntimeOptions{
@@ -293,14 +304,15 @@ func TestRuntimeStart_PreparedReplacementSettlesManagedNativePreflightBeforeComm
 		t.Fatalf("QuiesceForReplacement(predecessor): %v", err)
 	}
 
+	managerStore := newManagedNativeLifecycleStore(t)
 	probeRuntime := &managedNativeStartupProbeRuntime{}
+	module := managedNativeLifecycleModule(t, "replacement-native-agent")
 	candidateDeps := managedNativeLifecycleDeps(
 		managerStore,
 		delivery,
-		ownership,
 	)
 	candidateDeps.Config = managedNativeLifecycleConfig(true)
-	candidateDeps.Options = managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime)
+	candidateDeps.Options = managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime, module)
 	candidate, err := newScopedTestRuntime(t, ctx, candidateDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
@@ -308,43 +320,30 @@ func TestRuntimeStart_PreparedReplacementSettlesManagedNativePreflightBeforeComm
 	if err := candidate.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog(candidate): %v", err)
 	}
-	handoff, err := candidate.PrepareStartupOwnershipHandoff(predecessor)
-	if err != nil {
-		t.Fatalf("PrepareStartupOwnershipHandoff: %v", err)
-	}
 	if err := candidate.Start(ctx); err != nil {
 		t.Fatalf("Start(candidate): %v", err)
 	}
 
-	authority, err := handoff.typed.Authority()
+	authority, err := candidate.startupGrant.Evidence()
 	if err != nil {
-		t.Fatalf("handoff authority: %v", err)
+		t.Fatalf("candidate grant authority: %v", err)
 	}
-	if authority.State != runtimestartupownership.StateProbeSettled {
-		t.Fatalf("handoff authority state = %q, want probe_settled before commit", authority.State)
+	if authority.State != runtimestartupownership.GrantAdmitted {
+		t.Fatalf("candidate grant authority state = %q, want admitted", authority.State)
 	}
 	if len(authority.ProbeSurfaceIDs) != 1 {
 		t.Fatalf("handoff probe surface IDs = %v, want one", authority.ProbeSurfaceIDs)
 	}
-	if candidate.startupAdmission.ID != "" {
-		t.Fatalf("candidate received managed execution admission before handoff commit: %#v", candidate.startupAdmission)
+	if candidate.startupAdmission.ID == "" {
+		t.Fatal("candidate did not receive managed execution admission through its process grant")
 	}
 	if got := probeRuntime.probe.calls; !slices.Equal(got, []string{"replacement-native-agent"}) {
 		t.Fatalf("startup probe calls = %v, want replacement agent", got)
 	}
 	requireManagedNativeLifecycleSurface(t, managerStore, authority.ProbeSurfaceIDs[0], "replacement-native-agent", authority)
 
-	if err := handoff.Commit(); err != nil {
-		t.Fatalf("Commit handoff: %v", err)
-	}
-	if candidate.startupAdmission.ID == "" {
-		t.Fatal("candidate did not receive managed execution admission after handoff commit")
-	}
 	if !slices.Equal(candidate.startupAdmission.CapabilitySurfaceIDs, authority.ProbeSurfaceIDs) {
-		t.Fatalf("candidate admission surfaces = %v, pre-commit handoff surfaces = %v", candidate.startupAdmission.CapabilitySurfaceIDs, authority.ProbeSurfaceIDs)
-	}
-	if err := handoff.Finalize(); err != nil {
-		t.Fatalf("Finalize handoff: %v", err)
+		t.Fatalf("candidate admission surfaces = %v, settled grant surfaces = %v", candidate.startupAdmission.CapabilitySurfaceIDs, authority.ProbeSurfaceIDs)
 	}
 	if err := predecessor.Shutdown(); err != nil {
 		t.Fatalf("Shutdown(predecessor): %v", err)
@@ -358,11 +357,11 @@ func managedNativeLifecycleConfig(recovery bool) *config.Config {
 	return cfg
 }
 
-func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime llm.Runtime) RuntimeOptions {
+func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime llm.Runtime, module runtimepipeline.WorkflowModule) RuntimeOptions {
 	t.Helper()
 	return RuntimeOptions{
 		SelfCheck:      false,
-		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
+		WorkflowModule: module,
 		LLMRuntime:     modelRuntime,
 		WorkspaceLifecycle: claudeStartupWorkspaceStub{
 			target: &workspace.Target{Container: "swarm-agent-" + agentID, Workdir: "/workspace"},
@@ -380,7 +379,6 @@ func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime ll
 func managedNativeLifecycleDeps(
 	managerStore *managedNativeLifecycleStore,
 	delivery runtimedelivery.Store,
-	ownership runtimestartupownership.Store,
 ) RuntimeDeps {
 	eventStore := startupRecoveryMinimalEventStore{}
 	return RuntimeDeps{
@@ -389,29 +387,41 @@ func managedNativeLifecycleDeps(
 		PipelineObligations:      eventStore.PipelineObligations(),
 		DeliveryStore:            delivery,
 		ManagerStore:             managerStore,
+		ManagerPersistenceRoles:  runtimemanager.PersistenceRoles{LifecycleState: managerStore},
 		EffectsStore:             managerStore,
 		ManagedCapabilitiesStore: managerStore,
-		StartupOwnership:         ownership,
 	}
 }
 
-func managedNativeLifecycleAgent(t testing.TB, agentID string) runtimemanager.PersistedAgent {
+func managedNativeLifecycleAgent(t testing.TB, source semanticview.Source) runtimemanager.PersistedAgent {
 	t.Helper()
-	return runtimemanager.PersistedAgent{
-		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-			ID:            agentID,
-			Identity:      agentidentitytest.RootRuntime(t, agentID, "runtime-test/managed-native-lifecycle"),
-			Role:          "researcher",
-			FlowID:        "global",
-			Type:          "stub",
-			Model:         "regular",
-			ExecutionMode: "live",
-			NativeTools:   runtimeactors.NativeToolConfig{WebSearch: true},
-		}),
-		Status:    "active",
-		HiredBy:   "managed-native-lifecycle-test",
-		StartedAt: time.Now().UTC(),
+	records, err := runtimemanager.StaticAgentMaterializationRecords(source)
+	if err != nil {
+		t.Fatalf("materialize managed-native declaration: %v", err)
 	}
+	if len(records) != 1 {
+		t.Fatalf("managed-native materialization count = %d, want 1", len(records))
+	}
+	rec := records[0]
+	rec.Status = "active"
+	rec.HiredBy = "managed-native-lifecycle-test"
+	rec.StartedAt = time.Now().UTC()
+	rec.LifecycleEpoch = 1
+	rec.LifecycleGeneration = 1
+	rec.LifecyclePhase = runtimemanager.AgentLifecycleRunning
+	rec.LifecycleRunMode = runtimemanager.AgentRunModeStandard
+	return rec
+}
+
+func managedNativeLifecycleModule(t *testing.T, agentID string) semanticOnlyWorkflowRuntime {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := canonicalrouting.CopyManagedNativeLifecycle(t, agentID)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load managed-native lifecycle contract: %v", err)
+	}
+	return semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)}
 }
 
 func requireManagedNativeLifecycleSurface(
@@ -419,7 +429,7 @@ func requireManagedNativeLifecycleSurface(
 	store *managedNativeLifecycleStore,
 	surfaceID string,
 	agentID string,
-	authority runtimestartupownership.Authority,
+	authority runtimestartupownership.GrantEvidence,
 ) {
 	t.Helper()
 	surface, err := store.surface(surfaceID)
@@ -434,17 +444,17 @@ func requireManagedNativeLifecycleSurface(
 func validateManagedNativeLifecycleSurface(
 	surface managedcapabilities.Surface,
 	agentID string,
-	authority runtimestartupownership.Authority,
+	authority runtimestartupownership.GrantEvidence,
 ) error {
 	if surface.ActorID != agentID {
 		return fmt.Errorf("startup surface actor = %q, want %q", surface.ActorID, agentID)
 	}
 	if surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe ||
 		surface.Authority.ExecutionKind != managedcapabilities.ExecutionNormalAgent ||
-		surface.Authority.ExecutionAuthorityID != authority.AuthorityID ||
-		surface.Authority.StartupOwnerID != authority.OwnerID ||
-		surface.Authority.StartupGeneration != authority.Generation {
-		return fmt.Errorf("startup surface authority = %#v, want authority id %s owner %s generation %d", surface.Authority, authority.AuthorityID, authority.OwnerID, authority.Generation)
+		surface.Authority.ExecutionAuthorityID != authority.GrantID ||
+		surface.Authority.StartupOwnerID != authority.ProcessOwnerID ||
+		surface.Authority.StartupGeneration != authority.RuntimeGeneration {
+		return fmt.Errorf("startup surface authority = %#v, want grant id %s owner %s generation %d", surface.Authority, authority.GrantID, authority.ProcessOwnerID, authority.RuntimeGeneration)
 	}
 	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"web_search"}) {
 		return fmt.Errorf("effective startup capabilities = %v, want [web_search]", got)

@@ -17,6 +17,7 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 func TestValidateSourceAcceptsTelegramProviderConnectorHTTPActivityTool(t *testing.T) {
@@ -128,7 +129,7 @@ func TestValidateSourceRejectsMalformedProviderConnectorResponseSuccess(t *testi
 }
 
 func TestValidateSourceRejectsAgentExposureOfProviderConnector(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"sender": {ID: "sender", Tools: []string{"telegram.send_message"}},
 		},
@@ -1192,15 +1193,18 @@ func TestConnectorPackImportRejectsCollisionsAndNamesSources(t *testing.T) {
 }
 
 func TestValidateSourceRejectsDirectAgentExposureOfImportedProviderConnector(t *testing.T) {
-	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Agents: map[string]runtimecontracts.AgentRegistryEntry{
-				"sender": {ID: "sender", Tools: []string{"telegram.send_message"}},
-			},
-		}),
-		projectScopes: []semanticview.ProjectScope{
-			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"sender": {ID: "sender", Tools: []string{"telegram.send_message"}},
 		},
+	}
+	base := semanticviewtest.WrapRootAgents(bundle)
+	scope := base.ProjectScopes()[0]
+	scope.Manifest.ConnectorPacks = runtimecontracts.ConnectorPackImports{
+		Imports: []runtimecontracts.ConnectorPackImport{{Provider: "telegram", Tool: "telegram.send_message"}},
+	}
+	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
+		Source: base, projectScopes: []semanticview.ProjectScope{scope},
 	})
 	if err != nil {
 		t.Fatalf("SourceWithConnectorPackImports: %v", err)

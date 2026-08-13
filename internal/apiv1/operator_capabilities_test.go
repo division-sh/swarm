@@ -106,7 +106,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Agents: agents, Conversations: conversations, DeliveryLifecycle: c.AgentDeliveryLifecycle, Usage: c.AgentUsage}),
 		OperatorBundleCatalogHandlers(BundleCatalogHandlerOptions{Catalog: c.BundleCatalog}),
 		testOperatorBundleRegisterHandlers(c),
-		OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
+		OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency}),
 		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),
 		OperatorAgentControlHandlers(AgentControlHandlerOptions{Now: c.Now, Controller: c.AgentControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts}),
 	)
@@ -146,5 +146,5 @@ func testOperatorRunControlHandlers(c testOperatorCapabilities) map[string]Metho
 }
 
 func testOperatorBundleDeleteHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	return OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts})
+	return OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency})
 }

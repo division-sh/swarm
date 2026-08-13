@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -153,6 +154,54 @@ func (s *recoveryTestStore) LoadAgents(context.Context) ([]PersistedAgent, error
 }
 func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
 
+func (*recoveryTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	return AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, TransitionID: "11111111-1111-4111-8111-111111111111",
+		Identity: req.Identity, AgentID: req.AgentID,
+		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
+		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
+		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+	}, nil
+}
+
+func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *recoveryTestStore) {
+	t.Helper()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(store.agents))
+	for i := range store.agents {
+		if err := am.resolveAgentModel(&store.agents[i].Config); err != nil {
+			t.Fatalf("resolve recovery agent: %v", err)
+		}
+		identity, err := store.agents[i].Config.ConcreteIdentity()
+		if err != nil {
+			t.Fatalf("resolve recovery agent identity: %v", err)
+		}
+		revision, err := lifecycleConfigRevision(store.agents[i])
+		if err != nil {
+			t.Fatalf("resolve recovery agent revision: %v", err)
+		}
+		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: revision})
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatalf("construct recovery source set: %v", err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatalf("construct recovery admission: %v", err)
+	}
+	for i := range store.agents {
+		store.agents[i].Topology = admission
+	}
+	if err := am.InstallStartupTopology(store, admission, plan); err != nil {
+		t.Fatalf("install recovery topology: %v", err)
+	}
+	am.mu.Lock()
+	am.startupAgentsHydrated = false
+	am.mu.Unlock()
+}
+
 func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(t *testing.T) {
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
@@ -169,7 +218,8 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 			am := newTestAgentManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 				return recoveryTestAgent{id: cfg.ID}, nil
 			}, store)
-			err := am.Recover(context.Background())
+			installRecoveryTestStaticTopology(t, am, store)
+			err := am.hydratePersistedAgentExecutions(context.Background())
 			if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("Recover error = %v, want admission rejection", err)
 			}
@@ -194,8 +244,9 @@ func TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction(t *
 		factoryCalls++
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{ExecutionPosture: executionposture.MockOnly}, store)
+	installRecoveryTestStaticTopology(t, am, store)
 
-	if _, err := am.HydrateForStartup(testAuthorActivityContext(context.Background())); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+	if err := am.hydratePersistedAgentExecutions(testAuthorActivityContext(context.Background())); err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
 		t.Fatalf("HydrateForStartup error = %v, want live-agent rejection", err)
 	}
 	if factoryCalls != 0 || am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {
@@ -210,7 +261,7 @@ func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing
 		factoryCalls++
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{ExecutionPosture: executionposture.Live})
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ExecutionMode: executionmode.Live, ID: "restart-live", Role: "worker"})); err != nil {
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{ExecutionMode: executionmode.Live, ID: "restart-live", Role: "worker"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	before := factoryCalls
@@ -301,6 +352,10 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{WorkflowInstances: workflowInstances}, store)
+	installRecoveryTestStaticTopology(t, am, store)
+	if err := am.hydratePersistedAgentExecutions(context.Background()); err != nil {
+		t.Fatalf("hydrate static recovery agents: %v", err)
+	}
 
 	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
@@ -611,6 +666,10 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		hydrated = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
+	installRecoveryTestStaticTopology(t, am, store)
+	if err := am.hydratePersistedAgentExecutions(context.Background()); err != nil {
+		t.Fatalf("hydrate canonical loaded agent: %v", err)
+	}
 
 	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)

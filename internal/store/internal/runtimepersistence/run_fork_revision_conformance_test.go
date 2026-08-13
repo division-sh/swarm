@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -598,7 +599,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		}),
 		Status: "active", HiredBy: "revision-proof", StartedAt: now,
 	}
-	spawned, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+	spawned, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "revision-spawn",
 		Identity: identity, AgentID: agentID, Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
@@ -607,7 +608,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	if err != nil {
 		t.Fatalf("spawn lifecycle agent: %v", err)
 	}
-	started, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+	started, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: "revision-start",
 		Identity: identity, AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
 		ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
@@ -650,7 +651,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		t.Fatalf("commit lifecycle source revision: %v", err)
 	}
 
-	if _, err := store.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+	if _, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "revision-terminate",
 		Identity: identity, AgentID: agentID, Trigger: "terminate", ExpectedEpoch: started.RuntimeEpoch,
 		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,

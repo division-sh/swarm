@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -20,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -31,7 +33,7 @@ type budgetRecoveryParityStore interface {
 	budgetspend.Store
 	runtimebus.EventStore
 	runtimemanager.ManagerPersistence
-	runtimemanager.AgentLifecyclePersistence
+	storetest.AgentFixtureStore
 	runtimetools.MailboxPersistence
 }
 
@@ -110,11 +112,45 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			}}, selected, nil, source, executionposture.Live)
 			manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 				BaseContext:    ctx,
-				LifecycleStore: selected,
+				LifecycleStore: storetest.AgentLifecycleFixture(selected),
 				SemanticSource: source,
 				Budget:         tracker,
 				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"}
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+			if err != nil {
+				t.Fatalf("construct budget recovery topology plan: %v", err)
+			}
+			capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+				OwnerID: "budget-recovery-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			})
+			if err != nil {
+				t.Fatalf("acquire budget recovery process capability: %v", err)
+			}
+			if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), Plan: plan,
+			}); err != nil {
+				t.Fatalf("install budget recovery source set: %v", err)
+			}
+			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+				BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+				RuntimeInstanceID: authorActivityTestRuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+			})
+			if err != nil {
+				t.Fatalf("issue budget recovery generation grant: %v", err)
+			}
+			topologyAdmission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+			if err != nil {
+				t.Fatalf("construct budget recovery topology admission: %v", err)
+			}
+			if err := manager.InstallStartupTopology(grant, topologyAdmission, plan); err != nil {
+				t.Fatalf("install budget recovery manager topology: %v", err)
+			}
+			if err := manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
+				t.Fatalf("reconcile budget recovery manager topology: %v", err)
+			}
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 
 			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 			if err != nil {

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -17,7 +18,10 @@ import (
 	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
@@ -72,7 +76,7 @@ func TestSelectedStoresRejectCriteriaMismatchBeforeProviderRecovery(t *testing.T
 
 type selectedIntentAgentStore interface {
 	runtimemanager.ManagerPersistence
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+	agentfixture.Store
 }
 
 func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx context.Context, store selectedIntentAgentStore) {
@@ -87,17 +91,43 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx 
 		ReceiverExecution: eventreceiver.NormalExecution(),
 		ExecutionPosture:  executionposture.Live,
 	}, store)
-	if _, err := manager.HydrateForStartup(ctx); err == nil || !strings.Contains(err.Error(), "runtime refs must match contract agent criteria") {
-		t.Fatalf("HydrateForStartup error = %v, want criteria mismatch rejection", err)
+	runtimeInstanceID := uuid.NewString()
+	capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "agent-intent-parity", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire process capability: %v", err)
+	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+	plan, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !exists || len(plan.Sources) != 1 {
+		t.Fatalf("load fixture source set: exists=%v sources=%d err=%v", exists, len(plan.Sources), err)
+	}
+	coordinate := plan.Sources[0]
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		RuntimeInstanceID: runtimeInstanceID, RuntimeGeneration: 1,
+		SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue generation grant: %v", err)
+	}
+	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.InstallStartupTopology(grant, topology, plan); err != nil {
+		t.Fatalf("install startup topology: %v", err)
+	}
+	if err := manager.ReconcileStaticTopologyForStartup(ctx, selectedIntentRecoverySource(t)); err == nil || !strings.Contains(err.Error(), "differs from complete source-set plan") {
+		t.Fatalf("ReconcileStaticTopologyForStartup error = %v, want source-set mismatch rejection", err)
 	}
 	if providerCalls != 0 {
 		t.Fatalf("provider factory calls = %d, want 0", providerCalls)
 	}
 }
 
-func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store interface {
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
-}) {
+func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agentfixture.Store) {
 	t.Helper()
 	intent := selectedStoreIntent(t)
 	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"hostile-replacement"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
@@ -124,7 +154,7 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store inter
 		Prompt:             prompt,
 		Criteria:           []string{"hostile-replacement"},
 	}
-	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
+	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 }
@@ -145,16 +175,21 @@ func selectedStoreIntent(t testing.TB) runtimeagentintent.Resolved {
 
 func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 	t.Helper()
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"worker": {
-				ID:             "worker",
-				Role:           "worker",
-				ResolvedIntent: selectedStoreIntent(t),
-				Criteria:       []string{"quality"},
-			},
+	const owner = "swarm-test://flows/review/agents/worker"
+	entry := runtimecontracts.AgentRegistryEntry{
+		ID: "worker", Type: "managed", Role: "worker", Model: "regular",
+		ResolvedIntent: selectedStoreIntent(t), Criteria: []string{"quality"},
+	}
+	policy := runtimecontracts.PolicyDocument{Criteria: map[string]runtimecontracts.PolicyCriteriaSet{
+		"quality": {
+			Classes: map[string]runtimecontracts.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
+			Rules:   []runtimecontracts.PolicyCriteriaRule{{ID: "QUALITY-01", Class: "hard", Text: "Require declared quality."}},
 		},
+	}}
+	flow := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
+		Policy: policy,
 	}
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -162,8 +197,34 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 			Root: root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
 		},
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+			owner: {Kind: "agent", FlowID: "review", LocalID: "worker", Full: owner},
+		}},
 	}
-	return semanticview.Wrap(bundle)
+	return selectedIntentSource{Source: semanticview.Wrap(bundle), flow: semanticview.FlowScope{
+		ID: "review", Path: "review", PackageKey: "flows/review", Mode: "static",
+		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
+		AgentURIs: map[string]string{"worker": owner},
+		Policy:    policy,
+	}}
+}
+
+type selectedIntentSource struct {
+	semanticview.Source
+	flow semanticview.FlowScope
+}
+
+func (s selectedIntentSource) FlowScopes() []semanticview.FlowScope {
+	return []semanticview.FlowScope{s.flow}
+}
+func (s selectedIntentSource) FlowScopeByID(id string) (semanticview.FlowScope, bool) {
+	return s.flow, strings.TrimSpace(id) == s.flow.ID
+}
+func (s selectedIntentSource) FlowPath(id string) string {
+	if _, ok := s.FlowScopeByID(id); ok {
+		return s.flow.Path
+	}
+	return ""
 }
 
 type selectedIntentRecoveryAgent struct{ id string }

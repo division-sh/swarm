@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/google/uuid"
 )
 
 const (
@@ -34,6 +35,7 @@ var (
 )
 
 type Request struct {
+	OperationID       string
 	ActorTokenID      string
 	RequestHash       string
 	DryRun            bool
@@ -68,6 +70,7 @@ type QuiescenceResult struct {
 }
 
 type CleanupRequest struct {
+	OperationID  string
 	Result       Result
 	Quiescence   QuiescenceResult
 	ActorTokenID string
@@ -300,6 +303,7 @@ type ContainerIdentity struct {
 }
 
 func (r Request) normalize(now time.Time) (Request, error) {
+	r.OperationID = strings.TrimSpace(r.OperationID)
 	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
 	r.RequestHash = strings.TrimSpace(r.RequestHash)
 	if !r.IncludeBundlesSet {
@@ -308,6 +312,9 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	}
 	if r.ActorTokenID == "" {
 		return Request{}, fmt.Errorf("%w: actor token id is required", ErrInvalidRequest)
+	}
+	if _, err := uuid.Parse(r.OperationID); err != nil {
+		return Request{}, fmt.Errorf("%w: operation_id is invalid: %v", ErrInvalidRequest, err)
 	}
 	if r.RequestedAt.IsZero() {
 		r.RequestedAt = now

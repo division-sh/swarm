@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -143,7 +144,26 @@ func testRuntimeWorkflowValidationBundle() *runtimecontracts.WorkflowContractBun
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"test.input": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
+	}
 	return bundle
+}
+
+func testRuntimeWorkflowValidationAgent(id string) runtimecontracts.AgentRegistryEntry {
+	intent, err := runtimeagentintent.Resolve(
+		runtimeagentintent.SourceInline,
+		"inline",
+		"agents.yaml#agents."+strings.TrimSpace(id)+".intent",
+		"Perform the workflow validation test operation.",
+	)
+	if err != nil {
+		panic(err)
+	}
+	return runtimecontracts.AgentRegistryEntry{
+		ID: id, Role: "test", Model: "regular", ResolvedIntent: intent,
+		Subscriptions: []string{"test.input"},
+	}
 }
 
 func TestRetiredDynamicAgentToolsFailClosedAtVerifyAndBoot(t *testing.T) {
@@ -179,7 +199,7 @@ func TestRetiredDynamicAgentToolsFailClosedAtVerifyAndBoot(t *testing.T) {
 			t.Run(name+"/"+manifestation.name, func(t *testing.T) {
 				bundle := testRuntimeWorkflowValidationBundle()
 				manifestation.configure(bundle)
-				source := semanticview.Wrap(bundle)
+				source := semanticviewtest.WrapRootAgents(bundle)
 
 				_, err := ValidateWorkflowContractSurface(
 					testAuthorActivityContext(context.Background()),
@@ -223,7 +243,11 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 			source: func() semanticview.Source {
 				bundle := testRuntimeWorkflowValidationBundle()
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", Tools: []string{"missing_tool"}},
+					"agent-1": func() runtimecontracts.AgentRegistryEntry {
+						entry := testRuntimeWorkflowValidationAgent("agent-1")
+						entry.Tools = []string{"missing_tool"}
+						return entry
+					}(),
 				}
 				return semanticviewtest.WrapRootAgents(bundle)
 			}(),
@@ -234,7 +258,11 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 			source: func() semanticview.Source {
 				bundle := testRuntimeWorkflowValidationBundle()
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-					"agent-1": {ID: "agent-1", EmitEvents: []string{"missing.event"}},
+					"agent-1": func() runtimecontracts.AgentRegistryEntry {
+						entry := testRuntimeWorkflowValidationAgent("agent-1")
+						entry.EmitEvents = []string{"missing.event"}
+						return entry
+					}(),
 				}
 				return semanticviewtest.WrapRootAgents(bundle)
 			}(),
@@ -945,8 +973,16 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"agent-1": {ID: "agent-1", EmitEvents: []string{"ready.event"}},
-		"agent-2": {ID: "agent-2", Subscriptions: []string{"ready.event"}},
+		"agent-1": func() runtimecontracts.AgentRegistryEntry {
+			entry := testRuntimeWorkflowValidationAgent("agent-1")
+			entry.EmitEvents = []string{"ready.event"}
+			return entry
+		}(),
+		"agent-2": func() runtimecontracts.AgentRegistryEntry {
+			entry := testRuntimeWorkflowValidationAgent("agent-2")
+			entry.Subscriptions = []string{"ready.event"}
+			return entry
+		}(),
 	}
 	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
 		"ready.event": {
@@ -976,8 +1012,18 @@ func TestValidateWorkflowContractSurfaceRejectsInvalidGeneratedEmitToolSchema(t 
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
-		"agent-2": {ID: "agent-2", Role: "consumer", Subscriptions: []string{"ready.event"}},
+		"agent-1": func() runtimecontracts.AgentRegistryEntry {
+			entry := testRuntimeWorkflowValidationAgent("agent-1")
+			entry.Role = "agent"
+			entry.EmitEvents = []string{"ready.event"}
+			return entry
+		}(),
+		"agent-2": func() runtimecontracts.AgentRegistryEntry {
+			entry := testRuntimeWorkflowValidationAgent("agent-2")
+			entry.Role = "consumer"
+			entry.Subscriptions = []string{"ready.event"}
+			return entry
+		}(),
 	}
 	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
 		"ready.event": {
@@ -1016,8 +1062,18 @@ func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToo
 		},
 	}
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"agent-1": {ID: "agent-1", Role: "agent", EmitEvents: []string{"ready.event"}},
-		"agent-2": {ID: "agent-2", Role: "consumer", Subscriptions: []string{"ready.event"}},
+		"agent-1": func() runtimecontracts.AgentRegistryEntry {
+			entry := testRuntimeWorkflowValidationAgent("agent-1")
+			entry.Role = "agent"
+			entry.EmitEvents = []string{"ready.event"}
+			return entry
+		}(),
+		"agent-2": func() runtimecontracts.AgentRegistryEntry {
+			entry := testRuntimeWorkflowValidationAgent("agent-2")
+			entry.Role = "consumer"
+			entry.Subscriptions = []string{"ready.event"}
+			return entry
+		}(),
 	}
 	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
 		"ready.event": {

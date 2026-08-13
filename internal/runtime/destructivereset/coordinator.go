@@ -80,6 +80,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionRe
 		return ExecutionResult{}, err
 	}
 	cleanup, err := c.Cleaner.Apply(ctx, CleanupRequest{
+		OperationID:  req.OperationID,
 		Result:       result,
 		Quiescence:   quiescence,
 		ActorTokenID: req.ActorTokenID,

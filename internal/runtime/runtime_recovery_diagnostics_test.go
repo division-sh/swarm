@@ -13,10 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -830,7 +832,6 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		PipelineObligations:   eventStore.PipelineObligations(),
 		DeliveryStore:         deliveryStore,
 		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
@@ -878,22 +879,32 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 			runtimeflowidentity.DeriveRoute("child", "inst-1"),
 		},
 	}
-	managerStore := &startupRecoveryManagerStore{
-		agents: []runtimemanager.PersistedAgent{{
-			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
-		}},
+	managerIdentity := agentidentitytest.RootRuntime(t, "persisted-agent", "startup-recovery-manager-work")
+	managerTopology, err := runtimeagenttopology.FlowReadinessAdmission(
+		eventtest.UUID("startup-recovery-manager-run"),
+		"review/inst-1",
+		"startup-recovery-manager-readiness",
+	)
+	if err != nil {
+		t.Fatalf("construct manager snapshot topology: %v", err)
 	}
+	managerStore := &startupRecoveryManagerStore{agents: []runtimemanager.PersistedAgent{{
+		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: managerIdentity.AgentID(), Identity: managerIdentity,
+			Role: "worker", Type: "managed", Model: "regular",
+		}),
+		Topology: managerTopology,
+	}}}
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
-		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
-		EventStore:            eventStore,
-		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
-		PipelineObligations:   eventStore.PipelineObligations(),
-		DeliveryStore:         deliveryStore,
-		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		EventStore:          eventStore,
+		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations: eventStore.PipelineObligations(),
+		DeliveryStore:       deliveryStore,
+		ManagerStore:        managerStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,
@@ -968,7 +979,6 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations:   eventStore.PipelineObligations(),
 		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
@@ -1047,7 +1057,6 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations:   eventStore.PipelineObligations(),
 		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
@@ -1115,14 +1124,13 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
-		DeliveryStore:         deliveryStore,
-		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
-		EventStore:            eventStore,
-		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
-		PipelineObligations:   eventStore.PipelineObligations(),
-		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		DeliveryStore:       deliveryStore,
+		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		EventStore:          eventStore,
+		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations: eventStore.PipelineObligations(),
+		ManagerStore:        managerStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,
@@ -1175,14 +1183,13 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	eventStore := startupRecoveryMinimalEventStore{}
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
-		DeliveryStore:         deliveryStore,
-		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
-		EventStore:            eventStore,
-		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
-		PipelineObligations:   eventStore.PipelineObligations(),
-		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		DeliveryStore:       deliveryStore,
+		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		EventStore:          eventStore,
+		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations: eventStore.PipelineObligations(),
+		ManagerStore:        managerStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,
@@ -1231,6 +1238,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		PersistenceRoles:               runtimeTestManagerBusRoles(rt.Bus),
 		ReceiverExecution:              eventreceiver.NormalExecution(),
 	}, managerStore)
+	installRuntimeTestManagerGeneration(t, ctx, rt.Manager, rt.startupGrant)
 
 	err = rt.Start(ctx)
 	if err == nil {
@@ -1254,14 +1262,13 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
-		DeliveryStore:         deliveryStore,
-		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
-		EventStore:            eventStore,
-		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
-		PipelineObligations:   eventStore.PipelineObligations(),
-		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		DeliveryStore:       deliveryStore,
+		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		EventStore:          eventStore,
+		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations: eventStore.PipelineObligations(),
+		ManagerStore:        managerStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,
@@ -1272,8 +1279,8 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	err = rt.Start(ctx)
-	if err == nil || !strings.Contains(err.Error(), "hydrate manager before workflow timer restoration") {
-		t.Fatalf("Start error = %v, want fail-closed manager hydration gate", err)
+	if err == nil || !strings.Contains(err.Error(), "reconcile static declaration topology") {
+		t.Fatalf("Start error = %v, want fail-closed topology readback gate", err)
 	}
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)

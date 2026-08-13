@@ -127,10 +127,9 @@ type BundleRegisterHandlerOptions struct {
 }
 
 type BundleDeleteHandlerOptions struct {
-	Now             func() time.Time
-	Executor        BundleDeleteExecutor
-	Idempotency     APIIdempotencyStore
-	RuntimeContexts *runtime.RuntimeContextManager
+	Now         func() time.Time
+	Executor    BundleDeleteExecutor
+	Idempotency APIIdempotencyStore
 }
 
 type ConversationForkHandlerOptions struct {

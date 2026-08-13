@@ -519,13 +519,13 @@ func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Cont
 		result = s.registerErrs[0]
 		s.registerErrs = s.registerErrs[1:]
 	}
+	if result == nil {
+		result = s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+	}
 	if s.registerSeen != nil {
 		s.registerSeen <- result
 	}
-	if result != nil {
-		return result
-	}
-	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+	return result
 }
 
 func TestLifecycleReconcileWithRecoveryQueuesAndConverges(t *testing.T) {

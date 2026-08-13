@@ -223,21 +223,25 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
 	}
 	a.operationMu.Lock()
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.closed || a.conn == nil {
+		a.mu.Unlock()
 		a.operationMu.Unlock()
 		return nil, errors.New("PostgreSQL session authority is closed")
 	}
 	if a.activeTx != nil {
+		a.mu.Unlock()
 		a.operationMu.Unlock()
 		return nil, errors.New("PostgreSQL session authority already has an active transaction")
 	}
 	tx, err := a.conn.BeginTx(ctx, nil)
 	if err != nil {
 		a.operationMu.Unlock()
-		return nil, err
+		a.mu.Unlock()
+		discard := a.prepareDiscardExcept(nil)
+		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 	}
 	a.activeTx = tx
+	a.mu.Unlock()
 	return tx, nil
 }
 
@@ -603,9 +607,14 @@ func RunAuthorityTransaction(
 		return errors.Join(runErr, rollbackSessionTransaction(tx, session))
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
-		return errors.Join(commitErr, rollbackSessionTransaction(tx, session))
+		endErr := session.endTx(tx)
+		discardErr := session.forceDiscard()
+		return errors.Join(commitErr, endErr, wrapAdvisoryDiscardError(discardErr))
 	}
-	return session.endTx(tx)
+	if endErr := session.endTx(tx); endErr != nil {
+		return errors.Join(endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
+	}
+	return nil
 }
 
 func (l *AdvisoryLockLease) RunTransaction(
@@ -633,7 +642,46 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
 	if errors.Is(rollbackErr, sql.ErrTxDone) {
 		rollbackErr = nil
 	}
-	return errors.Join(rollbackErr, session.endTx(tx))
+	endErr := session.endTx(tx)
+	if rollbackErr == nil && endErr == nil {
+		return nil
+	}
+	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
+}
+
+// ProveCurrent performs an operation on the retained session. Local lease
+// state is evidence of ownership, but only successful I/O proves that the
+// server still associates the advisory lock with this exact session.
+func (l *AdvisoryLockLease) ProveCurrent(ctx context.Context) error {
+	if l == nil {
+		return errors.New("advisory lock lease has no current PostgreSQL session")
+	}
+	l.mu.Lock()
+	session := l.session
+	current := !l.released && session != nil
+	l.mu.Unlock()
+	if !current {
+		return errors.New("advisory lock lease has no current PostgreSQL session")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	endOperation, err := session.beginOperation()
+	if err != nil {
+		discard := session.prepareDiscardExcept(nil)
+		return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+	}
+	var one int
+	err = session.queryRowContext(ctx, `SELECT 1`).Scan(&one)
+	endOperation()
+	if err == nil && one == 1 {
+		return nil
+	}
+	discard := session.prepareDiscardExcept(nil)
+	if err == nil {
+		err = fmt.Errorf("retained PostgreSQL session possession probe returned %d", one)
+	}
+	return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 }
 
 func RollbackAuthorityTransaction(tx *sql.Tx, session *SessionAuthority) error {

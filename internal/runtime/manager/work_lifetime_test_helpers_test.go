@@ -211,6 +211,9 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if opts.SessionResetter == nil {
 		opts.SessionResetter = sessions.NewInMemoryRegistry(0)
 	}
+	if opts.LifecycleStore == nil && len(stores) > 0 {
+		opts.LifecycleStore, _ = any(stores[0]).(AgentLifecyclePersistence)
+	}
 	projectManagerTestPersistenceRoles(&opts.PersistenceRoles, bus)
 	if opts.PersistenceRoles.DirectiveOperations == nil {
 		if provider, ok := bus.(managerTestDirectiveOperationProvider); ok {
@@ -251,6 +254,9 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 		}
 	}
 	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)
+	manager.mu.Lock()
+	manager.startupAgentsHydrated = true
+	manager.mu.Unlock()
 	t.Cleanup(func() {
 		if err := manager.ShutdownWithOptions(ShutdownOptions{Grace: 5 * time.Second}); err != nil {
 			t.Errorf("shutdown manager test work owner: %v", err)

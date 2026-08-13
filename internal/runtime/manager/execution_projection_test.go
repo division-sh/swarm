@@ -327,7 +327,7 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 	factory := &projectionTestFactory{secondStarted: make(chan struct{}), releaseSecond: releaseBuild, handled: handled}
 	am := newProjectionTestManager(t, bus, factory.Build)
 	const agentID = "projection-restart"
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -387,7 +387,7 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			factory := &projectionTestFactory{secondStarted: make(chan struct{}), releaseSecond: releaseBuild, handled: handled}
 			am := newProjectionTestManager(t, bus, factory.Build)
 			const agentID = "projection-run"
-			if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+			if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agentID,
 				Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -435,7 +435,7 @@ func TestExecutionPreparationFailuresCompensateBeforeLaunchInBothRunModes(t *tes
 				factory := &projectionTestFactory{handled: make(chan int, 1)}
 				am := newProjectionTestManager(t, bus, factory.Build)
 				const agentID = "projection-start-failure"
-				if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+				if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live",
 					ID:            agentID,
 					Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -482,14 +482,14 @@ func TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute(t *testing.T)
 		return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{"foreign/task.ready"}, handled: make(chan int, 1)}, nil
 	})
 	const agentID = "selected-fork-agent"
-	if err := am.RegisterEphemeralAgentForExecution(context.Background(), PersistedAgent{Config: managerTestAgentConfig(models.AgentConfig{
+	if err := registerManagerTestEphemeralAgent(context.Background(), am, PersistedAgent{Config: managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.Runtime(t, agentID, "selected-fork-test", "review", "inst-1", "review/inst-1"),
 		FlowPath:      "review/inst-1",
 		Subscriptions: []string{"task.ready", "task.*"},
 	})}); err != nil {
-		t.Fatalf("RegisterEphemeralAgentForExecution: %v", err)
+		t.Fatalf("MaterializeAdmittedAgentForExecution: %v", err)
 	}
 
 	runCtx, cancelRun := context.WithCancel(context.Background())
@@ -511,48 +511,6 @@ func TestSelectedForkEphemeralRegistrationInstallsCarrierOnlyRoute(t *testing.T)
 	want := []events.EventType{"review/inst-1/task.*", "review/inst-1/task.ready"}
 	if !reflect.DeepEqual(execution.Subscriptions, want) {
 		t.Fatalf("selected-fork admitted subscriptions = %#v, want %#v", execution.Subscriptions, want)
-	}
-}
-
-func TestEphemeralCloneConsumesAdmittedBaseSubscriptions(t *testing.T) {
-	bus := newProjectionTestBus()
-	am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
-		return &projectionTestAgent{id: cfg.ID, handled: make(chan int, 1)}, nil
-	})
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "base-agent",
-		Identity:      runtimeagentidentitytest.Runtime(t, "base-agent", "ephemeral-clone-test", "review", "inst-1", "review/inst-1"),
-		FlowPath:      "review/inst-1",
-		Subscriptions: []string{"task.ready", "task.*"},
-	})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	baseIdentity := testAgentIdentity(t, am, "base-agent", "review/inst-1")
-	if err := am.SpawnEphemeralClone(baseIdentity, "clone-agent"); err != nil {
-		t.Fatalf("SpawnEphemeralClone: %v", err)
-	}
-
-	base, baseOK := am.lifecycle.executionSnapshotByIdentity(baseIdentity)
-	clone, cloneOK := testExecutionSnapshot(t, am, "clone-agent", "review/inst-1")
-	if !baseOK || !cloneOK {
-		t.Fatalf("execution snapshots: base=%v clone=%v", baseOK, cloneOK)
-	}
-	if !reflect.DeepEqual(clone.Subscriptions, base.Subscriptions) || clone.Admission.FlowPath() != base.Admission.FlowPath() {
-		t.Fatalf("clone admission = %#v/%q, want base %#v/%q", clone.Subscriptions, clone.Admission.FlowPath(), base.Subscriptions, base.Admission.FlowPath())
-	}
-
-	runCtx, cancelRun := context.WithCancel(context.Background())
-	defer cancelRun()
-	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	route, ok := bus.current("clone-agent")
-	if !ok {
-		t.Fatal("clone route missing")
-	}
-	if !reflect.DeepEqual(route.subscriptions, base.Subscriptions) {
-		t.Fatalf("clone route subscriptions = %#v, want admitted base %#v", route.subscriptions, base.Subscriptions)
 	}
 }
 
@@ -581,7 +539,7 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 		},
 	}, targetStore)
 	const agentID = "projection-directive"
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -640,7 +598,7 @@ func TestExecutionProjectionRunCancellationRemovesExactRoute(t *testing.T) {
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
 	am := newProjectionTestManager(t, bus, factory.Build)
 	const agentID = "projection-shutdown"
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -684,7 +642,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
 	am := newProjectionTestManager(t, bus, factory.Build)
 	const agentID = "projection-teardown"
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -727,7 +685,7 @@ func TestExecutionProjectionNaturalLoopExitRemovesExactRoute(t *testing.T) {
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
 	am := newProjectionTestManager(t, bus, factory.Build)
 	const agentID = "projection-self-release"
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -792,6 +750,7 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 		LifecycleEpoch:      runtimebus.CurrentRuntimeEpoch(),
 		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
+	rec.Topology = managerTestTopologyAdmission(t)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), rec, false); err != nil {
 		t.Fatalf("hydrate persisted running agent: %v", err)
 	}
@@ -835,7 +794,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 	defer cancelRun()
 	am.Run(managedExecutionTestContext(t, runCtx))
 	const agentID = "projection-flow-activation"
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
@@ -1016,7 +975,7 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 				})
 				baseStore := am.deliveryStore
 				const agentID = "carrier-disposition-agent"
-				if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+				if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live", ID: agentID,
 					Identity: runtimeagentidentitytest.RootRuntime(t, agentID, "carrier-disposition-test"), Subscriptions: []string{"test.old"},
 				})); err != nil {

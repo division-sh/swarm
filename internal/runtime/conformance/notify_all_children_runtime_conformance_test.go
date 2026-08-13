@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -36,6 +38,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
@@ -48,60 +51,17 @@ type notifyAllChildrenStore interface {
 	conformanceDurableEventBusStore
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimemanager.ManagerPersistence
-	runtimemanager.AgentLifecyclePersistence
+	storetest.AgentFixtureStore
 	runtimemanager.AgentLifecycleStateReader
 	ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error)
 }
 
-type lifecycleTransitionRecordingStore interface {
-	RecordedAuthorizedLifecycleTransition(string, string) (runtimemanager.AgentLifecycleTransition, bool)
-}
-
-type lifecycleTransitionRecorder struct {
-	mu       sync.Mutex
-	requests []runtimemanager.AgentLifecycleTransition
-}
-
-func (r *lifecycleTransitionRecorder) record(req runtimemanager.AgentLifecycleTransition) {
-	r.mu.Lock()
-	r.requests = append(r.requests, req)
-	r.mu.Unlock()
-}
-
-func (r *lifecycleTransitionRecorder) latestAuthorized(agentID, operationKind string) (runtimemanager.AgentLifecycleTransition, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for i := len(r.requests) - 1; i >= 0; i-- {
-		req := r.requests[i]
-		if req.AgentID == agentID && req.OperationKind == operationKind && req.DynamicTopology != nil {
-			return req, true
-		}
-	}
-	return runtimemanager.AgentLifecycleTransition{}, false
-}
-
 type failingNotifyAllChildrenPostgresStore struct {
 	*store.PostgresStore
-	lifecycle                lifecycleTransitionRecorder
 	failNextRouteReplacement atomic.Bool
 	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenPostgresStore) CommitAgentLifecycleTransition(
-	ctx context.Context,
-	req runtimemanager.AgentLifecycleTransition,
-) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	s.lifecycle.record(req)
-	return s.PostgresStore.CommitAgentLifecycleTransition(ctx, req)
-}
-
-func (s *failingNotifyAllChildrenPostgresStore) RecordedAuthorizedLifecycleTransition(
-	agentID string,
-	operationKind string,
-) (runtimemanager.AgentLifecycleTransition, bool) {
-	return s.lifecycle.latestAuthorized(agentID, operationKind)
 }
 
 func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
@@ -129,24 +89,8 @@ func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteTopology
 
 type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
-	lifecycle                lifecycleTransitionRecorder
 	failNextRouteReplacement atomic.Bool
 	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenSQLiteStore) CommitAgentLifecycleTransition(
-	ctx context.Context,
-	req runtimemanager.AgentLifecycleTransition,
-) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	s.lifecycle.record(req)
-	return s.SQLiteRuntimeStore.CommitAgentLifecycleTransition(ctx, req)
-}
-
-func (s *failingNotifyAllChildrenSQLiteStore) RecordedAuthorizedLifecycleTransition(
-	agentID string,
-	operationKind string,
-) (runtimemanager.AgentLifecycleTransition, bool) {
-	return s.lifecycle.latestAuthorized(agentID, operationKind)
 }
 
 func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
@@ -181,8 +125,93 @@ type notifyAllChildrenRuntime struct {
 }
 
 type notifyAllChildrenRuntimeOptions struct {
-	realMockAgents bool
-	agentGate      *notifyAllChildrenAgentGate
+	realMockAgents  bool
+	agentGate       *notifyAllChildrenAgentGate
+	processTopology *notifyAllChildrenProcessTopology
+}
+
+type notifyAllChildrenProcessTopology struct {
+	capability        runtimestartupownership.ProcessCapability
+	runtimeInstanceID string
+	nextGeneration    uint64
+}
+
+func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, selected notifyAllChildrenStore) *notifyAllChildrenProcessTopology {
+	t.Helper()
+	runtimeInstanceID := uuid.NewString()
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "notify-all-children-conformance", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire notify-all-children process topology capability: %v", err)
+	}
+	t.Cleanup(func() {
+		select {
+		case <-capability.Done():
+			return
+		default:
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Errorf("release notify-all-children process topology capability: %v", err)
+		}
+	})
+	return &notifyAllChildrenProcessTopology{capability: capability, runtimeInstanceID: runtimeInstanceID}
+}
+
+func (p *notifyAllChildrenProcessTopology) install(
+	t testing.TB,
+	ctx context.Context,
+	manager *runtimemanager.AgentManager,
+	source semanticview.Source,
+) {
+	t.Helper()
+	if p == nil || p.capability == nil {
+		t.Fatal("notify-all-children process topology capability is required")
+	}
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
+	if err != nil {
+		t.Fatalf("compile notify-all-children static topology: %v", err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatalf("construct notify-all-children source set: %v", err)
+	}
+	current, exists, err := p.capability.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatalf("load notify-all-children source set: %v", err)
+	}
+	if !exists || current.Revision != plan.Revision {
+		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
+		if exists {
+			commit.ExpectedRevision = current.Revision
+			_, err = p.capability.ReplaceSourceSet(ctx, commit)
+		} else {
+			_, err = p.capability.InstallCompleteSourceSet(ctx, commit)
+		}
+		if err != nil {
+			t.Fatalf("commit notify-all-children source set: %v", err)
+		}
+	}
+	p.nextGeneration++
+	grant, err := p.capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: bundleHash, BundleSource: bundleSource, RuntimeInstanceID: p.runtimeInstanceID,
+		RuntimeGeneration: p.nextGeneration, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue notify-all-children generation grant: %v", err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatalf("construct notify-all-children static admission: %v", err)
+	}
+	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
+		t.Fatalf("install notify-all-children startup topology: %v", err)
+	}
+	if err := manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
+		t.Fatalf("reconcile notify-all-children static topology: %v", err)
+	}
 }
 
 type notifyAllChildrenAgentGate struct {
@@ -338,11 +367,12 @@ func proveDynamicFlowSourceRevisionConvergence(
 		AgentTopologyRevision: 1,
 		AutoEmitOnCreate:      autoEmit,
 	})
+	processTopology := newNotifyAllChildrenProcessTopology(t, ctx, selected)
 	scopeV1, ok := semanticview.FlowScopeByID(sourceV1, notifyallchildren.ChildFlowID)
 	if !ok || len(scopeV1.Agents) != 2 {
 		t.Fatalf("v1 account agent contract = %#v found=%t, want reader/retired", scopeV1.Agents, ok)
 	}
-	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now)
+	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 	if err := runtimeV1.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v1")); err != nil {
 		t.Fatalf("run v1 manager: %v", err)
 	}
@@ -365,7 +395,6 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if got := !initialReadiness.CreationEventEmittedAt.IsZero(); got != autoEmit {
 		t.Fatalf("initial creation completion = %t, want %t", got, autoEmit)
 	}
-	instanceID := descriptor.InstanceID
 	readerID := "account-reader"
 	retiredID := "account-retired"
 	writerID := "account-writer"
@@ -386,17 +415,16 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if _, found := scopeV2.Agents["retired"]; found {
 		t.Fatalf("v2 account contract retained removed agent: %#v", scopeV2.Agents)
 	}
-	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now)
+	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 	if err := runtimeV2.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v2")); err != nil {
 		t.Fatalf("run v2 manager: %v", err)
 	}
 	reconcileCtx := worklifetime.WithOccurrence(ctx, runtimeV2.workOwner)
 	failNextRouteReplacement()
 	sourceRevisionErr := make(chan error, 1)
-	genericMutationErrs := make(chan error, 2)
 	start := make(chan struct{})
 	var mutations sync.WaitGroup
-	mutations.Add(3)
+	mutations.Add(1)
 	go func() {
 		defer mutations.Done()
 		<-start
@@ -404,41 +432,11 @@ func proveDynamicFlowSourceRevisionConvergence(
 			reconcileCtx, time.Now().UTC(), runtimeV2.manager,
 		)
 	}()
-	go func() {
-		defer mutations.Done()
-		<-start
-		rogue := v1Agents[readerID].Config
-		rogue.ID = "account-rogue"
-		rogue.Identity = runtimeagentidentity.Identity{}
-		rogue.Role = "rogue"
-		genericMutationErrs <- runtimeV2.manager.SpawnAgent(rogue)
-	}()
-	go func() {
-		defer mutations.Done()
-		<-start
-		rogue := v1Agents[readerID]
-		rogue.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
-			t,
-			rogue.Config,
-			"account-raw-rogue",
-			"notify-all-children-conformance.raw-rogue",
-			descriptor.FlowInstance,
-		)
-		rogue.Config.Role = "raw-rogue"
-		rogue.Status = "active"
-		genericMutationErrs <- selected.UpsertAgent(ctx, rogue)
-	}()
 	close(start)
 	mutations.Wait()
 	close(sourceRevisionErr)
-	close(genericMutationErrs)
 	if err := <-sourceRevisionErr; err != nil && !strings.Contains(err.Error(), "injected transient") {
 		t.Fatalf("reconcile revised source: %v", err)
-	}
-	for err := range genericMutationErrs {
-		if err == nil {
-			t.Fatal("generic dynamic-agent mutation bypassed readiness-owned desired topology")
-		}
 	}
 	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV2.pipeline, runID, descriptor.FlowInstance)
 	if failures := transientRouteFailures(); failures != 1 {
@@ -446,15 +444,8 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 
 	v2Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
-	rogueID := "account-rogue"
-	if _, found := v2Agents[rogueID]; found {
-		t.Fatalf("generic hire escaped readiness ownership: %#v", v2Agents[rogueID])
-	}
 	if _, found := v2Agents[retiredID]; found {
 		t.Fatalf("removed agent %s remains active: %#v", retiredID, v2Agents[retiredID])
-	}
-	if _, found := v2Agents["account-raw-rogue"]; found {
-		t.Fatalf("raw upsert escaped readiness ownership: %#v", v2Agents)
 	}
 	reader := v2Agents[readerID]
 	if reader.Config.Role != "reader-v2" || reader.LifecycleGeneration <= readerGenerationV1 {
@@ -472,54 +463,12 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if cfg, err := runtimeV2.manager.ResolveAgentConfig(writerID, descriptor.FlowInstance); err != nil || cfg.Role != "writer" {
 		t.Fatalf("added writer process config = %#v err=%v", cfg, err)
 	}
-	rogue := v1Agents[readerID].Config
-	rogue.ID = rogueID
-	rogue.Identity = runtimeagentidentity.Identity{}
-	rogue.Role = "rogue"
-	if err := runtimeV2.manager.SpawnAgent(rogue); err == nil || !strings.Contains(err.Error(), "resolved intent does not match a canonical declaration") {
-		t.Fatalf("generic hire error = %v, want canonical intent rejection", err)
-	}
-	recordingStore, ok := selected.(lifecycleTransitionRecordingStore)
-	if !ok {
-		t.Fatalf("selected store %T does not record lifecycle transitions", selected)
-	}
-	canonicalReconfigure, found := recordingStore.RecordedAuthorizedLifecycleTransition(readerID, "reconfigure")
-	if !found || canonicalReconfigure.DynamicTopology == nil {
-		t.Fatalf("canonical readiness reconfigure was not recorded: %#v found=%t", canonicalReconfigure, found)
-	}
-	replayed, err := selected.CommitAgentLifecycleTransition(ctx, canonicalReconfigure)
-	if err != nil || !replayed.Replayed {
-		t.Fatalf("authorized lifecycle replay = %#v err=%v, want exact replay", replayed, err)
-	}
-	unauthorizedReplay := canonicalReconfigure
-	unauthorizedReplay.DynamicTopology = nil
-	if _, err := selected.CommitAgentLifecycleTransition(ctx, unauthorizedReplay); err == nil {
-		t.Fatal("stored lifecycle result replay bypassed current readiness authority")
-	} else {
-		assertNotifyAllChildrenReadinessOwnershipFailure(t, "unauthorized stored-result replay", err)
+	if _, exists := reflect.TypeOf(runtimeV2.manager).MethodByName("SpawnAgent"); exists {
+		t.Fatal("retired generic agent hire writer remains exported")
 	}
 	if cfg, err := runtimeV1.manager.ResolveAgentConfig(readerID, descriptor.FlowInstance); err != nil || cfg.Role != "reader-v1" {
 		t.Fatalf("stale predecessor process projection changed after replay rejection: %#v err=%v", cfg, err)
 	}
-	proveNotifyAllChildrenRawAgentTopologyAdmission(
-		t,
-		ctx,
-		selected,
-		&runtimeV2,
-		runID,
-		descriptor,
-		reader,
-		instanceID,
-	)
-	proveNotifyAllChildrenTerminalTopologyAdmission(
-		t,
-		ctx,
-		selected,
-		&runtimeV2,
-		runID,
-		descriptor,
-		readerID,
-	)
 	if revisedReadiness.Plan.WorkflowVersion != sourceV2.WorkflowVersion() {
 		t.Fatalf("revised runtime readiness = %#v", revisedReadiness)
 	}
@@ -531,7 +480,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("removed lifecycle state = %#v found=%t err=%v", terminated, found, err)
 	}
 
-	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now)
+	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 	if _, err := runtimeV3.manager.HydrateForStartup(ctx); err != nil {
 		t.Fatalf("restart hydration: %v", err)
 	}
@@ -548,7 +497,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		AgentTopologyRevision: 3,
 		AutoEmitOnCreate:      autoEmit,
 	})
-	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now)
+	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 	if err := runtimeV4.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v3")); err != nil {
 		t.Fatalf("run v3 manager: %v", err)
 	}
@@ -580,29 +529,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 	); transitions != 1 {
 		t.Fatalf("terminated-to-registered transitions = %d, want exactly one", transitions)
 	}
-	if _, err := selected.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-		OperationID: uuid.NewString(), OperationKind: "restart", RequestHash: "stale-predecessor-restart",
-		Identity: terminated.Identity, AgentID: retiredID, Trigger: "restart",
-		ExpectedEpoch: terminated.RuntimeEpoch, ExpectedGeneration: terminated.Generation, ExpectedPhase: terminated.Phase,
-		TargetEpoch: terminated.RuntimeEpoch, TargetGeneration: terminated.Generation + 1,
-		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: terminated.ConfigRevision,
-		RunMode: runtimemanager.AgentRunModeStopped, Now: time.Now().UTC(),
-	}); err == nil {
-		t.Fatal("stale terminated predecessor CAS mutated reintroduced successor")
-	}
 	if reader := v3Agents[readerID]; reader.Config.Role != "reader-v3" {
 		t.Fatalf("v3 reader = %#v", reader)
 	}
 	if cfg, err := runtimeV4.manager.ResolveAgentConfig(retiredID, descriptor.FlowInstance); err != nil || cfg.Role != "returned" {
 		t.Fatalf("reintroduced process config = %#v err=%v", cfg, err)
 	}
-	if _, err := selected.CommitAgentLifecycleTransition(ctx, canonicalReconfigure); err == nil {
-		t.Fatal("stale authorized replay survived readiness-plan revision")
-	} else {
-		assertNotifyAllChildrenReadinessOwnershipFailure(t, "stale authorized replay", err)
-	}
 
-	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now)
+	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 	if _, err := runtimeV5.manager.HydrateForStartup(ctx); err != nil {
 		t.Fatalf("reintroduced restart hydration: %v", err)
 	}
@@ -654,133 +588,6 @@ type notifyAllChildrenTopologySnapshot struct {
 	readiness string
 	routes    string
 	process   string
-}
-
-func proveNotifyAllChildrenRawAgentTopologyAdmission(
-	t *testing.T,
-	ctx context.Context,
-	selected notifyAllChildrenStore,
-	runtime *notifyAllChildrenRuntime,
-	runID string,
-	descriptor runtimebus.ActiveFlowInstanceDescriptor,
-	reader runtimemanager.PersistedAgent,
-	instanceID string,
-) {
-	t.Helper()
-	outside := reader
-	outside.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
-		t,
-		outside.Config,
-		"outside-agent-"+instanceID,
-		"notify-all-children-conformance.outside",
-		"outside/"+instanceID,
-	)
-	outside.Config.Role = "outside"
-	outside.Config.FlowID = ""
-	outside.Config.Subscriptions = nil
-	outside.Config.EmitEvents = nil
-	outside.Status = "active"
-	if err := selected.UpsertAgent(ctx, outside); err != nil {
-		t.Fatalf("seed non-readiness-owned raw agent: %v", err)
-	}
-	before := snapshotNotifyAllChildrenTopology(t, ctx, selected, runtime, runID, descriptor)
-
-	rawAdd := reader
-	rawAdd.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
-		t,
-		rawAdd.Config,
-		"raw-add-"+instanceID,
-		"notify-all-children-conformance.raw-add",
-		descriptor.FlowInstance,
-	)
-	rawAdd.Config.Role = "raw-add"
-	rawAdd.Status = "active"
-	configRewrite := reader
-	configRewrite.Config.Role = "raw-config-rewrite"
-	configRewrite.Status = "active"
-	moveOut := reader
-	moveOut.Config.FlowPath = ""
-	moveOut.Status = "active"
-	moveIn := outside
-	moveIn.Config = notifyAllChildrenRuntimeCreatedAgentConfig(
-		t,
-		moveIn.Config,
-		moveIn.Config.ID,
-		"notify-all-children-conformance.move-in",
-		descriptor.FlowInstance,
-	)
-	moveIn.Status = "active"
-	activeRewrite := reader
-	activeRewrite.Status = "active"
-	failedRewrite := reader
-	failedRewrite.Status = "failed"
-	terminatedRewrite := reader
-	terminatedRewrite.Status = "terminated"
-
-	if err := selected.UpsertAgent(ctx, moveOut); err == nil {
-		t.Fatal("raw path move escaped concrete identity validation")
-	}
-	for _, tc := range []struct {
-		name string
-		rec  runtimemanager.PersistedAgent
-	}{
-		{name: "raw_add", rec: rawAdd},
-		{name: "declared_config_rewrite", rec: configRewrite},
-		{name: "path_move_in", rec: moveIn},
-		{name: "active_status", rec: activeRewrite},
-		{name: "failed_status", rec: failedRewrite},
-		{name: "terminated_status", rec: terminatedRewrite},
-	} {
-		err := selected.UpsertAgent(ctx, tc.rec)
-		assertNotifyAllChildrenReadinessOwnershipFailure(t, "raw upsert "+tc.name, err)
-	}
-	after := snapshotNotifyAllChildrenTopology(t, ctx, selected, runtime, runID, descriptor)
-	if after != before {
-		t.Fatalf("raw topology rejection changed selected/runtime state:\nbefore=%#v\nafter=%#v", before, after)
-	}
-}
-
-func proveNotifyAllChildrenTerminalTopologyAdmission(
-	t *testing.T,
-	ctx context.Context,
-	selected notifyAllChildrenStore,
-	runtime *notifyAllChildrenRuntime,
-	runID string,
-	descriptor runtimebus.ActiveFlowInstanceDescriptor,
-	agentID string,
-) {
-	t.Helper()
-	agent, found := loadNotifyAllChildrenAgentsByID(t, ctx, selected)[agentID]
-	if !found {
-		t.Fatalf("load terminal-matrix agent %s", agentID)
-	}
-	state, found, err := selected.LoadAgentLifecycleState(ctx, agent.Config.Identity)
-	if err != nil || !found {
-		t.Fatalf("load terminal-matrix lifecycle state: state=%#v found=%t err=%v", state, found, err)
-	}
-	before := snapshotNotifyAllChildrenTopology(t, ctx, selected, runtime, runID, descriptor)
-	for _, operationKind := range []string{"stop", "teardown", "future_terminal_operation"} {
-		for _, trigger := range []string{"stop", "teardown", "future_terminal_trigger"} {
-			_, err := selected.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-				OperationID: uuid.NewString(), OperationKind: operationKind,
-				RequestHash: "terminal-matrix-" + operationKind + "-" + trigger,
-				Identity:    state.Identity, AgentID: agentID, Trigger: trigger,
-				ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
-				TargetEpoch: state.RuntimeEpoch + 1, TargetGeneration: state.Generation + 1,
-				TargetPhase: runtimemanager.AgentLifecycleTerminated, ConfigRevision: state.ConfigRevision,
-				RunMode: runtimemanager.AgentRunModeStopped, Now: time.Now().UTC(),
-			})
-			assertNotifyAllChildrenReadinessOwnershipFailure(
-				t,
-				"terminal operation="+operationKind+" trigger="+trigger,
-				err,
-			)
-		}
-	}
-	after := snapshotNotifyAllChildrenTopology(t, ctx, selected, runtime, runID, descriptor)
-	if after != before {
-		t.Fatalf("terminal topology rejection changed selected/runtime state:\nbefore=%#v\nafter=%#v", before, after)
-	}
 }
 
 func snapshotNotifyAllChildrenTopology(
@@ -1568,12 +1375,15 @@ func newNotifyAllChildrenRuntime(
 		WorkflowInstances: coordinator,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,
-		LifecycleStore:    backend,
+		LifecycleStore:    storetest.AgentLifecycleFixture(backend),
 		SemanticSource:    source,
 		Sessions:          sessionStore,
 		LLMBackend:        llmBackend,
 		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
+	if opts.processTopology != nil {
+		opts.processTopology.install(t, testAuthorActivityContext(context.Background()), manager, source)
+	}
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner,
