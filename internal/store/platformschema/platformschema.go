@@ -195,6 +195,8 @@ func platformTableOrder(name string) int {
 		return 13
 	case "agent_topology_source_set_operations":
 		return 13
+	case "bundle_delete_final_mutation_replays":
+		return 13
 	case "agents":
 		return 14
 	case "agent_directive_operations":

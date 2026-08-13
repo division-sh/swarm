@@ -154,7 +154,7 @@ func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, s
 		if err != nil {
 			return err
 		}
-		if currentRevision == desiredRevision && current.Topology.Equal(admission) {
+		if currentRevision == desiredRevision && current.Topology.Equal(admission) && current.LifecyclePhase != AgentLifecycleFailed {
 			continue
 		}
 		if err := am.commitStaticTopologyReconciliation(ctx, current, &desired, admission); err != nil {
@@ -272,7 +272,7 @@ func (am *AgentManager) PrepareStaticTopologySourceSetRebind(
 			return nil, revisionErr
 		}
 		expected[identity] = revision
-		cell, lockErr := am.lifecycle.lockIdentityOperation(identity)
+		cell, lockErr := am.lifecycle.lockIdentityTopologyOperation(identity)
 		if lockErr != nil {
 			return nil, fmt.Errorf("lock static topology source-set rebind for %s: %w", identity.Description(), lockErr)
 		}
@@ -297,7 +297,7 @@ func (am *AgentManager) PrepareStaticTopologySourceSetRebind(
 	}
 	for identity, revision := range expected {
 		cell := am.lifecycle.cells[identity]
-		if cell == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+		if cell == nil || cell.phase == AgentLifecycleTerminated {
 			am.lifecycle.mu.Unlock()
 			return nil, fmt.Errorf("static topology source-set rebind requires live declaration %s", identity.Description())
 		}

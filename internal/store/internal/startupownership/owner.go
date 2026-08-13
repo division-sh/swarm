@@ -195,9 +195,11 @@ func (s *postgresSession) ApplyBundleDeleteFinalMutation(ctx context.Context, re
 		}
 		var err error
 		result, err = storeadmin.ApplyBundleDeleteFinalMutationInRetainedTransaction(s.owner.bundleDelete, txctx, tx, req)
-		if err == nil && topology != nil {
+		if err == nil {
 			result.SourceAuthorityOwner = "process_capability.ApplyBundleDeleteFinalMutation"
-			result.TransactionOrderProof = append([]string{"commit_agent_topology_source_set"}, result.TransactionOrderProof...)
+			if topology != nil {
+				result.TransactionOrderProof = append([]string{"commit_agent_topology_source_set"}, result.TransactionOrderProof...)
+			}
 			if err = storeBundleDeleteFinalMutationTx(txctx, tx, req, result); err != nil {
 				return err
 			}
@@ -209,10 +211,14 @@ func (s *postgresSession) ApplyBundleDeleteFinalMutation(ctx context.Context, re
 
 type sourceSetOperationResult struct {
 	runtimeagenttopology.SourceSetCommitResult
-	BundleDeleteFinalMutation *runtimebundledelete.FinalMutationResult `json:"bundle_delete_final_mutation,omitempty"`
-	BundleDeleteRequestHash   string                                   `json:"bundle_delete_request_hash,omitempty"`
-	BundleDeleteReplayKeyHash string                                   `json:"bundle_delete_replay_key_hash,omitempty"`
-	BundleDeleteRequestedAt   time.Time                                `json:"bundle_delete_requested_at,omitempty"`
+}
+
+type bundleDeleteFinalMutationReplayRecord struct {
+	OperationID   string
+	RequestHash   string
+	ReplayKeyHash string
+	RequestedAt   time.Time
+	Result        runtimebundledelete.FinalMutationResult
 }
 
 func storeBundleDeleteFinalMutationTx(
@@ -231,30 +237,18 @@ func storeBundleDeleteFinalMutationTx(
 	if req.RequestedAt.IsZero() {
 		return errors.New("bundle delete replay record requires requested_at")
 	}
+	replayKeyHash := strings.TrimSpace(req.ReplayKeyHash)
 	raw, err := canonicaljson.Bytes(result)
 	if err != nil {
 		return err
 	}
-	updated, err := tx.ExecContext(ctx, `
-		UPDATE agent_topology_source_set_operations
-		SET result = result || jsonb_build_object(
-			'bundle_delete_final_mutation', $2::jsonb,
-			'bundle_delete_request_hash', $3::text,
-			'bundle_delete_replay_key_hash', $4::text,
-			'bundle_delete_requested_at', $5::text
-		)
-		WHERE operation_id = $1::uuid
-		  AND operation_kind = 'remove_bundle_source'
-	`, strings.TrimSpace(req.OperationID), string(raw), requestHash, strings.TrimSpace(req.ReplayKeyHash), req.RequestedAt.UTC().Format(time.RFC3339Nano))
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO bundle_delete_final_mutation_replays (
+			operation_id, request_hash, replay_key_hash, requested_at, result, created_at
+		) VALUES ($1::uuid,$2,$3,$4,$5::jsonb,$6)
+	`, strings.TrimSpace(req.OperationID), requestHash, replayKeyHash, req.RequestedAt.UTC(), string(raw), time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("store bundle delete final mutation replay record: %w", err)
-	}
-	count, err := updated.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("count bundle delete final mutation replay record: %w", err)
-	}
-	if count != 1 {
-		return errors.New("bundle delete final mutation has no exact source-set operation")
 	}
 	return nil
 }
@@ -267,15 +261,18 @@ func loadBundleDeleteFinalMutationTx(
 	if tx == nil {
 		return runtimebundledelete.FinalMutationResult{}, false, errors.New("bundle delete replay requires retained transaction")
 	}
+	var stored bundleDeleteFinalMutationReplayRecord
 	var raw []byte
 	err := tx.QueryRowContext(ctx, `
-		SELECT result
-		FROM agent_topology_source_set_operations
+		SELECT operation_id::text,request_hash,replay_key_hash,requested_at,result
+		FROM bundle_delete_final_mutation_replays
 		WHERE operation_id = $1::uuid
-		  AND operation_kind = 'remove_bundle_source'
-	`, strings.TrimSpace(req.OperationID)).Scan(&raw)
+	`, strings.TrimSpace(req.OperationID)).Scan(&stored.OperationID, &stored.RequestHash, &stored.ReplayKeyHash, &stored.RequestedAt, &raw)
 	if err == nil {
-		result, err := decodeBundleDeleteFinalMutation(req, raw, false)
+		if err := json.Unmarshal(raw, &stored.Result); err != nil {
+			return runtimebundledelete.FinalMutationResult{}, false, fmt.Errorf("decode bundle delete final mutation replay result: %w", err)
+		}
+		result, err := decodeBundleDeleteFinalMutation(req, stored, false)
 		return result, err == nil, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -289,28 +286,29 @@ func loadBundleDeleteFinalMutationTx(
 		return runtimebundledelete.FinalMutationResult{}, false, errors.New("bundle delete replay requires requested_at")
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT result
-		FROM agent_topology_source_set_operations
-		WHERE operation_kind = 'remove_bundle_source'
-		  AND result->>'bundle_delete_replay_key_hash' = $1::text
-		  AND result ? 'bundle_delete_final_mutation'
-		  AND result ? 'bundle_delete_requested_at'
-		  AND (result->>'bundle_delete_requested_at')::timestamptz > $2::timestamptz
-		  AND (result->>'bundle_delete_requested_at')::timestamptz <= $3::timestamptz
-		ORDER BY created_at DESC
+		SELECT operation_id::text,request_hash,replay_key_hash,requested_at,result
+		FROM bundle_delete_final_mutation_replays
+		WHERE replay_key_hash = $1
+		  AND requested_at > $2
+		  AND requested_at <= $3
+		ORDER BY requested_at DESC, created_at DESC
 		LIMIT 2
 	`, replayKeyHash, req.RequestedAt.Add(-runtimebundledelete.FinalMutationReplayWindow).UTC(), req.RequestedAt.UTC())
 	if err != nil {
 		return runtimebundledelete.FinalMutationResult{}, false, fmt.Errorf("find bundle delete final mutation replay authority: %w", err)
 	}
 	defer rows.Close()
-	var candidates [][]byte
+	var candidates []bundleDeleteFinalMutationReplayRecord
 	for rows.Next() {
-		var candidate []byte
-		if err := rows.Scan(&candidate); err != nil {
+		var candidate bundleDeleteFinalMutationReplayRecord
+		var candidateRaw []byte
+		if err := rows.Scan(&candidate.OperationID, &candidate.RequestHash, &candidate.ReplayKeyHash, &candidate.RequestedAt, &candidateRaw); err != nil {
 			return runtimebundledelete.FinalMutationResult{}, false, fmt.Errorf("scan bundle delete final mutation replay authority: %w", err)
 		}
-		candidates = append(candidates, append([]byte(nil), candidate...))
+		if err := json.Unmarshal(candidateRaw, &candidate.Result); err != nil {
+			return runtimebundledelete.FinalMutationResult{}, false, fmt.Errorf("decode bundle delete final mutation replay result: %w", err)
+		}
+		candidates = append(candidates, candidate)
 	}
 	if err := rows.Err(); err != nil {
 		return runtimebundledelete.FinalMutationResult{}, false, fmt.Errorf("iterate bundle delete final mutation replay authority: %w", err)
@@ -325,32 +323,20 @@ func loadBundleDeleteFinalMutationTx(
 	return result, err == nil, err
 }
 
-func decodeBundleDeleteFinalMutation(
-	req runtimebundledelete.FinalMutationRequest,
-	raw []byte,
-	requireReplayAuthority bool,
-) (runtimebundledelete.FinalMutationResult, error) {
-	var stored sourceSetOperationResult
-	if err := json.Unmarshal(raw, &stored); err != nil {
-		return runtimebundledelete.FinalMutationResult{}, fmt.Errorf("decode bundle delete final mutation replay record: %w", err)
-	}
-	if stored.BundleDeleteFinalMutation == nil {
-		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay record has no final mutation")
-	}
-	if strings.TrimSpace(stored.BundleDeleteRequestHash) == "" ||
-		strings.TrimSpace(stored.BundleDeleteRequestHash) != strings.TrimSpace(req.RequestHash) {
+func decodeBundleDeleteFinalMutation(req runtimebundledelete.FinalMutationRequest, stored bundleDeleteFinalMutationReplayRecord, requireReplayAuthority bool) (runtimebundledelete.FinalMutationResult, error) {
+	if strings.TrimSpace(stored.RequestHash) == "" || strings.TrimSpace(stored.RequestHash) != strings.TrimSpace(req.RequestHash) {
 		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay conflicts with stored request hash")
 	}
-	if strings.TrimSpace(stored.BundleDeleteReplayKeyHash) != strings.TrimSpace(req.ReplayKeyHash) {
+	if strings.TrimSpace(stored.ReplayKeyHash) != strings.TrimSpace(req.ReplayKeyHash) {
 		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay conflicts with stored replay authority")
 	}
 	if requireReplayAuthority {
-		if stored.BundleDeleteRequestedAt.IsZero() || req.RequestedAt.Before(stored.BundleDeleteRequestedAt) ||
-			!req.RequestedAt.Before(stored.BundleDeleteRequestedAt.Add(runtimebundledelete.FinalMutationReplayWindow)) {
+		if stored.RequestedAt.IsZero() || req.RequestedAt.Before(stored.RequestedAt) ||
+			!req.RequestedAt.Before(stored.RequestedAt.Add(runtimebundledelete.FinalMutationReplayWindow)) {
 			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay authority is outside its validity window")
 		}
 	}
-	result := *stored.BundleDeleteFinalMutation
+	result := stored.Result
 	if strings.TrimSpace(result.BundleHash) != strings.TrimSpace(req.BundleHash) ||
 		strings.TrimSpace(result.OperationName) != strings.TrimSpace(req.OperationName) {
 		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay conflicts with stored final mutation")

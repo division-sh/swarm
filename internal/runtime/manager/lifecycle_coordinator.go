@@ -1118,6 +1118,18 @@ func (c *agentLifecycleCoordinator) prepareLoopTokenLocked(identity runtimeagent
 }
 
 func (c *agentLifecycleCoordinator) lockIdentityOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
+	return c.lockIdentityOperationWithFailed(identity, false)
+}
+
+// lockIdentityTopologyOperation admits failed durable cells because topology
+// rebinding does not make them executable. Ordinary lifecycle operations keep
+// treating failed cells as terminal until startup explicitly reintroduces a
+// still-declared identity as a fresh registered generation.
+func (c *agentLifecycleCoordinator) lockIdentityTopologyOperation(identity runtimeagentidentity.Identity) (*agentLifecycleCell, error) {
+	return c.lockIdentityOperationWithFailed(identity, true)
+}
+
+func (c *agentLifecycleCoordinator) lockIdentityOperationWithFailed(identity runtimeagentidentity.Identity, includeFailed bool) (*agentLifecycleCell, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
 		return nil, err
@@ -1131,7 +1143,7 @@ func (c *agentLifecycleCoordinator) lockIdentityOperation(identity runtimeagenti
 	cell.opMu.Lock()
 	c.mu.Lock()
 	current := c.cells[identity]
-	valid := current == cell && current.phase != AgentLifecycleTerminated && current.phase != AgentLifecycleFailed
+	valid := current == cell && current.phase != AgentLifecycleTerminated && (includeFailed || current.phase != AgentLifecycleFailed)
 	c.mu.Unlock()
 	if !valid {
 		cell.opMu.Unlock()

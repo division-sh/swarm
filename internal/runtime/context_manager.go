@@ -2020,6 +2020,51 @@ func (m *RuntimeContextManager) ReplaceBundleHash(existingHash string, contextDe
 	return m.PublishBundleHashReplacement(existingHash, contextDef)
 }
 
+// CompileReplacementSourceSetPlan projects the complete successor declaration
+// set through the manager's private runtime owners. Public context snapshots do
+// not expose those owners and therefore cannot compile authoritative topology.
+func (m *RuntimeContextManager) CompileReplacementSourceSetPlan(existingHash string, candidate BundleContext) (runtimeagenttopology.SourceSetPlan, error) {
+	if m == nil {
+		return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime context manager is required")
+	}
+	type sourceSetInput struct {
+		context BundleContext
+		runtime *Runtime
+	}
+	existingHash = strings.TrimSpace(existingHash)
+	m.mu.RLock()
+	inputs := make([]sourceSetInput, 0, len(m.order)+1)
+	for _, bundleHash := range m.order {
+		if bundleHash == existingHash {
+			continue
+		}
+		entry := m.contexts[bundleHash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		inputs = append(inputs, sourceSetInput{context: *entry.context, runtime: entry.runtime})
+	}
+	m.mu.RUnlock()
+	inputs = append(inputs, sourceSetInput{context: candidate, runtime: candidate.Runtime})
+
+	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(inputs))
+	agents := []runtimeagenttopology.DesiredAgent{}
+	for _, input := range inputs {
+		if input.runtime == nil || input.runtime.Manager == nil {
+			return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime replacement source-set compilation requires every runtime manager")
+		}
+		bundleHash, bundleSource := input.context.BundleSourceFact.StorageValues()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+		desired, err := input.runtime.Manager.CompileStaticTopologyDesiredAgents(input.context.Source, coordinate)
+		if err != nil {
+			return runtimeagenttopology.SourceSetPlan{}, err
+		}
+		sources = append(sources, coordinate)
+		agents = append(agents, desired...)
+	}
+	return runtimeagenttopology.NewSourceSetPlan(sources, agents)
+}
+
 func (m *RuntimeContextManager) validateReplacementLocked(existingHash string, contextDef BundleContext) error {
 	entry := m.contexts[existingHash]
 	if entry == nil || !runtimeContextEntryLoaded(entry) {

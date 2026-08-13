@@ -5821,18 +5821,19 @@ engine:
         for production concurrency and cross-process session fencing.
     - name: runtime_startup_ownership
       owner: internal/runtime/startupownership.Store
-      sqlite_owner: internal/store.SQLiteRuntimeStore process-local startup ownership lease
-      postgres_owner: internal/store.PostgresStore advisory-lock startup ownership
+      sqlite_owner: internal/store.SQLiteRuntimeStore process capability
+      postgres_owner: internal/store.PostgresStore retained-session process capability
       scope: >
         SQLite startup ownership prevents competing runtimes inside the local process boundary. It is not a production
-        multi-writer lock substitute. Exactly one runtime may execute shared-store consumers under the lease: pipeline
-        maintenance, system nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included.
-        Live replacement MUST quiesce and join the predecessor consumer set while the predecessor retains the lease; only
-        then may lease authority transfer and candidate activation begin. Candidate preparation before quiescence is limited
+        multi-writer lock substitute. One process capability owns the complete source set and issues one revocable grant per
+        admitted runtime generation. Shared-store consumers execute only under those grants: pipeline maintenance, system
+        nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included. Live replacement MUST
+        quiesce and join the predecessor consumer set while the process capability and predecessor grant remain current; only
+        then may the complete source set change and the candidate grant be admitted. Candidate preparation before quiescence is limited
         to local construction and strict validation and MUST NOT start shared-store loops or publish runtime events. A
-        pre-visibility candidate failure quiesces the candidate, transfers lease authority back, and starts a fresh runtime
-        from the predecessor's admitted source before restoring manager visibility. Aliasing one lease into two active
-        runtimes is prohibited. Candidate and restored runtime loops inherit the serve-process lifetime context; bounded
+        pre-visibility candidate failure quiesces the candidate, restores the predecessor source set and survivor grants,
+        and starts a fresh runtime from the predecessor's admitted source before restoring manager visibility. Issuing two
+        live grants for the same runtime coordinate/generation is prohibited. Candidate and restored runtime loops inherit the serve-process lifetime context; bounded
         replacement/recovery operation contexts MUST NOT become their post-commit lifetime owner. A committed handoff is
         retained until exact finalization succeeds. Finalization failure keeps readiness and runtime selection unavailable;
         retry consumes the same handoff and cannot reacquire, infer, roll forward through metadata-only publication, or
@@ -9584,8 +9585,8 @@ tool_model:
         generation, callback route and random token, stable provider slot, and atomic provider/signing credential snapshot
         identities. Snapshot identity is source plus store key plus a process-random epoch that changes whenever the value
         or metadata changes; secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
-        and output. Startup authority fences execution and handler/readiness use but is deliberately excluded from semantic
-        request identity, so an unchanged startup handoff performs no provider apply.
+        and output. The exact currently admitted runtime-generation grant fences execution and handler/readiness use but is
+        deliberately excluded from semantic request identity, so an unchanged startup handoff performs no provider apply.
       callback: >
         `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
         only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
@@ -9594,7 +9595,7 @@ tool_model:
         and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
-        serve-registration authority, revalidates startup authority and all credential snapshots, commits the launched
+        serve-registration authority, revalidates the currently admitted runtime-generation grant and all credential snapshots, commits the launched
         marker before one HTTP dispatch, and records a valid provider response as response_observed rather than authoritative
         registration success. Exact current callback URL settles the same retained operation and attempt by authoritative
         readback. Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain, discards the live
@@ -10778,9 +10779,11 @@ flow_model:
         Provider-trigger pack directories are re-read and re-verified for every reload. One candidate catalog generation must
         successfully recompile every surviving loaded context and the replacement context before readiness changes.
         Replacement first rejects new predecessor admission and quiesces predecessor shared-store/background consumers under
-        the configured grace while retaining the exclusive store lease. Only after quiescence may lease authority transfer
-        and candidate materialization begin. The replacement runtime plans its complete declaration set and the predecessor
-        declaration set. One selected-store transaction revises retained service ids, creates new ids, orphans omitted
+        the configured grace while retaining the process capability and predecessor grant. RuntimeContextManager compiles the
+        complete successor declaration source set through its private runtime owners; public context snapshots never expose
+        runtime pointers as planning authority. Every untouched loaded context is fenced before the source-set commit, then
+        rebound to an admitted successor grant and exact lifecycle admission before any context is republished. Only after
+        quiescence and source-set reservation may candidate materialization begin. One selected-store transaction revises retained service ids, creates new ids, orphans omitted
         predecessor ids, and materializes/publishes the replacement's standing targets. It MUST NOT inspect or mutate services
         owned by unrelated loaded contexts. Bundle-hash or bundle-source change alone is a normal revision and MUST NOT reject
         startup or reload. Duplicate identity, missing persisted predecessor identity, terminality outside the explicit repair
@@ -10790,9 +10793,10 @@ flow_model:
         target plans, catalog generation, and installed/effective capability subjects as one process authority transition.
         Predecessor withdrawal, candidate publication, and restored-predecessor publication consume its replacement protocol;
         supervisor-local readiness or runtime pointers are not alternate visibility owners. A quiesce timeout or failed
-        candidate activation remains a mutating failure: recovery finishes quiescing, fully stops the failed candidate, and
-        publishes a freshly restored predecessor before readiness returns. If bounded recovery cannot safely restore, the
-        context remains unavailable and the lease remains retained. Manager-backed deactivation propagates the caller's
+        candidate activation remains a mutating failure: recovery finishes quiescing, fully stops the failed candidate, restores
+        both the predecessor source-set head and every survivor grant/admission, and publishes a freshly restored predecessor
+        before readiness returns. If bounded recovery cannot safely restore, the context remains unavailable and the process
+        capability remains retained. Manager-backed deactivation propagates the caller's
         configured shutdown grace rather than substituting runtime defaults.
       fail_closed:
       - duplicate aliases within a bundle or across loaded runtime contexts
@@ -12610,6 +12614,7 @@ platform_tables:
         - agents
         - agent_topology_source_set_head
         - agent_topology_source_set_operations
+        - bundle_delete_final_mutation_replays
         - agent_lifecycle_operations
         - agent_lifecycle_transition_facts
         - agent_lifecycle_diagnostic_outbox
@@ -13055,6 +13060,24 @@ platform_tables:
             current_revision  TEXT NOT NULL,
             result             JSONB NOT NULL,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    bundle_delete_final_mutation_replays:
+      description: >-
+        Immutable replay evidence for one committed bundle-delete final mutation.
+        This owner is independent of complete-source-set mutation because deleting an
+        unloaded catalog bundle has no topology operation. The request hash and opaque
+        replay-key hash bind exact keyed retries; an unkeyed mutation records an empty
+        replay-key fact and is addressable only by its exact operation identity. No bundle
+        identity or content-derived key is accepted as authority.
+      ddl: |
+        CREATE TABLE bundle_delete_final_mutation_replays (
+            operation_id       UUID PRIMARY KEY,
+            request_hash       TEXT NOT NULL,
+            replay_key_hash    TEXT NOT NULL,
+            requested_at       TIMESTAMPTZ NOT NULL,
+            result             JSONB NOT NULL,
+            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            INDEX idx_bundle_delete_final_mutation_replay_key (replay_key_hash, requested_at)
         );
     agents:
       description: >-
@@ -33410,7 +33433,8 @@ agent_topology_authority:
       convergence; stale or partially rebound survivors remain unselectable and deletion cannot
       report completion. The same retained transaction records the exact bundle-delete final
       mutation, exact API request hash, opaque keyed replay-authority digest, and original request
-      time in the source-set operation ledger. Every API invocation receives a fresh operation
+      time in the independent bundle-delete final-mutation replay owner. This evidence is mandatory
+      even when deleting an unloaded catalog bundle requires no source-set operation. Every API invocation receives a fresh operation
       identity. If final API completion fails after commit, a keyed retry may recover exactly one
       matching committed record only within the API's 24-hour idempotency window; an unkeyed retry,
       an expired authority, a conflicting request, or ambiguous evidence fails closed. If planning
@@ -33420,7 +33444,14 @@ agent_topology_authority:
       persistence. On later startup, a persisted static lifecycle identity absent from the
       complete current plan is terminalized only through the current runtime generation grant and
       its matching admission; a removed source coordinate is never reconstructed as lifecycle
-      authority. Already terminated identities are inert and cannot be terminalized again.
+      authority. A desired failed static identity is advanced to a fresh registered generation during
+      startup rather than accepted as hydrated execution. During source-set changes, failed but still
+      desired identities consume the same topology-only rebind owner as running or registered identities;
+      termination remains excluded. Already terminated identities are inert and cannot be terminalized again.
+      Runtime replacement uses RuntimeContextManager as the complete-plan compiler because it owns the
+      private runtime managers. It fences every untouched loaded context before ReplaceSourceSet, rotates
+      each survivor to the committed plan, and republishes the complete survivor set only after convergence.
+      Rollback restores the predecessor source-set head and survivor generations before predecessor publication.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
