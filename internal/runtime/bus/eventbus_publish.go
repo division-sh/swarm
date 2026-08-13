@@ -220,7 +220,7 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 func (eb *EventBus) PublishAPIEventAcknowledged(
 	ctx context.Context,
 	evt events.Event,
-	endpoint *semanticview.AuthoredEventEndpoint,
+	endpoint *APIEventPublicationEndpoint,
 	idempotency apiidempotency.Request,
 	completion apiidempotency.Completion,
 ) (apiidempotency.Completion, bool, error) {
@@ -236,14 +236,15 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 		return apiidempotency.Completion{}, false, err
 	}
 	if endpoint != nil {
-		admission, err := newPublicInputAdmission(eb.semanticSource, *endpoint)
+		admission, publicInput, err := endpoint.admit(eb.semanticSource, evt)
 		if err != nil {
 			return apiidempotency.Completion{}, false, err
 		}
-		if err := admission.validateEvent(evt); err != nil {
-			return apiidempotency.Completion{}, false, err
+		if publicInput != nil {
+			ctx = withPublicInputAdmission(ctx, *publicInput)
+		} else {
+			ctx = withAPIEventPublicationAdmission(ctx, admission)
 		}
-		ctx = withPublicInputAdmission(ctx, admission)
 	}
 	owner, ok := eb.store.(APIEventPublicationCommitOwner)
 	if !ok || owner == nil {

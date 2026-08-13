@@ -197,13 +197,15 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	}
 	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy)
 	routePlan.ConnectEvaluation = connectPlan.Evaluation
-	recipients := routePlan.RecipientIDs()
-	persisted := routePlan.PersistedRecipientIDs()
 	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, p.rootFlowID)...)
 	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
-	routePlan.AddDeliveryIntents(routedNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, recipients, persisted)...)
+	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
+	if err := validateRoutedNodeDeliveryAuthority(evt, routing.RoutedRecipients, routePlan); err != nil {
+		return RoutePlan{}, err
+	}
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = 0
@@ -537,7 +539,7 @@ func targetedConcreteEventKeysForPlan(evt events.Event) []string {
 
 func concreteFlowInstanceEventKey(evt events.Event) string {
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	flowInstance := exactEventFlowInstance(evt)
 	if eventType == "" || flowInstance == "" {
 		return ""
 	}
@@ -550,6 +552,19 @@ func concreteFlowInstanceEventKey(evt events.Event) string {
 		return ""
 	}
 	return flowInstance + "/" + localEvent
+}
+
+func exactEventFlowInstance(evt events.Event) string {
+	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
+		return flowInstance
+	}
+	source := evt.RoutingSource()
+	switch source.Kind() {
+	case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance, events.RoutingSourceFlowOwnedControl:
+		return strings.Trim(strings.TrimSpace(source.Route().FlowInstance), "/")
+	default:
+		return ""
+	}
 }
 
 func eventContextLocalEventForFlowInstance(eventType, staticScope string) string {
@@ -775,38 +790,17 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []p
 	return normalizePlannedDeliveryRoutes(out)
 }
 
-func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
+func routedExactSameInstanceNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	var intents []RoutePlanDeliveryIntent
-	if routes := routedConcreteNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConcreteNodeRoute)...)
-	}
-	if scoped := routedScopedNoTargetNodeDeliveryIntents(evt, routed); len(scoped) > 0 {
-		intents = append(intents, scoped...)
-	}
-	if routes := routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt, routed); len(routes) > 0 {
-		intents = append(intents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerScopedNodeRoute)...)
-	}
-	if len(intents) > 0 {
-		return intents
-	}
-	internalRecipients := filterOutAgentIDs(recipients, persisted)
-	if len(internalRecipients) == 0 {
-		return nil
-	}
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	flowInstance := exactEventFlowInstance(evt)
 	if flowInstance == "" {
 		return nil
 	}
-	internalRecipientSet := make(map[string]struct{}, len(internalRecipients))
-	for _, recipient := range internalRecipients {
-		internalRecipientSet[recipient] = struct{}{}
-	}
-	out := make([]plannedDeliveryRoute, 0, len(internalRecipients))
+	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if _, ok := internalRecipientSet[subscriber.Recipient.ID()]; !ok || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+		if !subscriber.Recipient.IsNode() || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
 		out = append(out, plannedDeliveryRoute{
@@ -818,18 +812,17 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
 }
 
-func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if flowInstance == "" || eventType == "" || !strings.HasPrefix(eventType, flowInstance+"/") {
+func routedImportBoundaryNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
 	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if !routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
+		if !subscriber.Recipient.IsNode() || !subscriber.routeSource.importBoundaryWildcard() {
 			continue
 		}
-		if !subscriber.Recipient.IsNode() {
+		flowInstance := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+		if flowInstance == "" {
 			continue
 		}
 		out = append(out, plannedDeliveryRoute{
@@ -838,158 +831,39 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
-	return normalizePlannedDeliveryRoutes(out)
+	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerScopedNodeRoute)
 }
 
-func routedScopedNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, plan RoutePlan) error {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	if eventType == "" {
-		return nil
+	authorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
+	for _, intent := range plan.DeliveryIntents {
+		if intent.Recipient.IsNode() {
+			authorized[intent.Recipient] = struct{}{}
+		}
 	}
-	if !strings.Contains(eventType, "/") && (flowInstance == "" || concreteFlowInstanceEventKey(evt) == "") {
-		return nil
+	live := make(map[string]struct{}, len(plan.LiveRecipients))
+	for _, recipient := range plan.LiveRecipients {
+		live[recipient.Recipient.ID()] = struct{}{}
 	}
-	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
 	for _, subscriber := range routed {
-		targetFlowInstance, structural, ok := routedScopedNoTargetNodeDeliveryFlowInstance(evt, subscriber)
-		if !ok {
+		if subscriber.routeSource != subscriberRouteSourceSubscription || !subscriber.Recipient.IsNode() {
 			continue
 		}
-		out = append(out, RoutePlanDeliveryIntent{
-			Recipient: subscriber.Recipient, TargetBlueprint: routedNodeTargetRoute(evt, targetFlowInstance),
-			Handler: routedSubscriberTargetHandler(subscriber, evt.Type()), Producer: routeIntentProducerScopedNodeRoute,
-			Persist: true, AllowStructuralOwner: structural,
-		})
-	}
-	return normalizeRoutePlanDeliveryIntents(out)
-}
-
-func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
-	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if eventType == "" {
-		return nil
-	}
-	out := make([]plannedDeliveryRoute, 0, len(routed))
-	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() {
+		if _, ok := authorized[subscriber.Recipient]; ok {
 			continue
 		}
-		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		if path == "" {
+		if _, ok := live[subscriber.Recipient.ID()]; ok {
 			continue
 		}
-		matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
-		if matchPattern == "" || !strings.Contains(matchPattern, "*") || !RouteMatches(matchPattern, eventType) {
-			continue
-		}
-		if routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
-			continue
-		}
-		out = append(out, plannedDeliveryRoute{
-			Recipient: subscriber.Recipient,
-			Target:    routedNodeTargetRoute(evt, path),
-			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
-		})
+		return fmt.Errorf(
+			"routed node %q at %q matched target-free event %q without exact same-instance, explicit-target, or compiled-connect authority",
+			subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), evt.Type(),
+		)
 	}
-	return normalizePlannedDeliveryRoutes(out)
-}
-
-func routedScopedNoTargetNodeDeliveryFlowInstance(evt events.Event, subscriber Subscriber) (string, bool, bool) {
-	if !subscriber.Recipient.IsNode() {
-		return "", false, false
-	}
-	if strings.Contains(strings.TrimSpace(subscriber.MatchPattern), "*") {
-		return "", false, false
-	}
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	if path == "" {
-		return "", false, false
-	}
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	if flowInstance == "" {
-		if routedNodeMatchesScopedNoTargetEvent(evt, subscriber) {
-			return path, true, true
-		}
-		return "", false, false
-	}
-	if routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
-		return flowInstance, false, true
-	}
-	if target := routedDescendantStaticFlowInstanceTarget(evt, subscriber); target != "" {
-		return target, true, true
-	}
-	if target := routedStaticCrossFlowInstanceTarget(evt, subscriber); target != "" {
-		return target, true, true
-	}
-	return "", false, false
-}
-
-func routedDescendantStaticFlowInstanceTarget(evt events.Event, subscriber Subscriber) string {
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
-	if flowInstance == "" || path == "" || eventType == "" || eventType != matchPattern || !strings.HasPrefix(eventType, path+"/") {
-		return ""
-	}
-	staticScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)), "/")
-	if staticScope == "" || path == staticScope || !strings.HasPrefix(path, staticScope+"/") {
-		return ""
-	}
-	return flowInstance + strings.TrimPrefix(path, staticScope)
-}
-
-func routedStaticCrossFlowInstanceTarget(evt events.Event, subscriber Subscriber) string {
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
-	if path == "" || eventType == "" || eventType != matchPattern {
-		return ""
-	}
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	if flowInstance == "" {
-		return ""
-	}
-	staticScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)), "/")
-	if staticScope != "" && (path == staticScope || strings.HasPrefix(path, staticScope+"/")) {
-		return ""
-	}
-	return path
-}
-
-func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, routed []Subscriber, recipients, persisted []string) []RoutePlanDeliveryIntent {
-	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	if len(recipients) > 0 || len(persisted) > 0 {
-		return nil
-	}
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	if flowInstance == "" {
-		return nil
-	}
-	out := make([]plannedDeliveryRoute, 0, len(routed))
-	for _, subscriber := range routed {
-		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
-			continue
-		}
-		if !subscriber.Recipient.IsNode() {
-			continue
-		}
-		out = append(out, plannedDeliveryRoute{
-			Recipient: subscriber.Recipient,
-			Target:    routedNodeTargetRoute(evt, flowInstance),
-			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
-		})
-	}
-	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
+	return nil
 }
 
 func routedNodeTargetRoute(evt events.Event, targetFlowInstance string) events.RouteIdentity {
@@ -1022,13 +896,6 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
-	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
-		return nil
-	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if eventType == "" || strings.Contains(eventType, "/") {
-		return nil
-	}
 	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
 	for _, subscriber := range routed {
 		if !routedRootInputFlowNodeMatchesNoTargetEvent(evt, subscriber) {
@@ -1045,6 +912,35 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
+func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
+	if !ok || admission.kind != apiEventPublicationEndpointOrdinaryFlow || admission.eventType != evt.Type() {
+		return nil
+	}
+	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
+	for _, subscriber := range routed {
+		if !subscriber.Recipient.IsNode() || subscriber.routeSource != subscriberRouteSourceSubscription {
+			continue
+		}
+		if strings.TrimSpace(subscriber.handlerFlowID) != admission.flowID || strings.Trim(strings.TrimSpace(subscriber.Path), "/") != admission.flowPath {
+			continue
+		}
+		out = append(out, RoutePlanDeliveryIntent{
+			Recipient: subscriber.Recipient,
+			TargetBlueprint: events.RouteIdentity{
+				FlowID: admission.flowID, FlowInstance: admission.flowPath,
+			},
+			Handler:  routedSubscriberTargetHandler(subscriber, evt.Type()),
+			Producer: routeIntentProducerAPIEventPublication,
+			Persist:  true,
+		})
+	}
+	return normalizeRoutePlanDeliveryIntents(out)
+}
+
 func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
 	if !subscriber.Recipient.IsNode() {
 		return false
@@ -1055,11 +951,9 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {
 		return false
 	}
-	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
-		return false
-	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	return eventType != "" && !strings.Contains(eventType, "/")
+	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
+	return eventType != "" && eventType == matchPattern
 }
 
 func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
@@ -1132,25 +1026,6 @@ func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Sub
 	return routedNodeConcreteEventKey(evt, subscriber) != ""
 }
 
-func routedNodeMatchesScopedNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
-	if !subscriber.Recipient.IsNode() {
-		return false
-	}
-	if strings.Contains(strings.TrimSpace(subscriber.MatchPattern), "*") {
-		return false
-	}
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	if path == "" {
-		return false
-	}
-	if strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != "" {
-		return routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber)
-	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
-	return eventType != "" && eventType == matchPattern
-}
-
 func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber Subscriber) bool {
 	if !subscriber.Recipient.IsNode() {
 		return false
@@ -1169,7 +1044,7 @@ func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string 
 		return ""
 	}
 	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
+	flowInstance := exactEventFlowInstance(evt)
 	if instancePath == "" || flowInstance == "" || instancePath != flowInstance {
 		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
 		if staticScope == "" || instancePath != staticScope {

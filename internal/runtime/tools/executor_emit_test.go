@@ -22,6 +22,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -36,6 +37,16 @@ import (
 type publishBusCapture struct {
 	event events.Event
 	count int
+}
+
+type emitPreflightCaptureBus struct {
+	*runtimebus.EventBus
+	preflight events.Event
+}
+
+func (b *emitPreflightCaptureBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Event) (runtimebus.PublishRecipientPlan, error) {
+	b.preflight = evt
+	return b.EventBus.CheckPublishRecipientPlan(ctx, evt)
 }
 
 const emitRoutePlanTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -843,40 +854,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 }
 
 func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"analysis.done": {
-				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
-			},
-		},
-	}
-	analyzerFlow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "analyzer-flow",
-			Flow: "analyzer-flow",
-		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: runtimecontracts.FlowModeStatic,
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"analysis.done"},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"analysis.done": {},
-		},
-		Path: "root/analyzer-flow",
-	}
-	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &runtimecontracts.FlowContractView{
-			Children: []runtimecontracts.FlowContractView{analyzerFlow},
-		},
-		ByID: map[string]*runtimecontracts.FlowContractView{
-			"analyzer-flow": &analyzerFlow,
-		},
-	}
-	source := semanticview.Wrap(bundle)
+	source := staticChildPinOutputTestSource()
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
@@ -890,27 +868,98 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 		FlowPath:      "root/analyzer-flow",
 		EmitEvents:    []string{"analyzer-flow/analysis.done"},
 	}
+	inboundEntityID := "11111111-1111-1111-1111-111111111111"
+	sourceEntityID := "33333333-3333-3333-3333-333333333333"
+	currentOwner := events.RouteIdentity{
+		FlowID: "root", FlowInstance: "root/run-1", EntityID: "44444444-4444-4444-4444-444444444444",
+	}
 	inbound := toolTestInboundEvent(
 		events.EventType("analyzer-flow/analysis.requested"),
 		nil,
-		events.EnvelopeForSourceRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, "11111111-1111-1111-1111-111111111111"), events.RouteIdentity{
+		events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID:       "wrong-root",
 			FlowInstance: "wrong-root",
-			EntityID:     "33333333-3333-3333-3333-333333333333",
-		}),
+			EntityID:     sourceEntityID,
+		}), events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: inboundEntityID}),
 		executionmode.Live,
 	)
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
+	ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+		Recipient:     events.MustAgentDeliveryRecipient(actor.ID),
+		AgentIdentity: actor.Identity,
+		Target:        events.MustExistingEntityTarget(currentOwner),
+	})
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err != nil {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
-	want := events.RouteIdentity{EntityID: "11111111-1111-1111-1111-111111111111"}
-	if got := bus.event.TargetRoute(); got != want {
-		t.Fatalf("target route = %#v, want delivery entity route %#v", got, want)
+	if got := bus.event.TargetRoute(); got != currentOwner {
+		t.Fatalf("target route = %#v, want exact current delivery route %#v", got, currentOwner)
 	}
+	if got := bus.event.TargetRoute().EntityID; got == inboundEntityID || got == sourceEntityID {
+		t.Fatalf("target entity = %q, must not use inbound=%q or source=%q", got, inboundEntityID, sourceEntityID)
+	}
+}
+
+func TestHandleEmitTool_StaticChildPinOutputRejectsMissingOrEntitylessDeliveryOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		withRoute func(context.Context, models.AgentConfig) context.Context
+	}{
+		{name: "missing", withRoute: func(ctx context.Context, _ models.AgentConfig) context.Context { return ctx }},
+		{name: "entityless", withRoute: func(ctx context.Context, actor models.AgentConfig) context.Context {
+			return runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+				Recipient: events.MustAgentDeliveryRecipient(actor.ID), AgentIdentity: actor.Identity,
+				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1"}),
+			})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := staticChildPinOutputTestSource()
+			bus := &publishBusCapture{}
+			actor := models.AgentConfig{
+				ExecutionMode: "live", ID: "analyzer",
+				Identity: toolTestAgentIdentity(t, "analyzer", "analyzer-flow", "root/analyzer-flow"),
+				Role:     "analyzer", FlowID: "analyzer-flow", FlowPath: "root/analyzer-flow",
+				EmitEvents: []string{"analyzer-flow/analysis.done"},
+			}
+			exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+			inbound := toolTestInboundEvent(events.EventType("analyzer-flow/analysis.requested"), nil,
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}), executionmode.Live)
+			ctx := tc.withRoute(runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound), actor)
+			_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
+			if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+				t.Fatalf("handleEmitTool error = %v, want target_required_missing", err)
+			}
+			if bus.count != 0 {
+				t.Fatalf("publish count = %d, want zero", bus.count)
+			}
+		})
+	}
+}
+
+func staticChildPinOutputTestSource() semanticview.Source {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"analysis.done": {Payload: runtimecontracts.EventPayloadSpec{Type: "object"}},
+		},
+	}
+	analyzerFlow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "analyzer-flow", Flow: "analyzer-flow"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeStatic,
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{Events: []string{"analysis.done"}}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"analysis.done": {}},
+		Path:   "root/analyzer-flow",
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{analyzerFlow}},
+		ByID: map[string]*runtimecontracts.FlowContractView{"analyzer-flow": &analyzerFlow},
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
@@ -1169,7 +1218,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	}
 }
 
-func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflight(t *testing.T) {
+func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *testing.T) {
 	source := emitRoutePlanRootReceiverSource()
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
@@ -1193,7 +1242,8 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 		EmitEvents:    []string{"producer/deploy.done"},
 	}
-	exec := NewExecutorWithOptions(eb, ExecutorOptions{
+	probe := &emitPreflightCaptureBus{EventBus: eb}
+	exec := NewExecutorWithOptions(probe, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
@@ -1223,8 +1273,11 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	if got, want := string(persisted.Type()), "producer/inst-1/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want concrete template event %q", got, want)
 	}
+	if !probe.preflight.TargetRoute().Empty() || len(probe.preflight.TargetRoutes()) != 0 {
+		t.Fatalf("preflight producer target = %#v/%#v, want targetless lowered-connect event", probe.preflight.TargetRoute(), probe.preflight.TargetRoutes())
+	}
 	if got := persisted.TargetRoute(); got != parentRoute {
-		t.Fatalf("persisted target route = %#v, want parent route %#v", got, parentRoute)
+		t.Fatalf("persisted target route = %#v, want EventBus-selected root owner %#v", got, parentRoute)
 	}
 	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("root-receiver"), Target: events.MustExistingEntityTarget(parentRoute)}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
@@ -1232,7 +1285,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	}
 }
 
-func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdentity(t *testing.T) {
+func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		rows map[string]runtimepipeline.WorkflowInstance
@@ -1242,6 +1295,11 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 			"producer/inst-1": {Metadata: map[string]any{
 				"parent_flow_id":       "root",
 				"parent_flow_instance": "root/inst-1",
+			}},
+		}},
+		{name: "complete_but_unselected", rows: map[string]runtimepipeline.WorkflowInstance{
+			"producer/inst-1": {Metadata: map[string]any{
+				"parent_flow_id": "root", "parent_flow_instance": "root/inst-1", "parent_entity_id": eventtest.UUID("unselected-root"),
 			}},
 		}},
 	} {
@@ -1266,8 +1324,8 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 			})
 
 			_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_deploy_done", map[string]any{})
-			if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
-				t.Fatalf("handleEmitTool error = %v, want parent_route_incomplete", err)
+			if err == nil || !strings.Contains(err.Error(), "route_plan_preflight_failed") {
+				t.Fatalf("handleEmitTool error = %v, want exact selected-owner preflight failure", err)
 			}
 			if len(store.events) != 0 || len(store.routes) != 0 {
 				t.Fatalf("persisted events/routes = %d/%d, want 0/0", len(store.events), len(store.routes))

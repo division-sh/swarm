@@ -87,16 +87,61 @@ type Descriptor struct {
 	AddressFields map[string]string
 }
 
+type targetEvidenceState uint8
+
+const (
+	targetEvidenceAbsent targetEvidenceState = iota
+	targetEvidenceExact
+	targetEvidenceInvalid
+)
+
+// PersistedStructuralParent is the classified parent route stored when a
+// child/template instance is created. Its zero value is explicit absence.
+type PersistedStructuralParent struct {
+	state targetEvidenceState
+	route events.RouteIdentity
+}
+
+func ClassifyPersistedStructuralParent(route events.RouteIdentity) PersistedStructuralParent {
+	route = route.Normalized()
+	if route.Empty() {
+		return PersistedStructuralParent{}
+	}
+	if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
+		return PersistedStructuralParent{state: targetEvidenceInvalid}
+	}
+	return PersistedStructuralParent{state: targetEvidenceExact, route: route}
+}
+
+// CurrentDeliveryTarget is exact target evidence obtained from an admitted
+// DeliveryRoute. It cannot be constructed from an event or source identity.
+type CurrentDeliveryTarget struct {
+	state targetEvidenceState
+	route events.RouteIdentity
+}
+
+func ClassifyCurrentDeliveryTarget(route events.DeliveryRoute, present bool) CurrentDeliveryTarget {
+	if !present {
+		return CurrentDeliveryTarget{}
+	}
+	route = route.Normalized()
+	if _, err := route.Identity(); err != nil || route.Target.EntitylessReceiver() {
+		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
+	}
+	target := route.Target.Route().Normalized()
+	if target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
+		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
+	}
+	return CurrentDeliveryTarget{state: targetEvidenceExact, route: target}
+}
+
 type ResolutionInput struct {
-	Source        semanticview.Source
-	FlowID        string
-	EventType     string
-	RoutingSource events.RoutingSource
-	ParentRoute   events.RouteIdentity
-	// Static child flows have no persisted ParentRoute row; they may route back to
-	// the current delivery entity, but template/dynamic ParentRoute metadata must
-	// remain complete and fail closed when partial.
-	AllowEntityOnlyParentRoute bool
+	Source               semanticview.Source
+	FlowID               string
+	EventType            string
+	RoutingSource        events.RoutingSource
+	StructuralParent     PersistedStructuralParent
+	CurrentDeliveryOwner CurrentDeliveryTarget
 }
 
 type Resolution struct {
@@ -273,32 +318,25 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	if consumer.InvalidSink() || (consumer.Has(OutputConsumerHarness) && consumer.HasRuntimeConsumer()) {
 		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
 	}
-	connectPlans := consumer.connects
-	if connectPlansContainRootReceiver(connectPlans) {
-		parentRoute := input.ParentRoute.Normalized()
-		if parentRoute.EntityID == "" {
-			return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
-		}
-		return Resolution{
-			Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute),
-			Target:   parentRoute,
-		}
-	}
 	if consumer.Has(OutputConsumerHarness) || consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerExternal) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	if len(connectPlans) > 0 {
+	if len(consumer.connects) > 0 {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	parentRoute := input.ParentRoute.Normalized()
-	if !parentRoute.Empty() {
-		if input.AllowEntityOnlyParentRoute && parentRoute.FlowID == "" && parentRoute.FlowInstance == "" && parentRoute.EntityID != "" {
-			return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute), Target: parentRoute}
-		}
-		if parentRoute.FlowID == "" || parentRoute.FlowInstance == "" || parentRoute.EntityID == "" {
-			return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
-		}
+	if input.StructuralParent.state == targetEvidenceInvalid {
+		return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
+	}
+	if input.StructuralParent.state == targetEvidenceExact {
+		parentRoute := input.StructuralParent.route
 		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute), Target: parentRoute}
+	}
+	if nestedStaticCurrentDeliveryTargetEligible(input.Source, input.FlowID) {
+		if input.CurrentDeliveryOwner.state != targetEvidenceExact {
+			return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
+		}
+		target := input.CurrentDeliveryOwner.route
+		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, target), Target: target}
 	}
 	if OutputHasExternalConsumer(input.Source, input.FlowID, input.EventType) {
 		return Resolution{Envelope: envelope.Normalized()}
@@ -306,13 +344,12 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
 }
 
-func connectPlansContainRootReceiver(plans []ConnectRoutePlan) bool {
-	for _, plan := range plans {
-		if plan.receiver.IsRoot() {
-			return true
-		}
+func nestedStaticCurrentDeliveryTargetEligible(source semanticview.Source, flowID string) bool {
+	scope, ok := semanticview.FlowScopeByID(source, strings.TrimSpace(flowID))
+	if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), string(runtimecontracts.FlowModeStatic)) {
+		return false
 	}
-	return false
+	return strings.Contains(strings.Trim(strings.TrimSpace(scope.Path), "/"), "/")
 }
 
 func OutputHarnessSink(source semanticview.Source, flowID, eventType string) bool {

@@ -20,13 +20,16 @@ type selectedRunTargetOwnerProjection struct {
 	agentsAvailable  bool
 	descriptors      []ActiveTargetDescriptor
 	targetsAvailable bool
-	structural       events.DeliveryTargetOwnership
+	currentTarget    events.DeliveryTargetOwnership
 	source           semanticview.Source
 	required         bool
 }
 
 func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
 	plan = plan.Normalized()
+	if err := validateStructuralTargetOwnerProofAgreement(plan.DeliveryIntents); err != nil {
+		return RoutePlan{}, err
+	}
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
 		if !intent.TargetOwnership.Empty() {
@@ -49,7 +52,7 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 				descriptor, ok := p.agents[intent.AgentIdentity.Normalize()]
 				if !ok {
 					if intent.PendingAgentLifecycle {
-						owner, err := p.resolveSelectedRoute(intent.TargetBlueprint, intent.AllowStructuralOwner)
+						owner, err := p.resolveSelectedRoute(intent.TargetBlueprint, intent.StructuralOwnerProof)
 						if err != nil {
 							return RoutePlan{}, fmt.Errorf("resolve pending delivery target for %s: %w", intent.Recipient.ID(), err)
 						}
@@ -84,7 +87,7 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 				intent.TargetBlueprint = owner.Route()
 				continue
 			}
-			owner, err := p.resolveSelectedRoute(intent.TargetBlueprint, intent.AllowStructuralOwner)
+			owner, err := p.resolveSelectedRoute(intent.TargetBlueprint, intent.StructuralOwnerProof)
 			if err != nil {
 				return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
 			}
@@ -100,8 +103,7 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 		}
 		owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
 			Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-			Handler: handler, Candidates: p.targetOwnerCandidates(), StructuralOwner: p.structural,
-			AllowStructuralOwner: intent.AllowStructuralOwner,
+			Handler: handler, Candidates: p.targetOwnerCandidates(), StructuralOwnerProof: intent.StructuralOwnerProof,
 		})
 		if err != nil {
 			return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
@@ -115,6 +117,27 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 	}
 	plan.ConnectEvaluation = ledger
 	return plan.Normalized(), nil
+}
+
+func validateStructuralTargetOwnerProofAgreement(intents []RoutePlanDeliveryIntent) error {
+	seen := make(map[deliveryIntentKey]runtimepinrouting.StructuralTargetOwnerProof, len(intents))
+	for _, intent := range intents {
+		proof := intent.StructuralOwnerProof
+		if proof.Empty() {
+			continue
+		}
+		key := deliveryIntentKey{
+			recipient: intent.Recipient, agentIdentity: intent.AgentIdentity.Normalize(),
+			target: intent.TargetBlueprint.Normalized(), targetOwner: intent.TargetOwnership,
+			handler: intent.Handler, replyContextID: intent.Context.Normalized().ReplyContextID(),
+			projection: intent.PayloadProjection.Normalized().Fingerprint(), connectClaim: intent.ConnectClaim,
+		}
+		if previous, ok := seen[key]; ok && previous != proof {
+			return fmt.Errorf("conflicting compiled structural target-owner proofs for receiver %s", intent.Recipient.ID())
+		}
+		seen[key] = proof
+	}
+	return nil
 }
 
 func (p selectedRunTargetOwnerProjection) resolveConnectEvaluation(ledger events.ConnectEvaluationLedger, intents []RoutePlanDeliveryIntent) (events.ConnectEvaluationLedger, error) {
@@ -226,7 +249,7 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 		descriptors: descriptors, targetsAvailable: targetsAvailable, source: p.semanticSource, required: p.requireTargetOwners,
 	}
 	if route, ok := runtimedelivery.RouteFromContext(ctx); ok {
-		projection.structural = route.Target
+		projection.currentTarget = route.Target
 	}
 	if projection.required {
 		if err := projection.validate(); err != nil {
@@ -246,7 +269,7 @@ func (p selectedRunTargetOwnerProjection) validate() error {
 	return nil
 }
 
-func (p selectedRunTargetOwnerProjection) pinRoutingDescriptors(plans []runtimepinrouting.ConnectRoutePlan) []runtimepinrouting.Descriptor {
+func (p selectedRunTargetOwnerProjection) pinRoutingDescriptors(plans []runtimepinrouting.ConnectRoutePlan, sourceEvent runtimepinrouting.SourceEvent) ([]runtimepinrouting.Descriptor, error) {
 	out := make([]runtimepinrouting.Descriptor, 0, len(p.descriptors)+len(plans))
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
@@ -256,21 +279,20 @@ func (p selectedRunTargetOwnerProjection) pinRoutingDescriptors(plans []runtimep
 		})
 	}
 	for _, plan := range plans {
-		if !plan.StructuralTargetOwnerEligible() {
-			continue
-		}
 		for _, target := range plan.Readback().Targets {
-			if descriptor, ok := p.structuralDescriptor(target); ok {
-				out = append(out, runtimepinrouting.Descriptor{
-					ID: descriptor.ID, EntityID: descriptor.EntityID, FlowInstance: descriptor.FlowInstance,
-				})
+			proof, ok, err := plan.ProveStructuralTargetOwner(target, p.currentTarget, sourceEvent)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				out = append(out, proof.Descriptor())
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
-func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.RouteIdentity, allowStructural bool) (events.DeliveryTargetOwnership, error) {
+func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.RouteIdentity, proof runtimepinrouting.StructuralTargetOwnerProof) (events.DeliveryTargetOwnership, error) {
 	blueprint = blueprint.Normalized()
 	if blueprint.Empty() {
 		if !p.required {
@@ -295,24 +317,14 @@ func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.
 		}
 		owners[ownership] = struct{}{}
 	}
-	if len(owners) == 0 && allowStructural {
-		if blueprint.EntityID == "" {
-			if descriptor, ok := p.structuralDescriptor(blueprint); ok {
-				owner := blueprint
-				owner.EntityID = descriptor.EntityID
-				var ownership events.DeliveryTargetOwnership
-				var err error
-				if p.structural.MaterializingEntity() {
-					ownership, err = events.NewMaterializingEntityTarget(owner)
-				} else {
-					ownership, err = events.NewExistingEntityTarget(owner)
-				}
-				if err != nil {
-					return events.DeliveryTargetOwnership{}, err
-				}
-				owners[ownership] = struct{}{}
-			}
+	if len(owners) == 0 && !proof.Empty() {
+		if err := proof.Validate(); err != nil {
+			return events.DeliveryTargetOwnership{}, err
 		}
+		if proof.TargetBlueprint() != blueprint {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("compiled structural target-owner proof does not match receiver blueprint")
+		}
+		owners[proof.TargetOwner()] = struct{}{}
 	}
 	if len(owners) != 1 {
 		if len(owners) == 0 && !p.required {
@@ -359,16 +371,4 @@ func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipel
 		})
 	}
 	return out
-}
-
-func (p selectedRunTargetOwnerProjection) structuralDescriptor(blueprint events.RouteIdentity) (ActiveTargetDescriptor, bool) {
-	blueprint = blueprint.Normalized()
-	structural := p.structural.Route()
-	if blueprint.FlowInstance == "" || structural.EntityID == "" {
-		return ActiveTargetDescriptor{}, false
-	}
-	return ActiveTargetDescriptor{
-		ID:       "structural:" + blueprint.FlowInstance,
-		EntityID: structural.EntityID, FlowInstance: blueprint.FlowInstance,
-	}.Normalized(), true
 }

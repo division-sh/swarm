@@ -21,7 +21,9 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -4913,6 +4915,159 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 	}
 }
 
+func TestExecutor_LoweredConnectEmissionRemainsTargetlessBeforeEventBus(t *testing.T) {
+	source := sourceWithChildOutputPinAndRootConnect()
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if len(graph.Plans()) != 1 || len(graph.Issues()) != 0 {
+		t.Fatalf("compiled plans/issues = %#v/%#v, want one valid child-to-root connect", graph.Plans(), graph.Issues())
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	structuralParent := events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1", EntityID: "stored-parent"}
+	currentOwner := events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1", EntityID: "current-owner"}
+	producerSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: "child", FlowInstance: "child/inst-1", EntityID: "child-source",
+	})
+	if err != nil {
+		t.Fatalf("producer source: %v", err)
+	}
+	state := testStateSnapshot("running", map[string]any{
+		"flow_path": "child/inst-1", "parent_flow_id": structuralParent.FlowID,
+		"parent_flow_instance": structuralParent.FlowInstance, "parent_entity_id": structuralParent.EntityID,
+	}, nil, map[string]map[string]any{})
+	state.EntityID = identity.NormalizeEntityID("child-source")
+	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("child-node"), Target: events.MustExistingEntityTarget(currentOwner),
+	})
+	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{
+		EntityID: "child-source", NodeID: "child-node", FlowID: "child", ProducerSource: producerSource,
+		Event: eventtest.RunCreatingRootIngress("evt-connect", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "",
+			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}), time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child/inst-1/child.done"}}, State: state,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("emit intents = %#v, want one", result.EmitIntents)
+	}
+	emitted := result.EmitIntents[0].Event
+	if !emitted.TargetRoute().Empty() || len(emitted.TargetRoutes()) != 0 {
+		t.Fatalf("lowered-connect emission target = %#v/%#v, want targetless before EventBus", emitted.TargetRoute(), emitted.TargetRoutes())
+	}
+	if got := emitted.SourceRoute(); got != producerSource.Route() {
+		t.Fatalf("emitted source = %#v, want admitted source %#v", got, producerSource.Route())
+	}
+}
+
+func TestExecutor_NestedStaticOutputUsesExactCurrentDeliveryTarget(t *testing.T) {
+	source := sourceWithNestedStaticOutputPin()
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	currentOwner := events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1", EntityID: "current-owner"}
+	inboundOwner := events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}
+	producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: "child", FlowInstance: "root/child", EntityID: "source-owner",
+	})
+	if err != nil {
+		t.Fatalf("producer source: %v", err)
+	}
+	state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
+	state.EntityID = identity.NormalizeEntityID(currentOwner.EntityID)
+	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("child-node"), Target: events.MustExistingEntityTarget(currentOwner),
+	})
+	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{
+		EntityID: identity.NormalizeEntityID(currentOwner.EntityID), NodeID: "child-node", FlowID: "child", ProducerSource: producerSource,
+		Event: eventtest.RunCreatingRootIngress("evt-static", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "",
+			events.EnvelopeForTargetRoute(events.EventEnvelope{}, inboundOwner), time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("emit intents = %#v, want one", result.EmitIntents)
+	}
+	if got := result.EmitIntents[0].Event.TargetRoute(); got != currentOwner {
+		t.Fatalf("target = %#v, want exact current delivery %#v", got, currentOwner)
+	}
+	if currentOwner.EntityID == inboundOwner.EntityID || currentOwner.EntityID == producerSource.Route().EntityID {
+		t.Fatal("test identities must be distinguishable")
+	}
+}
+
+func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{name: "missing", ctx: context.Background()},
+		{name: "entityless", ctx: runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+			Recipient: events.MustNodeDeliveryRecipient("child-node"),
+			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1"}),
+		})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source: sourceWithNestedStaticOutputPin(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "child", FlowInstance: "root/child", EntityID: "source-owner"})
+			if err != nil {
+				t.Fatalf("producer source: %v", err)
+			}
+			state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
+			state.EntityID = identity.NormalizeEntityID("state-owner")
+			result, err := exec.ExecuteSemanticFixture(tc.ctx, ExecutionRequest{
+				EntityID: "state-owner", NodeID: "child-node", FlowID: "child", ProducerSource: producerSource,
+				Event:   eventtest.RunCreatingRootIngress("evt-static-hostile", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
+			})
+			if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+				t.Fatalf("Execute error = %v, want target_required_missing", err)
+			}
+			if len(result.EmitIntents) != 0 {
+				t.Fatalf("emit intents = %#v, want none", result.EmitIntents)
+			}
+		})
+	}
+}
+
+func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: sourceWithChildOutputPin(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	state := testStateSnapshot("running", map[string]any{
+		"flow_path": "child/inst-1", "parent_flow_id": "root", "parent_entity_id": "parent-ent",
+	}, nil, map[string]map[string]any{})
+	state.EntityID = identity.NormalizeEntityID("child-ent")
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "child-ent", NodeID: "child-node", FlowID: "child",
+		Event:   eventtest.RunCreatingRootIngress("evt-partial-parent", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
+	})
+	if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
+		t.Fatalf("Execute error = %v, want parent_route_incomplete", err)
+	}
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("emit intents = %#v, want none", result.EmitIntents)
+	}
+}
+
 func sourceWithChildOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
@@ -4939,6 +5094,57 @@ func sourceWithChildOutputPin() semanticview.Source {
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"child": &child,
 			},
+		},
+	})
+}
+
+func sourceWithNestedStaticOutputPin() semanticview.Source {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "child_done", Event: "child.done"}},
+		}}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
+		Path:   "root/child",
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "root", FlowOutputs: map[string][]string{"child": {"child.done"}},
+			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"child": child.Schema.Pins.Outputs.EventPins},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}},
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
+		},
+	})
+}
+
+func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "child_done", Event: "child.done"}},
+		}}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
+		Path:   "child",
+	}
+	rootInput := runtimecontracts.FlowInputEventPin{Name: "child_done", Event: "child.done"}
+	connect := runtimecontracts.FlowPackageConnect{From: "child.child_done", To: ".child_done", SourceFile: "package.yaml", SourceLine: 1}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema:  &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}},
+		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "root", FlowInputs: map[string][]string{"": {"child.done"}}, FlowOutputs: map[string][]string{"child": {"child.done"}},
+			FlowInputEventPins:  map[string][]runtimecontracts.FlowInputEventPin{"": {rootInput}},
+			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"child": child.Schema.Pins.Outputs.EventPins},
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{connect},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}},
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
 		},
 	})
 }

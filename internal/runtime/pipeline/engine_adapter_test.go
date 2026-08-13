@@ -400,11 +400,11 @@ func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string
 		Source:    mutationParentRoutePinOutputSource(),
 		FlowID:    "child",
 		EventType: "child.done",
-		ParentRoute: events.RouteIdentity{
+		StructuralParent: runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
 			FlowID:       route.FlowID,
 			FlowInstance: route.FlowInstance,
 			EntityID:     route.EntityID,
-		},
+		}),
 	}, eventtest.RunCreatingRootIngress("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != want {
 		t.Fatalf("pin output failure = %q, want %q (metadata=%#v)", result.Failure, want, metadata)

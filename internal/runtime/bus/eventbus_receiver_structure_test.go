@@ -191,6 +191,59 @@ func TestEventBusReceiverOwnerAdmissionStructuralGuard(t *testing.T) {
 	}
 }
 
+func TestDeliveryTargetOwnerAuthorityStructuralGuard(t *testing.T) {
+	forbidden := map[string]bool{
+		"AllowStructuralOwner":                                  false,
+		"StructuralTargetOwnerEligible":                         false,
+		"structuralDescriptor":                                  false,
+		"routedScopedNoTargetNodeDeliveryIntents":               false,
+		"routedStaticCrossFlowInstanceTarget":                   false,
+		"routedDescendantStaticFlowInstanceTarget":              false,
+		"routedWildcardStaticServiceNoTargetNodeDeliveryRoutes": false,
+	}
+	requiredCalls := map[string]bool{
+		"connectRoutePlanDeliveryIntents":                        false,
+		"selectedRunTargetOwnerProjection.pinRoutingDescriptors": false,
+	}
+	for path, file := range parseTargetOwnerAuthorityProductionFiles(t) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			identifier, ok := node.(*ast.Ident)
+			if ok {
+				if _, banned := forbidden[identifier.Name]; banned {
+					forbidden[identifier.Name] = true
+					t.Errorf("%s: retired target-owner authority %s returned", path, identifier.Name)
+				}
+			}
+			return true
+		})
+		for _, declaration := range file.Decls {
+			fn, ok := declaration.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			key := receiverFunctionKey(fn)
+			if _, guarded := requiredCalls[key]; !guarded {
+				if _, guarded = requiredCalls[fn.Name.Name]; !guarded {
+					continue
+				}
+				key = fn.Name.Name
+			}
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if ok && calledFunctionName(call) == "ProveStructuralTargetOwner" {
+					requiredCalls[key] = true
+				}
+				return true
+			})
+		}
+	}
+	for name, found := range requiredCalls {
+		if !found {
+			t.Errorf("structural target-owner guard lost compiled proof consumption in %s", name)
+		}
+	}
+}
+
 func parseReceiverOwnershipProductionFiles(t testing.TB) map[string]*ast.File {
 	t.Helper()
 	files := make(map[string]*ast.File)
@@ -199,6 +252,33 @@ func parseReceiverOwnershipProductionFiles(t testing.TB) map[string]*ast.File {
 		filepath.Join("..", "manager"),
 		filepath.Join("..", "pipeline"),
 		filepath.Join("..", "core", "eventreceiver"),
+	} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				t.Fatalf("parse %s: %v", path, err)
+			}
+			files[path] = file
+		}
+	}
+	return files
+}
+
+func parseTargetOwnerAuthorityProductionFiles(t testing.TB) map[string]*ast.File {
+	t.Helper()
+	files := make(map[string]*ast.File)
+	for _, dir := range []string{
+		".",
+		filepath.Join("..", "pipeline"),
+		filepath.Join("..", "core", "pinrouting"),
 	} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {

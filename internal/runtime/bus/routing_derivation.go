@@ -832,9 +832,6 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 		return nil
 	}
 	rootInputs := routeRootInputEventSet(source)
-	if len(rootInputs) == 0 {
-		return nil
-	}
 	for _, scope := range source.FlowScopes() {
 		if strings.EqualFold(scope.Mode, "template") {
 			continue
@@ -844,8 +841,14 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 		if flowID == "" || flowPath == "" {
 			continue
 		}
-		for _, eventType := range sortedStringKeys(rootInputs) {
-			if !normalizedStringListContains(scope.InputEvents, eventType) {
+		admittedInputs := routeAdmittedFlowIngressEventSet(source, scope, rootInputs)
+		if len(admittedInputs) == 0 {
+			continue
+		}
+		identityScope := routeEventIdentityScope(flowPath, routeFlowLocalEventSet(source, scope), scope.InputEvents)
+		for _, eventType := range sortedStringKeys(admittedInputs) {
+			localEvent := eventidentity.Normalize(identityScope.LocalizeInput(eventType))
+			if localEvent == "" || !normalizedStringListContains(scope.InputEvents, localEvent) {
 				continue
 			}
 			for _, key := range sortedStringKeys(scope.Nodes) {
@@ -855,15 +858,16 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 				if subscriberID == "" {
 					subscriberID = semanticNodeID
 				}
-				if semanticNodeID == "" || !routeNodeSubscribesToLocalExact(source, semanticNodeID, eventType) {
+				if semanticNodeID == "" || !routeNodeSubscribesToLocalExact(source, semanticNodeID, localEvent) {
 					continue
 				}
 				subscriber := Subscriber{
-					Recipient:     events.MustNodeDeliveryRecipient(subscriberID),
-					Path:          flowPath,
-					MatchPattern:  eventType,
-					routeSource:   subscriberRouteSourceRootInputFlow,
-					handlerFlowID: flowID, handlerNodeID: semanticNodeID,
+					Recipient:      events.MustNodeDeliveryRecipient(subscriberID),
+					Path:           flowPath,
+					MatchPattern:   eventType,
+					routeSource:    subscriberRouteSourceRootInputFlow,
+					LocalizedEvent: localEvent,
+					handlerFlowID:  flowID, handlerNodeID: semanticNodeID,
 				}
 				var err error
 				subscriber.targetHandler, err = runtimepipeline.AdmitDeliveryTargetHandler(
@@ -877,6 +881,22 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 		}
 	}
 	return nil
+}
+
+func routeAdmittedFlowIngressEventSet(source semanticview.Source, scope semanticview.FlowScope, rootInputs map[string]struct{}) map[string]struct{} {
+	out := cloneStringSet(rootInputs)
+	flowID := strings.TrimSpace(scope.ID)
+	for _, localEvent := range scope.InputEvents {
+		resolution := semanticview.ResolveNonConnectFlowInputProducer(source, flowID, localEvent)
+		if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
+			continue
+		}
+		eventType := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, localEvent))
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	return out
 }
 
 func routeRootInputEventSet(source semanticview.Source) map[string]struct{} {

@@ -1291,7 +1291,7 @@ func (p *mutatingProbeEventPublisher) PublishAcknowledged(ctx context.Context, e
 func (p *mutatingProbeEventPublisher) PublishAPIEventAcknowledged(
 	ctx context.Context,
 	evt events.Event,
-	_ *semanticview.AuthoredEventEndpoint,
+	_ *runtimebus.APIEventPublicationEndpoint,
 	request apiidempotency.Request,
 	completion apiidempotency.Completion,
 ) (apiidempotency.Completion, bool, error) {

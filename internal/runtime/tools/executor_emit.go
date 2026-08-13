@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -144,7 +145,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			RoutingSource: routingSource,
 		}, envelope)
 		if rootResolution.Failure == runtimepinrouting.FailureParentRouteIncomplete {
-			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
+			structuralParent, currentDeliveryOwner, err := e.emitTargetEvidenceForActor(ctx, actor, flowInstance)
 			if err != nil {
 				wrapped := failures.WrapDetail(
 					"parent_route_lookup_failed",
@@ -157,12 +158,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				return nil, wrapped
 			}
 			rootResolution = runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-				Source:                     e.workflowSource,
-				FlowID:                     flowID,
-				EventType:                  eventType,
-				RoutingSource:              routingSource,
-				ParentRoute:                parentRoute,
-				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
+				Source:               e.workflowSource,
+				FlowID:               flowID,
+				EventType:            eventType,
+				RoutingSource:        routingSource,
+				StructuralParent:     structuralParent,
+				CurrentDeliveryOwner: currentDeliveryOwner,
 			}, envelope)
 			if !rootResolution.Failure.Empty() {
 				wrapped := failures.NewTarget(
@@ -210,7 +211,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			}
 		}
 		if !usePublishAuthority && !resolvedBeforePreflight {
-			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
+			structuralParent, currentDeliveryOwner, err := e.emitTargetEvidenceForActor(ctx, actor, flowInstance)
 			if err != nil {
 				wrapped := failures.WrapDetail(
 					"parent_route_lookup_failed",
@@ -223,12 +224,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				return nil, wrapped
 			}
 			resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-				Source:                     e.workflowSource,
-				FlowID:                     flowID,
-				EventType:                  eventType,
-				RoutingSource:              routingSource,
-				ParentRoute:                parentRoute,
-				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
+				Source:               e.workflowSource,
+				FlowID:               flowID,
+				EventType:            eventType,
+				RoutingSource:        routingSource,
+				StructuralParent:     structuralParent,
+				CurrentDeliveryOwner: currentDeliveryOwner,
 			}, envelope)
 			if !resolution.Failure.Empty() {
 				wrapped := failures.NewTarget(
@@ -269,10 +270,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}, nil
 }
 
-func (e *Executor) emitParentRouteForActor(ctx context.Context, actor models.AgentConfig, flowID, flowInstance string, inbound events.Event) (events.RouteIdentity, bool, error) {
+func (e *Executor) emitTargetEvidenceForActor(ctx context.Context, actor models.AgentConfig, flowInstance string) (runtimepinrouting.PersistedStructuralParent, runtimepinrouting.CurrentDeliveryTarget, error) {
 	if e == nil {
-		return events.RouteIdentity{}, false, nil
+		return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, nil
 	}
+	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
+	currentDeliveryOwner := runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent)
 	if e.workflowInstances != nil {
 		instancePath := strings.Trim(strings.TrimSpace(flowInstance), "/")
 		if instancePath == "" {
@@ -281,42 +284,19 @@ func (e *Executor) emitParentRouteForActor(ctx context.Context, actor models.Age
 		if instancePath != "" {
 			instance, ok, err := e.workflowInstances.Load(ctx, runtimeflowidentity.RouteForInstancePath(instancePath))
 			if err != nil {
-				return events.RouteIdentity{}, false, err
+				return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, err
 			}
 			if ok {
 				parent := runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata).Normalized()
-				return events.RouteIdentity{
+				return runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
 					FlowID:       parent.FlowID,
 					FlowInstance: parent.FlowInstance,
 					EntityID:     parent.EntityID,
-				}.Normalized(), false, nil
+				}), currentDeliveryOwner, nil
 			}
 		}
 	}
-	if route, ok := e.staticFlowEntityParentRoute(flowID, inbound); ok {
-		return route, true, nil
-	}
-	return events.RouteIdentity{}, false, nil
-}
-
-func (e *Executor) staticFlowEntityParentRoute(flowID string, inbound events.Event) (events.RouteIdentity, bool) {
-	flowID = strings.TrimSpace(flowID)
-	if e == nil || e.workflowSource == nil || flowID == "" {
-		return events.RouteIdentity{}, false
-	}
-	scope, ok := e.workflowSource.FlowScopeByID(flowID)
-	if !ok || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-		return events.RouteIdentity{}, false
-	}
-	path := strings.Trim(strings.TrimSpace(e.workflowSource.FlowPath(flowID)), "/")
-	if !strings.Contains(path, "/") {
-		return events.RouteIdentity{}, false
-	}
-	entityID := strings.TrimSpace(inbound.EntityID())
-	if entityID == "" {
-		return events.RouteIdentity{}, false
-	}
-	return events.RouteIdentity{EntityID: entityID}.Normalized(), true
+	return runtimepinrouting.PersistedStructuralParent{}, currentDeliveryOwner, nil
 }
 
 func emitFlowInstanceForActorEvent(actor models.AgentConfig, inbound events.Event) string {

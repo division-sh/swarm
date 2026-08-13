@@ -440,6 +440,7 @@ const (
 	connectEndpointRoot connectEndpointKind = iota + 1
 	connectEndpointExternalIngress
 	connectEndpointStaticFlow
+	connectEndpointSingletonFlow
 	connectEndpointTemplateFlow
 )
 
@@ -474,6 +475,8 @@ func newConnectRoutePlanEndpoint(direction ConnectEndpointRoleKind, root bool, f
 		kind = connectEndpointExternalIngress
 	case root:
 		kind = connectEndpointRoot
+	case strings.TrimSpace(mode) == runtimecontracts.FlowModeSingleton:
+		kind = connectEndpointSingletonFlow
 	case strings.TrimSpace(mode) == runtimecontracts.FlowModeTemplate:
 		kind = connectEndpointTemplateFlow
 	}
@@ -499,7 +502,9 @@ func (e ConnectRoutePlanEndpoint) IsRoot() bool { return e.kind == connectEndpoi
 func (e ConnectRoutePlanEndpoint) IsExternalIngress() bool {
 	return e.kind == connectEndpointExternalIngress
 }
-func (e ConnectRoutePlanEndpoint) IsTemplate() bool { return e.kind == connectEndpointTemplateFlow }
+func (e ConnectRoutePlanEndpoint) IsStatic() bool    { return e.kind == connectEndpointStaticFlow }
+func (e ConnectRoutePlanEndpoint) IsSingleton() bool { return e.kind == connectEndpointSingletonFlow }
+func (e ConnectRoutePlanEndpoint) IsTemplate() bool  { return e.kind == connectEndpointTemplateFlow }
 
 // ConnectRoutePlanEndpointReadback is a one-way display projection. No graph
 // evaluator or application API accepts this type.
@@ -1074,23 +1079,129 @@ func (p ConnectRoutePlan) RequiresRuntimeResolution() bool {
 	return p.receiver.IsRoot() || p.resolutionKind != ConnectResolutionStatic
 }
 
-// StructuralTargetOwnerEligible reports whether compiled topology proves that
-// a static receiver is nested under the currently executing delivery owner.
-// The delivery target supplies entity authority; endpoint paths only prove the
-// structural relationship.
-func (p ConnectRoutePlan) StructuralTargetOwnerEligible() bool {
-	if p.fanIn != nil || p.receiver.kind != connectEndpointStaticFlow {
-		return false
+// StructuralTargetOwnerProof is an opaque, publish-time proof that one exact
+// compiled connect may share the current delivery entity with its nested
+// static receiver. Only ConnectRoutePlan.ProveStructuralTargetOwner can create
+// a non-zero proof.
+type StructuralTargetOwnerProof struct {
+	planID events.ConnectPlanIdentity
+	target events.RouteIdentity
+	owner  events.DeliveryTargetOwnership
+}
+
+func (p StructuralTargetOwnerProof) Empty() bool {
+	return p.planID.Empty() && p.target.Normalized().Empty() && p.owner.Empty()
+}
+
+func (p StructuralTargetOwnerProof) TargetBlueprint() events.RouteIdentity {
+	return p.target.Normalized()
+}
+
+func (p StructuralTargetOwnerProof) TargetOwner() events.DeliveryTargetOwnership {
+	return p.owner
+}
+
+func (p StructuralTargetOwnerProof) Descriptor() Descriptor {
+	owner := p.TargetOwner().Route()
+	return Descriptor{
+		ID:           "compiled-structural:" + p.planID.String(),
+		EntityID:     owner.EntityID,
+		FlowInstance: owner.FlowInstance,
+	}
+}
+
+func (p StructuralTargetOwnerProof) Validate() error {
+	if p.Empty() {
+		return nil
+	}
+	if p.planID.Empty() {
+		return fmt.Errorf("compiled structural target-owner proof requires exact plan identity")
+	}
+	target := p.TargetBlueprint()
+	if target.Empty() || target.EntityID != "" {
+		return fmt.Errorf("compiled structural target-owner proof requires an entityless target blueprint")
+	}
+	if err := p.owner.Validate(); err != nil {
+		return fmt.Errorf("compiled structural target-owner proof owner: %w", err)
+	}
+	if !p.owner.ExistingEntity() && !p.owner.MaterializingEntity() {
+		return fmt.Errorf("compiled structural target-owner proof requires an entity-bearing current owner")
+	}
+	ownerRoute := p.owner.Route()
+	if ownerRoute.FlowID != target.FlowID || ownerRoute.FlowInstance != target.FlowInstance || ownerRoute.EntityID == "" {
+		return fmt.Errorf("compiled structural target-owner proof target and owner disagree")
+	}
+	return nil
+}
+
+// ProveStructuralTargetOwner binds legal shared ownership to one exact
+// compiled plan, receiver blueprint, and already-admitted current target. A
+// false result is an explicit absence of structural authority, never a hint to
+// reconstruct it from route text.
+func (p ConnectRoutePlan) ProveStructuralTargetOwner(target events.RouteIdentity, current events.DeliveryTargetOwnership, sourceEvent SourceEvent) (StructuralTargetOwnerProof, bool, error) {
+	target = target.Normalized()
+	if p.fanIn != nil || p.receiver.kind != connectEndpointStaticFlow || current.Empty() {
+		return StructuralTargetOwnerProof{}, false, nil
+	}
+	if err := current.Validate(); err != nil {
+		return StructuralTargetOwnerProof{}, false, fmt.Errorf("admitted current delivery owner: %w", err)
+	}
+	if !current.ExistingEntity() && !current.MaterializingEntity() {
+		return StructuralTargetOwnerProof{}, false, nil
 	}
 	receiverPath := strings.Trim(p.receiver.flowPath.value, "/")
-	if receiverPath == "" {
+	if receiverPath == "" || !p.structuralSourceOwnsCurrent(sourceEvent, current.Route()) {
+		return StructuralTargetOwnerProof{}, false, nil
+	}
+	if !p.source.IsRoot() {
+		sourcePath := strings.Trim(p.source.flowPath.value, "/")
+		if sourcePath == "" || receiverPath == sourcePath || !strings.HasPrefix(receiverPath, sourcePath+"/") {
+			return StructuralTargetOwnerProof{}, false, nil
+		}
+	}
+	want := p.target.Normalized()
+	if want.Empty() || target != want || target.EntityID != "" || target.FlowID != p.receiver.flowID.value || target.FlowInstance != receiverPath {
+		return StructuralTargetOwnerProof{}, false, fmt.Errorf("compiled structural target-owner proof target does not match the exact receiver blueprint")
+	}
+	ownerRoute := target
+	ownerRoute.EntityID = current.Route().EntityID
+	var owner events.DeliveryTargetOwnership
+	var err error
+	if current.MaterializingEntity() {
+		owner, err = events.NewMaterializingEntityTarget(ownerRoute)
+	} else {
+		owner, err = events.NewExistingEntityTarget(ownerRoute)
+	}
+	if err != nil {
+		return StructuralTargetOwnerProof{}, false, err
+	}
+	planID, err := ConnectPlanIdentity(p)
+	if err != nil {
+		return StructuralTargetOwnerProof{}, false, err
+	}
+	proof := StructuralTargetOwnerProof{planID: planID, target: target, owner: owner}
+	if err := proof.Validate(); err != nil {
+		return StructuralTargetOwnerProof{}, false, err
+	}
+	return proof, true, nil
+}
+
+func (p ConnectRoutePlan) structuralSourceOwnsCurrent(sourceEvent SourceEvent, current events.RouteIdentity) bool {
+	current = current.Normalized()
+	if current.EntityID == "" || current.FlowInstance == "" {
 		return false
 	}
-	if p.source.IsRoot() {
-		return true
+	if !connectSourceEndpointMatches(p.source, sourceEvent) {
+		return false
 	}
-	sourcePath := strings.Trim(p.source.flowPath.value, "/")
-	return sourcePath != "" && receiverPath != sourcePath && strings.HasPrefix(receiverPath, sourcePath+"/")
+	switch p.source.kind {
+	case connectEndpointRoot:
+		return sourceEvent.route.EntityID != "" && sourceEvent.route.EntityID == current.EntityID
+	case connectEndpointStaticFlow, connectEndpointSingletonFlow, connectEndpointTemplateFlow:
+		return sourceEvent.route.Normalized() == current
+	default:
+		return false
+	}
 }
 
 type ConnectRoutePlanIssue struct {

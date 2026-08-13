@@ -15,7 +15,8 @@ import (
 func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
 	parent := events.RouteIdentity{FlowID: "root", FlowInstance: "root/inst-1", EntityID: "parent-ent"}
 	result := Resolve(ResolutionInput{
-		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done", ParentRoute: parent,
+		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
+		StructuralParent: ClassifyPersistedStructuralParent(parent),
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if !result.Failure.Empty() || result.Target != parent || result.Event.TargetRoute() != parent {
 		t.Fatalf("resolution = %#v, want exact parent route", result)
@@ -91,7 +92,7 @@ func TestResolveHarnessSinkCreatesNoRuntimeRoute(t *testing.T) {
 func TestResolveFailsClosedOnIncompleteParentRoute(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
-		ParentRoute: events.RouteIdentity{FlowID: "root", EntityID: "parent-ent"},
+		StructuralParent: ClassifyPersistedStructuralParent(events.RouteIdentity{FlowID: "root", EntityID: "parent-ent"}),
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != FailureParentRouteIncomplete {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureParentRouteIncomplete)
