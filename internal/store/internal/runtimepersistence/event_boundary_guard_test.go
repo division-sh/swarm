@@ -55,6 +55,13 @@ var eventRecordSQLFiles = map[string]struct{}{
 	"internal/store/internal/backend/eventrecord/sqlite/adapter.go":   {},
 }
 
+var eventPayloadBytesSQLFiles = map[string]struct{}{
+	"internal/store/internal/backend/delivery/dead_letters.go":        {},
+	"internal/store/internal/backend/eventrecord/postgres/adapter.go": {},
+	"internal/store/internal/backend/eventrecord/sqlite/adapter.go":   {},
+	"internal/store/internal/backend/runforkrevision/revision.go":     {},
+}
+
 var directEventSQLTestFixtures = map[string]int{
 	"internal/cliapp/raw_sql_boundary_test.go":                                 1,
 	"internal/store/internal/runtimepersistence/event_schema_contract_test.go": 2,
@@ -62,6 +69,7 @@ var directEventSQLTestFixtures = map[string]int{
 
 var eventInsertSQL = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+events\b`)
 var completeEventReadSQL = regexp.MustCompile(`(?is)\bevent_class\b.*\bFROM\s+events\b`)
+var eventPayloadBytesSQL = regexp.MustCompile(`(?is)\bpayload_bytes\b`)
 
 func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)
@@ -197,6 +205,11 @@ func checkEventBoundaryFile(t *testing.T, path, relative string, gotAdmission ma
 			if eventInsertSQL.MatchString(raw) || completeEventReadSQL.MatchString(raw) {
 				if _, ok := eventRecordSQLFiles[relative]; !ok {
 					t.Fatalf("%s:%d owns event-record SQL outside a private backend adapter", relative, fset.Position(value.Pos()).Line)
+				}
+			}
+			if eventPayloadBytesSQL.MatchString(raw) {
+				if _, ok := eventPayloadBytesSQLFiles[relative]; !ok {
+					t.Fatalf("%s:%d consumes authoritative event payload bytes outside the closed owner set", relative, fset.Position(value.Pos()).Line)
 				}
 			}
 		case *ast.CompositeLit:

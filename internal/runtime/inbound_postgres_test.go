@@ -725,7 +725,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	eventtestsql.CorruptEventStore(t, ctx, db, authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
-	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb WHERE event_id = $1::uuid`, eventID)
+	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb, payload_bytes = '{"corrupt":true}'::bytea WHERE event_id = $1::uuid`, eventID)
 	duplicate := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, pg, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
@@ -794,7 +794,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	eventtestsql.CorruptEventStore(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
-	}, `UPDATE events SET payload = '{"corrupt":true}' WHERE event_id = ?`, "", eventID)
+	}, `UPDATE events SET payload = '{"corrupt":true}', payload_bytes = CAST('{"corrupt":true}' AS BLOB) WHERE event_id = ?`, "", eventID)
 	duplicate := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, g, bus, sqliteStore, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {

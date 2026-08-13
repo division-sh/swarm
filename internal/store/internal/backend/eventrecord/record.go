@@ -380,7 +380,7 @@ func (r Record) Equal(other Record) bool {
 		r.EntityID == other.EntityID &&
 		r.FlowInstance == other.FlowInstance &&
 		r.Scope == other.Scope &&
-		jsonEqual(r.Payload, other.Payload) &&
+		bytes.Equal(r.Payload, other.Payload) &&
 		r.ExecutionMode == other.ExecutionMode &&
 		r.ChainDepth == other.ChainDepth &&
 		r.ProducedBy == other.ProducedBy &&

@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -32,7 +33,7 @@ type runForkRevisionEvent struct {
 	TargetRoute    json.RawMessage      `json:"target_route"`
 	TargetSet      json.RawMessage      `json:"target_set"`
 	Scope          string               `json:"scope"`
-	Payload        json.RawMessage      `json:"payload"`
+	Payload        json.RawMessage      `json:"-"`
 	ChainDepth     int                  `json:"chain_depth"`
 	ProducedBy     string               `json:"produced_by"`
 	ProducedByType string               `json:"produced_by_type"`
@@ -304,10 +305,22 @@ func appendRunForkRevisionFact(snapshot *runForkRevisionSnapshot, family runfork
 	}
 	switch family {
 	case runforkrevision.FamilyEvents:
-		var fact runForkRevisionEvent
-		if err := decode(&fact); err != nil {
+		var persisted struct {
+			runForkRevisionEvent
+			PayloadBase64 string `json:"payload_base64"`
+		}
+		if err := decode(&persisted); err != nil {
 			return err
 		}
+		payload, err := base64.StdEncoding.DecodeString(persisted.PayloadBase64)
+		if err != nil {
+			return fmt.Errorf("decode run fork events revision payload bytes: %w", err)
+		}
+		if !json.Valid(payload) {
+			return fmt.Errorf("decode run fork events revision payload bytes: payload is not valid JSON")
+		}
+		fact := persisted.runForkRevisionEvent
+		fact.Payload = json.RawMessage(payload)
 		fact.runForkRevisionedFact = stamp
 		snapshot.Events = append(snapshot.Events, fact)
 	case runforkrevision.FamilyEntityMutations:

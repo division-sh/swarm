@@ -1,6 +1,8 @@
 package runtimepersistence
 
 import (
+	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +58,23 @@ func TestRunForkRevisionProjectionPreservesSourceRouteSeparatelyFromReceiverCont
 	}
 	if _, ok := stringSliceSet(facts.SourceFlows)["consumer"]; ok {
 		t.Fatalf("source flows = %v, receiver context must not become source identity", facts.SourceFlows)
+	}
+}
+
+func TestRunForkRevisionProjectionReconstructsExactPayloadBytes(t *testing.T) {
+	for _, payload := range [][]byte{
+		[]byte(`{ "value": 1 }`),
+		[]byte(`{"b":2,"a":1}`),
+		[]byte(`{"value":1.0}`),
+	} {
+		snapshot := &runForkRevisionSnapshot{}
+		raw := []byte(`{"event_id":"event-1","event_name":"proof","payload_base64":"` + base64.StdEncoding.EncodeToString(payload) + `"}`)
+		if err := appendRunForkRevisionFact(snapshot, runforkrevision.FamilyEvents, runForkRevisionedFact{FirstRevision: 1, Revision: 1}, raw); err != nil {
+			t.Fatalf("append exact payload fact %q: %v", payload, err)
+		}
+		if len(snapshot.Events) != 1 || !bytes.Equal(snapshot.Events[0].Payload, payload) {
+			t.Fatalf("revision payload = %q, want %q", snapshot.Events[0].Payload, payload)
+		}
 	}
 }
 

@@ -498,7 +498,7 @@ const canonicalEventsProjectionSQL = `
 	           'entity_id', e.entity_id, 'flow_instance', e.flow_instance,
 	           'routing_source', jsonb_build_object('kind', e.routing_source_kind, 'route', e.source_route, 'authority', COALESCE(e.routing_source_authority, '')),
 	           'target_route', e.target_route,
-	           'target_set', e.target_set, 'scope', e.scope, 'payload', e.payload,
+	           'target_set', e.target_set, 'scope', e.scope, 'payload_base64', encode(e.payload_bytes, 'base64'),
 	           'chain_depth', e.chain_depth, 'produced_by', e.produced_by,
 	           'produced_by_type', e.produced_by_type, 'handler_node', e.handler_node,
 	           'idempotency_key', e.idempotency_key, 'source_event_id', e.source_event_id,

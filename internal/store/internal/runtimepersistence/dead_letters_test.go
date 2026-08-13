@@ -227,7 +227,7 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			entityID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(
-				uuid.NewString(), "deadletter.identity", "runtime", "", []byte(`{"text":"canonical"}`), 2,
+				uuid.NewString(), "deadletter.identity", "runtime", "", []byte(`{"text":"canonical","value":1}`), 2,
 				uuid.NewString(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 				time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC),
 			)
@@ -327,15 +327,26 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("claim second delivery: %v", err)
 			}
-			sourceConflict := base
-			sourceConflict.DeliveryID = secondClaim.Snapshot.DeliveryID
-			sourceConflict.ClaimVersion = secondClaim.Claim.Version()
-			sourceConflict.HandlerNode = secondRoute.Recipient.ID()
-			sourceConflict.OriginalPayload = []byte(`{"text":"not-the-persisted-event"}`)
-			if err := selected.RecordDeadLetter(ctx, sourceConflict); err == nil || !strings.Contains(err.Error(), "source event facts conflict: original_payload") {
-				t.Fatalf("RecordDeadLetter source mismatch error = %v", err)
+			for _, tc := range []struct {
+				name    string
+				payload []byte
+			}{
+				{name: "whitespace", payload: []byte(`{ "text": "canonical", "value": 1 }`)},
+				{name: "key_order", payload: []byte(`{"value":1,"text":"canonical"}`)},
+				{name: "numeric_lexeme", payload: []byte(`{"text":"canonical","value":1.0}`)},
+			} {
+				t.Run("source_payload_"+tc.name, func(t *testing.T) {
+					sourceConflict := base
+					sourceConflict.DeliveryID = secondClaim.Snapshot.DeliveryID
+					sourceConflict.ClaimVersion = secondClaim.Claim.Version()
+					sourceConflict.HandlerNode = secondRoute.Recipient.ID()
+					sourceConflict.OriginalPayload = tc.payload
+					if err := selected.RecordDeadLetter(ctx, sourceConflict); err == nil || !strings.Contains(err.Error(), "source event facts conflict: original_payload") {
+						t.Fatalf("RecordDeadLetter source mismatch error = %v", err)
+					}
+					assertCounts(1, 1)
+				})
 			}
-			assertCounts(1, 1)
 		})
 	}
 }

@@ -70,6 +70,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 		`CREATE TABLE events (
 			event_class TEXT NOT NULL, event_id TEXT PRIMARY KEY, run_id TEXT, event_name TEXT NOT NULL,
 			task_id TEXT, entity_id TEXT, flow_instance TEXT, scope TEXT NOT NULL, payload BLOB NOT NULL,
+			payload_bytes BLOB NOT NULL,
 			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
 			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,

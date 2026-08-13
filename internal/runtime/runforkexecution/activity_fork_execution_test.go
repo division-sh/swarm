@@ -323,7 +323,8 @@ func seedSelectedContractActivityLoop(t *testing.T, db *sql.DB, runID, entityID,
 
 func seedSelectedContractActivityRequest(t *testing.T, db *sql.DB, runID, requestEventID string, payload selectedContractActivityRequestPayload) {
 	t.Helper()
-	if _, err := db.ExecContext(context.Background(), `UPDATE events SET payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, runID, requestEventID, selectedContractActivityJSON(t, payload)); err != nil {
+	raw := selectedContractActivityJSON(t, payload)
+	if _, err := db.ExecContext(context.Background(), `UPDATE events SET payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, runID, requestEventID, raw, []byte(raw)); err != nil {
 		t.Fatalf("seed source activity request: %v", err)
 	}
 }

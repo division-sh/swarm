@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -76,6 +77,9 @@ func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
 			t.Run("age_independent_selection_and_global_presence", func(t *testing.T) {
 				provePipelineAgeIndependentSelection(t, ctx, fixture, selected)
 			})
+			t.Run("exact_payload_recovery_claim", func(t *testing.T) {
+				provePipelineExactPayloadRecovery(t, ctx, fixture, selected)
+			})
 			t.Run("claim_exclusion_release_and_stale_fencing", func(t *testing.T) {
 				provePipelineClaimLifecycle(t, ctx, fixture, selected)
 			})
@@ -107,6 +111,35 @@ func TestPipelineObligationSQLitePostgresParityMatrix(t *testing.T) {
 				provePipelineCommittedSettlementCleanupOutcome(t, ctx, fixture, selected)
 			})
 		})
+	}
+}
+
+func provePipelineExactPayloadRecovery(
+	t *testing.T,
+	ctx context.Context,
+	fixture authorActivityReceiptFixture,
+	selected pipelineObligationParityStore,
+) {
+	t.Helper()
+	runID := uuid.NewString()
+	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	payload := []byte("{\n  \"value\": 1.0, \"order\": [2, 1]\n}")
+	event := eventtest.PersistedProjection(
+		uuid.NewString(), events.EventType("recovery.payload_bytes"), "runtime", "", payload,
+		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Add(-time.Minute),
+	)
+	if err := commitSemanticEventFixture(ctx, selected, event); err != nil {
+		t.Fatalf("commit recovery event: %v", err)
+	}
+	work, err := selected.PipelineObligations().ClaimEvent(ctx, event.ID(), runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim recovery event: %v", err)
+	}
+	if got := work.Event.Payload(); !bytes.Equal(got, payload) {
+		t.Fatalf("recovery payload = %q, want %q", got, payload)
+	}
+	if _, err := selected.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
+		t.Fatalf("settle recovery event: %v", err)
 	}
 }
 

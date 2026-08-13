@@ -42,7 +42,7 @@ func TestEventIntegrityFingerprintIncludesExactProducerAndClassAuthority(t *test
 	}
 }
 
-func TestEventIntegrityFingerprintIgnoresJSONEncodingOrder(t *testing.T) {
+func TestEventIntegrityFingerprintIncludesExactPayloadBytes(t *testing.T) {
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
 	build := func(payload []byte) events.Event {
@@ -51,19 +51,27 @@ func TestEventIntegrityFingerprintIgnoresJSONEncodingOrder(t *testing.T) {
 			events.EventEnvelope{}, time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC),
 		)
 	}
-	left := build([]byte(`{"outer":{"a":1,"b":2},"value":true}`))
-	right := build([]byte(`{"value":true,"outer":{"b":2,"a":1}}`))
-
-	leftFingerprint, err := EventIntegrityFingerprint(left, runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rightFingerprint, err := EventIntegrityFingerprint(right, runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if leftFingerprint != rightFingerprint {
-		t.Fatalf("semantic JSON key order changed event integrity: left=%s right=%s", leftFingerprint, rightFingerprint)
+	for _, tc := range []struct {
+		name        string
+		left, right []byte
+	}{
+		{name: "whitespace", left: []byte(`{"value":1}`), right: []byte(`{ "value": 1 }`)},
+		{name: "key_order", left: []byte(`{"outer":{"a":1,"b":2},"value":true}`), right: []byte(`{"value":true,"outer":{"b":2,"a":1}}`)},
+		{name: "numeric_lexeme", left: []byte(`{"value":1}`), right: []byte(`{"value":1.0}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			leftFingerprint, err := EventIntegrityFingerprint(build(tc.left), runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rightFingerprint, err := EventIntegrityFingerprint(build(tc.right), runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if leftFingerprint == rightFingerprint {
+				t.Fatalf("byte-distinct payloads share event integrity fingerprint %s", leftFingerprint)
+			}
+		})
 	}
 }
 

@@ -666,6 +666,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			flow_instance TEXT,
 			scope TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
 			payload TEXT NOT NULL CHECK (json_valid(payload)),
+			payload_bytes BLOB NOT NULL,
 			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
 			chain_depth INTEGER NOT NULL CHECK (chain_depth >= 0),
 			produced_by TEXT NOT NULL CHECK (NULLIF(TRIM(produced_by), '') IS NOT NULL),
