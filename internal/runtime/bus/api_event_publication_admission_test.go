@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -52,8 +53,41 @@ func TestOrdinaryFlowAPIEventPublicationAdmissionIsExactAndNonTransferable(t *te
 		uuid.NewString(), "child/work.requested", "operator", "", []byte(`{}`),
 		0, uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	if _, _, err := endpoint.admit(source, existingRun); err == nil || !strings.Contains(err.Error(), "new-run root ingress") {
-		t.Fatalf("existing-run endpoint reuse error = %v, want admission-class rejection", err)
+	existingAdmission, publicInput, err := endpoint.admit(source, existingRun)
+	if err != nil || publicInput != nil || existingAdmission.flowID != "child" || existingAdmission.eventType != existingRun.Type() {
+		t.Fatalf("existing-run exact API admission = %#v public=%#v err=%v", existingAdmission, publicInput, err)
+	}
+}
+
+func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
+	source := semanticview.Wrap(routedRootInputFlowNodeBundle())
+	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
+	if err != nil {
+		t.Fatalf("admit root-input endpoint: %v", err)
+	}
+	if got := endpoint.Readback(); got.Kind != "root_input" || got.FlowID != "" || got.EventType != "thing.created" {
+		t.Fatalf("root-input endpoint readback = %#v", got)
+	}
+	if _, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.missing"); err == nil || !strings.Contains(err.Error(), "does not own") {
+		t.Fatalf("unknown root-input error = %v, want exact ownership rejection", err)
+	}
+	existing := eventtest.OperatorInjected(
+		uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	admission, publicInput, err := endpoint.admit(source, existing)
+	if err != nil || publicInput != nil || admission.kind != apiEventPublicationEndpointRootInput || admission.eventType != existing.Type() {
+		t.Fatalf("root-input API admission = %#v public=%#v err=%v", admission, publicInput, err)
+	}
+	child := eventtest.ChildForProducerWithRoutingSource(
+		uuid.NewString(), "thing.created", eventtest.Producer(events.EventProducerNode, "child"), "", []byte(`{}`), 0,
+		events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+		events.EventEnvelope{}, eventtest.StaticFlowRoutingSource("child", "child", eventtest.UUID("root-input-child")), time.Now().UTC(),
+	)
+	if _, _, err := endpoint.admit(source, child); err == nil || !strings.Contains(err.Error(), "root-ingress or operator-injected") {
+		t.Fatalf("child root-input endpoint error = %v, want admission-class rejection", err)
+	}
+	if got, want := int(apiEventPublicationEndpointKindCount-1), 3; got != want {
+		t.Fatalf("API endpoint variants = %d, want %d closed variants", got, want)
 	}
 }
 

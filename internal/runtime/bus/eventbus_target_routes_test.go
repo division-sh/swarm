@@ -2166,6 +2166,39 @@ func TestEventBusPublish_RootInputFlowRejectsInternalSameNameBeforePersistence(t
 	}
 }
 
+func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
+	source := semanticview.Wrap(routedRootInputFlowNodeBundle())
+	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
+	if err != nil {
+		t.Fatalf("construct exact operator API endpoint: %v", err)
+	}
+	store := newTargetRouteMemoryStore()
+	wantRoute := events.RouteIdentity{
+		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("operator-root-input-owner"),
+	}.Normalized()
+	store.setTargetOwnerRoutes(wantRoute)
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("create EventBus: %v", err)
+	}
+	event := eventtest.OperatorInjected(
+		uuid.NewString(), events.EventType("thing.created"), "operator", "", []byte(`{"proof":"typed-api-endpoint"}`), 0,
+		uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
+	)
+
+	plan, err := eventBus.CheckAPIEventPublishRecipientPlan(context.Background(), event, &endpoint)
+	if err != nil {
+		t.Fatalf("preflight exact operator API endpoint: %v", err)
+	}
+	want := events.MustExistingEntityTarget(wantRoute)
+	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "entity-writer" || plan.DeliveryRoutes[0].Target != want {
+		t.Fatalf("operator API delivery routes = %#v, want exact validation receiver %#v", plan.DeliveryRoutes, want)
+	}
+	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), event); err == nil || !strings.Contains(err.Error(), "root-input") {
+		t.Fatalf("unadmitted operator preflight error = %v, want root-input admission refusal", err)
+	}
+}
+
 func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()

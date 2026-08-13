@@ -2027,6 +2027,28 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	return eb.publishRecipientPlan(evt, plan), nil
 }
 
+// CheckAPIEventPublishRecipientPlan applies the ordinary publish preflight
+// with the exact source-validated API endpoint that the commit path consumes.
+func (eb *EventBus) CheckAPIEventPublishRecipientPlan(
+	ctx context.Context,
+	evt events.Event,
+	endpoint *APIEventPublicationEndpoint,
+) (PublishRecipientPlan, error) {
+	if endpoint == nil {
+		return eb.CheckPublishRecipientPlan(ctx, evt)
+	}
+	admission, publicInput, err := endpoint.admit(eb.semanticSource, evt)
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	if publicInput != nil {
+		ctx = withPublicInputAdmission(ctx, *publicInput)
+	} else {
+		ctx = withAPIEventPublicationAdmission(ctx, admission)
+	}
+	return eb.CheckPublishRecipientPlan(ctx, evt)
+}
+
 // RecoverPersistedPipeline replays the complete pipeline for an event whose
 // terminal pipeline receipt was never written.
 func (eb *EventBus) RecoverPersistedPipeline(ctx context.Context, work runtimepipelineobligation.ClaimedWork, recipients []string) (runtimepipelineobligation.ExecutionOutcome, error) {

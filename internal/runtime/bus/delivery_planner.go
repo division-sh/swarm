@@ -839,9 +839,13 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 		return nil
 	}
 	authorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
+	apiAuthorized := make(map[events.DeliveryRecipient]struct{}, len(plan.DeliveryIntents))
 	for _, intent := range plan.DeliveryIntents {
 		if intent.Recipient.IsNode() {
 			authorized[intent.Recipient] = struct{}{}
+			if intent.Producer == routeIntentProducerAPIEventPublication {
+				apiAuthorized[intent.Recipient] = struct{}{}
+			}
 		}
 	}
 	live := make(map[string]struct{}, len(plan.LiveRecipients))
@@ -853,6 +857,9 @@ func validateRoutedNodeDeliveryAuthority(evt events.Event, routed []Subscriber, 
 			continue
 		}
 		if subscriber.routeSource == subscriberRouteSourceRootInputFlow && evt.AdmissionClass() != events.EventAdmissionRootIngress {
+			if _, ok := apiAuthorized[subscriber.Recipient]; ok {
+				continue
+			}
 			return fmt.Errorf(
 				"routed root-input node %q at %q matched target-free event %q without root_ingress admission",
 				subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), evt.Type(),
@@ -926,21 +933,44 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 		return nil
 	}
 	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
-	if !ok || admission.kind != apiEventPublicationEndpointOrdinaryFlow || admission.eventType != evt.Type() {
+	if !ok || admission.eventType != evt.Type() {
 		return nil
 	}
 	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
 	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() || subscriber.routeSource != subscriberRouteSourceSubscription {
+		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		if strings.TrimSpace(subscriber.handlerFlowID) != admission.flowID || strings.Trim(strings.TrimSpace(subscriber.Path), "/") != admission.flowPath {
+		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+		flowID := strings.TrimSpace(subscriber.handlerFlowID)
+		switch subscriber.routeSource {
+		case subscriberRouteSourceSubscription:
+			if admission.kind != apiEventPublicationEndpointOrdinaryFlow || flowID != admission.flowID || path != admission.flowPath {
+				continue
+			}
+		case subscriberRouteSourceRootInputFlow:
+			if evt.AdmissionClass() != events.EventAdmissionOperatorInjected {
+				continue
+			}
+			switch admission.kind {
+			case apiEventPublicationEndpointOrdinaryFlow:
+				if flowID != admission.flowID || path != admission.flowPath {
+					continue
+				}
+			case apiEventPublicationEndpointRootInput:
+				if flowID == "" || path == "" {
+					continue
+				}
+			default:
+				continue
+			}
+		default:
 			continue
 		}
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: subscriber.Recipient,
 			TargetBlueprint: events.RouteIdentity{
-				FlowID: admission.flowID, FlowInstance: admission.flowPath,
+				FlowID: flowID, FlowInstance: path,
 			},
 			Handler:  routedSubscriberTargetHandler(subscriber, evt.Type()),
 			Producer: routeIntentProducerAPIEventPublication,

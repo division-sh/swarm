@@ -1233,10 +1233,10 @@ contract_formats:
           or root/flow `auto_emit_on_create`, but it MUST NOT generate producer-scoped auto-wire route patterns.
           Direct parent connect proof proves the input is satisfied, but concrete delivery authority remains the connect
           RoutePlan, not a raw subscription fallback.
-          A RouteTable root_input_flow node route is executable only for an admitted root_ingress event, including a
-          source-validated API publication that produces that class. A child, operator-injected, replay, runtime, or
-          platform event with the same event name cannot acquire external-input receiver authority and MUST fail before
-          event-delivery or receiver mutation.
+          A RouteTable root_input_flow node route is executable only for an admitted root_ingress event or an
+          operator_injected event carrying the exact opaque, source-validated root_input API publication endpoint for that
+          event. An unadmitted child, operator-injected, replay, runtime, or platform event with the same event name cannot
+          acquire external-input receiver authority and MUST fail before event-delivery or receiver mutation.
         retired_paths: |
           Unique same-name sibling output-pin inference is retired as producer-pattern authority. `swarm.source: external`
           on events.yaml is not input-pin producer proof; it remains external metadata for non-input event roles such as

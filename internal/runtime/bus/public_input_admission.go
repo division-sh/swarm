@@ -17,10 +17,12 @@ type apiEventPublicationEndpointKind uint8
 
 const (
 	apiEventPublicationEndpointOrdinaryFlow apiEventPublicationEndpointKind = iota + 1
+	apiEventPublicationEndpointRootInput
 	apiEventPublicationEndpointTemplate
+	apiEventPublicationEndpointKindCount
 )
 
-// APIEventPublicationEndpoint is an opaque, source-validated create-new
+// APIEventPublicationEndpoint is an opaque, source-validated publication
 // endpoint. Callers cannot manufacture flow ownership from event strings.
 type APIEventPublicationEndpoint struct {
 	kind        apiEventPublicationEndpointKind
@@ -44,10 +46,25 @@ func (e APIEventPublicationEndpoint) Readback() APIEventPublicationEndpointReadb
 	switch e.kind {
 	case apiEventPublicationEndpointOrdinaryFlow:
 		readback.Kind = "ordinary_flow"
+	case apiEventPublicationEndpointRootInput:
+		readback.Kind = "root_input"
 	case apiEventPublicationEndpointTemplate:
 		readback.Kind = "template_input"
 	}
 	return readback
+}
+
+func NewRootInputAPIEventPublicationEndpoint(source semanticview.Source, eventType string) (APIEventPublicationEndpoint, error) {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if source == nil || eventType == "" {
+		return APIEventPublicationEndpoint{}, fmt.Errorf("root-input event publication endpoint is incomplete")
+	}
+	if !source.FlowHasInputEvent("", eventType) {
+		return APIEventPublicationEndpoint{}, fmt.Errorf("root input does not own %q", eventType)
+	}
+	return APIEventPublicationEndpoint{
+		kind: apiEventPublicationEndpointRootInput, eventType: events.EventType(eventType),
+	}, nil
 }
 
 type apiEventPublicationAdmission struct {
@@ -126,6 +143,18 @@ func (e APIEventPublicationEndpoint) admit(source semanticview.Source, evt event
 			return apiEventPublicationAdmission{}, nil, err
 		}
 		return admission, nil, nil
+	case apiEventPublicationEndpointRootInput:
+		if source == nil {
+			return apiEventPublicationAdmission{}, nil, fmt.Errorf("root-input event publication source is unavailable")
+		}
+		if !source.FlowHasInputEvent("", string(e.eventType)) {
+			return apiEventPublicationAdmission{}, nil, fmt.Errorf("root-input event publication endpoint %s no longer resolves exactly", e.eventType)
+		}
+		admission := apiEventPublicationAdmission{kind: apiEventPublicationEndpointRootInput, eventType: e.eventType}
+		if err := admission.validateEvent(evt); err != nil {
+			return apiEventPublicationAdmission{}, nil, err
+		}
+		return admission, nil, nil
 	case apiEventPublicationEndpointTemplate:
 		publicInput, err := newPublicInputAdmission(source, e.publicInput)
 		if err != nil {
@@ -141,16 +170,38 @@ func (e APIEventPublicationEndpoint) admit(source semanticview.Source, evt event
 }
 
 func (a apiEventPublicationAdmission) validateEvent(evt events.Event) error {
-	if a.kind != apiEventPublicationEndpointOrdinaryFlow || a.flowID == "" || a.flowPath == "" || a.eventType == "" {
-		return fmt.Errorf("ordinary flow event publication admission is incomplete")
+	switch a.kind {
+	case apiEventPublicationEndpointOrdinaryFlow:
+		if a.flowID == "" || a.flowPath == "" || a.eventType == "" {
+			return fmt.Errorf("ordinary flow event publication admission is incomplete")
+		}
+	case apiEventPublicationEndpointRootInput:
+		if a.flowID != "" || a.flowPath != "" || a.eventType == "" {
+			return fmt.Errorf("root-input event publication admission is incomplete")
+		}
+	default:
+		return fmt.Errorf("event publication admission is incomplete")
 	}
-	if evt.AdmissionClass() != events.EventAdmissionRootIngress {
-		return fmt.Errorf("ordinary flow event publication admission requires a new-run root ingress event")
+	switch evt.AdmissionClass() {
+	case events.EventAdmissionRootIngress, events.EventAdmissionOperatorInjected:
+	default:
+		return fmt.Errorf("%s event publication admission requires root-ingress or operator-injected API publication", a.endpointCode())
 	}
 	if evt.Type() != a.eventType {
-		return fmt.Errorf("ordinary flow event publication endpoint %s resolves %s, not %s", a.flowID, a.eventType, evt.Type())
+		return fmt.Errorf("%s event publication endpoint resolves %s, not %s", a.endpointCode(), a.eventType, evt.Type())
 	}
 	return nil
+}
+
+func (a apiEventPublicationAdmission) endpointCode() string {
+	switch a.kind {
+	case apiEventPublicationEndpointOrdinaryFlow:
+		return "ordinary-flow"
+	case apiEventPublicationEndpointRootInput:
+		return "root-input"
+	default:
+		return "unknown"
+	}
 }
 
 func withAPIEventPublicationAdmission(ctx context.Context, admission apiEventPublicationAdmission) context.Context {
