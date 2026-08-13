@@ -113,19 +113,12 @@ func (s *SQLite) LoadBundleCatalog(ctx context.Context, bundleHash string) (bund
 	return scanned.toDetail()
 }
 
-func (s *SQLite) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalogcontract.AgentsResult, error) {
+func (s *SQLite) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalogcontract.AgentListOptions) (bundlecatalogcontract.AgentsResult, error) {
 	detail, err := s.LoadBundleCatalog(ctx, bundleHash)
 	if err != nil {
 		return bundlecatalogcontract.AgentsResult{}, err
 	}
-	agents, err := projectBundleCatalogAgents(detail.ParsedJSON, detail.ContentYAML)
-	if err != nil {
-		return bundlecatalogcontract.AgentsResult{}, err
-	}
-	if agents == nil {
-		agents = []bundlecatalogcontract.AgentDefinition{}
-	}
-	return bundlecatalogcontract.AgentsResult{Agents: agents}, nil
+	return pageBundleCatalogAgents(detail.BundleHash, detail.ParsedJSON, opts)
 }
 
 func scanSQLiteBundleCatalogRow(row bundleCatalogScanner) (bundleCatalogRow, error) {

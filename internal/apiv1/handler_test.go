@@ -764,6 +764,7 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 			bundleHash: {
 				Agents: []bundlecatalog.AgentDefinition{{
 					AgentID:           "researcher",
+					AgentNameOwner:    "swarm://flows/research/agent/researcher",
 					Role:              "research",
 					Type:              "managed",
 					Model:             "cheap",
@@ -819,7 +820,7 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 		t.Fatalf("bundle.get bundle_hash = %#v", got)
 	}
 
-	agents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agents","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`"}}`)
+	agents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agents","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`","limit":1,"cursor":"agent-cursor"}}`)
 	if agents.Error != nil {
 		t.Fatalf("bundle.agents error = %#v", agents.Error)
 	}
@@ -827,6 +828,9 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 	agent := asMap(t, agentRows[0])
 	if agent["agent_id"] != "researcher" || agent["model"] != "cheap" {
 		t.Fatalf("bundle.agents row = %#v", agent)
+	}
+	if catalog.lastAgents.Limit != 1 || catalog.lastAgents.Cursor != "agent-cursor" {
+		t.Fatalf("bundle.agents opts = %#v", catalog.lastAgents)
 	}
 	for _, runtimeKey := range []string{"status", "runtime_state", "queue", "active", "session_id"} {
 		if _, ok := agent[runtimeKey]; ok {
@@ -837,13 +841,14 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 
 func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	catalog := &fakeBundleCatalogReadStore{
+		missing: map[string]bool{bundleHash: true},
+		listErr: bundlecatalog.ErrInvalidCursor,
+	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			BundleCatalog: &fakeBundleCatalogReadStore{
-				missing: map[string]bool{bundleHash: true},
-				listErr: bundlecatalog.ErrInvalidCursor,
-			},
+			BundleCatalog: catalog,
 		}),
 	})
 
@@ -863,6 +868,43 @@ func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
 	badCursor := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"cursor","method":"bundle.list","params":{"cursor":"bad"}}`)
 	if badCursor.Error == nil || badCursor.Error.Code != codeInvalidParams {
 		t.Fatalf("bundle.list invalid cursor error = %#v, want invalid params", badCursor.Error)
+	}
+
+	catalog.missing = nil
+	catalog.agentsErr = bundlecatalog.ErrInvalidCursor
+	badAgentCursor := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agent-cursor","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`","cursor":"bad"}}`)
+	if badAgentCursor.Error == nil || badAgentCursor.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.agents invalid cursor error = %#v, want invalid params", badAgentCursor.Error)
+	}
+
+	catalog.agentsErr = &bundlecatalog.AgentDefinitionTooLargeError{
+		BundleHash: bundleHash, AgentNameOwner: "swarm://agent/oversized", AgentID: "oversized",
+		EncodedRowBytes: 800000, ResultByteCeiling: bundlecatalog.AgentListResultByteCeiling,
+	}
+	oversized := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"oversized","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`"}}`)
+	if oversized.Error == nil || asMap(t, oversized.Error.Data)["code"] != BundleAgentDefinitionTooLargeCode {
+		t.Fatalf("bundle.agents oversized error = %#v", oversized.Error)
+	}
+}
+
+func TestOperatorBundleAgentsJSONRPCEnvelopeStaysBelowCLIBudget(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	catalog := &fakeBundleCatalogReadStore{agents: map[string]bundlecatalog.AgentsResult{
+		bundleHash: {
+			Agents: []bundlecatalog.AgentDefinition{{
+				AgentID: "large", AgentNameOwner: "swarm://agent/large", MemorySource: "platform_default",
+				IntentKind: "inline", IntentSource: "inline", IntentProvenance: "agents.yaml#agents.large.intent",
+				IntentContentHash: "sha256:test", IntentIdentity: "agent-intent:v1:sha256:test", IntentContent: strings.Repeat("x", 700_000),
+			}},
+		},
+	}}
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{BundleCatalog: catalog})})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"large","method":"bundle.agents","params":{"bundle_hash":"`+bundleHash+`"}}`))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	handler.ServeHTTP(recorder, testAuthorActivityRequest(request))
+	if recorder.Code != http.StatusOK || recorder.Body.Len() >= 1<<20 {
+		t.Fatalf("bundle.agents envelope status=%d bytes=%d", recorder.Code, recorder.Body.Len())
 	}
 }
 
@@ -1298,6 +1340,8 @@ type fakeBundleCatalogReadStore struct {
 	listResult bundlecatalog.ListResult
 	listErr    error
 	lastList   bundlecatalog.ListOptions
+	lastAgents bundlecatalog.AgentListOptions
+	agentsErr  error
 	details    map[string]bundlecatalog.Detail
 	agents     map[string]bundlecatalog.AgentsResult
 	missing    map[string]bool
@@ -1324,7 +1368,11 @@ func (s *fakeBundleCatalogReadStore) LoadBundleCatalog(_ context.Context, bundle
 	return detail, nil
 }
 
-func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string) (bundlecatalog.AgentsResult, error) {
+func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
+	s.lastAgents = opts
+	if s.agentsErr != nil {
+		return bundlecatalog.AgentsResult{}, s.agentsErr
+	}
 	if s.missing[bundleHash] {
 		return bundlecatalog.AgentsResult{}, bundlecatalog.ErrNotFound
 	}

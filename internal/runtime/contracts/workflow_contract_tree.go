@@ -19,13 +19,14 @@ func flowViewChildren(view *FlowContractView) []*FlowContractView {
 }
 func loadProjectContractView(contractsRoot string, paths ProjectPackagePaths, manifest ProjectPackageDocument) (ProjectContractView, error) {
 	view := ProjectContractView{
-		Paths:    paths,
-		Manifest: manifest,
-		Nodes:    map[string]SystemNodeContract{},
-		Events:   map[string]EventCatalogEntry{},
-		Agents:   map[string]AgentRegistryEntry{},
-		Tools:    map[string]ToolSchemaEntry{},
-		Policy:   PolicyDocument{Values: map[string]PolicyValue{}},
+		Paths:     paths,
+		Manifest:  manifest,
+		Nodes:     map[string]SystemNodeContract{},
+		Events:    map[string]EventCatalogEntry{},
+		Agents:    map[string]AgentRegistryEntry{},
+		AgentURIs: map[string]string{},
+		Tools:     map[string]ToolSchemaEntry{},
+		Policy:    PolicyDocument{Values: map[string]PolicyValue{}},
 	}
 	if err := loadOptionalYAMLMap(paths.ProjectNodesFile, &view.Nodes); err != nil {
 		return view, err

@@ -178,9 +178,8 @@ func TestPostgresBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	parsedJSON, err := json.Marshal(map[string]any{
-		"agents": map[string]any{
-			"bundle-agent": apiTestCatalogAgentDefinition(t, "bundle-agent", "Handle the bundle catalog proof."),
-		},
+		"projection_version": "swarm.bundle.catalog.v2",
+		"agents":             []map[string]any{apiTestCatalogAgentDefinition(t, "bundle-agent", "Handle the bundle catalog proof.")},
 	})
 	if err != nil {
 		t.Fatalf("encode postgres bundle catalog projection: %v", err)

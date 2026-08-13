@@ -125,7 +125,7 @@ func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	parsedJSON, err := json.Marshal(map[string]any{"agents": []map[string]any{
+	parsedJSON, err := json.Marshal(map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []map[string]any{
 		apiTestCatalogAgentDefinition(t, "bundle-agent", "Bundle agent intent."),
 	}})
 	if err != nil {

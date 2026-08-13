@@ -176,69 +176,10 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 			Nodes:        view.Nodes,
 			Events:       view.Events,
 			Agents:       runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
-			AgentURIs:    projectAgentURIs(s.bundle, view.Paths.Key),
+			AgentURIs:    cloneStringMap(view.AgentURIs),
 			Tools:        toolEntryMapSnapshot(view.Tools),
 			Policy:       view.Policy,
 		})
-	}
-	return out
-}
-
-func projectAgentURIs(bundle *runtimecontracts.WorkflowContractBundle, packageKey string) map[string]string {
-	packageKey = strings.TrimSpace(packageKey)
-	if bundle == nil || packageKey == "" {
-		return nil
-	}
-	var visit func(*runtimecontracts.FlowContractView) map[string]string
-	visit = func(view *runtimecontracts.FlowContractView) map[string]string {
-		if view == nil {
-			return nil
-		}
-		if strings.TrimSpace(view.Paths.ID) == "" && strings.TrimSpace(view.Paths.PackageKey) == packageKey {
-			return cloneStringMap(view.AgentURIs)
-		}
-		for index := range view.Children {
-			if uris := visit(&view.Children[index]); len(uris) > 0 {
-				return uris
-			}
-		}
-		return nil
-	}
-	if bundle.FlowTree.Root != nil {
-		if uris := visit(bundle.FlowTree.Root); len(uris) > 0 {
-			return uris
-		}
-	}
-
-	project, ok := bundle.ProjectViewByKey(packageKey)
-	if !ok {
-		return nil
-	}
-	out := map[string]string{}
-	for localID := range runtimecontracts.EffectiveAgentRegistryEntries(project.Agents) {
-		declarations := 0
-		for _, candidate := range bundle.ProjectViews() {
-			if _, exists := candidate.Agents[localID]; exists {
-				declarations++
-			}
-		}
-		if declarations != 1 {
-			continue
-		}
-		owners := map[string]struct{}{}
-		for _, ref := range bundle.URIRegistry.Agents {
-			if strings.TrimSpace(ref.FlowID) != "" || strings.TrimSpace(ref.LocalID) != strings.TrimSpace(localID) {
-				continue
-			}
-			if owner := strings.TrimSpace(ref.Full); owner != "" {
-				owners[owner] = struct{}{}
-			}
-		}
-		if len(owners) == 1 {
-			for owner := range owners {
-				out[localID] = owner
-			}
-		}
 	}
 	return out
 }

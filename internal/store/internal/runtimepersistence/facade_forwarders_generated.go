@@ -449,8 +449,8 @@ func (s *PostgresStore) ListBundleCatalog(ctx context.Context, opts bundlecatalo
 	return s.postgres.ListBundleCatalog(ctx, opts)
 }
 
-func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalog.AgentsResult, error) {
-	return s.postgres.ListBundleCatalogAgents(ctx, bundleHash)
+func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
+	return s.postgres.ListBundleCatalogAgents(ctx, bundleHash, opts)
 }
 
 func (s *PostgresStore) ListCompletionCandidates(ctx context.Context, scope runlifecycle.CandidateScope, cursor runlifecycle.CandidateCursor, limit int) (runlifecycle.CandidatePage, error) {
@@ -1525,8 +1525,8 @@ func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts bundlec
 	return s.sQLite.ListBundleCatalog(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalog.AgentsResult, error) {
-	return s.sQLite.ListBundleCatalogAgents(ctx, bundleHash)
+func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalog.AgentListOptions) (bundlecatalog.AgentsResult, error) {
+	return s.sQLite.ListBundleCatalogAgents(ctx, bundleHash, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListCompletionCandidates(ctx context.Context, scope runlifecycle.CandidateScope, cursor runlifecycle.CandidateCursor, limit int) (runlifecycle.CandidatePage, error) {

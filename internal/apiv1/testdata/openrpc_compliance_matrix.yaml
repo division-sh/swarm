@@ -156,7 +156,7 @@ methods:
   - method: bundle.agents
     transport: http
     required_params: [bundle_hash]
-    declared_errors: [BUNDLE_NOT_FOUND]
+    declared_errors: [BUNDLE_NOT_FOUND, BUNDLE_AGENT_DEFINITION_TOO_LARGE]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorBundleCatalogHandlersExposeStoreOwner}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

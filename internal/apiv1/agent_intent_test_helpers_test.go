@@ -40,6 +40,7 @@ func apiTestCatalogAgentDefinition(t testing.TB, agentID, content string) map[st
 	intent := apiTestResolvedIntent(t, agentID, content)
 	return map[string]any{
 		"agent_id":            agentID,
+		"agent_name_owner":    "swarm://agent/" + agentID,
 		"role":                "worker",
 		"type":                "managed",
 		"model":               "regular",
