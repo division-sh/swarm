@@ -72,6 +72,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "reply_contexts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "reply_contexts.run_id", DeleteOrderGroup: 4},
 		{Table: "standing_service_journal", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "server-wide runtime.nuke standing transition history", DeleteOrderGroup: 4},
 		{Table: "standing_service_generations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "server-wide runtime.nuke standing generation authority", DeleteOrderGroup: 4},
+		{Table: "run_scenario_execution_profiles", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_scenario_execution_profiles.run_id", DeleteOrderGroup: 5},
 		{Table: "events", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "events.run_id", DeleteOrderGroup: 5},
 		{Table: "standing_services", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "server-wide runtime.nuke standing service authority", DeleteOrderGroup: 5},
 		{Table: "runs", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "runs.run_id cleanup set", DeleteOrderGroup: 6},

@@ -1,0 +1,10 @@
+work.requested:
+  mode: Mode
+  details: Details
+  tags: "[text]"
+  required: [mode, details, tags]
+work.alternate:
+  mode: Mode
+  details: Details
+  tags: "[text]"
+  required: [mode, details, tags]

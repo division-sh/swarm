@@ -58,6 +58,7 @@ func TestProviderCapabilitySurfaceRetiresDuplicateOwnersAndTargetBindingGuess(t 
 		},
 		"internal/cliapp/provider_connector_tools.go": {
 			"providerConnectorSurfaceMessage", "formatProviderConnectorSurfaceVerbs", "formatProviderConnectorRequirements",
+			"SourceWithConnectorPackImports",
 		},
 		"internal/cliapp/provider_trigger_packs.go": {
 			"providerTriggerPackSurfaceMessage", "formatProviderTriggerPackRequirements", "ResolveInboundTarget",

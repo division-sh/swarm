@@ -1,0 +1,10 @@
+name: work
+mode: static
+initial_state: ready
+states: [ready]
+pins:
+  inputs:
+    events:
+      - {name: primary, event: work.requested, source: external}
+      - {name: alternate, event: work.alternate, source: external}
+  outputs: {events: []}

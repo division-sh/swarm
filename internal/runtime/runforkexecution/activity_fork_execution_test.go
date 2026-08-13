@@ -289,8 +289,9 @@ func selectedContractActivityLoadedSource(source semanticview.Source, selection 
 	nodes := []runtimepipeline.WorkflowNode{{
 		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
 	}}
+	fact := testEphemeralBundleSourceFact(runForkTestBundleHash)
 	return LoadedSelectedContractSource{
-		Selection: selection, Source: source, BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
+		Selection: selection, Source: source, BundleSourceFact: fact, EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
 		Module: selectedContractWorkflowModule{
 			source: source, workflow: workflow, nodes: nodes,
 			guardRegistry: runtimepipeline.NewContractGuardRegistry(source), actionRegistry: runtimepipeline.NewContractActionRegistry(source),

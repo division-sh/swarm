@@ -11,6 +11,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -80,20 +81,23 @@ type MailboxHandlerOptions struct {
 }
 
 type EventPublicationOptions struct {
-	ExecutionPosture executionposture.Posture
-	Now              func() time.Time
-	Idempotency      APIIdempotencyStore
-	Events           EventPublisher
-	Acknowledged     AcknowledgedEventPublisher
-	RecipientPlans   EventRecipientPlanChecker
-	BundleSource     BundleSourceAdmitter
-	Runs             RunReadStore
-	Entities         EntityReadStore
-	Observability    ObservabilityReadStore
-	RunBundleContext RunBundleContextStore
-	RuntimeContexts  *runtime.RuntimeContextManager
-	Source           semanticview.Source
-	Bundle           runtimecontracts.BundleIdentity
+	ExecutionPosture          executionposture.Posture
+	Now                       func() time.Time
+	Idempotency               APIIdempotencyStore
+	Events                    EventPublisher
+	Acknowledged              AcknowledgedEventPublisher
+	RecipientPlans            EventRecipientPlanChecker
+	BundleSource              BundleSourceAdmitter
+	Runs                      RunReadStore
+	Entities                  EntityReadStore
+	Observability             ObservabilityReadStore
+	RunBundleContext          RunBundleContextStore
+	RuntimeContexts           *runtime.RuntimeContextManager
+	Source                    semanticview.Source
+	Bundle                    runtimecontracts.BundleIdentity
+	EffectiveSourceIdentity   scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog    *scenarioexecution.Catalog
+	ScenarioExecutionProfiles runtimepipeline.ScenarioExecutionProfileReader
 }
 
 type RunStartHandlerOptions struct {
@@ -192,13 +196,17 @@ type StandingServiceHandlerOptions struct {
 }
 
 type TestSetupHandlerOptions struct {
-	Now              func() time.Time
-	Setup            TestSetupStore
-	Idempotency      APIIdempotencyStore
-	RunBundleContext RunBundleContextStore
-	RuntimeContexts  *runtime.RuntimeContextManager
-	BundleSource     BundleSourceAdmitter
-	Source           semanticview.Source
+	Now                       func() time.Time
+	Setup                     TestSetupStore
+	Idempotency               APIIdempotencyStore
+	RunBundleContext          RunBundleContextStore
+	RuntimeContexts           *runtime.RuntimeContextManager
+	BundleSource              BundleSourceAdmitter
+	Source                    semanticview.Source
+	ExecutionPosture          executionposture.Posture
+	EffectiveSourceIdentity   scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog    *scenarioexecution.Catalog
+	ScenarioExecutionProfiles runtimepipeline.ScenarioExecutionProfileReader
 }
 
 type SubscriptionOptions struct {

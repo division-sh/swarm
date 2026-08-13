@@ -21,6 +21,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -189,6 +190,10 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 	if err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
 	}
+	scenarioProfile, sourceProfiled, err := admitRunForkScenarioProfile(ctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.BundleSourceFact)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
 	existing, found, err := loadExactRunForkMaterialization(
 		ctx, s.RunLifecyclePostgresOwner, tx, forkRunID, plan, identity, &selection,
 	)
@@ -196,6 +201,9 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 		return runfork.RunForkMaterialization{}, err
 	}
 	if found {
+		if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
+			return runfork.RunForkMaterialization{}, err
+		}
 		if routeResolved {
 			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(ctx, tx, routeRecovery); err != nil {
 				return runfork.RunForkMaterialization{}, err
@@ -238,6 +246,11 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
 	if err := s.InsertRunForkRunTx(ctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.BundleSourceFact); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
+	}
+	if sourceProfiled {
+		if err := scenarioexecutionpersistence.EnsurePostgres(ctx, tx, forkRunID, scenarioProfile, now); err != nil {
+			return runfork.RunForkMaterialization{}, fmt.Errorf("inherit selected-contract fork scenario execution profile: %w", err)
+		}
 	}
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)

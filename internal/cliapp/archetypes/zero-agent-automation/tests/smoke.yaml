@@ -1,0 +1,13 @@
+name: zero-agent automation smoke
+derive:
+  flow: automation
+  input: request
+  payload:
+    generate: true
+    set:
+      chat_id: "1001"
+      text: hello from Swarm
+connector_responses:
+  telegram.send_message: {}
+expect:
+  no_dead_letters: true

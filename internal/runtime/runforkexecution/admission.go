@@ -10,11 +10,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
@@ -35,12 +37,13 @@ type SelectedContractSourceLoadRequest struct {
 }
 
 type LoadedSelectedContractSource struct {
-	Selection              runfork.RunForkContractSelection
-	Source                 semanticview.Source
-	Module                 runtimepipeline.WorkflowModule
-	BundleSourceFact       runtimecorrelation.BundleSourceFact
-	MockConnectorResponses *providerconnectors.MockResponsePlan
-	Cleanup                func() error
+	Selection               runfork.RunForkContractSelection
+	Source                  semanticview.Source
+	Module                  runtimepipeline.WorkflowModule
+	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
+	MockConnectorResponses  *providerconnectors.MockResponsePlan
+	Cleanup                 func() error
 }
 
 type selectedContractWorkflowModule struct {
@@ -116,7 +119,11 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("hash selected-contract source: %w", err)
 	}
-	source, mockConnectorResponses, err := compileSelectedContractSource(semanticview.Wrap(bundle))
+	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	source, mockConnectorResponses, effectiveSourceIdentity, err := compileSelectedContractSource(semanticview.Wrap(bundle), sourceFact)
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
@@ -137,15 +144,12 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-	if err != nil {
-		return LoadedSelectedContractSource{}, err
-	}
 	return LoadedSelectedContractSource{
-		Selection:              selection,
-		Source:                 source,
-		BundleSourceFact:       sourceFact,
-		MockConnectorResponses: mockConnectorResponses,
+		Selection:               selection,
+		Source:                  source,
+		BundleSourceFact:        sourceFact,
+		EffectiveSourceIdentity: effectiveSourceIdentity,
+		MockConnectorResponses:  mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
 			workflow:       workflow,
@@ -226,7 +230,12 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
 	}
-	source, mockConnectorResponses, err := compileSelectedContractSource(semanticview.Wrap(runtimeSource.Bundle))
+	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	if err != nil {
+		_ = runtimeSource.Cleanup()
+		return LoadedSelectedContractSource{}, err
+	}
+	source, mockConnectorResponses, effectiveSourceIdentity, err := compileSelectedContractSource(semanticview.Wrap(runtimeSource.Bundle), sourceFact)
 	if err != nil {
 		_ = runtimeSource.Cleanup()
 		return LoadedSelectedContractSource{}, err
@@ -251,16 +260,12 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		_ = runtimeSource.Cleanup()
 		return LoadedSelectedContractSource{}, err
 	}
-	sourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
-	if err != nil {
-		_ = runtimeSource.Cleanup()
-		return LoadedSelectedContractSource{}, err
-	}
 	return LoadedSelectedContractSource{
-		Selection:              selection,
-		Source:                 source,
-		BundleSourceFact:       sourceFact,
-		MockConnectorResponses: mockConnectorResponses,
+		Selection:               selection,
+		Source:                  source,
+		BundleSourceFact:        sourceFact,
+		EffectiveSourceIdentity: effectiveSourceIdentity,
+		MockConnectorResponses:  mockConnectorResponses,
 		Module: selectedContractWorkflowModule{
 			source:         source,
 			workflow:       workflow,
@@ -272,19 +277,101 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 	}, nil
 }
 
-func compileSelectedContractSource(source semanticview.Source) (semanticview.Source, *providerconnectors.MockResponsePlan, error) {
-	effective, err := providerconnectors.SourceWithConnectorPackImports(source)
+func compileSelectedContractSource(source semanticview.Source, sourceFact runtimecorrelation.BundleSourceFact) (semanticview.Source, *providerconnectors.MockResponsePlan, scenarioexecution.EffectiveSourceIdentity, error) {
+	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+		Source: source, BundleSourceFact: sourceFact,
+	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("selected-contract provider connector pack import failed: %w", err)
+		return nil, nil, scenarioexecution.EffectiveSourceIdentity{}, fmt.Errorf("selected-contract effective source projection failed: %w", err)
 	}
+	effective := projection.Source()
 	if retired := runtimetools.ValidateRetiredDynamicAgentToolReferences(effective); len(retired) > 0 {
-		return nil, nil, fmt.Errorf("selected-contract source admission failed: %w", errors.Join(retired...))
+		return nil, nil, scenarioexecution.EffectiveSourceIdentity{}, fmt.Errorf("selected-contract source admission failed: %w", errors.Join(retired...))
 	}
 	plan, err := providerconnectors.CompileMockResponsePlan(effective)
 	if err != nil {
-		return nil, nil, fmt.Errorf("selected-contract mock response compilation failed: %w", err)
+		return nil, nil, scenarioexecution.EffectiveSourceIdentity{}, fmt.Errorf("selected-contract mock response compilation failed: %w", err)
 	}
-	return effective, plan, nil
+	return effective, plan, projection.Identity(), nil
+}
+
+type admittedSelectedContractSourceLoader struct {
+	loaded LoadedSelectedContractSource
+}
+
+// NewAdmittedSelectedContractSourceLoader binds selected-contract execution to
+// an already-admitted runtime projection without recomposing external inputs.
+func NewAdmittedSelectedContractSourceLoader(selection runfork.RunForkContractSelection, module runtimepipeline.WorkflowModule, sourceFact runtimecorrelation.BundleSourceFact, identity scenarioexecution.EffectiveSourceIdentity) (SelectedContractSourceLoader, error) {
+	if module == nil || module.SemanticSource() == nil {
+		return nil, fmt.Errorf("admitted selected-contract source loader requires an executable workflow module")
+	}
+	if err := sourceFact.Validate(); err != nil {
+		return nil, fmt.Errorf("admitted selected-contract source loader bundle fact: %w", err)
+	}
+	if err := identity.Validate(); err != nil {
+		return nil, fmt.Errorf("admitted selected-contract source loader effective identity: %w", err)
+	}
+	if !identity.BundleSourceFact().Matches(sourceFact) {
+		return nil, fmt.Errorf("admitted selected-contract source loader effective identity does not match bundle fact")
+	}
+	source := module.SemanticSource()
+	if strings.TrimSpace(selection.WorkflowName) == "" {
+		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())
+	}
+	if strings.TrimSpace(selection.WorkflowVersion) == "" {
+		selection.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	}
+	if err := validateSelectedContractSelection("admitted selected source loader", selection); err != nil {
+		return nil, err
+	}
+	plan, err := providerconnectors.CompileMockResponsePlan(source)
+	if err != nil {
+		return nil, fmt.Errorf("admitted selected-contract mock response compilation failed: %w", err)
+	}
+	return &admittedSelectedContractSourceLoader{loaded: LoadedSelectedContractSource{
+		Selection: selection, Source: source, Module: module, BundleSourceFact: sourceFact,
+		EffectiveSourceIdentity: identity, MockConnectorResponses: plan,
+	}}, nil
+}
+
+func (l *admittedSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+	return l.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: selection})
+}
+
+func (l *admittedSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	if err := ctx.Err(); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	if l == nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("admitted selected-contract source loader is required")
+	}
+	selection := req.Selection
+	if err := validateSelectedSourceLoaderSelection(selection); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	switch strings.TrimSpace(selection.Mode) {
+	case runfork.RunForkContractSelectionModeSelectedContracts:
+		if strings.TrimSpace(l.loaded.Selection.Mode) != runfork.RunForkContractSelectionModeSelectedContracts ||
+			strings.TrimSpace(selection.ContractsRoot) != strings.TrimSpace(l.loaded.Selection.ContractsRoot) {
+			return LoadedSelectedContractSource{}, fmt.Errorf("admitted selected source contracts_root does not match the admitted runtime")
+		}
+	case runfork.RunForkContractSelectionModeBundleHash:
+		if !l.loaded.BundleSourceFact.IsPersisted() || strings.TrimSpace(selection.BundleHash) != l.loaded.BundleSourceFact.BundleHash() {
+			return LoadedSelectedContractSource{}, fmt.Errorf("admitted selected source bundle_hash does not match the persisted admitted runtime")
+		}
+	}
+	if strings.TrimSpace(selection.WorkflowName) == "" {
+		selection.WorkflowName = strings.TrimSpace(l.loaded.Source.WorkflowName())
+	}
+	if strings.TrimSpace(selection.WorkflowVersion) == "" {
+		selection.WorkflowVersion = strings.TrimSpace(l.loaded.Source.WorkflowVersion())
+	}
+	if err := validateSelectedContractSelection("admitted selected source", selection); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	loaded := l.loaded
+	loaded.Selection = selection
+	return loaded, nil
 }
 
 func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {

@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -40,6 +41,10 @@ import (
 
 type RunBundleAvailabilityReader interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+}
+
+type ScenarioExecutionProfileReader interface {
+	LoadScenarioExecutionProfile(context.Context, string) (scenarioexecution.Profile, bool, error)
 }
 
 type PipelineCoordinator struct {
@@ -72,6 +77,8 @@ type PipelineCoordinator struct {
 	credentials            runtimecredentials.Store
 	managedCredentials     runtimemanagedcredentials.Store
 	mockConnectorResponses *providerconnectors.MockResponsePlan
+	scenarioProfiles       ScenarioExecutionProfileReader
+	effectiveSource        scenarioexecution.EffectiveSourceIdentity
 	channelActivityTools   map[string]ChannelActivityTarget
 	artifactRoot           string
 	bundleSourceFact       runtimecorrelation.BundleSourceFact
@@ -116,6 +123,8 @@ type PipelineCoordinatorOptions struct {
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
+	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
+	EffectiveSourceIdentity          scenarioexecution.EffectiveSourceIdentity
 	ChannelActivityTools             map[string]ChannelActivityTarget
 	ArtifactRoot                     string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
@@ -242,6 +251,8 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
 		mockConnectorResponses:           opts.MockConnectorResponses,
+		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
+		effectiveSource:                  opts.EffectiveSourceIdentity,
 		channelActivityTools:             copyActivityToolEntries(opts.ChannelActivityTools),
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleSourceFact:                 opts.BundleSourceFact,

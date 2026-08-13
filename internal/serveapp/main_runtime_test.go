@@ -808,7 +808,7 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEphemeralIdentity(t *testing.T) {
+func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsAdmittedIdentity(t *testing.T) {
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -869,8 +869,8 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 	`, result.ForkRunID).Scan(&forkBundleHash, &forkBundleSource); err != nil {
 		t.Fatalf("load fork run bundle identity: %v", err)
 	}
-	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourceEphemeral {
-		t.Fatalf("fork bundle identity = hash:%q source:%q, want disk-loaded %s/%s", forkBundleHash, forkBundleSource, projection.BundleHash, storerunlifecycle.BundleSourceEphemeral)
+	if forkBundleHash != projection.BundleHash || forkBundleSource != storerunlifecycle.BundleSourcePersisted {
+		t.Fatalf("fork bundle identity = hash:%q source:%q, want admitted %s/%s", forkBundleHash, forkBundleSource, projection.BundleHash, storerunlifecycle.BundleSourcePersisted)
 	}
 
 	if code := serve.stop(); code != 0 {

@@ -176,6 +176,9 @@ func eventPublicationOptionsForRuntime(opts EventPublicationOptions, selected se
 	opts.Acknowledged = selected.Runtime.Bus
 	opts.RecipientPlans = selected.Runtime.Bus
 	opts.BundleSource = selected.Runtime.Bus
+	opts.ExecutionPosture = selected.Runtime.ExecutionPosture
+	opts.EffectiveSourceIdentity = selected.Runtime.EffectiveSourceIdentity
+	opts.ScenarioProfileCatalog = selected.Runtime.ScenarioProfileCatalog
 	return opts, nil
 }
 

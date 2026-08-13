@@ -39,6 +39,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -593,6 +594,83 @@ func TestRuntimeProjectSupervisorFailedSameHashReplacementRestoresOldContext(t *
 	lookup := manager.LookupBundleHashStatus(hash)
 	if !ready.Load() || supervisor.CurrentRuntime() != restoredRT || !lookup.Loaded() {
 		t.Fatalf("failed same-hash replacement mutated old authority: ready=%v runtime=%p lookup=%#v replacement_err=%v", ready.Load(), supervisor.CurrentRuntime(), lookup, replacementErr)
+	}
+}
+
+func TestRuntimeProjectSupervisorSameHashReplacementPublishesCandidateEffectiveSource(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	oldBus, err := runtimebus.NewEphemeralEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus(old): %v", err)
+	}
+	newBus, err := runtimebus.NewEphemeralEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus(new): %v", err)
+	}
+	hash := "bundle-v1:sha256:" + strings.Repeat("c", 64)
+	fact := mustServeTestPersistedBundleSourceFact(hash)
+	oldIdentity, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newIdentity, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCatalog, err := scenarioexecution.NewCatalog(oldIdentity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newCatalog, err := scenarioexecution.NewCatalog(newIdentity, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRT := &runtimepkg.Runtime{
+		ExecutionPosture: executionposture.Live, Bus: oldBus,
+		EffectiveSourceIdentity: oldIdentity, ScenarioProfileCatalog: oldCatalog,
+		Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact},
+	}
+	newRT := &runtimepkg.Runtime{
+		ExecutionPosture: executionposture.Live, Bus: newBus,
+		EffectiveSourceIdentity: newIdentity, ScenarioProfileCatalog: newCatalog,
+		Options: runtimepkg.RuntimeOptions{WorkflowModule: stubWorkflowModule{source: source}, BundleSourceFact: fact},
+	}
+	oldWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
+	newWorkOwner := newSupervisorTestRuntimeOccurrence(t, hash)
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+		BundleSourceFact: fact, Source: source, Runtime: oldRT, WorkOwner: oldWorkOwner,
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	var ready atomic.Bool
+	ready.Store(true)
+	supervisor := &runtimeProjectSupervisor{
+		ready: &ready, currentRoot: "/tmp/current", currentSource: source,
+		currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: oldRT,
+		currentBundleSourceFact: fact, executionPosture: executionposture.Live, runtimeContexts: manager,
+	}
+	supervisor.quiesceRuntime = func(_ context.Context, rt *runtimepkg.Runtime, opts runtimepkg.ShutdownOptions) error {
+		return rt.QuiesceForReplacement(opts)
+	}
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+
+	if _, err := supervisor.replaceCurrentRuntimeWithSource(
+		context.Background(), "/tmp/candidate", source, &runtimecontracts.WorkflowContractBundle{}, fact,
+		runtimecontracts.BundleIdentity{BundleHash: hash}, newRT, newWorkOwner,
+	); err != nil {
+		t.Fatalf("replace same-hash runtime: %v", err)
+	}
+	lookup := manager.LookupBundleHashStatus(hash)
+	if !ready.Load() || supervisor.CurrentRuntime() != newRT || !lookup.Loaded() {
+		t.Fatalf("replacement publication = ready:%v runtime:%p lookup:%#v", ready.Load(), supervisor.CurrentRuntime(), lookup)
+	}
+	if !lookup.Context.EffectiveSourceIdentity.Equal(newIdentity) {
+		t.Fatalf("replacement effective identity = %s, want %s", lookup.Context.EffectiveSourceIdentity.Digest(), newIdentity.Digest())
+	}
+	if lookup.Context.ScenarioProfileCatalog != newCatalog || !lookup.Context.ScenarioProfileCatalog.EffectiveSourceIdentity().Equal(newIdentity) {
+		t.Fatal("replacement context did not publish the candidate scenario profile catalog")
 	}
 }
 

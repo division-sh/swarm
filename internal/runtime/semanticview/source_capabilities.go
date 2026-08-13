@@ -177,6 +177,28 @@ func MustConnectorImportSource(value string) ConnectorImportSource {
 
 func (s ConnectorImportSource) URI() string { return s.value }
 
+type ConnectorPackProvenance struct {
+	PackID       string
+	Version      string
+	ManifestHash string
+	Source       string
+}
+
+func NewConnectorPackProvenance(packID, version, manifestHash, source string) (ConnectorPackProvenance, error) {
+	provenance := ConnectorPackProvenance{
+		PackID: strings.TrimSpace(packID), Version: strings.TrimSpace(version),
+		ManifestHash: strings.TrimSpace(manifestHash), Source: strings.TrimSpace(source),
+	}
+	if !provenance.Valid() {
+		return ConnectorPackProvenance{}, fmt.Errorf("connector pack provenance requires pack id, version, manifest hash, and source")
+	}
+	return provenance, nil
+}
+
+func (p ConnectorPackProvenance) Valid() bool {
+	return p.PackID != "" && p.Version != "" && p.ManifestHash != "" && p.Source != ""
+}
+
 type providerTriggerCapabilities struct {
 	base       Source
 	generation triggergeneration.Generation
@@ -207,6 +229,31 @@ func (p ProviderTriggerEventProvenance) Valid() bool {
 type connectorPackCapabilities struct {
 	generations   map[string]ConnectorGenerationSurface
 	importSources map[string]ConnectorImportSource
+	provenance    map[string]ConnectorPackProvenance
+}
+
+func (c Capabilities) WithConnectorPackProvenance(provenance map[string]ConnectorPackProvenance) Capabilities {
+	out := c
+	if out.connectorPacks == nil || len(provenance) != len(out.connectorPacks.importSources) {
+		out.connectorPacks = nil
+		return out
+	}
+	copyByTool := make(map[string]ConnectorPackProvenance, len(provenance))
+	for toolID, item := range provenance {
+		if !item.Valid() {
+			out.connectorPacks = nil
+			return out
+		}
+		if _, imported := out.connectorPacks.importSources[toolID]; !imported {
+			out.connectorPacks = nil
+			return out
+		}
+		copyByTool[toolID] = item
+	}
+	capabilities := *out.connectorPacks
+	capabilities.provenance = copyByTool
+	out.connectorPacks = &capabilities
+	return out
 }
 
 // Capabilities is the finite compile-visible semantic-source capability set.
@@ -347,4 +394,12 @@ func (c Capabilities) ConnectorImportSource(toolID string) (ConnectorImportSourc
 	}
 	source, ok := c.connectorPacks.importSources[toolID]
 	return source, ok
+}
+
+func (c Capabilities) ConnectorPackProvenance(toolID string) (ConnectorPackProvenance, bool) {
+	if c.connectorPacks == nil || toolID == "" || toolID != strings.TrimSpace(toolID) {
+		return ConnectorPackProvenance{}, false
+	}
+	provenance, ok := c.connectorPacks.provenance[toolID]
+	return provenance, ok && provenance.Valid()
 }

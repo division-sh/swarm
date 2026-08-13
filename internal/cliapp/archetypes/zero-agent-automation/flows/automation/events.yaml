@@ -1,0 +1,4 @@
+automation.requested:
+  chat_id: text
+  text: text
+  required: [chat_id, text]

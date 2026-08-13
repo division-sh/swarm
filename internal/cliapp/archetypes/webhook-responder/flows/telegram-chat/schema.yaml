@@ -1,0 +1,15 @@
+name: telegram-chat
+mode: template
+instance: conversation_reference
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - name: telegram_text_message
+        event: inbound.telegram.text_message
+        source: external
+        resolution: {mode: select-or-create}
+        carries:
+          conversation_reference: {from: payload.conversation_reference, type: text}
+  outputs: {events: []}

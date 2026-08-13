@@ -21,6 +21,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -68,6 +69,7 @@ type eventPublicationParams struct {
 	Emitter                string
 	NewRunCreated          bool
 	RunIDProvided          bool
+	ScenarioExecution      *scenarioexecution.Selector
 }
 
 type eventPublicationConfig struct {
@@ -201,6 +203,10 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
+		ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, params.RunID, params.NewRunCreated, params.ScenarioExecution)
+		if err != nil {
+			return apiidempotency.Completion{}, err
+		}
 		if !cfg.rootInputOnly {
 			requestedEventName := params.EventName
 			resolvedEventName, err := resolveEventPublicationEventName(selectedOpts.Source, params.EventName)
@@ -313,6 +319,10 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	if err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
+	scenarioSelector, err := scenarioExecutionSelectorParam(req.Params)
+	if err != nil {
+		return eventPublicationParams{}, bundleIdentityParam{}, err
+	}
 	if targetRouteSet && !cfg.allowExplicitTargetRoute {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "target", "reason": "is not supported for this method"})
 	}
@@ -377,6 +387,7 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		Emitter:                emitter,
 		NewRunCreated:          newRun,
 		RunIDProvided:          runIDProvided,
+		ScenarioExecution:      scenarioSelector,
 	}, bundleIdentity, nil
 }
 

@@ -17,6 +17,7 @@ import (
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
 )
 
@@ -97,6 +98,10 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("resolve fork bundle identity: %w", err)
 	}
+	scenarioProfile, sourceProfiled, err := admitRunForkScenarioProfile(ctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.BundleSourceFact)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
 	existing, found, err := loadExactRunForkMaterialization(
 		ctx, s.RunLifecyclePostgresOwner, tx, forkRunID, plan, identity, selection,
 	)
@@ -104,6 +109,9 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		return runfork.RunForkMaterialization{}, err
 	}
 	if found {
+		if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
+			return runfork.RunForkMaterialization{}, err
+		}
 		return existing, nil
 	}
 	metadata, err := loadRunForkEntityMetadata(plan)
@@ -119,6 +127,11 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
 	if err := s.InsertRunForkRunTx(ctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.BundleSourceFact); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
+	}
+	if sourceProfiled {
+		if err := scenarioexecutionpersistence.EnsurePostgres(ctx, tx, forkRunID, scenarioProfile, now); err != nil {
+			return runfork.RunForkMaterialization{}, fmt.Errorf("inherit fork scenario execution profile: %w", err)
+		}
 	}
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)

@@ -3476,6 +3476,14 @@
           }
         },
         {
+          "name": "scenario_execution",
+          "required": false,
+          "description": "Exact immutable scenario profile selection for a new or already-exactly-bound mock-only run.",
+          "schema": {
+            "$ref": "#/components/schemas/ScenarioExecutionSelector"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -8830,6 +8838,14 @@
           }
         },
         {
+          "name": "scenario_execution",
+          "required": false,
+          "description": "Exact immutable scenario profile selection atomically bound to the scenario setup run.",
+          "schema": {
+            "$ref": "#/components/schemas/ScenarioExecutionSelector"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -13523,6 +13539,30 @@
           "cleanup",
           "containers",
           "partial_failure"
+        ],
+        "type": "object"
+      },
+      "ScenarioExecutionSelector": {
+        "additionalProperties": false,
+        "description": "Identity-only selector for one immutable scenario execution profile admitted by the selected mock-only runtime. Response bytes are never accepted through the public API.",
+        "properties": {
+          "effective_source_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "profile_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "profile_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "profile_digest",
+          "effective_source_digest"
         ],
         "type": "object"
       },

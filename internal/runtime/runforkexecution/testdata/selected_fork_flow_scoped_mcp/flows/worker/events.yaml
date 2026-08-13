@@ -1,3 +1,4 @@
-task.assigned: {}
+task.assigned:
+  task_id: text
 task.completed:
   fork_result: text

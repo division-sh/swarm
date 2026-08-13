@@ -16,6 +16,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 )
 
 func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
@@ -37,6 +38,11 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 			Source: fact, StartedAt: req.CreatedAt,
 		}); err != nil {
 			return err
+		}
+		if req.ScenarioExecutionProfile != nil {
+			if err := storescenarioexecution.EnsurePostgres(txctx, tx, req.RunID, *req.ScenarioExecutionProfile, req.CreatedAt); err != nil {
+				return err
+			}
 		}
 		for _, entity := range req.Entities {
 			fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
@@ -105,6 +111,11 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 			Source: fact, StartedAt: req.CreatedAt,
 		}); err != nil {
 			return err
+		}
+		if req.ScenarioExecutionProfile != nil {
+			if err := storescenarioexecution.EnsureSQLite(txctx, tx, req.RunID, *req.ScenarioExecutionProfile, req.CreatedAt); err != nil {
+				return err
+			}
 		}
 		for _, entity := range req.Entities {
 			fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)

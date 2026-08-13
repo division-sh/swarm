@@ -12398,6 +12398,7 @@ platform_tables:
         - run_fork_selected_contract_bindings
       delete_by_run_id:
         - author_activity_occurrences
+        - run_scenario_execution_profiles
         - run_fork_fact_revisions
         - run_fork_revisions
         - run_fork_revision_heads
@@ -14400,6 +14401,14 @@ platform_tables:
         \ retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
         \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (delivery_id, claim_version),\n    FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version),\n    CHECK ((delivery_id IS NULL AND claim_version IS NULL) OR (delivery_id IS NOT NULL AND claim_version > 0)),\n    INDEX idx_dead_letters_flow (flow_instance,\
         \ created_at),\n    INDEX idx_dead_letters_class ((failure->>'class'))\n);"
+    run_scenario_execution_profiles:
+      description: >-
+        Immutable source-bound scenario execution profile selected for one run. profile_bytes is the sole artifact
+        authority and is persisted as opaque exact bytes. profile_digest and effective_source_digest are indexed
+        verification projections; readers verify the bytes on every read and never reinterpret jsonb or a current
+        process catalog. A run has at most one profile, installed atomically by its run-creation owner or inherited
+        atomically by PostgreSQL fork materialization.
+      ddl: "CREATE TABLE run_scenario_execution_profiles (\n    run_id                  UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,\n    profile_id              TEXT NOT NULL CHECK (NULLIF(TRIM(profile_id), '') IS NOT NULL),\n    profile_digest          TEXT NOT NULL CHECK (profile_digest ~ '^sha256:[0-9a-f]{64}$'),\n    effective_source_digest TEXT NOT NULL CHECK (effective_source_digest ~ '^sha256:[0-9a-f]{64}$'),\n    profile_bytes           BYTEA NOT NULL,\n    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_run_scenario_profiles_profile (profile_id, profile_digest),\n    INDEX idx_run_scenario_profiles_source (effective_source_digest)\n);"
     runs:
       description: 'Platform run registry. A run is a top-level execution context with one immutable, explicitly
         discriminated origin: event, scenario setup, standing generation, or fork materialization. Every event,
@@ -19717,6 +19726,72 @@ test_specification:
         dead_letter_readback: event/delivery/dead-letter read owners consumed by run.trace and run.diagnose
         test_quiescence_inputs: platform-spec.yaml#api_specification.method_catalog.run.diagnose result.test_quiescence backed by run_model.lifecycle.completion inputs and ProjectRunOperationalStatus
         contract_validation: engine.boot_verification.checks plus existing event payload/schema validation owners
+    derived_scenario_compilation:
+      status: implemented_s6
+      explicit_selection: >-
+        Derivation is selected only by `swarm test --derive <exact-flow>` or by an authored scenario document containing
+        `derive`. Absence of scenario files never selects derivation. The compiler enumerates exact public input endpoints
+        from the admitted effective source. Zero candidates fails; multiple candidates list their exact pin/event identities
+        and require `--input`; `--all-inputs` emits one deterministic plan per endpoint in canonical order. It never chooses
+        the first candidate or searches a global event-name map.
+      canonical_plan: >-
+        `DerivedScenarioPlan` is the single immutable producer-independent plan. It records the exact flow, pin, resolved
+        event, accepted-schema digest, generated canonical payload, and immutable scenario execution profile. Ephemeral CLI
+        derivation, authored derive documents, and scaffold/guided producers consume this plan shape; no second runner or
+        archetype-specific execution branch exists.
+      generated_base_overlay: >-
+        The existing canonical schema inhabitant creates the base object. Authored `derive.payload.set` recursively overlays
+        object fields and may replace arrays or scalar fields. The complete result is then revalidated through the canonical
+        event-schema validator. Unknown paths, type mismatches, enum violations, required-field corruption, and invalid array
+        items fail before public mutation; no partial plan or fallback survives.
+      honest_oracle: >-
+        A mechanically derived scenario claims only that the selected trigger is observed, the run reaches canonical test
+        quiescence, and no dead letter exists. Business-output, entity-state, mailbox, or causal assertions exist only when
+        explicitly authored as witness data in the scenario document. Handler topology, CEL, Python, connector modules, and
+        mock implementations are never interpreted to guess expected behavior.
+      effective_source_projection:
+        owner: internal/runtime.AdmitEffectiveSourceProjection
+        version: admitted-effective-source-projection/v1
+        identity_version: effective-source-identity/v1
+        rule: >-
+          One typed projection returns the composed semantic source, executable workflow module when supplied, and a versioned
+          canonical digest. Consumers do not compose or hash source subsets independently. The identity includes the exact base
+          bundle hash and persisted/ephemeral provenance; every exact public input with resolved event provenance and accepted
+          schema; every effective authored/imported provider connector and channel runtime tool with complete canonical schema;
+          connector import/generation/provenance; provider-trigger catalog generation and imported-event provenance; and every
+          configured channel plan/binding generation. Missing required schemas or external provenance fails closed.
+        excluded: credentials, readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
+      execution_profile:
+        owner: internal/runtime/scenarioexecution
+        selector: identity-only ScenarioExecutionSelector; raw response bytes are never accepted by the API
+        posture: mock_only; live execution rejects selection before run, event, entity, attempt, credential, or transport mutation
+        catalog: >-
+          Runtime construction compiles an immutable catalog bound to one exact effective-source identity. Connector-response
+          overlays are admitted through the existing provider connector response-plan owner. An empty response overlay is still
+          a behavior-bearing canonical profile and is persisted for every derived execution.
+        persistence: >-
+          New-run event.publish and test.setup_entities resolve the selector against the selected runtime catalog and atomically
+          persist one exact profile with run creation. The sole artifact authority is opaque canonical bytes in PostgreSQL bytea
+          or SQLite BLOB plus verified profile/effective-source digests. Reads verify bytes and digest before decode. Existing
+          runs may omit the selector or repeat the exact profile, but cannot install or switch it. An omitted existing-run
+          selector loads the durable profile during API admission and rejects posture or effective-source drift before event
+          publication. There is no jsonb authority, decode/re-encode fallback, legacy reader, migration, or dual format.
+        dispatch: >-
+          Activity dispatch resolves SourceRunID to the durable profile, requires exact runtime effective-source identity before
+          attempt/credential/transport, overlays the admitted responses through the existing response plan, and never reads
+          current scenario files or process-global response state.
+      temporal_semantics: >-
+        Restart and replacement publish the effective-source identity and profile catalog atomically with the runtime context.
+        A predecessor run cannot execute under a same-base but different effective identity. Failed replacement leaves the
+        predecessor authoritative. An already-admitted runtime context supplies its exact module/source/identity to selected-
+        contract execution; disk/catalog loaders compile through the same projection and fail closed when required external
+        provenance is unavailable. PostgreSQL fork inherits exact profile bytes only when effective identities match before
+        materialization; SQLite fork remains unsupported and non-mutating.
+      archetype_admission: >-
+        Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies, boots under mock_only, and
+        runs through the public scenario runner with zero credentials and zero Docker in under 60 seconds. `swarm new` writes
+        only the selected embedded canonical archetype and refuses overwrite; future producers persist the same canonical plan
+        grammar rather than introducing a scaffold-only format.
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.
     - This runner does not select or implement the active `mock` backend, and no active `local` LLM backend profile is promoted.
@@ -19741,7 +19816,9 @@ test_specification:
           recorded by implication for v1.
         vars: Optional map of literal values or CEL expressions evaluated once before the first step.
         setup: Optional setup/pre-state block for deterministic scenario-owned entity rows before the first action step.
-        steps: Required non-empty list of scenario actions.
+        derive: Optional explicit derived-plan declaration containing exact flow/input, generated-base payload, and optional set overlay.
+        connector_responses: Optional exact mock connector response witnesses admitted only with derive under mock_only posture.
+        steps: Required non-empty list of scenario actions unless derive is present; derive and steps are mutually exclusive.
         expect: Optional final assertion block evaluated after the final step reaches test quiescence.
         invalid: Optional table of invalid fixture variants. Each case derives from a base fixture/action and expects a
           specific reject/fail-closed outcome.
@@ -21383,6 +21460,11 @@ cli_specification:
               classification: split
               owner_issue: '#1712'
               reason: deterministic scenario-runner output is implemented, but output-mode route-through remains part of the CLI output umbrella.
+            new:
+              command: swarm new
+              classification: split
+              owner_issue: '#1712'
+              reason: archetype scaffold output is implemented, but output-mode route-through remains part of the CLI output umbrella.
             workspace:
               command: swarm workspace
               classification: exception
@@ -22736,7 +22818,7 @@ cli_specification:
       - trusted runtime identity and context registry consumption
       - store/data migration and swarm run start behavior
     test:
-      command: swarm test [scenario-file ...] [--contracts <path>] [--timeout <duration>] [--poll-interval <duration>]
+      command: swarm test [scenario-file ...] [--derive <flow>] [--input <pin>|--all-inputs] [--contracts <path>] [--timeout <duration>] [--poll-interval <duration>]
       group: author_validate
       tier: should_have
       implementation_status: implemented_first_slice
@@ -22744,7 +22826,7 @@ cli_specification:
       behavior: >-
         Public deterministic scenario-runner CLI consumer. The command discovers v1 YAML scenarios only under
         contracts/tests/... and contracts/flows/<flow>/tests/...; automatic discovery treats YAML files with version, steps,
-        or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit
+        derive, or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit
         scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the
         canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing
         event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps
@@ -22758,6 +22840,12 @@ cli_specification:
         command does not activate mock/local providers, implement ProviderContract, test live agent sessions/tool calls/audit/
         spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables
         directly.
+      derived_mode: >-
+        `--derive <flow>` explicitly compiles and executes the canonical S6 derived plan without writing a scenario file.
+        `--input` selects one exact public pin; ambiguity fails with candidate evidence; `--all-inputs` runs one plan per exact
+        pin. Derived mode cannot be combined with scenario-file arguments. Every plan uses the same public event.publish,
+        quiescence, trace, event/dead-letter, entity, and mailbox owners as authored scenarios and prints
+        `scenario ok: derived:<flow>/<pin>`.
       generated_input_fixtures:
         status: implemented_s3
         syntax: >-
@@ -22833,6 +22921,12 @@ cli_specification:
         behavior: Positive safety deadline for test quiescence waits. Reaching it fails the scenario with diagnostic context.
       - name: --poll-interval <duration>
         behavior: Positive interval between canonical readback probes while waiting for test quiescence.
+      - name: --derive <flow>
+        behavior: Explicitly derive and run a scenario from one exact effective flow contract; omission never enables derivation.
+      - name: --input <pin>
+        behavior: Exact public input pin for derived mode. Required when the selected flow has multiple inputs unless --all-inputs is used.
+      - name: --all-inputs
+        behavior: Derive one deterministic plan for every exact public input of the selected flow in canonical order; mutually exclusive with --input.
       dropped_flags:
         --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       output:
@@ -22862,6 +22956,22 @@ cli_specification:
         unmatched rows through paginated entity.list, fail closed on zero/multiple detail matches, and read canonical detail
         through entity.get
       - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
+      - derived execution persists exact canonical profile bytes and effective-source digest through event.publish or
+        test.setup_entities on SQLite and PostgreSQL; mismatches fail before mutation, restart/replacement cannot substitute a
+        current profile, and PostgreSQL fork inheritance compares the exact effective identity
+      - every admitted swarm new archetype verifies, boots, and completes its public mock-only smoke scenario without
+        credentials or Docker in less than 60 seconds
+    new:
+      command: swarm new <archetype> [--output <path>]
+      group: getting_started
+      tier: should_have
+      implementation_status: implemented_first_slice
+      owner: platform-spec.yaml#test_specification.derived_scenario_compilation
+      behavior: >-
+        Scaffolds one exact admitted archetype into a new destination directory. The admitted set is closed and consists of
+        zero-agent-automation and webhook-responder. Every scaffold contains a complete contract, explicit mock-only runtime
+        posture, and public swarm test smoke scenario. Existing destinations and unknown archetypes fail before mutation; no
+        aliases, remote templates, fallback archetypes, or legacy layouts are accepted.
     workspace_build:
       command: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]
       group: getting_started
@@ -27065,6 +27175,26 @@ api_specification:
           Singular receiver route identity accepted by /v1/rpc event.publish when run_id is supplied.
           The API validates the entity belongs to the selected run and flow_instance before persistence.
           Selector target forms, fan-out target_set, and payload-derived target identity are not part of this schema.
+      ScenarioExecutionSelector:
+        type: object
+        additionalProperties: false
+        required:
+        - profile_id
+        - profile_digest
+        - effective_source_digest
+        properties:
+          profile_id:
+            type: string
+            minLength: 1
+          profile_digest:
+            type: string
+            pattern: '^sha256:[0-9a-f]{64}$'
+          effective_source_digest:
+            type: string
+            pattern: '^sha256:[0-9a-f]{64}$'
+        description: >-
+          Identity-only selector for one immutable scenario execution profile admitted by the selected mock-only runtime.
+          Response bytes are never accepted through the public API.
       EventPublishDelivery:
         type: object
         additionalProperties: false
@@ -30379,6 +30509,11 @@ api_specification:
         description: Optional producer identifier. Defaults to cli-publish:<actor_token_id>.
         schema:
           type: string
+      - name: scenario_execution
+        required: false
+        description: Exact immutable scenario profile selection for a new or already-exactly-bound mock-only run.
+        schema:
+          $ref: '#/components/schemas/ScenarioExecutionSelector'
       - name: idempotency_key
         required: false
         schema:
@@ -30466,6 +30601,11 @@ api_specification:
                 type: object
                 additionalProperties:
                   type: boolean
+      - name: scenario_execution
+        required: false
+        description: Exact immutable scenario profile selection atomically bound to the scenario setup run.
+        schema:
+          $ref: '#/components/schemas/ScenarioExecutionSelector'
       - name: idempotency_key
         required: false
         schema:

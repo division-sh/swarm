@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -107,7 +109,32 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			return 1
 		}
 		workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
-		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
+		bundleHash, err := runtimecontracts.BundleHash(bundle)
+		if err != nil {
+			if errOut != nil {
+				fmt.Fprintf(errOut, "verify failed: hash bundle: %v\n", err)
+			}
+			return 1
+		}
+		sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+		if err != nil {
+			if errOut != nil {
+				fmt.Fprintf(errOut, "verify failed: source identity: %v\n", err)
+			}
+			return 1
+		}
+		projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+			Source: source, BundleSourceFact: sourceFact,
+			ProviderTriggerCatalog: validationOpts.ProviderTriggerCatalog,
+			ChannelPlans:           validationOpts.ChannelPlans, ChannelOutboundBindings: validationOpts.ChannelOutboundBindings,
+		})
+		if err != nil {
+			if errOut != nil {
+				fmt.Fprintf(errOut, "verify failed: admit effective source: %v\n", err)
+			}
+			return 1
+		}
+		result, err := verifyBundleResultWithOptions(ctx, projection.Source(), validationOpts)
 		if err != nil {
 			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
 				output := verifyCommandOutput(false, contractsRoot, workspaceBackendDetail, result)
@@ -289,6 +316,16 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load provider trigger packs: %w", err)
 	}
 	opts.ProviderTriggerCatalog = providerPacks.Catalog
+	providerCredentials, err := BuildProviderCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure provider credentials: %w", err)
+	}
+	channelPacks, err := LoadConfiguredChannelPacks(context.Background(), repo, configResult, source.PlatformSpec(), providerPacks.Catalog, providerCredentials, managedCredentialStore)
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load channel packs: %w", err)
+	}
+	opts.ChannelPlans = channelPacks.Plans
+	opts.ChannelOutboundBindings = channelPacks.Bindings
 	return opts, nil
 }
 

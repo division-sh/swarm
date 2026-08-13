@@ -52,6 +52,8 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -87,6 +89,7 @@ type RuntimeOptions struct {
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
 	ChannelPlans                     []packs.SatisfactionPlan
 	ChannelOutboundBindings          []packs.OutboundBindingPlan
+	ScenarioDeclarations             []scenarioderivation.Declaration
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -141,6 +144,7 @@ type RuntimeDeps struct {
 	BudgetSpendStore               budgetspend.Store
 	InboundStore                   InboundPersistence
 	RuntimeIngressStore            runtimeingress.Store
+	ScenarioExecutionProfiles      runtimepipeline.ScenarioExecutionProfileReader
 }
 
 type validatedRuntimeDeps struct {
@@ -157,6 +161,8 @@ type validatedRuntimeDeps struct {
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
 	BundleSourceFact           runtimecorrelation.BundleSourceFact
+	EffectiveSourceIdentity    scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog     *scenarioexecution.Catalog
 }
 
 const BootProgressTotalSteps = 22
@@ -246,6 +252,8 @@ type Runtime struct {
 	mailboxStore               runtimetools.MailboxPersistence
 	effectsStore               runtimeeffects.Store
 	managedCapabilitiesStore   managedcapabilities.Persistence
+	EffectiveSourceIdentity    scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog     *scenarioexecution.Catalog
 
 	Config             *config.Config
 	ExecutionPosture   executionposture.Posture
@@ -600,38 +608,6 @@ func (m connectorPackWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
 }
 
-func workflowModuleWithProviderPacks(module runtimepipeline.WorkflowModule, triggerCatalog *providertriggers.CatalogSnapshot, channelBindings []packs.OutboundBindingPlan) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
-	if module == nil {
-		return nil, nil, nil
-	}
-	source, err := providerconnectors.SourceWithConnectorPackImports(module.SemanticSource())
-	if err != nil {
-		return nil, nil, err
-	}
-	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
-	if err != nil {
-		return nil, nil, err
-	}
-	channelTools := map[string]runtimecontracts.ToolSchemaEntry{}
-	for _, binding := range channelBindings {
-		tools, err := binding.RuntimeTools()
-		if err != nil {
-			return nil, nil, fmt.Errorf("compile channel binding %q runtime tools: %w", binding.BindingID(), err)
-		}
-		for id, tool := range tools {
-			if _, exists := channelTools[id]; exists {
-				return nil, nil, fmt.Errorf("duplicate channel runtime tool %q", id)
-			}
-			channelTools[id] = tool
-		}
-	}
-	source, err = semanticview.WithRuntimeTools(source, channelTools)
-	if err != nil {
-		return nil, nil, err
-	}
-	return connectorPackWorkflowModule{WorkflowModule: module, source: source}, source, nil
-}
-
 func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[string]runtimepipeline.ChannelActivityTarget, error) {
 	out := map[string]runtimepipeline.ChannelActivityTarget{}
 	for _, binding := range bindings {
@@ -684,6 +660,9 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if err := opts.BundleSourceFact.Validate(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime bundle source fact: %w", err)
 	}
+	if opts.WorkflowModule == nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: workflow module is required")
+	}
 	if err := cfg.ValidateExtensions(); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config validation failed: %w", err)
 	}
@@ -721,21 +700,23 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	if deps.InboundStore != nil && opts.ProviderTriggerCatalog == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger catalog snapshot is required when inbound store is configured")
 	}
-	var source semanticview.Source
-	if opts.WorkflowModule != nil {
-		workflowModule, wrappedSource, err := workflowModuleWithProviderPacks(opts.WorkflowModule, opts.ProviderTriggerCatalog, opts.ChannelOutboundBindings)
-		if err != nil {
-			return validatedRuntimeDeps{}, fmt.Errorf("provider connector pack import failed: %w", err)
-		}
-		opts.WorkflowModule = workflowModule
-		source = wrappedSource
+	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
+		WorkflowModule: opts.WorkflowModule, BundleSourceFact: opts.BundleSourceFact,
+		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+		ChannelOutboundBindings: opts.ChannelOutboundBindings,
+	})
+	if err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("admit effective source projection: %w", err)
+	}
+	opts.WorkflowModule = projection.WorkflowModule()
+	source := projection.Source()
+	scenarioProfileCatalog, err := scenarioderivation.CompileCatalog(source, projection.Identity(), opts.ScenarioDeclarations...)
+	if err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("compile scenario execution profile catalog: %w", err)
 	}
 	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, posture, allowValidationHarness)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
-	}
-	if source == nil {
-		source = opts.WorkflowModule.SemanticSource()
 	}
 	if err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
@@ -771,6 +752,8 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
 		BundleSourceFact:           opts.BundleSourceFact,
+		EffectiveSourceIdentity:    projection.Identity(),
+		ScenarioProfileCatalog:     scenarioProfileCatalog,
 	}, nil
 }
 
@@ -984,6 +967,8 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		bootID:                    uuid.NewString(),
 		Config:                    cfg,
 		ExecutionPosture:          boot.ExecutionPosture,
+		EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
+		ScenarioProfileCatalog:    boot.ScenarioProfileCatalog,
 		Options:                   opts,
 		Workspace:                 opts.WorkspaceLifecycle,
 		MCPTurns:                  mcpTurns,
@@ -1099,24 +1084,26 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 				}
 				return managerRef.DeactivateFlowInstanceModel(ctx, req)
 			},
-			TimerScheduler:          rt.Scheduler,
-			GenericSchedules:        rt.GenericSchedules,
-			TimerObligationReader:   runtimeDeps.TimerObligationReader,
-			MailboxMaterializer:     runtimeDeps.MailboxMaterializer,
-			DecisionCards:           runtimeDeps.DecisionCards,
-			ProposedEffects:         runtimeDeps.ProposedEffects,
-			HumanTasks:              runtimeDeps.DecisionCardHumanTasks,
-			DecisionCardDraftExpiry: runtimeDeps.DecisionCardDraftExpiry,
-			HumanTaskExpiry:         runtimeDeps.HumanTaskExpiry,
-			DeliveryRuntime:         rt.Bus,
-			FlowRoutes:              rt.Bus,
-			RunLifecycle:            runtimeDeps.EventBusDurable.RunLifecycle,
-			Credentials:             rt.Credentials,
-			ManagedCredentials:      rt.ManagedCredentials,
-			MockConnectorResponses:  boot.MockConnectorResponses,
-			ChannelActivityTools:    channelActivityTools,
-			ArtifactRoot:            artifactRoot,
-			BundleSourceFact:        opts.BundleSourceFact,
+			TimerScheduler:            rt.Scheduler,
+			GenericSchedules:          rt.GenericSchedules,
+			TimerObligationReader:     runtimeDeps.TimerObligationReader,
+			MailboxMaterializer:       runtimeDeps.MailboxMaterializer,
+			DecisionCards:             runtimeDeps.DecisionCards,
+			ProposedEffects:           runtimeDeps.ProposedEffects,
+			HumanTasks:                runtimeDeps.DecisionCardHumanTasks,
+			DecisionCardDraftExpiry:   runtimeDeps.DecisionCardDraftExpiry,
+			HumanTaskExpiry:           runtimeDeps.HumanTaskExpiry,
+			DeliveryRuntime:           rt.Bus,
+			FlowRoutes:                rt.Bus,
+			RunLifecycle:              runtimeDeps.EventBusDurable.RunLifecycle,
+			Credentials:               rt.Credentials,
+			ManagedCredentials:        rt.ManagedCredentials,
+			MockConnectorResponses:    boot.MockConnectorResponses,
+			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,
+			EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
+			ChannelActivityTools:      channelActivityTools,
+			ArtifactRoot:              artifactRoot,
+			BundleSourceFact:          opts.BundleSourceFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,
 				UrgencyDelay:       rt.Config.Runtime.DecisionCardUrgency,

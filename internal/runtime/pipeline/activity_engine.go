@@ -25,6 +25,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -273,10 +274,14 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 				"tool": intent.Tool, "effect_class": string(toolEffectClass), "required_effect_class": string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 			}))
 		}
+		responsePlan, err := d.coordinator.mockResponsePlanForRun(ctx, intent.SourceRunID, source)
+		if err != nil {
+			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
+		}
 		if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
 			return err
 		}
-		admitted, err := d.coordinator.mockConnectorResponses.Admit(intent.Tool, tool)
+		admitted, err := responsePlan.Admit(intent.Tool, tool)
 		if err != nil {
 			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "mock_connector_response_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool}, err))
 		}
@@ -344,6 +349,29 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	failureIntent := intent
 	failureIntent.Attempt = maxAttempts
 	return d.publishActivityFailure(ctx, failureIntent, lastErr)
+}
+
+func (pc *PipelineCoordinator) mockResponsePlanForRun(ctx context.Context, runID string, source semanticview.Source) (*providerconnectors.MockResponsePlan, error) {
+	if pc.scenarioProfiles == nil {
+		return pc.mockConnectorResponses, nil
+	}
+	profile, found, err := pc.scenarioProfiles.LoadScenarioExecutionProfile(ctx, strings.TrimSpace(runID))
+	if err != nil {
+		return nil, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
+	}
+	if !found {
+		return pc.mockConnectorResponses, nil
+	}
+	if pc.executionPosture != executionposture.MockOnly {
+		return nil, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
+	}
+	if err := pc.effectiveSource.Validate(); err != nil {
+		return nil, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
+	}
+	if !profile.EffectiveSourceIdentity().Equal(pc.effectiveSource) {
+		return nil, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
+	}
+	return providerconnectors.OverlayMockResponsePlan(pc.mockConnectorResponses, source, profile.ConnectorResponses())
 }
 
 func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent) (bool, error) {

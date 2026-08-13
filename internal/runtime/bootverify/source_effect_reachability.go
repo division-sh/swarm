@@ -30,23 +30,22 @@ type SourceBootEffectContext struct {
 	Reachability           SourceBootEffectReachability
 }
 
-// PrepareSourceBootEffectContext imports connector packs, compiles the exact
-// mock response plan, and derives effect reachability as one operation.
+// PrepareSourceBootEffectContext compiles the exact mock response plan and
+// derives effect reachability from an already admitted effective source.
 func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefault llmselection.Profile, posture executionposture.Posture) (SourceBootEffectContext, error) {
-	effectiveSource, err := providerconnectors.SourceWithConnectorPackImports(source)
-	if err != nil {
-		return SourceBootEffectContext{}, fmt.Errorf("provider connector pack import failed: %w", err)
+	if source == nil {
+		return SourceBootEffectContext{}, fmt.Errorf("effective semantic source is required")
 	}
-	plan, err := providerconnectors.CompileMockResponsePlan(effectiveSource)
+	plan, err := providerconnectors.CompileMockResponsePlan(source)
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("provider connector mock response compilation failed: %w", err)
 	}
-	reachability, err := ResolveSourceBootEffectReachability(effectiveSource, configuredDefault, plan, posture)
+	reachability, err := ResolveSourceBootEffectReachability(source, configuredDefault, plan, posture)
 	if err != nil {
 		return SourceBootEffectContext{}, fmt.Errorf("resolve source boot effect reachability: %w", err)
 	}
 	return SourceBootEffectContext{
-		Source:                 effectiveSource,
+		Source:                 source,
 		MockConnectorResponses: plan,
 		Reachability:           reachability,
 	}, nil

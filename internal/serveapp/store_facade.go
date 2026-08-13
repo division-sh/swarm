@@ -218,6 +218,7 @@ func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {
 		BudgetSpendStore:               s.BudgetSpendStore,
 		InboundStore:                   s.InboundStore,
 		RuntimeIngressStore:            s.RuntimeIngressStore,
+		ScenarioExecutionProfiles:      s.ScenarioExecutionProfiles,
 	}
 }
 

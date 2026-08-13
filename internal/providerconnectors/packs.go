@@ -421,6 +421,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 	importedTools := map[string]runtimecontracts.ToolSchemaEntry{}
 	importedGeneration := map[string]GenerationSurface{}
 	importSources := map[string]semanticview.ConnectorImportSource{}
+	importProvenance := map[string]semanticview.ConnectorPackProvenance{}
 	importedByProjectScope := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, item := range imports {
 		if item.provider == "" {
@@ -456,6 +457,12 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 			return nil, fmt.Errorf("provider connector tool %q import source: %w", item.toolID, err)
 		}
 		importSources[item.toolID] = importSource
+		importProvenance[item.toolID] = semanticview.ConnectorPackProvenance{
+			PackID:       strings.TrimSpace(pack.Envelope.ID),
+			Version:      strings.TrimSpace(pack.Envelope.Version),
+			ManifestHash: strings.TrimSpace(pack.Envelope.ManifestHash),
+			Source:       strings.TrimSpace(firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source)),
+		}
 		if importedByProjectScope[item.projectScopeKey] == nil {
 			importedByProjectScope[item.projectScopeKey] = map[string]runtimecontracts.ToolSchemaEntry{}
 		}
@@ -466,6 +473,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		importedTools:          importedTools,
 		importedGeneration:     importedGeneration,
 		importSources:          importSources,
+		importProvenance:       importProvenance,
 		importedByProjectScope: importedByProjectScope,
 	}, nil
 }
@@ -504,11 +512,12 @@ type connectorPackSource struct {
 	importedTools          map[string]runtimecontracts.ToolSchemaEntry
 	importedGeneration     map[string]GenerationSurface
 	importSources          map[string]semanticview.ConnectorImportSource
+	importProvenance       map[string]semanticview.ConnectorPackProvenance
 	importedByProjectScope map[string]map[string]runtimecontracts.ToolSchemaEntry
 }
 
 func (s connectorPackSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithConnectorPackImports(s.importedGeneration, s.importSources)
+	return s.Source.SemanticCapabilities().WithConnectorPackImports(s.importedGeneration, s.importSources).WithConnectorPackProvenance(s.importProvenance)
 }
 
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {

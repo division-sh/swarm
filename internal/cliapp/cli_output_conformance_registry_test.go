@@ -68,6 +68,7 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm completion":             "exception",
 	"swarm doctor":                 "split",
 	"swarm test":                   "split",
+	"swarm new":                    "split",
 	"swarm workspace":              "exception",
 	"swarm workspace build":        "split",
 	"swarm secrets":                "exception",

@@ -18,6 +18,13 @@ func (p SatisfactionPlan) Generation() (plangeneration.Generation, error) {
 	return p.generation, nil
 }
 
+// Generation identifies the complete structural plan behind this configured
+// binding. Destination and binding identity are carried separately by the
+// effective-source projection.
+func (p OutboundBindingPlan) Generation() (plangeneration.Generation, error) {
+	return p.structural.Generation()
+}
+
 func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Generation, error) {
 	if err := validateSatisfactionPlanGenerationInputs(p); err != nil {
 		return plangeneration.Generation{}, err
