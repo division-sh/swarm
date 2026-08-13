@@ -621,6 +621,9 @@ func (s *runtimeProjectSupervisor) installProcessGenerationGrant(ctx context.Con
 }
 
 func replacementSourceSetPlan(manager *runtime.RuntimeContextManager, replacedHash string, candidate runtime.BundleContext) (runtimeagenttopology.SourceSetPlan, error) {
+	if manager != nil {
+		return manager.CompileReplacementSourceSetPlan(replacedHash, candidate)
+	}
 	sources := []runtimeagenttopology.SourceCoordinate{}
 	agents := []runtimeagenttopology.DesiredAgent{}
 	appendContext := func(contextDef runtime.BundleContext) error {
@@ -636,16 +639,6 @@ func replacementSourceSetPlan(manager *runtime.RuntimeContextManager, replacedHa
 		sources = append(sources, coordinate)
 		agents = append(agents, desired...)
 		return nil
-	}
-	if manager != nil {
-		for _, loaded := range manager.LoadedContexts() {
-			if loaded.BundleHash() == strings.TrimSpace(replacedHash) {
-				continue
-			}
-			if err := appendContext(loaded); err != nil {
-				return runtimeagenttopology.SourceSetPlan{}, err
-			}
-		}
 	}
 	if candidate.BundleSourceFact.Validate() == nil {
 		if err := appendContext(candidate); err != nil {
@@ -685,6 +678,50 @@ func (s *runtimeProjectSupervisor) restoreCommittedSourceSet(ctx context.Context
 		ExpectedRevision: expected.Revision, Plan: previous,
 	})
 	return err
+}
+
+func (s *runtimeProjectSupervisor) prepareReplacementSurvivors(
+	ctx context.Context,
+	manager *runtime.RuntimeContextManager,
+	plan runtimeagenttopology.SourceSetPlan,
+) (*runtime.PreparedRuntimeSourceSetTransition, error) {
+	if s == nil || s.processCapability == nil || manager == nil {
+		return nil, errors.New("runtime replacement survivor refresh requires process topology and runtime context ownership")
+	}
+	current, exists, err := s.processCapability.CurrentSourceSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, errors.New("runtime replacement survivor refresh requires an installed source set")
+	}
+	if current.Revision == plan.Revision {
+		return nil, nil
+	}
+	return manager.PrepareSourceSetTransition(ctx, plan)
+}
+
+func (s *runtimeProjectSupervisor) restoreCommittedSourceSetAndSurvivors(
+	ctx context.Context,
+	manager *runtime.RuntimeContextManager,
+	expected runtimeagenttopology.SourceSetPlan,
+	previous runtimeagenttopology.SourceSetPlan,
+	attempt sourceSetReplacementAttempt,
+) error {
+	if err := s.restoreCommittedSourceSet(ctx, expected, previous, attempt); err != nil {
+		return err
+	}
+	transition, err := manager.PrepareSourceSetTransition(ctx, previous)
+	if err != nil {
+		return fmt.Errorf("prepare predecessor source-set survivor restoration: %w", err)
+	}
+	if transition == nil {
+		return nil
+	}
+	if err := transition.Commit(ctx, s.processCapability); err != nil {
+		return fmt.Errorf("restore predecessor source-set survivors: %w", err)
+	}
+	return nil
 }
 
 func (s *runtimeProjectSupervisor) completePendingReplacement() error {
@@ -898,13 +935,36 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT, freeze)
 			return s.CurrentProject(), errors.Join(fmt.Errorf("quiesce predecessor runtime before replacement: %w", err), restoreErr)
 		}
+		survivorTransition, err := s.prepareReplacementSurvivors(ctx, manager, candidatePlan)
+		if err != nil {
+			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
+		}
+		survivorTransitionSettled := false
+		defer func() {
+			if !survivorTransitionSettled && survivorTransition != nil {
+				_ = survivorTransition.Abort()
+			}
+		}()
 		topologyAttempt := newSourceSetReplacementAttempt()
 		previousPlan, err := s.replaceCommittedSourceSet(ctx, candidatePlan, topologyAttempt)
 		if err != nil {
+			if survivorTransition != nil {
+				survivorTransitionSettled = true
+				err = errors.Join(err, survivorTransition.Abort())
+			}
 			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
 		restorePredecessor := func(cause error) error {
 			topologyErr := s.restoreCommittedSourceSet(context.Background(), candidatePlan, previousPlan, topologyAttempt)
+			if survivorTransition != nil {
+				survivorTransitionSettled = true
+				topologyErr = errors.Join(topologyErr, survivorTransition.Abort())
+			}
+			restartErr := s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze)
+			return errors.Join(cause, topologyErr, restartErr)
+		}
+		restoreAfterSurvivorCommit := func(cause error) error {
+			topologyErr := s.restoreCommittedSourceSetAndSurvivors(context.Background(), manager, candidatePlan, previousPlan, topologyAttempt)
 			restartErr := s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze)
 			return errors.Join(cause, topologyErr, restartErr)
 		}
@@ -939,6 +999,15 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			return s.CurrentProject(), restorePredecessor(err)
 		}
+		if survivorTransition != nil {
+			survivorTransitionSettled = true
+			if err := survivorTransition.Commit(ctx, s.processCapability); err != nil {
+				_ = publication.Discard()
+				publication = nil
+				_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
+				return s.CurrentProject(), restoreAfterSurvivorCommit(err)
+			}
+		}
 		pending := &pendingRuntimeReplacement{
 			publication: publication,
 			root:        resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
@@ -959,7 +1028,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			}
 			s.mu.Unlock()
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			return s.CurrentProject(), restorePredecessor(err)
+			return s.CurrentProject(), restoreAfterSurvivorCommit(err)
 		}
 		return s.CurrentProject(), nil
 	}

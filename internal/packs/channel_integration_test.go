@@ -519,6 +519,20 @@ func (t *mockRegistrationTransport) counts() (int, int) {
 	return t.identifyCount, t.applyCount
 }
 
+func mockRegistrationStartupGrant(t *testing.T, owner string) startupownership.GrantEvidence {
+	t.Helper()
+	grant := startupownership.GrantEvidence{
+		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: owner,
+		ProcessBootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), BundleSource: "ephemeral",
+		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, SourceSetRevision: "mock-registration-source-set",
+		StateVersion: 3, State: startupownership.GrantAdmitted,
+	}
+	if err := grant.Validate(); err != nil {
+		t.Fatalf("mock registration startup grant: %v", err)
+	}
+	return grant
+}
+
 func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
 	channel, trigger, connector := mockChannelSatisfier()
@@ -547,12 +561,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	if err != nil {
 		t.Fatalf("NewSnapshotOwner: %v", err)
 	}
-	startup, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
-		OwnerID: "mock-serve", BootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64),
-	}, "test")
-	if err != nil {
-		t.Fatalf("NewColdAuthority: %v", err)
-	}
+	startup := mockRegistrationStartupGrant(t, "mock-serve")
 	transport := &mockRegistrationTransport{}
 	readiness := runtimepublicingress.NewReadinessOwner(true)
 	controller, err := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
@@ -561,7 +570,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		HTTP:              runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture:           executionposture.Live,
 		RuntimeInstanceID: uuid.NewString(),
-		StartupAuthority:  func() (startupownership.Authority, error) { return startup, nil },
+		StartupAuthority:  func() (startupownership.GrantEvidence, error) { return startup, nil },
 		Readiness:         readiness,
 	})
 	if err != nil {
@@ -571,7 +580,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	readiness.SetRuntimeReady(true)
 	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
 		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
-		StartupAuthorityID: startup.AuthorityID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(runtimepublicingress.EvidenceTTL),
+		StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(runtimepublicingress.EvidenceTTL),
 	})
 	pair := runtimepublicingress.RegistrationPair{
 		BindingID: "mock-hitl", PlanGeneration: planGeneration, Registration: registration,
@@ -607,15 +616,10 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		t.Fatalf("known-success apply count = %d, want 1", applied)
 	}
 
-	startup, err = startupownership.NewColdAuthority(startupownership.AcquireRequest{
-		OwnerID: "mock-serve-successor", BootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64),
-	}, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	startup = mockRegistrationStartupGrant(t, "mock-serve-successor")
 	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
 		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
-		StartupAuthorityID: startup.AuthorityID, ObservedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(runtimepublicingress.EvidenceTTL),
+		StartupAuthorityID: startup.GrantID, ObservedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(runtimepublicingress.EvidenceTTL),
 	})
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
 		t.Fatalf("unchanged handoff reconcile: %v", err)
@@ -709,7 +713,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 
 	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
 		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
-		StartupAuthorityID: startup.AuthorityID, ObservedAt: time.Now().UTC(), ExpiresAt: rotated.Registrations[0].ExpiresAt.Add(time.Minute),
+		StartupAuthorityID: startup.GrantID, ObservedAt: time.Now().UTC(), ExpiresAt: rotated.Registrations[0].ExpiresAt.Add(time.Minute),
 	})
 	if snapshot := readiness.Snapshot(rotated.Registrations[0].ExpiresAt); snapshot.Ready || snapshot.PublicIngressReady {
 		t.Fatalf("expired registration remained ready: %#v", snapshot)

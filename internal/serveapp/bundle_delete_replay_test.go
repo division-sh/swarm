@@ -190,8 +190,8 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 	}
 	var replayRecorded bool
 	if err := db.QueryRowContext(ctx, `
-		SELECT result ? 'bundle_delete_final_mutation'
-		FROM agent_topology_source_set_operations
+		SELECT result IS NOT NULL
+		FROM bundle_delete_final_mutation_replays
 		WHERE operation_id = $1::uuid
 	`, req.OperationID).Scan(&replayRecorded); err != nil {
 		t.Fatalf("read final mutation replay record: %v", err)
@@ -298,6 +298,91 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 	expiredRequest.RequestedAt = req.RequestedAt.Add(runtimebundledelete.FinalMutationReplayWindow)
 	if _, err := coordinator.Execute(ctx, expiredRequest); !errors.Is(err, runtimebundledelete.ErrBundleNotFound) {
 		t.Fatalf("expired replay error = %v, want ErrBundleNotFound", err)
+	}
+}
+
+func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperation(t *testing.T) {
+	ctx := context.Background()
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	selected, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	db := storetest.DatabaseForTest(selected)
+	t.Cleanup(func() { _ = db.Close() })
+	storetest.BootstrapPostgresRuntimeStore(t, selected)
+
+	root := writeServeRuntimeAgentSlugFixture(t, "unloaded-delete-replay", "unloaded-worker")
+	bundleHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, root)
+	unkeyedRoot := writeServeRuntimeAgentSlugFixture(t, "unloaded-delete-unkeyed", "unkeyed-worker")
+	unkeyedBundleHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, unkeyedRoot)
+	runtimeInstanceID := uuid.NewString()
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "unloaded-bundle-delete-replay", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("AcquireProcessCapability: %v", err)
+	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+
+	requestedAt := time.Now().UTC()
+	request := runtimebundledelete.FinalMutationRequest{
+		OperationID: uuid.NewString(), OperationName: runtimebundledelete.DefaultOperationName,
+		RequestHash: "unloaded-bundle-delete-request", ReplayKeyHash: strings.Repeat("b", 64),
+		BundleHash: bundleHash, RequestedAt: requestedAt,
+	}
+	committed, err := capability.ApplyBundleDeleteFinalMutation(ctx, request, nil)
+	if err != nil {
+		t.Fatalf("commit unloaded bundle deletion: %v", err)
+	}
+	if !committed.Deleted || committed.BundleRowsDeleted != 1 {
+		t.Fatalf("committed unloaded deletion = %#v", committed)
+	}
+	var topologyOperations int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_topology_source_set_operations WHERE operation_id=$1::uuid`, request.OperationID).Scan(&topologyOperations); err != nil {
+		t.Fatalf("count unrelated topology operations: %v", err)
+	}
+	if topologyOperations != 0 {
+		t.Fatalf("unloaded deletion topology operations=%d, want 0", topologyOperations)
+	}
+
+	replay := request
+	replay.OperationID = uuid.NewString()
+	replay.RequestedAt = requestedAt.Add(time.Minute)
+	replayed, err := capability.ApplyBundleDeleteFinalMutation(ctx, replay, nil)
+	if err != nil {
+		t.Fatalf("replay unloaded bundle deletion: %v", err)
+	}
+	if !reflect.DeepEqual(replayed, committed) {
+		t.Fatalf("replayed unloaded deletion = %#v, want %#v", replayed, committed)
+	}
+	var replayRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bundle_delete_final_mutation_replays WHERE replay_key_hash=$1`, request.ReplayKeyHash).Scan(&replayRows); err != nil {
+		t.Fatalf("count unloaded deletion replay facts: %v", err)
+	}
+	if replayRows != 1 {
+		t.Fatalf("unloaded deletion replay facts=%d, want 1", replayRows)
+	}
+
+	unkeyedRequest := runtimebundledelete.FinalMutationRequest{
+		OperationID: uuid.NewString(), OperationName: runtimebundledelete.DefaultOperationName,
+		RequestHash: "unloaded-bundle-delete-unkeyed-request",
+		BundleHash:  unkeyedBundleHash, RequestedAt: requestedAt.Add(2 * time.Minute),
+	}
+	unkeyed, err := capability.ApplyBundleDeleteFinalMutation(ctx, unkeyedRequest, nil)
+	if err != nil {
+		t.Fatalf("commit unkeyed unloaded bundle deletion: %v", err)
+	}
+	if !unkeyed.Deleted || unkeyed.BundleRowsDeleted != 1 {
+		t.Fatalf("committed unkeyed unloaded deletion = %#v", unkeyed)
+	}
+	var unkeyedRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bundle_delete_final_mutation_replays WHERE operation_id=$1::uuid AND replay_key_hash=''`, unkeyedRequest.OperationID).Scan(&unkeyedRows); err != nil {
+		t.Fatalf("count unkeyed unloaded deletion replay fact: %v", err)
+	}
+	if unkeyedRows != 1 {
+		t.Fatalf("unkeyed unloaded deletion replay facts=%d, want 1 exact operation fact", unkeyedRows)
 	}
 }
 
