@@ -610,7 +610,7 @@ func TestDoctorConsumesProviderTriggerEventImportOwner(t *testing.T) {
 			if code != test.wantCode || stderr != "" {
 				t.Fatalf("code=%d stderr=%q report=%#v, want code=%d", code, stderr, report, test.wantCode)
 			}
-			finding, found := localPreflightReportFinding(report, "provider_trigger_event_import_failed")
+			finding, found := localPreflightReportFinding(report, "effective_source_projection_failed")
 			if found != test.wantError {
 				t.Fatalf("provider-trigger import finding = (%#v, %v), want error=%v", finding, found, test.wantError)
 			}

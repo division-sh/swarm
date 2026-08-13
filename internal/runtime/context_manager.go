@@ -15,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -26,15 +27,17 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
-	BundleSourceFact  runtimecorrelation.BundleSourceFact
-	BundleIdentity    runtimecontracts.BundleIdentity
-	Source            semanticview.Source
-	ContractsRoot     string
-	PlatformSpecPath  string
-	Runtime           *Runtime
-	WorkOwner         *worklifetime.RuntimeOccurrence
-	WorkspaceScopeKey string
-	StandingTargets   []StandingTarget
+	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	BundleIdentity          runtimecontracts.BundleIdentity
+	Source                  semanticview.Source
+	ContractsRoot           string
+	PlatformSpecPath        string
+	Runtime                 *Runtime
+	WorkOwner               *worklifetime.RuntimeOccurrence
+	WorkspaceScopeKey       string
+	StandingTargets         []StandingTarget
+	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog  *scenarioexecution.Catalog
 }
 
 type RuntimeContextState string
@@ -609,6 +612,20 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	}
 	if contextDef.Runtime == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s runtime is required", bundleHash)
+	}
+	runtimeIdentity := contextDef.Runtime.EffectiveSourceIdentity
+	if runtimeIdentity.Validate() == nil {
+		if err := contextDef.EffectiveSourceIdentity.Validate(); err == nil && !contextDef.EffectiveSourceIdentity.Equal(runtimeIdentity) {
+			return BundleContext{}, fmt.Errorf("runtime context %s effective source identity does not belong to runtime", bundleHash)
+		}
+		contextDef.EffectiveSourceIdentity = runtimeIdentity
+		if contextDef.Runtime.ScenarioProfileCatalog == nil {
+			return BundleContext{}, fmt.Errorf("runtime context %s scenario profile catalog is required", bundleHash)
+		}
+		if contextDef.ScenarioProfileCatalog != nil && !contextDef.ScenarioProfileCatalog.EffectiveSourceIdentity().Equal(runtimeIdentity) {
+			return BundleContext{}, fmt.Errorf("runtime context %s scenario profile catalog does not belong to runtime", bundleHash)
+		}
+		contextDef.ScenarioProfileCatalog = contextDef.Runtime.ScenarioProfileCatalog
 	}
 	if contextDef.Runtime.Bus == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", bundleHash)

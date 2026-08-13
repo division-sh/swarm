@@ -17,8 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testing.T) {
@@ -586,15 +586,53 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 	}
 }
 
+func TestAdmittedSelectedContractSourceLoaderBindsExactPersistedBundleSelection(t *testing.T) {
+	repoRoot := runForkExecutionRepoRoot(t)
+	selection := runfork.RunForkContractSelection{
+		Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
+		ContractsRoot: filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"),
+	}
+	loaded, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(context.Background(), selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := runtimecorrelation.NewPersistedBundleSourceFact(loaded.BundleSourceFact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(persisted, "sha256:"+strings.Repeat("9", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader, err := NewAdmittedSelectedContractSourceLoader(loaded.Selection, loaded.Module, persisted, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: persisted.BundleHash()}
+	admitted, err := loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{Selection: target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admitted.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
+		admitted.Selection.BundleHash != persisted.BundleHash() ||
+		admitted.Selection.WorkflowName != loaded.Source.WorkflowName() ||
+		admitted.Selection.WorkflowVersion != loaded.Source.WorkflowVersion() {
+		t.Fatalf("admitted target selection = %#v", admitted.Selection)
+	}
+
+	target.BundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	if _, err := loader.LoadRunForkSelectedContractSourceForRequest(context.Background(), SelectedContractSourceLoadRequest{Selection: target}); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched bundle selection error = %v", err)
+	}
+}
+
 func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t *testing.T) {
 	repoRoot := runForkExecutionRepoRoot(t)
 	for _, sourceKind := range []string{"flow_local", "pack_imported"} {
 		t.Run(sourceKind, func(t *testing.T) {
-			var contractsRoot string
-			if sourceKind == "flow_local" {
-				contractsRoot = canonicalrouting.CopyStandingTelegramServe(t, "https://example.invalid")
-			} else {
-				contractsRoot = canonicalrouting.CopyStandingTelegramServe(t, "https://example.invalid")
+			contractsRoot := copySelectedForkConnectorFixture(t, repoRoot)
+			if sourceKind == "pack_imported" {
 				convertSelectedTelegramFixtureToPackImport(t, contractsRoot)
 			}
 
@@ -637,6 +675,40 @@ func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t 
 	}
 }
 
+func copySelectedForkConnectorFixture(t *testing.T, repoRoot string) string {
+	t.Helper()
+	sourceRoot := filepath.Join(repoRoot, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS(sourceRoot)); err != nil {
+		t.Fatalf("copy selected fork connector fixture: %v", err)
+	}
+	tool := `telegram.send_message:
+  category: provider_connector
+  description: send Telegram messages
+  handler_type: http
+  effect_class: non_idempotent_write
+  credentials: [telegram_bot_token]
+  input_schema:
+    type: object
+    properties:
+      chat_id: {type: string}
+      text: {type: string}
+    required: [chat_id, text]
+  output_schema: {type: object}
+  response_success: {kind: http_status_2xx}
+  http:
+    method: POST
+    url: https://example.invalid/bot{{credentials.telegram_bot_token}}/sendMessage
+    body:
+      chat_id: "{{input.chat_id}}"
+      text: "{{input.text}}"
+`
+	if err := os.WriteFile(filepath.Join(root, "flows", "worker", "tools.yaml"), []byte(tool), 0o644); err != nil {
+		t.Fatalf("write selected connector fixture: %v", err)
+	}
+	return root
+}
+
 func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot string) {
 	t.Helper()
 	packagePath := filepath.Join(contractsRoot, "package.yaml")
@@ -652,7 +724,7 @@ func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot stri
 	if err := os.WriteFile(packagePath, body, 0o644); err != nil {
 		t.Fatalf("write selected package fixture: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(contractsRoot, "flows", "telegram-chat", "tools.yaml"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(contractsRoot, "flows", "worker", "tools.yaml"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatalf("remove selected flow-local connector fixture: %v", err)
 	}
 }
@@ -660,17 +732,22 @@ func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot stri
 func TestCompileSelectedContractSourceIsolatesEffectiveConnectorPlans(t *testing.T) {
 	firstTool := selectedMockConnectorTool()
 	secondTool := selectedMockConnectorTool()
-	first, firstPlan, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+	firstFact := testEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("1", 64))
+	first, firstPlan, firstIdentity, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 		"first.send": firstTool,
-	}}))
+	}}), firstFact)
 	if err != nil {
 		t.Fatalf("compile first selected source: %v", err)
 	}
-	second, secondPlan, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+	secondFact := testEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("2", 64))
+	second, secondPlan, secondIdentity, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 		"second.send": secondTool,
-	}}))
+	}}), secondFact)
 	if err != nil {
 		t.Fatalf("compile second selected source: %v", err)
+	}
+	if !firstIdentity.BundleSourceFact().Matches(firstFact) || !secondIdentity.BundleSourceFact().Matches(secondFact) || firstIdentity.Equal(secondIdentity) {
+		t.Fatalf("selected effective identities were not bound to their exact sources: first=%s second=%s", firstIdentity.Digest(), secondIdentity.Digest())
 	}
 	if _, ok := first.ToolEntries()["second.send"]; ok {
 		t.Fatal("first selected source contains second connector")
@@ -1014,11 +1091,21 @@ func testSelectedSource(selection runfork.RunForkContractSelection) semanticview
 }
 
 func testLoadedSelectedSource(selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
+	fact := testEphemeralBundleSourceFact(runForkTestBundleHash)
 	return LoadedSelectedContractSource{
-		Selection:        selection,
-		Source:           testSelectedSource(selection),
-		BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
+		Selection:               selection,
+		Source:                  testSelectedSource(selection),
+		BundleSourceFact:        fact,
+		EffectiveSourceIdentity: testEffectiveSourceIdentity(fact),
 	}
+}
+
+func testEffectiveSourceIdentity(fact runtimecorrelation.BundleSourceFact) scenarioexecution.EffectiveSourceIdentity {
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("a", 64))
+	if err != nil {
+		panic(err)
+	}
+	return identity
 }
 
 func testEphemeralBundleSourceFact(bundleHash string) runtimecorrelation.BundleSourceFact {

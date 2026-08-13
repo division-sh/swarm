@@ -1,0 +1,9 @@
+name: automation
+mode: static
+initial_state: ready
+states: [ready]
+pins:
+  inputs:
+    events:
+      - {name: request, event: automation.requested, source: external}
+  outputs: {events: []}

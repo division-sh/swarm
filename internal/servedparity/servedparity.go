@@ -44,6 +44,7 @@ const (
 	ScenarioMailboxDeferDecisionLifecycle        = "mailbox_defer_decision_lifecycle"
 	ScenarioTestSetupEntitiesLifecycle           = "test_setup_entities_lifecycle"
 	ScenarioGeneratedInputFixtureLifecycle       = "generated_input_fixture_lifecycle"
+	ScenarioDerivedScenarioLifecycle             = "derived_scenario_lifecycle"
 	ScenarioPublicMockApprovalLifecycle          = "public_mock_approval_lifecycle"
 	ScenarioConversationForkLifecycle            = "conversation_fork_lifecycle"
 	ScenarioConversationForkChatLifecycle        = "conversation_fork_chat_lifecycle"
@@ -96,6 +97,7 @@ func Scenarios() []Scenario {
 		servedMailboxDecisionScenario(ScenarioMailboxDeferDecisionLifecycle, "mailbox.defer"),
 		servedControlScenario(ScenarioTestSetupEntitiesLifecycle, "test.setup_entities", "TestServedParityHarnessTestSetupEntitiesLifecycle"),
 		servedControlScenario(ScenarioGeneratedInputFixtureLifecycle, "event.publish", "TestServedParityHarnessGeneratedInputFixtureLifecycle"),
+		servedControlScenario(ScenarioDerivedScenarioLifecycle, "event.publish", "TestServedParityHarnessDerivedScenarioLifecycle"),
 		servedControlScenario(ScenarioPublicMockApprovalLifecycle, "event.publish", "TestServedParityHarnessPublicMockApprovalLifecycle"),
 		servedControlScenario(ScenarioConversationForkLifecycle, "conversation.fork", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkChatLifecycle, "conversation.fork_chat", "TestServedParityHarnessConversationForkLifecycle"),

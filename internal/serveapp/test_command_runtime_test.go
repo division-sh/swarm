@@ -22,10 +22,15 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testsql"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -69,6 +74,19 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 
 func TestServedParityHarnessGeneratedInputFixtureLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioGeneratedInputFixtureLifecycle), runServedGeneratedInputFixtureBackendProof)
+}
+
+func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
+	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
+}
+
+func TestScaffoldAdmittedArchetypesRunUneditedZeroCredentialSQLite(t *testing.T) {
+	for _, archetype := range []string{"zero-agent-automation", "webhook-responder"} {
+		archetype := archetype
+		t.Run(archetype, func(t *testing.T) {
+			runScaffoldArchetypeSQLiteProof(t, archetype)
+		})
+	}
 }
 
 func TestServedParityHarnessPublicMockApprovalLifecycle(t *testing.T) {
@@ -352,6 +370,369 @@ func requireSchemaOnlyProviderTriggerHasNoWebhookRoute(t *testing.T, serverURL s
 	if resp.StatusCode != http.StatusNotFound || !strings.Contains(body.String(), "no ingress target") || !strings.Contains(body.String(), "add ingress") {
 		t.Fatalf("schema-only webhook response = %d %q, want teaching 404 with no route activation", resp.StatusCode, body.String())
 	}
+}
+
+func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	contractsPath := scaffoldConformanceArchetype(t, "zero-agent-automation")
+
+	var db *sql.DB
+	var configPath string
+	var postgresDSN string
+	platformSpecPath := filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)
+	opts := cliapp.ServeOptions{
+		ContractsPath: contractsPath, PlatformSpecPath: platformSpecPath,
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	}
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		stubServeRuntimeWorkspaceLifecycle(t)
+		oldBuildStores := buildStoresForServe
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				db = stores.SQLDB
+			}
+			return stores, err
+		}
+		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "derived-scenario.sqlite"))
+	case servedparity.BackendExplicitPostgres:
+		postgresDSN, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
+		opts.StoreMode = storebackend.BackendPostgres.String()
+		opts.StoreModeSet = true
+	default:
+		t.Fatalf("unsupported backend %q", backend)
+	}
+	opts.ConfigPath = configPath
+	process := startServeRuntimeTestProcess(t, opts)
+	process.waitForReadyLine()
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+	rt := servedTestProcessRuntime(t, process)
+	if db == nil || rt == nil || rt.Options.WorkflowModule == nil {
+		t.Fatalf("%s derived scenario runtime is incomplete", backend)
+	}
+
+	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: "automation", Input: "request"})
+	if err != nil || len(plans) != 1 {
+		t.Fatalf("%s compile negative selector plan: plans=%d err=%v", backend, len(plans), err)
+	}
+	selector, err := scenarioexecution.NewSelector(plans[0].Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector.EffectiveSourceDigest = "sha256:" + strings.Repeat("0", 64)
+	bundleHash, err := runtimecontracts.BundleHash(mustBundleFromSource(t, rt.Options.WorkflowModule.SemanticSource()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeMismatch := loadScenarioMutationCounts(t, db, backend)
+	rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
+		"bundle_hash": bundleHash, "event_name": "automation.requested",
+		"payload":         map[string]any{"chat_id": "1001", "text": "must not publish"},
+		"idempotency_key": "derived-effective-source-mismatch-" + string(backend),
+		"scenario_execution": map[string]any{
+			"profile_id": selector.ProfileID, "profile_digest": selector.ProfileDigest,
+			"effective_source_digest": selector.EffectiveSourceDigest,
+		},
+	})
+	if code, _ := rpcErr.Data["code"].(string); code != apiv1.BundleMismatchCode {
+		t.Fatalf("%s mismatched effective source error = %#v", backend, rpcErr)
+	}
+	if afterPublish := loadScenarioMutationCounts(t, db, backend); afterPublish != beforeMismatch {
+		t.Fatalf("%s mismatched event.publish mutated state: before=%+v after=%+v", backend, beforeMismatch, afterPublish)
+	}
+	setupRunID := "00000000-0000-4000-8000-000000000201"
+	setupEntityID := "00000000-0000-4000-8000-000000000202"
+	rpcErr = requireServedJSONRPCError(t, endpoint, "test.setup_entities", map[string]any{
+		"bundle_hash": bundleHash, "run_id": setupRunID,
+		"idempotency_key": "derived-setup-effective-source-mismatch-" + string(backend),
+		"entities": []any{map[string]any{
+			"alias": "subject", "entity_id": setupEntityID, "flow_instance": "automation",
+			"entity_type": "subject", "current_state": "ready", "fields": map[string]any{},
+		}},
+		"scenario_execution": map[string]any{
+			"profile_id": selector.ProfileID, "profile_digest": selector.ProfileDigest,
+			"effective_source_digest": selector.EffectiveSourceDigest,
+		},
+	})
+	if code, _ := rpcErr.Data["code"].(string); code != apiv1.BundleMismatchCode {
+		t.Fatalf("%s mismatched setup effective source error = %#v", backend, rpcErr)
+	}
+	if afterSetup := loadScenarioMutationCounts(t, db, backend); afterSetup != beforeMismatch {
+		t.Fatalf("%s mismatched test.setup_entities mutated state: before=%+v after=%+v", backend, beforeMismatch, afterSetup)
+	}
+
+	var stdout, stderr bytes.Buffer
+	started := time.Now()
+	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		"test", "--derive", "automation", "--input", "request",
+		"--contracts", contractsPath, "--config", configPath,
+		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
+		"--timeout", "20s", "--poll-interval", "25ms",
+	}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("%s derived scenario code=%d stdout=%s stderr=%s", backend, code, stdout.String(), stderr.String())
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Second {
+		t.Fatalf("%s derived scenario took %s, want under 60s", backend, elapsed)
+	}
+	if !strings.Contains(stdout.String(), "scenario ok: derived:automation/request") || strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("%s derived output stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
+	}
+	requireExactScenarioExecutionProfile(t, db, backend, rt.EffectiveSourceIdentity)
+	beforeRestart := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
+		t.Fatalf("%s zero-credential journey created credential store %s: %v", backend, credentialPath, err)
+	}
+	if code := process.stop(); code != 0 {
+		t.Fatalf("%s first derived runtime stop code = %d\n%s", backend, code, process.outputString())
+	}
+	if backend == servedparity.BackendExplicitPostgres {
+		reopened, err := store.NewPostgresStore(postgresDSN)
+		if err != nil {
+			t.Fatalf("reopen PostgreSQL derived runtime store: %v", err)
+		}
+		t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
+		priorBuildStores := buildStoresForServe
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			storetest.BootstrapPostgresRuntimeStore(t, reopened)
+			return selectedPostgresStoreBundle(reopened, storetest.DatabaseForTest(reopened), cfg), nil
+		}
+		t.Cleanup(func() { buildStoresForServe = priorBuildStores })
+		db = storetest.DatabaseForTest(reopened)
+	}
+	restarted := startServeRuntimeTestProcess(t, opts)
+	restarted.waitForReadyLine()
+	restartedEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
+	restartedRuntime := servedTestProcessRuntime(t, restarted)
+	if !restartedRuntime.EffectiveSourceIdentity.Equal(rt.EffectiveSourceIdentity) {
+		t.Fatalf("%s restart effective identity changed: before=%s after=%s", backend, rt.EffectiveSourceIdentity.Digest(), restartedRuntime.EffectiveSourceIdentity.Digest())
+	}
+	afterRestart := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	if beforeRestart.runID != afterRestart.runID || beforeRestart.profileID != afterRestart.profileID || beforeRestart.profileDigest != afterRestart.profileDigest || beforeRestart.effectiveDigest != afterRestart.effectiveDigest || !bytes.Equal(beforeRestart.raw, afterRestart.raw) {
+		t.Fatalf("%s restart changed exact scenario execution profile", backend)
+	}
+	var resumed map[string]any
+	requireServedJSONRPCResult(t, restartedEndpoint, "run.get", map[string]any{"run_id": beforeRestart.runID}, &resumed)
+	run, _ := resumed["run"].(map[string]any)
+	if run["run_id"] != beforeRestart.runID {
+		t.Fatalf("%s restarted run readback = %#v, want original run", backend, resumed)
+	}
+	finalRecord := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	if !bytes.Equal(beforeRestart.raw, finalRecord.raw) || beforeRestart.profileDigest != finalRecord.profileDigest || scenarioExecutionProfileCount(t, db, backend) != 1 {
+		t.Fatalf("%s restarted execution changed or duplicated durable scenario profile", backend)
+	}
+}
+
+func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	contractsPath := scaffoldConformanceArchetype(t, archetype)
+	writeArchetypeOperatorPackInventory(t, contractsPath)
+	configPath := filepath.Join(contractsPath, "swarm.yaml")
+
+	var verifyOut, verifyErr bytes.Buffer
+	if code := cliapp.Execute(context.Background(), contractsPath, []string{"verify", "--config", configPath, "--contracts", contractsPath}, &verifyOut, &verifyErr, nil); code != 0 {
+		t.Fatalf("%s generated verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
+	}
+	oldBuildStores := buildStoresForServe
+	var db *sql.DB
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		stores, err := oldBuildStores(ctx, selection, cfg)
+		if err == nil {
+			db = stores.SQLDB
+		}
+		return stores, err
+	}
+	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+	endpoint, rt := startServedEventPublishFollowUpRuntimeAtRepo(t, contractsPath, cliapp.ServeOptions{
+		ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	if db == nil || rt == nil {
+		t.Fatalf("%s generated runtime is incomplete", archetype)
+	}
+	var stdout, stderr bytes.Buffer
+	started := time.Now()
+	code := cliapp.Execute(context.Background(), contractsPath, []string{
+		"test", "--config", configPath, "--contracts", contractsPath,
+		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
+		"--timeout", "30s", "--poll-interval", "25ms", filepath.Join("tests", "smoke.yaml"),
+	}, &stdout, &stderr, nil)
+	if code != 0 {
+		t.Fatalf("%s generated scenario code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Second {
+		t.Fatalf("%s generated journey took %s, want under 60s", archetype, elapsed)
+	}
+	requireExactScenarioExecutionProfile(t, db, servedparity.BackendDefaultSQLite, rt.EffectiveSourceIdentity)
+	if _, err := os.Stat(credentialPath); !os.IsNotExist(err) {
+		t.Fatalf("%s generated journey created credential store %s: %v", archetype, credentialPath, err)
+	}
+}
+
+func scaffoldConformanceArchetype(t *testing.T, archetype string) string {
+	t.Helper()
+	destination := filepath.Join(t.TempDir(), archetype)
+	var stdout, stderr bytes.Buffer
+	if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"new", archetype, "--output", destination}, &stdout, &stderr, nil); code != 0 {
+		t.Fatalf("scaffold %s code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
+	}
+	return destination
+}
+
+func writeArchetypeOperatorPackInventory(t *testing.T, contractsPath string) {
+	t.Helper()
+	localDir := filepath.Join(contractsPath, ".swarm")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	operatorConfigPath := filepath.Join(localDir, "swarm.yaml")
+	body, err := os.ReadFile(operatorConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := withTestProviderTriggerPlatformInventory(t, string(body))
+	if err := os.WriteFile(operatorConfigPath, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func scenarioExecutionProfileCount(t *testing.T, db *sql.DB, backend servedparity.Backend) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_scenario_execution_profiles`).Scan(&count); err != nil {
+		t.Fatalf("%s count scenario execution profiles: %v", backend, err)
+	}
+	return count
+}
+
+type scenarioMutationCounts struct {
+	Runs, Events, EntityState, Profiles int
+}
+
+func loadScenarioMutationCounts(t *testing.T, db *sql.DB, backend servedparity.Backend) scenarioMutationCounts {
+	t.Helper()
+	var counts scenarioMutationCounts
+	queries := []struct {
+		name string
+		out  *int
+	}{
+		{name: "runs", out: &counts.Runs},
+		{name: "events", out: &counts.Events},
+		{name: "entity_state", out: &counts.EntityState},
+		{name: "run_scenario_execution_profiles", out: &counts.Profiles},
+	}
+	for _, query := range queries {
+		if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+query.name).Scan(query.out); err != nil {
+			t.Fatalf("%s count %s: %v", backend, query.name, err)
+		}
+	}
+	return counts
+}
+
+func requireExactScenarioExecutionProfile(t *testing.T, db *sql.DB, backend servedparity.Backend, identity scenarioexecution.EffectiveSourceIdentity) {
+	t.Helper()
+	record := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	profile, err := scenarioexecution.DecodeProfile(record.raw, record.profileDigest)
+	if err != nil {
+		t.Fatalf("%s decode exact scenario profile: %v", backend, err)
+	}
+	if profile.ID() != record.profileID || record.effectiveDigest != identity.Digest() || !profile.EffectiveSourceIdentity().Equal(identity) {
+		t.Fatalf("%s persisted profile identity mismatch: id=%s digest=%s effective=%s", backend, record.profileID, record.profileDigest, record.effectiveDigest)
+	}
+}
+
+type scenarioExecutionProfileRecord struct {
+	runID, profileID, profileDigest, effectiveDigest string
+	raw                                              []byte
+}
+
+func loadExactScenarioExecutionProfileRecord(t *testing.T, db *sql.DB, backend servedparity.Backend) scenarioExecutionProfileRecord {
+	t.Helper()
+	var record scenarioExecutionProfileRecord
+	if err := db.QueryRowContext(context.Background(), `SELECT run_id, profile_id, profile_digest, effective_source_digest, profile_bytes FROM run_scenario_execution_profiles`).Scan(&record.runID, &record.profileID, &record.profileDigest, &record.effectiveDigest, &record.raw); err != nil {
+		t.Fatalf("%s load scenario execution profile: %v", backend, err)
+	}
+	return record
+}
+
+func servedTestProcessRuntime(t *testing.T, process *serveRuntimeTestProcess) *runtimepkg.Runtime {
+	t.Helper()
+	process.mu.Lock()
+	defer process.mu.Unlock()
+	if process.runtime == nil {
+		t.Fatal("served test process runtime is not ready")
+	}
+	return process.runtime
+}
+
+func mustBundleFromSource(t *testing.T, source semanticview.Source) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("effective source is not bundle-backed")
+	}
+	return bundle
+}
+
+func startServedEventPublishFollowUpRuntimeAtRepo(t *testing.T, repoRoot string, opts cliapp.ServeOptions) (string, *runtimepkg.Runtime) {
+	t.Helper()
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	var out lockedBuffer
+	done := make(chan int, 1)
+	runtimeReady := make(chan *runtimepkg.Runtime, 1)
+	priorRuntimeReadyHook := opts.TestRuntimeReadyHook
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+		if priorRuntimeReadyHook != nil {
+			priorRuntimeReadyHook(rt)
+		}
+		select {
+		case runtimeReady <- rt:
+		default:
+		}
+	}
+	opts.Output = &out
+	go func() { done <- Run(serveCtx, repoRoot, opts) }()
+	waitForServeReadyLine(t, &out, done)
+	var rt *runtimepkg.Runtime
+	select {
+	case rt = <-runtimeReady:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for generated serve runtime\noutput:\n%s", out.String())
+	}
+	t.Cleanup(func() {
+		cancelServe()
+		select {
+		case code := <-done:
+			if code != 0 {
+				t.Errorf("generated Run exit code = %d\noutput:\n%s", code, out.String())
+			}
+		case <-time.After(servedProofPollDeadline):
+			t.Errorf("timed out stopping generated Run\noutput:\n%s", out.String())
+		}
+	})
+	return "http://" + serveRuntimeAPIListenerFromOutput(t, out.String()) + "/v1/rpc", rt
 }
 
 func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedparity.Backend) {

@@ -469,6 +469,12 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		"route_identity ~ '^delivery-route-v2:sha256:[0-9a-f]{64}$'",
 		sqliteDeliveryRouteIdentityPredicate("route_identity"),
 	)
+	for _, column := range []string{"profile_digest", "effective_source_digest"} {
+		predicate = strings.ReplaceAll(predicate,
+			column+" ~ '^sha256:[0-9a-f]{64}$'",
+			sqliteSHA256Predicate(column),
+		)
+	}
 	predicate = strings.ReplaceAll(predicate, "source_route <> '{}'::jsonb", "source_route <> '{}'")
 	predicate = strings.ReplaceAll(predicate, "target_route <> '{}'::jsonb", "target_route <> '{}'")
 	predicate = strings.ReplaceAll(predicate, "routing_source->>'kind'", "json_extract(routing_source, '$.kind')")
@@ -485,6 +491,11 @@ func sqliteBundleHashPredicate(column string) string {
 
 func sqliteDeliveryRouteIdentityPredicate(column string) string {
 	return fmt.Sprintf("(length(%s) = 89 AND substr(%s, 1, 25) = 'delivery-route-v2:sha256:' AND substr(%s, 26) GLOB '%s')",
+		column, column, column, strings.Repeat("[0-9a-f]", 64))
+}
+
+func sqliteSHA256Predicate(column string) string {
+	return fmt.Sprintf("(length(%s) = 71 AND substr(%s, 1, 7) = 'sha256:' AND substr(%s, 8) GLOB '%s')",
 		column, column, column, strings.Repeat("[0-9a-f]", 64))
 }
 

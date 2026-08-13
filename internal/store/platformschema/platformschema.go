@@ -171,6 +171,8 @@ func platformTableOrder(name string) int {
 		return 3
 	case "runs":
 		return 5
+	case "run_scenario_execution_profiles":
+		return 6
 	case "standing_services":
 		return 8
 	case "standing_service_generations":

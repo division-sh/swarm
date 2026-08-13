@@ -20,6 +20,7 @@ import (
 	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
 
 func sortedTrimmedStrings(values []string) []string {
@@ -254,10 +255,11 @@ const (
 )
 
 type RunForkMaterializeRequest struct {
-	SourceRunID       string
-	At                string
-	ContractSelection *RunForkContractSelection
-	BundleSourceFact  runtimecorrelation.BundleSourceFact
+	SourceRunID             string
+	At                      string
+	ContractSelection       *RunForkContractSelection
+	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 }
 
 type RunForkMaterialization struct {
@@ -958,14 +960,15 @@ const (
 )
 
 type RunForkSelectedContractExecutionMaterializeRequest struct {
-	SourceRunID       string
-	At                string
-	ContractSelection RunForkContractSelection
-	BundleSourceFact  runtimecorrelation.BundleSourceFact
-	FrontierAdmission RunForkContractFrontierAdmission
-	RouteTopology     RunForkSelectedContractRouteTopology
-	RecipientPlanning RunForkSelectedContractRecipientPlanning
-	WorkflowStates    []RunForkSelectedContractWorkflowState
+	SourceRunID             string
+	At                      string
+	ContractSelection       RunForkContractSelection
+	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
+	FrontierAdmission       RunForkContractFrontierAdmission
+	RouteTopology           RunForkSelectedContractRouteTopology
+	RecipientPlanning       RunForkSelectedContractRecipientPlanning
+	WorkflowStates          []RunForkSelectedContractWorkflowState
 }
 
 type RunForkSelectedContractWorkflowStateAddressKind string

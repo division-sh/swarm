@@ -16,6 +16,7 @@ import (
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/google/uuid"
 )
 
@@ -65,6 +66,7 @@ type SelectedContractRunForkExecutor struct {
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
 	ContractSelection              runfork.RunForkContractSelection
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
+	EffectiveSourceIdentity        scenarioexecution.EffectiveSourceIdentity
 }
 
 func (e SelectedContractRunForkExecutor) SelectRunForkExecutor(contextDef *swruntime.BundleContext, selectedRuntime *swruntime.Runtime) (RunForkExecutor, error) {
@@ -74,7 +76,18 @@ func (e SelectedContractRunForkExecutor) SelectRunForkExecutor(contextDef *swrun
 	e.AgentRuntime.Config = selectedRuntime.Config
 	e.AgentRuntime.Workspace = selectedRuntime.Workspace
 	e.AgentRuntime.Credentials = selectedRuntime.Credentials
+	e.EffectiveSourceIdentity = contextDef.EffectiveSourceIdentity
 	e.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source, contextDef.ContractsRoot)
+	loader, err := runtimerunforkexecution.NewAdmittedSelectedContractSourceLoader(
+		e.ContractSelection,
+		selectedRuntime.Options.WorkflowModule,
+		contextDef.BundleSourceFact,
+		contextDef.EffectiveSourceIdentity,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("bind selected run fork to admitted runtime source: %w", err)
+	}
+	e.SourceLoader = loader
 	return e, nil
 }
 
@@ -87,13 +100,14 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		selection = e.ContractSelection
 	}
 	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
-		SourceRunID:         strings.TrimSpace(req.SourceRunID),
-		At:                  strings.TrimSpace(req.ForkEventID),
-		ExpectedBundleHash:  strings.TrimSpace(req.BundleHash),
-		ConfirmSourceFreeze: req.ConfirmSourceFreeze,
-		SourceLoader:        e.SourceLoader,
-		ContractSelection:   selection,
-		AgentRuntime:        e.AgentRuntime,
+		SourceRunID:             strings.TrimSpace(req.SourceRunID),
+		At:                      strings.TrimSpace(req.ForkEventID),
+		ExpectedBundleHash:      strings.TrimSpace(req.BundleHash),
+		ConfirmSourceFreeze:     req.ConfirmSourceFreeze,
+		SourceLoader:            e.SourceLoader,
+		ContractSelection:       selection,
+		AgentRuntime:            e.AgentRuntime,
+		EffectiveSourceIdentity: e.EffectiveSourceIdentity,
 	})
 	if err != nil {
 		return RunForkExecutionResult{}, err

@@ -1,12 +1,16 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	pipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -48,6 +52,109 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 		t.Fatalf("SetupScenarioEntities changed replay error = %v, want different fields", err)
 	}
 	assertSQLiteScenarioSetupCounts(t, ctx, sqliteStore, runID, entityID, 1, 3)
+}
+
+func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T) {
+	ctx := testAuthorActivityContext()
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("test context bundle source fact is missing")
+	}
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := scenarioexecution.NewProfile(identity, "derived/minimal", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	req := pipeline.ScenarioSetupRequest{
+		RunID: runID, CreatedAt: time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC),
+		ScenarioExecutionProfile: &profile,
+		Entities: []pipeline.ScenarioSetupEntityRequest{{
+			Alias: "subject", EntityID: uuid.NewString(), FlowInstance: "flow", EntityType: "default", CurrentState: "ready",
+		}},
+	}
+	if _, err := store.SetupScenarioEntities(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	var profileID, profileDigest, effectiveDigest string
+	var raw []byte
+	if err := store.backend.QueryRowContext(ctx, `
+		SELECT profile_id, profile_digest, effective_source_digest, profile_bytes
+		FROM run_scenario_execution_profiles WHERE run_id = ?
+	`, runID).Scan(&profileID, &profileDigest, &effectiveDigest, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if profileID != profile.ID() || profileDigest != profile.Digest() || effectiveDigest != identity.Digest() || !bytes.Equal(raw, profile.CanonicalBytes()) {
+		t.Fatalf("stored profile mismatch: id=%q digest=%q effective=%q bytes=%s", profileID, profileDigest, effectiveDigest, raw)
+	}
+	changedIdentity, _ := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("b", 64))
+	changed, _ := scenarioexecution.NewProfile(changedIdentity, profile.ID(), nil)
+	req.ScenarioExecutionProfile = &changed
+	if _, err := store.SetupScenarioEntities(ctx, req); err == nil || !strings.Contains(err.Error(), "different scenario execution profile") {
+		t.Fatalf("changed profile replay error = %v", err)
+	}
+	if err := store.backend.QueryRowContext(ctx, `SELECT profile_bytes FROM run_scenario_execution_profiles WHERE run_id = ?`, runID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, profile.CanonicalBytes()) {
+		t.Fatal("conflicting replay mutated stored profile bytes")
+	}
+}
+
+func TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("test context bundle source fact is missing")
+	}
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := scenarioexecution.NewProfile(identity, "derived/minimal", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.NewString()
+	req := pipeline.ScenarioSetupRequest{
+		RunID: runID, CreatedAt: time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC),
+		ScenarioExecutionProfile: &profile,
+		Entities: []pipeline.ScenarioSetupEntityRequest{{
+			Alias: "subject", EntityID: uuid.NewString(), FlowInstance: "flow", EntityType: "default", CurrentState: "ready",
+		}},
+	}
+	if _, err := store.SetupScenarioEntities(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	var profileID, profileDigest, effectiveDigest string
+	var raw []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT profile_id, profile_digest, effective_source_digest, profile_bytes
+		FROM run_scenario_execution_profiles WHERE run_id = $1::uuid
+	`, runID).Scan(&profileID, &profileDigest, &effectiveDigest, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if profileID != profile.ID() || profileDigest != profile.Digest() || effectiveDigest != identity.Digest() || !bytes.Equal(raw, profile.CanonicalBytes()) {
+		t.Fatalf("stored profile mismatch: id=%q digest=%q effective=%q bytes=%s", profileID, profileDigest, effectiveDigest, raw)
+	}
+	changedIdentity, _ := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("b", 64))
+	changed, _ := scenarioexecution.NewProfile(changedIdentity, profile.ID(), nil)
+	req.ScenarioExecutionProfile = &changed
+	if _, err := store.SetupScenarioEntities(ctx, req); err == nil || !strings.Contains(err.Error(), "different scenario execution profile") {
+		t.Fatalf("changed profile replay error = %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT profile_bytes FROM run_scenario_execution_profiles WHERE run_id = $1::uuid`, runID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, profile.CanonicalBytes()) {
+		t.Fatal("conflicting replay mutated stored profile bytes")
+	}
 }
 
 func assertSQLiteScenarioSetupCounts(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, entityID string, wantEntities, wantMutations int) {

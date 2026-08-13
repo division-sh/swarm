@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -388,6 +389,14 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	deps := s.stores.runtimeDeps()
 	deps.Config = s.cfg
+	locatedScenarios, err := scenarioderivation.LoadDeclarations(resolvedRoot)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate scenario derivation profiles: %w", err)
+	}
+	scenarioDeclarations := make([]scenarioderivation.Declaration, 0, len(locatedScenarios))
+	for _, located := range locatedScenarios {
+		scenarioDeclarations = append(scenarioDeclarations, located.Declaration)
+	}
 	deps.Options = runtime.RuntimeOptions{
 		SelfCheck:               false,
 		ProcessWorkOwner:        s.processWorkOwner,
@@ -401,6 +410,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		ProviderTriggerCatalog:  candidateCatalog,
 		ChannelPlans:            candidateChannelPlans,
 		ChannelOutboundBindings: candidateChannelBindings,
+		ScenarioDeclarations:    scenarioDeclarations,
 	}
 	newRT, err := s.createRuntime(ctx, deps)
 	if err != nil {

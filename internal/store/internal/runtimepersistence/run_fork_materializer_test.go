@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -20,13 +21,84 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
+
+func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := newTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700000490, 0).UTC()
+	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
+
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		t.Fatal("test bundle source fact is missing")
+	}
+	identity, err := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := scenarioexecution.NewProfile(identity, "derived:flow-a/input", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scenarioexecutionpersistence.EnsurePostgres(ctx, tx, sourceRunID, profile, at); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	different, err := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
+		SourceRunID: sourceRunID, At: eventID, EffectiveSourceIdentity: different,
+	}); err == nil || !strings.Contains(err.Error(), "effective source mismatch") {
+		t.Fatalf("different effective source fork error = %v", err)
+	}
+	var forkRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
+		t.Fatal(err)
+	}
+	if forkRows != 0 {
+		t.Fatalf("fork rows after rejected effective source = %d, want 0", forkRows)
+	}
+
+	request := runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID, EffectiveSourceIdentity: identity}
+	materialized, err := pg.MaterializeRunFork(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited, found, err := pg.LoadScenarioExecutionProfile(ctx, materialized.ForkRunID)
+	if err != nil || !found {
+		t.Fatalf("load inherited profile: found=%t err=%v", found, err)
+	}
+	if inherited.Digest() != profile.Digest() || !bytes.Equal(inherited.CanonicalBytes(), profile.CanonicalBytes()) {
+		t.Fatal("fork did not inherit exact scenario execution profile bytes")
+	}
+	if _, err := pg.MaterializeRunFork(ctx, request); err != nil {
+		t.Fatalf("exact fork replay: %v", err)
+	}
+}
 
 func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)

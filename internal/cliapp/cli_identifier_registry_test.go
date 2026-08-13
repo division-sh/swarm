@@ -981,6 +981,7 @@ var cliIdentifierNonResourcePositionals = map[string]bool{
 	cliIdentifierRegistryKey("swarm help", "arg:command"):                               true,
 	cliIdentifierRegistryKey("swarm incidents", "arg:filters"):                          true,
 	cliIdentifierRegistryKey("swarm logs", "arg:filters"):                               true,
+	cliIdentifierRegistryKey("swarm new", "arg:archetype"):                              true,
 	cliIdentifierRegistryKey("swarm test", "arg:scenario-file"):                         true,
 }
 
@@ -990,6 +991,9 @@ var cliIdentifierGlobalNonResourceStringFlags = map[string]bool{
 }
 
 var cliIdentifierNonResourceStringFlags = map[string]bool{
+	cliIdentifierRegistryKey("swarm new", "flag:output"):                            true,
+	cliIdentifierRegistryKey("swarm test", "flag:derive"):                           true,
+	cliIdentifierRegistryKey("swarm test", "flag:input"):                            true,
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:cursor"):               true,
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:delivery-status"):      true,
 	cliIdentifierRegistryKey("swarm agent diagnose", "flag:queue-cursor"):           true,

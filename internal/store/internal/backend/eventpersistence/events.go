@@ -23,6 +23,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
 )
 
@@ -304,6 +305,9 @@ func (s *EventPostgresOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, st
 		ensureErr = s.ensureRunRow(ctx, tx, story, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
 	case events.AdmittedRunRequireActive:
 		ensureErr = requirePostgresRunActive(ctx, tx, wantIdentity.RunID)
+		if ensureErr == nil {
+			ensureErr = storescenarioexecution.RequirePostgresFromContext(ctx, tx, wantIdentity.RunID)
+		}
 	case events.AdmittedRunRequirePresent:
 		if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect || evt.Type() != events.EventTypePlatformRuntimeLog || strings.TrimSpace(wantIdentity.RunID) == "" {
 			ensureErr = fmt.Errorf("event %s has invalid require-present run disposition", wantIdentity.EventID)
@@ -533,7 +537,10 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, story
 	_, err = s.RunLifecyclePostgresOwner.CreateRunTx(ctx, tx, story, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: time.Now().UTC(),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return storescenarioexecution.EnsurePostgresFromContext(ctx, tx, runID, time.Now().UTC())
 }
 
 func (s *EventPostgresOwner) ensureRuntimeLogRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {

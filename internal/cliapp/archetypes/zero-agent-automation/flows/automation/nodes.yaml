@@ -1,0 +1,12 @@
+send-notification:
+  id: send-notification
+  execution_type: system_node
+  subscribes_to: [automation.requested]
+  event_handlers:
+    automation.requested:
+      activity:
+        id: send_notification
+        tool: telegram.send_message
+        input:
+          chat_id: {cel: payload.chat_id}
+          text: {cel: payload.text}

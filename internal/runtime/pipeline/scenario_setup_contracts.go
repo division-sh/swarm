@@ -3,12 +3,15 @@ package pipeline
 import (
 	"strings"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
 
 type ScenarioSetupRequest struct {
-	RunID     string
-	Entities  []ScenarioSetupEntityRequest
-	CreatedAt time.Time
+	RunID                    string
+	Entities                 []ScenarioSetupEntityRequest
+	CreatedAt                time.Time
+	ScenarioExecutionProfile *scenarioexecution.Profile
 }
 
 type ScenarioSetupEntityRequest struct {

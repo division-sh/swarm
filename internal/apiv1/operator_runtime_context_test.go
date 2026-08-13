@@ -28,6 +28,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -584,10 +585,16 @@ func TestRunForkExecutorForBundleContextRebindsSelectedContractSelection(t *test
 		},
 	}
 
-	selectedRuntime := &swruntime.Runtime{}
+	module := newRunCompletionSystemNodeModule(t, targetSource)
+	sourceFact := runtimeContextTestSourceFact(runtimeContextTestBundleHashB)
+	effectiveIdentity, err := scenarioexecution.NewEffectiveSourceIdentity(sourceFact, "sha256:"+strings.Repeat("b", 64))
+	if err != nil {
+		t.Fatalf("create target effective source identity: %v", err)
+	}
+	selectedRuntime := &swruntime.Runtime{Options: swruntime.RuntimeOptions{WorkflowModule: module}}
 	rebound, err := executor.SelectRunForkExecutor(&swruntime.BundleContext{
-		Source:        targetSource,
-		ContractsRoot: "/tmp/target-contracts",
+		Source: targetSource, ContractsRoot: "/tmp/target-contracts",
+		BundleSourceFact: sourceFact, EffectiveSourceIdentity: effectiveIdentity,
 	}, selectedRuntime)
 	if err != nil {
 		t.Fatalf("select run fork executor: %v", err)
@@ -838,6 +845,7 @@ func runtimeContextTestRuntime(rt *swruntime.Runtime, bundleHash string) *swrunt
 	if rt == nil {
 		return nil
 	}
+	rt.ExecutionPosture = executionposture.Live
 	rt.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	rt.Options.BundleSourceFact = runtimeContextTestSourceFact(bundleHash)
 	return rt

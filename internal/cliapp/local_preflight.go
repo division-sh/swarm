@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -265,11 +266,31 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, message, remediation)
 		return nil, "", false
 	}
-	source, err = runtime.SourceWithProviderTriggerEvents(source, req.ProviderTriggerCatalog)
-	if err != nil {
-		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_event_import_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider_trigger_events imports or the configured provider-trigger packs")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, "local preflight source is not bundle-backed", "fix the selected contract source")
 		return nil, "", false
 	}
+	bundleHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected contract source")
+		return nil, "", false
+	}
+	sourceFact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected contract source")
+		return nil, "", false
+	}
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		Source: source, BundleSourceFact: sourceFact,
+		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
+		ChannelPlans:           req.ChannelPacks.Plans, ChannelOutboundBindings: req.ChannelPacks.Bindings,
+	})
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider-trigger, provider-connector, or channel declarations")
+		return nil, "", false
+	}
+	source = projection.Source()
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
 	appendEffectiveProviderTriggerCapabilitySubjects(report, source, req.ProviderTriggerCatalog)
 	appendChannelCapabilitySubjects(report, req.ChannelPacks)

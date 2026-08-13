@@ -51,6 +51,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -179,6 +180,7 @@ type storeBundle struct {
 	BundleRuntimeCatalogStore      selectedBundleRuntimeCatalogStore
 	BundleSourceCatalogStore       selectedBundleSourceCatalogStore
 	RunBundleAvailabilityStore     selectedRunBundleAvailabilityStore
+	ScenarioExecutionProfiles      runtimepipeline.ScenarioExecutionProfileReader
 	StartupRecoveryStore           selectedStartupRecoveryStore
 	RunStalledReader               runStalledReadStore
 	APIOptionalCapabilityBuilder   selectedAPIOptionalCapabilityBuilder
@@ -413,6 +415,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		BundleRuntimeCatalogStore:   pg,
 		BundleSourceCatalogStore:    pg,
 		RunBundleAvailabilityStore:  pg,
+		ScenarioExecutionProfiles:   pg,
 		StartupRecoveryStore:        pg,
 		RunStalledReader:            pg,
 		RunForkRuntimeOwner:         selectedPostgresRunForkRuntimeOwner(pg, workflowPersistence),
@@ -728,6 +731,16 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("prepare bundle source: %w", err)
 	}
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		WorkflowModule: loaded.module, BundleSourceFact: bundleSourceFact,
+		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
+		ChannelPlans:           req.ChannelPlans, ChannelOutboundBindings: req.ChannelBindings,
+	})
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
+	}
+	loaded.module = projection.WorkflowModule()
+	loaded.source = projection.Source()
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
 	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.WorkspaceLookup, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
@@ -781,6 +794,14 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if !req.UseStartupOwnership {
 		runtimeDeps.StartupOwnership = nil
 	}
+	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.contractsRoot)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("load scenario derivation profiles: %w", err)
+	}
+	scenarioDeclarations := make([]scenarioderivation.Declaration, 0, len(locatedScenarios))
+	for _, located := range locatedScenarios {
+		scenarioDeclarations = append(scenarioDeclarations, located.Declaration)
+	}
 	runtimeDeps.Options = runtime.RuntimeOptions{
 		SelfCheck:                        req.Options.SelfCheck,
 		WorkflowModule:                   loaded.module,
@@ -796,6 +817,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
 		ChannelPlans:                     req.ChannelPlans,
 		ChannelOutboundBindings:          req.ChannelBindings,
+		ScenarioDeclarations:             scenarioDeclarations,
 		BootStartedAt:                    req.BootStartedAt,
 		BootProgress:                     req.BootProgress,
 		SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -809,6 +831,12 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	rt, err := runtime.NewRuntime(req.Ctx, runtimeDeps)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
+	}
+	if !rt.EffectiveSourceIdentity.Equal(projection.Identity()) {
+		return serveRuntimeBundleContext{}, fmt.Errorf(
+			"runtime effective source changed after prevalidation: validated=%s admitted=%s",
+			projection.Identity().Digest(), rt.EffectiveSourceIdentity.Digest(),
+		)
 	}
 	loaded.module, loaded.source, err = admittedRuntimeModuleAndSource(rt)
 	if err != nil {
@@ -1296,7 +1324,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Idempotency:      stores.IdempotencyStore, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
 		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
-		Source: source, Bundle: bootBundleIdentity,
+		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles,
 	}
 	runtimeIdentity := apiv1.RuntimeIdentityResult{
 		RuntimeInstanceID:   runtimeInstanceID,
@@ -1320,7 +1348,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: stores.IdempotencyStore, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source}),
+		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: stores.IdempotencyStore, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles}),
 		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: stores.IdempotencyStore}),
@@ -2301,6 +2329,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			AgentReadStore:              sqliteStore,
 			ConversationReadStore:       sqliteStore,
 			RunBundleContextStore:       sqliteStore,
+			ScenarioExecutionProfiles:   sqliteStore,
 			RunStalledReader:            sqliteStore,
 		}
 		bundle.APIOptionalCapabilityBuilder = selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore)

@@ -1,11 +1,13 @@
 package providerconnectors
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -64,4 +66,41 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 		}
 	}
 	return plan, nil
+}
+
+// OverlayMockResponsePlan admits exact scenario-local replacements through
+// the same tool/output owner as the generated base plan.
+func OverlayMockResponsePlan(base *MockResponsePlan, source semanticview.Source, responses []scenarioexecution.ConnectorResponse) (*MockResponsePlan, error) {
+	if source == nil {
+		return nil, fmt.Errorf("scenario mock response overlay requires the effective semantic source")
+	}
+	merged := map[string]json.RawMessage{}
+	if base != nil {
+		for toolID, response := range base.responses {
+			merged[toolID] = append(json.RawMessage(nil), response...)
+		}
+	}
+	tools := source.ToolEntries()
+	for _, response := range responses {
+		tool, ok := tools[response.ToolID]
+		if !ok {
+			return nil, fmt.Errorf("scenario mock response references unknown effective tool %q", response.ToolID)
+		}
+		outputDigest, err := tool.OutputSchema().CanonicalHash()
+		if err != nil {
+			return nil, fmt.Errorf("scenario mock response tool %q output_schema: %w", response.ToolID, err)
+		}
+		if outputDigest != response.OutputSchemaDigest {
+			return nil, fmt.Errorf("scenario mock response tool %q output_schema digest mismatch: profile=%s effective=%s", response.ToolID, response.OutputSchemaDigest, outputDigest)
+		}
+		candidate, err := NewMockResponsePlan(map[string]json.RawMessage{response.ToolID: response.Response})
+		if err != nil {
+			return nil, err
+		}
+		if _, err := candidate.Admit(response.ToolID, tool); err != nil {
+			return nil, fmt.Errorf("scenario mock response tool %q: %w", response.ToolID, err)
+		}
+		merged[response.ToolID] = append(json.RawMessage(nil), response.Response...)
+	}
+	return NewMockResponsePlan(merged)
 }

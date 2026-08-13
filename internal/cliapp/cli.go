@@ -134,6 +134,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		}
 	}
 	addToGroup(commandGroupStart,
+		newArchetypeCommand(),
 		newDoctorCommand(ctx, repo, opts),
 		newWorkspaceCommand(ctx, opts.RepoRoot),
 		newContextCommand(ctx, opts),

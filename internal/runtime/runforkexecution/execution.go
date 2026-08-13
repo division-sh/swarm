@@ -17,18 +17,21 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
 
 type SelectedContractExecutionRequest struct {
-	SourceRunID         string
-	At                  string
-	ExpectedBundleHash  string
-	BundleSourceFact    runtimecorrelation.BundleSourceFact
-	ConfirmSourceFreeze bool
-	Owner               SelectedContractExecutionOwner
-	SourceLoader        SelectedContractSourceLoader
-	ContractSelection   runfork.RunForkContractSelection
-	AgentRuntime        SelectedContractAgentRuntimeOptions
+	SourceRunID             string
+	At                      string
+	ExpectedBundleHash      string
+	BundleSourceFact        runtimecorrelation.BundleSourceFact
+	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
+	ConfirmSourceFreeze     bool
+
+	Owner             SelectedContractExecutionOwner
+	SourceLoader      SelectedContractSourceLoader
+	ContractSelection runfork.RunForkContractSelection
+	AgentRuntime      SelectedContractAgentRuntimeOptions
 }
 
 type SelectedContractExecutionForkEvent struct {
@@ -90,6 +93,12 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	if err := loadedSource.BundleSourceFact.Validate(); err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete bundle identity: %w", err)
+	}
+	if err := loadedSource.EffectiveSourceIdentity.Validate(); err != nil {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract source loader returned incomplete effective source identity: %w", err)
+	}
+	if err := req.EffectiveSourceIdentity.Validate(); err == nil && !req.EffectiveSourceIdentity.Equal(loadedSource.EffectiveSourceIdentity) {
+		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract effective source identity does not match loaded effective source")
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loadedSource.BundleSourceFact)
 	materializationBundleHash := loadedSource.BundleSourceFact.BundleHash()
@@ -190,14 +199,15 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 	}
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
-		SourceRunID:       plan.SourceRunID,
-		At:                plan.ForkPoint.EventID,
-		ContractSelection: selection,
-		BundleSourceFact:  loadedSource.BundleSourceFact,
-		FrontierAdmission: frontier,
-		RouteTopology:     routeTopology,
-		RecipientPlanning: *model.RecipientPlanning,
-		WorkflowStates:    workflowStates,
+		SourceRunID:             plan.SourceRunID,
+		At:                      plan.ForkPoint.EventID,
+		ContractSelection:       selection,
+		BundleSourceFact:        loadedSource.BundleSourceFact,
+		EffectiveSourceIdentity: loadedSource.EffectiveSourceIdentity,
+		FrontierAdmission:       frontier,
+		RouteTopology:           routeTopology,
+		RecipientPlanning:       *model.RecipientPlanning,
+		WorkflowStates:          workflowStates,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
@@ -396,29 +406,35 @@ func selectedContractPipelineCoordinatorOptions(
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
 ) runtimepipeline.PipelineCoordinatorOptions {
+	var scenarioProfiles runtimepipeline.ScenarioExecutionProfileReader
+	if reader, ok := ports.fork.(runtimepipeline.ScenarioExecutionProfileReader); ok {
+		scenarioProfiles = reader
+	}
 	return runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture:        agentRuntime.ExecutionPosture,
-		WorkOwner:               agentRuntime.AgentManagerOptions.WorkOwner,
-		ReceiverExecution:       agentRuntime.AgentManagerOptions.ReceiverExecution,
-		Module:                  loaded.Module,
-		Persistence:             ports.workflow,
-		DeliveryStore:           ports.busDurable.DeliveryLifecycle,
-		DeadLetters:             ports.busDurable.TargetFailureRecorder,
-		PipelineObligations:     ports.pipelineObligations,
-		InstanceActivator:       instanceActivator,
-		MailboxMaterializer:     ports.mailbox,
-		DecisionCards:           ports.decisionCards,
-		ProposedEffects:         ports.proposedEffects,
-		HumanTasks:              ports.humanTasks,
-		DecisionCardDraftExpiry: ports.decisionCardDraftExpiry,
-		HumanTaskExpiry:         ports.humanTaskExpiry,
-		DeliveryRuntime:         bus,
-		FlowRoutes:              bus,
-		RunLifecycle:            ports.busDurable.RunLifecycle,
-		Credentials:             agentRuntime.Credentials,
-		ManagedCredentials:      agentRuntime.ManagedCredentials,
-		MockConnectorResponses:  loaded.MockConnectorResponses,
-		BundleSourceFact:        loaded.BundleSourceFact,
+		ExecutionPosture:          agentRuntime.ExecutionPosture,
+		WorkOwner:                 agentRuntime.AgentManagerOptions.WorkOwner,
+		ReceiverExecution:         agentRuntime.AgentManagerOptions.ReceiverExecution,
+		Module:                    loaded.Module,
+		Persistence:               ports.workflow,
+		DeliveryStore:             ports.busDurable.DeliveryLifecycle,
+		DeadLetters:               ports.busDurable.TargetFailureRecorder,
+		PipelineObligations:       ports.pipelineObligations,
+		InstanceActivator:         instanceActivator,
+		MailboxMaterializer:       ports.mailbox,
+		DecisionCards:             ports.decisionCards,
+		ProposedEffects:           ports.proposedEffects,
+		HumanTasks:                ports.humanTasks,
+		DecisionCardDraftExpiry:   ports.decisionCardDraftExpiry,
+		HumanTaskExpiry:           ports.humanTaskExpiry,
+		DeliveryRuntime:           bus,
+		FlowRoutes:                bus,
+		RunLifecycle:              ports.busDurable.RunLifecycle,
+		Credentials:               agentRuntime.Credentials,
+		ManagedCredentials:        agentRuntime.ManagedCredentials,
+		MockConnectorResponses:    loaded.MockConnectorResponses,
+		BundleSourceFact:          loaded.BundleSourceFact,
+		ScenarioExecutionProfiles: scenarioProfiles,
+		EffectiveSourceIdentity:   loaded.EffectiveSourceIdentity,
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -75,15 +76,30 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 		}
 		params := eventPublicationParams{RunID: request.RunID, RunIDProvided: true}
 		scope := EventPublicationOptions{
-			RunBundleContext: opts.RunBundleContext,
-			RuntimeContexts:  opts.RuntimeContexts,
-			BundleSource:     opts.BundleSource,
-			Source:           opts.Source,
+			RunBundleContext:          opts.RunBundleContext,
+			RuntimeContexts:           opts.RuntimeContexts,
+			BundleSource:              opts.BundleSource,
+			Source:                    opts.Source,
+			ExecutionPosture:          opts.ExecutionPosture,
+			EffectiveSourceIdentity:   opts.EffectiveSourceIdentity,
+			ScenarioProfileCatalog:    opts.ScenarioProfileCatalog,
+			ScenarioExecutionProfiles: opts.ScenarioExecutionProfiles,
 		}
 		var selectedScope EventPublicationOptions
 		ctx, selectedScope, _, err = resolveEventPublicationBundleScope(ctx, scope, params, identity, eventPublicationConfig{})
 		if err != nil {
 			return apiidempotency.Completion{}, err
+		}
+		selector, err := scenarioExecutionSelectorParam(req.Params)
+		if err != nil {
+			return apiidempotency.Completion{}, err
+		}
+		ctx, err = admitScenarioExecutionSelector(ctx, selectedScope, request.RunID, true, selector)
+		if err != nil {
+			return apiidempotency.Completion{}, err
+		}
+		if profile, ok := scenarioexecution.AdmittedProfileFromContext(ctx); ok {
+			request.ScenarioExecutionProfile = &profile
 		}
 		if err := validateTestSetupEntitiesAgainstBundle(selectedScope.Source, request); err != nil {
 			return apiidempotency.Completion{}, err

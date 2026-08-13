@@ -1,0 +1,8 @@
+name: zero-agent-automation
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+connector_packs:
+  imports:
+    - {provider: telegram, tool: telegram.send_message}
+flows:
+  - {id: automation, flow: automation, mode: static}

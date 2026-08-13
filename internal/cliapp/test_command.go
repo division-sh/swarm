@@ -19,10 +19,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -50,6 +55,9 @@ type scenarioTestCommandOptions struct {
 	platformSpec string
 	timeout      time.Duration
 	pollInterval time.Duration
+	derive       string
+	input        string
+	allInputs    bool
 }
 
 type scenarioTestFile struct {
@@ -65,6 +73,7 @@ type scenarioDocument struct {
 	Steps   []scenarioStep
 	Expect  scenarioExpect
 	Invalid *scenarioInvalid
+	Derive  *scenarioderivation.Declaration
 }
 
 type scenarioSetup struct {
@@ -189,14 +198,16 @@ func (e scenarioTestValidationError) Unwrap() error {
 }
 
 type scenarioRunner struct {
-	client       *cliAPIClient
-	bundle       *runtimecontracts.WorkflowContractBundle
-	source       semanticview.Source
-	bundleHash   string
-	contractsDir string
-	timeout      time.Duration
-	pollInterval time.Duration
-	out          io.Writer
+	client                  *cliAPIClient
+	bundle                  *runtimecontracts.WorkflowContractBundle
+	source                  semanticview.Source
+	bundleHash              string
+	contractsDir            string
+	timeout                 time.Duration
+	pollInterval            time.Duration
+	out                     io.Writer
+	effectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
+	scenarioExecution       *scenarioexecution.Selector
 }
 
 type scenarioExpressionEvaluator struct {
@@ -226,6 +237,9 @@ func newTestCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&testOpts.platformSpec, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().DurationVar(&testOpts.timeout, "timeout", defaultScenarioTestTimeout, "Safety deadline for test quiescence")
 	cmd.Flags().DurationVar(&testOpts.pollInterval, "poll-interval", defaultScenarioTestPoll, "Canonical readback polling interval while waiting for quiescence")
+	cmd.Flags().StringVar(&testOpts.derive, "derive", "", "Derive and run a scenario for an exact flow")
+	cmd.Flags().StringVar(&testOpts.input, "input", "", "Exact public input pin for derived mode")
+	cmd.Flags().BoolVar(&testOpts.allInputs, "all-inputs", false, "Derive one scenario for every public input of the selected flow")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &testOpts.apiOptions, cliAPICommandClassMutating, "swarm test")
 	return cmd
 }
@@ -249,12 +263,22 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
-	files, err := discoverScenarioTestFiles(contractsDir, args)
-	if err != nil {
-		return returnScenarioTestValidationError(errOut, err)
+	deriveFlow := strings.Trim(strings.TrimSpace(opts.derive), "/")
+	if deriveFlow == "" && (strings.TrimSpace(opts.input) != "" || opts.allInputs) {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("--input and --all-inputs require --derive"))
 	}
-	if len(files) == 0 {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("no scenario files found under contracts/tests or contracts/flows/<flow>/tests"))
+	if deriveFlow != "" && len(args) > 0 {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("--derive cannot be combined with scenario-file arguments"))
+	}
+	var files []scenarioTestFile
+	if deriveFlow == "" {
+		files, err = discoverScenarioTestFiles(contractsDir, args)
+		if err != nil {
+			return returnScenarioTestValidationError(errOut, err)
+		}
+		if len(files) == 0 {
+			return returnScenarioTestValidationError(errOut, fmt.Errorf("no scenario files found under contracts/tests or contracts/flows/<flow>/tests"))
+		}
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot, contractsDir, platformSpec)
 	if err != nil {
@@ -264,28 +288,81 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load provider trigger packs: %w", err))
 	}
-	source, err := runtime.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), providerPacks.Catalog)
+	channelSpec, err := loadChannelPlatformSpecDocument(platformSpec)
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("compose provider trigger events: %w", err))
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("load channel platform spec: %w", err))
+	}
+	providerCredentials, err := BuildProviderCredentialStore()
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("configure provider credentials: %w", err))
+	}
+	managedCredentials, err := BuildManagedCredentialStore()
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("configure managed credentials: %w", err))
+	}
+	channelPacks, err := LoadConfiguredChannelPacks(ctx, RepoRoot, configResult, channelSpec, providerPacks.Catalog, providerCredentials, managedCredentials)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("load channel packs: %w", err))
 	}
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("compute bundle_hash: %w", err))
 	}
+	storeSelection, err := resolveRuntimeStoreSelectionWithDefault(
+		RepoRoot,
+		storebackend.ActiveDefaultBackend().String(),
+		false,
+		configResult.Config,
+		filepath.Join(RepoRoot, ".swarm", "swarm.db"),
+		storebackend.SourceProjectDefault,
+	)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("resolve runtime store for effective source: %w", err))
+	}
+	sourceFact, err := scenarioTestBundleSourceFact(bundleHash, storeSelection.Backend)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("derive bundle source fact: %w", err))
+	}
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
+		ProviderTriggerCatalog: providerPacks.Catalog, ChannelPlans: channelPacks.Plans,
+		ChannelOutboundBindings: channelPacks.Bindings,
+	})
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit effective source: %w", err))
+	}
+	source := projection.Source()
 	client, err := newCLIAPIClientFromConfig(opts.apiOptions, configResult.cli)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
 	runner := scenarioRunner{
-		client:       client,
-		bundle:       bundle,
-		source:       source,
-		bundleHash:   bundleHash,
-		contractsDir: contractsDir,
-		timeout:      opts.timeout,
-		pollInterval: opts.pollInterval,
-		out:          out,
+		client:                  client,
+		bundle:                  bundle,
+		source:                  source,
+		bundleHash:              bundleHash,
+		contractsDir:            contractsDir,
+		timeout:                 opts.timeout,
+		pollInterval:            opts.pollInterval,
+		out:                     out,
+		effectiveSourceIdentity: projection.Identity(),
+	}
+	if deriveFlow != "" {
+		plans, err := scenarioderivation.Compile(source, projection.Identity(), scenarioderivation.Request{
+			FlowID: deriveFlow, Input: opts.input, AllInputs: opts.allInputs,
+		})
+		if err != nil {
+			return returnScenarioTestValidationError(errOut, err)
+		}
+		for _, plan := range plans {
+			if err := runner.runDerivedPlan(ctx, plan); err != nil {
+				writeCLIAPIError(errOut, err)
+				return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
+			}
+		}
+		fmt.Fprintf(out, "swarm test ok: scenarios=%d\n", len(plans))
+		return nil
 	}
 	for _, file := range files {
 		if err := runner.runScenarioFile(ctx, file); err != nil {
@@ -295,6 +372,17 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	}
 	fmt.Fprintf(out, "swarm test ok: scenarios=%d\n", len(files))
 	return nil
+}
+
+func scenarioTestBundleSourceFact(bundleHash string, backend storebackend.Backend) (runtimecorrelation.BundleSourceFact, error) {
+	switch backend {
+	case storebackend.BackendSQLite:
+		return runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+	case storebackend.BackendPostgres:
+		return runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
+	default:
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("unsupported runtime store backend %q", backend)
+	}
 }
 
 func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandConfig) (string, string, error) {
@@ -431,7 +519,7 @@ func autoDiscoveredScenarioCandidate(path string) bool {
 		return true
 	}
 	top := mappingNode(root.Content[0])
-	return top["version"] != nil || top["steps"] != nil || top["invalid"] != nil
+	return top["version"] != nil || top["steps"] != nil || top["derive"] != nil || top["invalid"] != nil
 }
 
 func splitPath(path string) []string {
@@ -453,6 +541,28 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 	doc, err := parseScenarioDocument(raw)
 	if err != nil {
 		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+	}
+	if doc.Derive != nil {
+		plans, err := scenarioderivation.Compile(r.source, r.effectiveSourceIdentity, scenarioderivation.Request{
+			FlowID: doc.Derive.FlowID, Input: doc.Derive.Input, Set: doc.Derive.Set,
+			ProfileID: doc.Derive.Name, Responses: doc.Derive.ConnectorResponses,
+		})
+		if err != nil {
+			return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+		}
+		payload := map[string]any{}
+		if err := canonicaljson.DecodeInto(plans[0].Payload, &payload); err != nil {
+			return scenarioTestValidationError{err: fmt.Errorf("%s: materialize derived payload: %w", file.Path, err)}
+		}
+		doc.Steps = []scenarioStep{{Action: "publish", PublishEvent: plans[0].EventKey, Payload: payload}}
+		file.FlowID = plans[0].FlowID
+		selector, err := scenarioexecution.NewSelector(plans[0].Profile)
+		if err != nil {
+			return scenarioTestValidationError{err: fmt.Errorf("%s: select scenario execution profile: %w", file.Path, err)}
+		}
+		r.scenarioExecution = &selector
+		defer func() { r.scenarioExecution = nil }()
+		addDerivedGenericOracle(&doc.Expect, plans[0].EventKey)
 	}
 	seed, err := r.scenarioEvaluatorSeed(file, doc)
 	if err != nil {
@@ -497,7 +607,64 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 	return nil
 }
 
+func (r scenarioRunner) runDerivedPlan(ctx context.Context, plan scenarioderivation.Plan) error {
+	payload := map[string]any{}
+	if err := canonicaljson.DecodeInto(plan.Payload, &payload); err != nil {
+		return scenarioTestValidationError{err: fmt.Errorf("materialize derived payload: %w", err)}
+	}
+	selector, err := scenarioexecution.NewSelector(plan.Profile)
+	if err != nil {
+		return scenarioTestValidationError{err: fmt.Errorf("select scenario execution profile: %w", err)}
+	}
+	r.scenarioExecution = &selector
+	defer func() { r.scenarioExecution = nil }()
+	file := scenarioTestFile{Path: filepath.Join(r.contractsDir, "tests", "derived-"+scenarioSHA40(plan.FlowID+"\x00"+plan.PinName)+".yaml"), FlowID: plan.FlowID}
+	doc := scenarioDocument{
+		Name:  "derived:" + plan.FlowID + "/" + plan.PinName,
+		Steps: []scenarioStep{{Action: "publish", PublishEvent: plan.EventKey, Payload: payload}},
+	}
+	addDerivedGenericOracle(&doc.Expect, plan.EventKey)
+	seed := strings.Join([]string{scenarioderivation.PlanVersion, r.effectiveSourceIdentity.Digest(), plan.FlowID, plan.PinName}, "\x00")
+	evaluator, err := newScenarioExpressionEvaluator(seed, nil)
+	if err != nil {
+		return scenarioTestValidationError{err: err}
+	}
+	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
+	if err := r.runScenarioStep(ctx, file, evaluator, state, doc.Steps[0]); err != nil {
+		return fmt.Errorf("derived %s/%s: %w", plan.FlowID, plan.PinName, err)
+	}
+	if err := r.waitForQuiescence(ctx, state.RunID); err != nil {
+		return fmt.Errorf("derived %s/%s: %w", plan.FlowID, plan.PinName, err)
+	}
+	if err := r.evaluateExpectations(ctx, state, evaluator, doc.Expect); err != nil {
+		return fmt.Errorf("derived %s/%s: %w", plan.FlowID, plan.PinName, err)
+	}
+	fmt.Fprintf(r.out, "scenario ok: derived:%s/%s\n", plan.FlowID, plan.PinName)
+	return nil
+}
+
+func addDerivedGenericOracle(expect *scenarioExpect, eventKey string) {
+	if expect == nil {
+		return
+	}
+	for _, existing := range expect.Events.Include {
+		if existing == eventKey {
+			goto deadLetters
+		}
+	}
+	expect.Events.Include = append(expect.Events.Include, eventKey)
+deadLetters:
+	if expect.NoDeadLetters == nil {
+		value := true
+		expect.NoDeadLetters = &value
+	}
+}
+
 func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
+	declaration, derived, err := scenarioderivation.ParseDeclaration(raw)
+	if err != nil {
+		return scenarioDocument{}, err
+	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(raw, &root); err != nil {
 		return scenarioDocument{}, fmt.Errorf("parse YAML: %w", err)
@@ -508,7 +675,7 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 	top := mappingNode(root.Content[0])
 	for key := range top {
 		switch key {
-		case "version", "name", "seed", "vars", "setup", "steps", "expect", "invalid":
+		case "version", "name", "seed", "vars", "setup", "steps", "derive", "connector_responses", "expect", "invalid":
 		default:
 			return scenarioDocument{}, fmt.Errorf("unsupported top-level field %q", key)
 		}
@@ -520,6 +687,9 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 		}
 	}
 	doc := scenarioDocument{Vars: map[string]any{}}
+	if derived {
+		doc.Derive = &declaration
+	}
 	if node := top["name"]; node != nil {
 		doc.Name = strings.TrimSpace(fmt.Sprint(yamlNodeValue(node)))
 	}
@@ -541,18 +711,20 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 		doc.Setup = setup
 	}
 	stepsNode := top["steps"]
-	if stepsNode == nil {
+	if stepsNode == nil && !derived {
 		return scenarioDocument{}, fmt.Errorf("steps is required")
 	}
-	if stepsNode.Kind != yaml.SequenceNode || len(stepsNode.Content) == 0 {
+	if stepsNode != nil && (stepsNode.Kind != yaml.SequenceNode || len(stepsNode.Content) == 0) {
 		return scenarioDocument{}, fmt.Errorf("steps must be a non-empty list")
 	}
-	for _, node := range stepsNode.Content {
-		step, err := parseScenarioStep(node)
-		if err != nil {
-			return scenarioDocument{}, err
+	if stepsNode != nil {
+		for _, node := range stepsNode.Content {
+			step, err := parseScenarioStep(node)
+			if err != nil {
+				return scenarioDocument{}, err
+			}
+			doc.Steps = append(doc.Steps, step)
 		}
-		doc.Steps = append(doc.Steps, step)
 	}
 	if node := top["expect"]; node != nil {
 		expect, err := parseScenarioExpect(node)
@@ -1226,6 +1398,9 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 		"run_id":          runID,
 		"idempotency_key": scenarioSHA40(evaluator.seed + "\x00setup.entities"),
 	}
+	if selector := r.scenarioExecutionParams(); selector != nil {
+		params["scenario_execution"] = selector
+	}
 	entities := make([]any, 0, len(setup.Entities))
 	for _, entity := range setup.Entities {
 		evaluated, err := r.evaluateScenarioSetupEntity(file, evaluator, entity)
@@ -1481,6 +1656,9 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 		"payload":     payload,
 		"bundle_hash": r.bundleHash,
 	}
+	if selector := r.scenarioExecutionParams(); selector != nil {
+		params["scenario_execution"] = selector
+	}
 	if state.RunID != "" {
 		params["run_id"] = state.RunID
 	}
@@ -1557,6 +1735,17 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 	state.RunID = result.RunID
 	state.LastEventID = result.EventID
 	return nil
+}
+
+func (r scenarioRunner) scenarioExecutionParams() map[string]any {
+	if r.scenarioExecution == nil {
+		return nil
+	}
+	return map[string]any{
+		"profile_id":              r.scenarioExecution.ProfileID,
+		"profile_digest":          r.scenarioExecution.ProfileDigest,
+		"effective_source_digest": r.scenarioExecution.EffectiveSourceDigest,
+	}
 }
 
 func (r scenarioRunner) scopedEventName(flowID, eventName string) string {
@@ -2256,11 +2445,21 @@ func (r scenarioRunner) assertNoDeadLetters(ctx context.Context, runID string) e
 		}
 		for _, event := range result.Events {
 			if strings.TrimSpace(event.EventName) == "platform.dead_letter" || len(event.DeadLetters) > 0 {
-				return fmt.Errorf("expected no dead letters for run %s, found event %s", runID, event.EventID)
+				evidence := "platform.dead_letter"
+				if len(event.DeadLetters) > 0 {
+					evidence = scenarioFailureEvidence(event.DeadLetters[0].Failure)
+				}
+				return fmt.Errorf("expected no dead letters for run %s, found event %s (%s)", runID, event.EventID, evidence)
 			}
 			for _, delivery := range event.Deliveries {
 				if strings.TrimSpace(delivery.Status) == "dead_letter" || len(delivery.DeadLetters) > 0 {
-					return fmt.Errorf("expected no dead letters for run %s, found delivery %s on event %s", runID, delivery.DeliveryID, event.EventID)
+					evidence := strings.TrimSpace(delivery.ReasonCode)
+					if delivery.Failure != nil {
+						evidence = scenarioFailureEvidence(*delivery.Failure)
+					} else if len(delivery.DeadLetters) > 0 {
+						evidence = scenarioFailureEvidence(delivery.DeadLetters[0].Failure)
+					}
+					return fmt.Errorf("expected no dead letters for run %s, found delivery %s on event %s (%s)", runID, delivery.DeliveryID, event.EventID, evidence)
 				}
 			}
 		}
@@ -2274,6 +2473,20 @@ func (r scenarioRunner) assertNoDeadLetters(ctx context.Context, runID string) e
 		seen[cursor] = struct{}{}
 		params["cursor"] = cursor
 	}
+}
+
+func scenarioFailureEvidence(failure runtimefailures.Envelope) string {
+	parts := []string{strings.TrimSpace(failure.Detail.Code + ": " + failure.Message)}
+	if component := strings.TrimSpace(failure.Component); component != "" {
+		parts = append(parts, "component="+component)
+	}
+	if operation := strings.TrimSpace(failure.Operation); operation != "" {
+		parts = append(parts, "operation="+operation)
+	}
+	if len(failure.Detail.Attributes) > 0 {
+		parts = append(parts, fmt.Sprintf("attributes=%v", failure.Detail.Attributes))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scenarioRunState, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {

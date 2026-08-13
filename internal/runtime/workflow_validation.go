@@ -108,10 +108,6 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	source = bootEffects.Source
 	result.mockConnectorResponses = bootEffects.MockConnectorResponses
 	result.bootEffectReachability = bootEffects.Reachability
-	source, err = SourceWithProviderTriggerEvents(source, opts.ProviderTriggerCatalog)
-	if err != nil {
-		return result, fmt.Errorf("provider trigger event import failed: %w", err)
-	}
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		Credentials:             opts.Credentials,

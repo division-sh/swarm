@@ -1,0 +1,7 @@
+runtime:
+  execution_posture: mock_only
+  recovery_on_startup: true
+workspace:
+  data_source: ./.swarm/workspaces
+llm:
+  backend: claude_cli

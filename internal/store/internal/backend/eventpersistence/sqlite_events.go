@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
 )
 
@@ -86,6 +87,9 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 		ensureErr = s.ensureActiveRunRow(ctx, tx, story, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
 	case events.AdmittedRunRequireActive:
 		ensureErr = storerunstate.RequireSQLiteActiveTx(ctx, tx, wantIdentity.RunID)
+		if ensureErr == nil {
+			ensureErr = storescenarioexecution.RequireSQLiteFromContext(ctx, tx, wantIdentity.RunID)
+		}
 	case events.AdmittedRunRequirePresent:
 		if evt.AdmissionClass() != events.EventAdmissionDiagnosticDirect || evt.Type() != events.EventTypePlatformRuntimeLog || strings.TrimSpace(wantIdentity.RunID) == "" {
 			ensureErr = fmt.Errorf("event %s has invalid require-present run disposition", wantIdentity.EventID)
@@ -153,7 +157,10 @@ func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, s
 	_, err = s.RunLifecycleSQLiteOwner.CreateRunTx(ctx, tx, story, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return storescenarioexecution.EnsureSQLiteFromContext(ctx, tx, runID, runtimerunlifecycle.CanonicalTimestamp(now))
 }
 
 func (s *EventSQLiteOwner) requireRunRowPresent(ctx context.Context, tx *sql.Tx, runID string) error {
