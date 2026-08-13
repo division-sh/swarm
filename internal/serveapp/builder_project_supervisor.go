@@ -151,25 +151,7 @@ func newRuntimeProjectSupervisor(
 		loadWorkflow: func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 			return cliapp.NewSwarmWorkflowModule(RepoRoot, contractsRoot, platformSpecPath)
 		},
-		validateSource: func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
-			credentialStore, err := cliapp.BuildCredentialStore()
-			if err != nil {
-				return err
-			}
-			profile, err := cfg.LLMBackendProfile()
-			if err != nil {
-				return fmt.Errorf("resolve llm backend profile for Builder validation: %w", err)
-			}
-			posture, err := cfg.ProcessExecutionPosture()
-			if err != nil {
-				return err
-			}
-			opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
-			opts.LLMProfile = profile
-			opts.ProviderTriggerCatalog = catalog
-			_, err = runtime.ValidateWorkflowContractSurface(ctx, source, opts)
-			return err
-		},
+		validateSource: newBuilderProjectSourceValidator(cfg),
 		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
 			return initializeStateStores(ctx, stores, bundle)
 		},
@@ -216,6 +198,31 @@ func newRuntimeProjectSupervisor(
 		supervisor.channelBindings = append([]packs.OutboundBindingPlan(nil), initialRT.Options.ChannelOutboundBindings...)
 	}
 	return supervisor
+}
+
+func newBuilderProjectSourceValidator(cfg *config.Config) func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error {
+	return func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
+		if cfg == nil {
+			return fmt.Errorf("runtime config is required for Builder validation")
+		}
+		credentialStore, err := cliapp.BuildCredentialStore()
+		if err != nil {
+			return err
+		}
+		profile, err := cfg.LLMBackendProfile()
+		if err != nil {
+			return fmt.Errorf("resolve llm backend profile for Builder validation: %w", err)
+		}
+		posture, err := cfg.ProcessExecutionPosture()
+		if err != nil {
+			return err
+		}
+		opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
+		opts.LLMProfile = profile
+		opts.ProviderTriggerCatalog = catalog
+		_, err = runtime.ValidateWorkflowContractSurface(ctx, source, opts)
+		return err
+	}
 }
 
 func (s *runtimeProjectSupervisor) CurrentSource() semanticview.Source {
@@ -321,7 +328,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("load project: %w", err)
 	}
-	source := semanticview.Wrap(bundle)
+	authoredSource := semanticview.Wrap(bundle)
 	candidateCatalog := s.providerTriggers
 	if s.loadProviderCatalog != nil {
 		candidateCatalog, err = s.loadProviderCatalog()
@@ -335,13 +342,26 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
 	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
 	if s.loadChannelPacks != nil {
-		channelLoad, loadErr := s.loadChannelPacks(ctx, source, candidateCatalog)
+		channelLoad, loadErr := s.loadChannelPacks(ctx, authoredSource, candidateCatalog)
 		if loadErr != nil {
 			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate channel packs: %w", loadErr)
 		}
 		candidateChannelPlans = channelLoad.Plans
 		candidateChannelBindings = channelLoad.Bindings
 	}
+	bundleSourcePlan, err := planServeBundleSource(s.stores, bundle, s.dev)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("plan project bundle source: %w", err)
+	}
+	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
+		WorkflowModule: module, BundleSourceFact: bundleSourcePlan.fact,
+		ProviderTriggerCatalog: candidateCatalog, ChannelPlans: candidateChannelPlans,
+		ChannelOutboundBindings: candidateChannelBindings,
+	})
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("admit candidate effective source projection: %w", err)
+	}
+	source := projection.Source()
 	if err := s.validateSource(ctx, source, candidateCatalog); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -356,9 +376,12 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle identity: %w", err)
 	}
-	bundleSourceFact, err := prepareServeBundleSource(ctx, s.stores, bundle, s.dev)
+	bundleSourceFact, err := persistServeBundleSourcePlan(ctx, s.stores, bundleSourcePlan)
 	if err != nil {
-		return builderpkg.ProjectStatus{}, fmt.Errorf("prepare project bundle source: %w", err)
+		return builderpkg.ProjectStatus{}, fmt.Errorf("persist project bundle source: %w", err)
+	}
+	if !bundleSourceFact.Matches(bundleSourcePlan.fact) {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("persisted project bundle source fact changed after prevalidation")
 	}
 	managedCredentialStore, err := cliapp.BuildManagedCredentialStore()
 	if err != nil {
@@ -415,6 +438,21 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	newRT, err := s.createRuntime(ctx, deps)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
+	}
+	if newRT == nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("replacement runtime is required")
+	}
+	if !newRT.Options.BundleSourceFact.Matches(bundleSourceFact) {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("replacement runtime bundle source fact changed after prevalidation")
+	}
+	if !newRT.EffectiveSourceIdentity.Equal(projection.Identity()) {
+		return builderpkg.ProjectStatus{}, fmt.Errorf(
+			"replacement runtime effective source changed after prevalidation: validated=%s admitted=%s",
+			projection.Identity().Digest(), newRT.EffectiveSourceIdentity.Digest(),
+		)
+	}
+	if newRT.ScenarioProfileCatalog == nil || !newRT.ScenarioProfileCatalog.EffectiveSourceIdentity().Equal(projection.Identity()) {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("replacement runtime scenario profile catalog does not belong to the prevalidated effective source")
 	}
 	_, source, err = admittedRuntimeModuleAndSource(newRT)
 	if err != nil {
