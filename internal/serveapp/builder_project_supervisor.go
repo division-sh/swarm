@@ -30,36 +30,37 @@ import (
 )
 
 type runtimeProjectSupervisor struct {
-	RepoRoot            string
-	platformSpecPath    string
-	cfg                 *config.Config
-	stores              storeBundle
-	ready               serveReadiness
-	dev                 bool
-	mountSources        cliapp.WorkspaceMountSources
-	workspaceBackend    cliapp.WorkspaceBackendSelection
-	credentials         runtimecredentials.Store
-	providerCredentials runtimecredentials.Store
-	providerTriggers    *providertriggers.CatalogSnapshot
-	processWorkOwner    *worklifetime.Process
-	loadProviderCatalog func() (*providertriggers.CatalogSnapshot, error)
-	loadChannelPacks    func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
-	onRuntimePublished  func(context.Context) error
-	channelPlans        []packs.SatisfactionPlan
-	channelBindings     []packs.OutboundBindingPlan
-	startRuntime        func(context.Context, *runtime.Runtime) error
-	quiesceRuntime      func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
-	shutdownRuntime     func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
-	loadWorkflow        func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
-	validateSource      func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error
-	initStateStores     func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
-	newWorkspaces       func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error)
-	createRuntime       func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
-	cloneRuntime        func(context.Context, *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error)
-	replacementShutdown runtime.ShutdownOptions
-	runtimeLifetime     context.Context
-	runtimeInstanceID   string
-	operationMu         sync.Mutex
+	RepoRoot             string
+	platformSpecPath     string
+	cfg                  *config.Config
+	stores               storeBundle
+	ready                serveReadiness
+	dev                  bool
+	mountSources         cliapp.WorkspaceMountSources
+	workspaceBackend     cliapp.WorkspaceBackendSelection
+	credentials          runtimecredentials.Store
+	providerCredentials  runtimecredentials.Store
+	providerTriggers     *providertriggers.CatalogSnapshot
+	processWorkOwner     *worklifetime.Process
+	loadProviderCatalog  func() (*providertriggers.CatalogSnapshot, error)
+	loadChannelPacks     func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
+	onRuntimePublished   func(context.Context) error
+	beforeStartupHandoff func(context.Context) error
+	channelPlans         []packs.SatisfactionPlan
+	channelBindings      []packs.OutboundBindingPlan
+	startRuntime         func(context.Context, *runtime.Runtime) error
+	quiesceRuntime       func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
+	shutdownRuntime      func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
+	loadWorkflow         func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
+	validateSource       func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error
+	initStateStores      func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
+	newWorkspaces        func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error)
+	createRuntime        func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
+	cloneRuntime         func(context.Context, *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error)
+	replacementShutdown  runtime.ShutdownOptions
+	runtimeLifetime      context.Context
+	runtimeInstanceID    string
+	operationMu          sync.Mutex
 
 	mu                              sync.RWMutex
 	currentRoot                     string
@@ -100,6 +101,15 @@ func (s *runtimeProjectSupervisor) SetRuntimePublishedHook(hook func(context.Con
 	}
 	s.mu.Lock()
 	s.onRuntimePublished = hook
+	s.mu.Unlock()
+}
+
+func (s *runtimeProjectSupervisor) SetStartupOwnershipHandoffBarrier(barrier func(context.Context) error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.beforeStartupHandoff = barrier
 	s.mu.Unlock()
 }
 
@@ -720,6 +730,14 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		if err := s.quiesceCurrentRuntimeWithOptions(ctx, oldRT, s.replacementShutdown); err != nil {
 			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT)
 			return s.CurrentProject(), errors.Join(fmt.Errorf("quiesce predecessor runtime before replacement: %w", err), restoreErr)
+		}
+		s.mu.RLock()
+		beforeStartupHandoff := s.beforeStartupHandoff
+		s.mu.RUnlock()
+		if beforeStartupHandoff != nil {
+			if err := beforeStartupHandoff(ctx); err != nil {
+				return s.CurrentProject(), errors.Join(fmt.Errorf("settle public channel registration before startup ownership handoff: %w", err), s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT))
+			}
 		}
 		handoff, err := newRT.PrepareStartupOwnershipHandoff(oldRT)
 		if err != nil {

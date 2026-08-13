@@ -1487,6 +1487,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			}
 			return reconcilePublicIngress(hookCtx, generation)
 		})
+		supervisor.SetStartupOwnershipHandoffBarrier(registrationController.PrepareStartupHandoff)
 	}
 	apiServerLease, err := processWorkOwner.Begin(ctx)
 	if err != nil {

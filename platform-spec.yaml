@@ -9528,21 +9528,31 @@ tool_model:
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
         serve-registration authority, revalidates startup authority and all credential snapshots, commits the launched
-        marker before one HTTP dispatch, and settles from the provider response. Acknowledgment loss permits readback only:
-        exact current callback URL settles the same retained operation and attempt by authoritative readback; mismatch or
-        unavailable readback remains pending and uncertain and never resends. A settlement error retains that original
-        operation and attempt until repeated exact settlement succeeds. Proven pre-launch failure terminalizes the attempt
+        marker before one HTTP dispatch, and records a valid provider response as response_observed rather than authoritative
+        registration success. Exact current callback URL settles the same retained operation and attempt by authoritative
+        readback. Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain, discards the live
+        process handle, retains immutable operation/attempt/base/failure evidence, and never resends under the same semantic
+        base. A settlement error retains that original operation and attempt until exact settlement or outcome-uncertain
+        terminalization durably succeeds. Proven pre-launch failure terminalizes the attempt
         with launch_rejected evidence and permits a fresh attempt under the same operation identity; an authorization whose
         commit acknowledgment was lost resumes the same authorized attempt. No provider dispatch occurs before the durable
         launch marker is known. Process restart or changed semantic intent creates a new token and operation; replay and
         recovery never redispatch an old launched operation.
       phases: >
         The immutable process snapshot separates last_verified intent from the current attempt and publishes exactly one
-        explicit phase per selected pair: no_attempt, pre_launch, pending_settlement, or verified. Failed identify,
+        explicit phase per selected pair: no_attempt, pre_launch, pending_settlement, verified, or outcome_uncertain. Failed identify,
         admission, collision, credential, authority, and readback observations are recorded separately from lifecycle
         identity: they lower currentness immediately without erasing last_verified or a pending operation. Registration
         selection, route selection, replacement, and removal publish as one atomic selected set; exposure mutation and
         revocation use the same snapshot owner.
+      startup_handoff: >
+        Before startup ownership commit, one registration-controller barrier serializes with renewal while the predecessor
+        remains current. Verified evidence carries without apply and is rebound/revalidated after successor publication;
+        outcome_uncertain carries terminal local evidence only and remains unready; no_attempt carries no effect and may
+        perform its first apply after successor activation. Pending settlement must settle exact or terminalize mismatch or
+        unavailability under the predecessor. If that durable settlement cannot complete, handoff aborts and the predecessor
+        remains current. Pre_launch must finish before handoff or handoff aborts. A live predecessor attempt or handle is never
+        transferred to the successor.
       observations: >
         Slot identify, callback readback, and nonce reachability are bounded, redacted, process-local read-only
         observations. Transient observation failure preserves prior verified and pending lifecycle evidence while making
@@ -33390,7 +33400,7 @@ managed_external_effect_authority:
   logical_operation:
     identity: For normal agents, a deterministic operation_id is derived from the stable complete typed concrete agent identity, typed inbound/explicit logical identity, deterministic provider-turn or provider-owned tool-call occurrence coordinate, adapter, and declared lineage. Same-slug concrete siblings are distinct. Exact replay and successor lifecycle generations of the same concrete identity remain stable. Selected-contract-fork, conversation-fork-chat, and startup-probe authority derivations remain owned by their exact execution authorities. Runtime epoch and generation are deliberately excluded so the same logical work cannot redispatch after restart; they remain fenced evidence on the original operation/attempt. Request bytes are excluded from identity and stored as a separate fingerprint.
     replay: Authorization loads the existing operation and latest attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, settled, or uncertain replay never dispatches; changed request or registration fields return a fingerprint conflict.
-    attempts: One actual attempt is authorized for each logical operation except Claude CLI may allocate the next ordinal after the preceding attempt has exact durable zero-process-launch proof. The attempt ID is deterministically derived from operation_id and ordinal. No other adapter creates a second attempt or operation during replay.
+    attempts: One actual attempt is authorized for each logical operation except Claude CLI may allocate the next ordinal after the preceding attempt has exact durable zero-process-launch proof, and provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch. The attempt ID is deterministically derived from operation_id and ordinal. No adapter creates a later ordinal after launch, response observation, settlement, or outcome uncertainty.
   effect_classes:
     read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
     write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
@@ -33403,7 +33413,8 @@ managed_external_effect_authority:
     prelaunch_failure: Every failure before cmd.Start, including target resolution, admission, command construction, pipe setup,
       monitor setup, and exact cmd.Start rejection, settles the authorized attempt terminal_failure with canonical evidence.
       Claude CLI may admit a later ordinal only when the canonical returned failure disposition is retry and the delivery retry
-      budget permits another invocation.
+      budget permits another invocation. Provider registration may admit a later ordinal only for the same operation after
+      exact launch_rejected=true evidence proves zero provider dispatch.
     postlaunch_read_only_failure: Terminal connector failure with no automatic retry.
     postlaunch_write_or_unknown_failure: Every error after cmd.Start succeeds, including provider exit, response validation,
       mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
@@ -33425,6 +33436,9 @@ managed_external_effect_authority:
     - adapter: claude_cli
       condition: preceding operation and attempt are terminal_failure, retain the same persisted authority epoch/generation as the current typed authority, and have no launched_at or carry exact launch_rejected=true evidence after cmd.Start rejection
       exclusion: cmd.Start success, launched/response_observed/outcome_uncertain/settled state, provider exit classification, and inferred gateway/native/customization inactivity never authorize another attempt
+    - adapter: provider_registration
+      condition: preceding operation and attempt are terminal_failure with exact launch_rejected=true evidence proving zero provider dispatch, retain the same registration operation identity, and remain under the current serve-registration authority
+      exclusion: provider HTTP dispatch, launched/response_observed/outcome_uncertain/settled state, acknowledgment loss, readback mismatch or unavailability, and inferred provider state never authorize another attempt
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
     provider_registration: [provider_registration]
@@ -33433,7 +33447,7 @@ managed_external_effect_authority:
     native: [native_bash, native_read_file, native_write_file]
     relay: [tool_result_relay, claude_tool_result_relay]
   forbidden:
-    - provider or authored HTTP automatic retries except the exact Claude CLI zero-process-launch transition above
+    - provider or authored HTTP automatic retries except the exact provider_registration zero-dispatch launch_rejected transition above
     - managed-credential 401 refresh followed by target redispatch
     - effect classification derived from HTTP status, JSON-RPC correlation, exit code, or provider self-description
     - post-mutation native file failure reported as a proven terminal no-effect outcome

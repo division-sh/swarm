@@ -65,8 +65,14 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 		})}}
 		result, err := executor.Apply(serveRegistrationTestContext(harness, "known-success"), "telegram.apply_webhook", tool, input, credentials, lineage)
-		if err != nil || !result.Acknowledged || result.Pending != nil {
+		if err != nil || !result.Acknowledged || result.Pending == nil {
 			t.Fatalf("Apply = %#v, %v", result, err)
+		}
+		if err := harness.RequireState("provider_registration", runtimeeffects.StateResponseObserved); err != nil {
+			t.Fatal(err)
+		}
+		if err := result.Pending.SettleReadback(context.Background(), true, nil); err != nil {
+			t.Fatalf("SettleReadback exact: %v", err)
 		}
 		if err := harness.RequireState("provider_registration", runtimeeffects.StateSettled); err != nil {
 			t.Fatal(err)
@@ -105,10 +111,10 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 		if err == nil || result.Pending == nil {
 			t.Fatalf("Apply acknowledgment loss = %#v, %v", result, err)
 		}
-		if err := result.Pending.SettleReadback(context.Background(), false, errors.New("callback mismatch")); err == nil {
-			t.Fatal("mismatched readback returned nil")
+		if err := result.Pending.SettleReadback(context.Background(), false, errors.New("callback mismatch")); err != nil {
+			t.Fatalf("terminalize mismatched readback: %v", err)
 		}
-		if err := harness.RequireState("provider_registration", runtimeeffects.StateLaunched); err != nil {
+		if err := harness.RequireState("provider_registration", runtimeeffects.StateOutcomeUncertain); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -120,8 +126,11 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 		})}}
 		result, err := executor.Apply(serveRegistrationTestContext(harness, "settlement-ack-loss"), "telegram.apply_webhook", tool, input, credentials, lineage)
-		if err == nil || result.Pending == nil || result.Acknowledged {
+		if err != nil || result.Pending == nil || !result.Acknowledged {
 			t.Fatalf("Apply settlement acknowledgment loss = %#v, %v", result, err)
+		}
+		if err := result.Pending.SettleReadback(context.Background(), true, nil); err == nil {
+			t.Fatal("first readback settlement unexpectedly succeeded")
 		}
 		harness.SettleErr = nil
 		if err := result.Pending.SettleReadback(context.Background(), true, nil); err != nil {

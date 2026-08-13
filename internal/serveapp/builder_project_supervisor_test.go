@@ -990,6 +990,22 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						runtimeContexts:         manager,
 						executionPosture:        executionposture.Live,
 					}
+					var registrationBarrierCalls atomic.Int32
+					barrierPredecessor := predecessor
+					supervisor.SetStartupOwnershipHandoffBarrier(func(ctx context.Context) error {
+						current := supervisor.CurrentRuntime()
+						if current == nil || current != barrierPredecessor {
+							return errors.New("registration handoff barrier does not own the expected predecessor runtime")
+						}
+						if current.Manager.IsRunning() || current.Bus.OutboxSweeperActive() {
+							return errors.New("registration handoff barrier ran before predecessor quiescence")
+						}
+						if _, err := current.CurrentStartupAuthority(); err != nil {
+							return err
+						}
+						registrationBarrierCalls.Add(1)
+						return nil
+					})
 					supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
 						if rt == candidate {
 							if active.Load() != 0 || predecessor.Manager.IsRunning() || predecessor.Bus.OutboxSweeperActive() {
@@ -1026,6 +1042,9 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if !status.Loaded || supervisor.CurrentRuntime() != candidate {
 						t.Fatalf("replacement status/runtime = %#v/%p, want loaded candidate %p", status, supervisor.CurrentRuntime(), candidate)
 					}
+					if got := registrationBarrierCalls.Load(); got != 1 {
+						t.Fatalf("registration barrier calls after first handoff=%d, want 1", got)
+					}
 					replacementContext, ok := manager.LookupBundleHash(newHash)
 					if !ok {
 						t.Fatalf("manager does not expose replacement hash %s", newHash)
@@ -1044,6 +1063,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}
 					successor := newRuntime(newHash)
 					successor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
+					barrierPredecessor = candidate
 					status, err = supervisor.replaceCurrentRuntimeWithSource(
 						context.Background(), "/successor", source, bundle, newFact,
 						runtimecontracts.BundleIdentity{BundleHash: newHash}, successor, successor.WorkOccurrence(),
@@ -1053,6 +1073,9 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					}
 					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 2 || finalizeAttempts != 3 {
 						t.Fatalf("later replacement counts = prepare:%d finalize:%d, want 2/3", prepareCount, finalizeAttempts)
+					}
+					if got := registrationBarrierCalls.Load(); got != 2 {
+						t.Fatalf("registration barrier calls after second handoff=%d, want 2", got)
 					}
 					if err := successor.Shutdown(); err != nil {
 						t.Fatalf("shutdown later replacement: %v", err)

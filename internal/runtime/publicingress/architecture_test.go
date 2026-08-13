@@ -27,6 +27,15 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 			t.Fatalf("provider registration controller revived split snapshot owner %q", forbidden)
 		}
 	}
+	for _, required := range []string{
+		"registrationPhaseOutcomeUncertain",
+		"PrepareStartupHandoff",
+		"terminalizePendingReadback",
+	} {
+		if !strings.Contains(string(registrationSource), required) {
+			t.Fatalf("provider registration lifecycle owner is missing %q", required)
+		}
+	}
 	readinessSource, err := os.ReadFile(filepath.Join(repo, "internal", "runtime", "publicingress", "readiness.go"))
 	if err != nil {
 		t.Fatalf("read registration snapshot owner: %v", err)
@@ -67,6 +76,27 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 		})
 		if err != nil && !os.IsNotExist(err) {
 			t.Fatalf("scan persistence tree %s: %v", root, err)
+		}
+	}
+
+	supervisorSource, err := os.ReadFile(filepath.Join(repo, "internal", "serveapp", "builder_project_supervisor.go"))
+	if err != nil {
+		t.Fatalf("read startup handoff owner: %v", err)
+	}
+	if !strings.Contains(string(supervisorSource), "beforeStartupHandoff(ctx)") {
+		t.Fatal("runtime replacement can commit startup ownership without the registration barrier")
+	}
+	spec, err := os.ReadFile(filepath.Join(repo, "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	for _, required := range []string{
+		"provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch",
+		"Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain",
+		"A live predecessor attempt or handle is never",
+	} {
+		if !strings.Contains(string(spec), required) {
+			t.Fatalf("authoritative provider-registration contract is missing %q", required)
 		}
 	}
 }

@@ -465,6 +465,7 @@ type mockRegistrationTransport struct {
 	applyCount    int
 	currentURL    string
 	readbackURL   string
+	readbackErr   error
 	loseAck       bool
 }
 
@@ -495,6 +496,9 @@ func (t *mockRegistrationTransport) RoundTrip(request *http.Request) (*http.Resp
 		}
 		return mockRegistrationResponse(http.StatusOK, `{"result":{"accepted":true}}`), nil
 	case request.Method == http.MethodGet && request.URL.Path == "/v2/callback":
+		if t.readbackErr != nil {
+			return nil, t.readbackErr
+		}
 		callback := t.currentURL
 		if t.readbackURL != "" {
 			callback = t.readbackURL
@@ -638,10 +642,52 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	transport.readbackURL = ""
 	transport.mu.Unlock()
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
-		t.Fatalf("authoritative readback reconcile: %v", err)
+		t.Fatalf("same-base uncertain reconcile: %v", err)
 	}
 	if _, applied := transport.counts(); applied != 2 {
-		t.Fatalf("ack-loss recovery resent apply: %d", applied)
+		t.Fatalf("mismatched readback resent apply: %d", applied)
+	}
+	uncertain := readiness.Snapshot(time.Now().UTC())
+	if uncertain.PublicIngressReady || len(uncertain.Registrations) != 1 || uncertain.Registrations[0].Phase != "outcome_uncertain" {
+		t.Fatalf("mismatched mock registration = %#v", uncertain)
+	}
+
+	if err := credentialStore.Set(context.Background(), "signing", "mock-proof-v3"); err != nil {
+		t.Fatalf("rotate signing credential for unavailable readback: %v", err)
+	}
+	transport.mu.Lock()
+	transport.loseAck = true
+	transport.readbackErr = errors.New("mock readback unavailable")
+	transport.mu.Unlock()
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err == nil {
+		t.Fatal("unavailable mock readback returned nil")
+	}
+	if _, applied := transport.counts(); applied != 3 {
+		t.Fatalf("unavailable readback apply count = %d, want 3", applied)
+	}
+	unavailable := readiness.Snapshot(time.Now().UTC())
+	if unavailable.PublicIngressReady || unavailable.Registrations[0].Phase != "outcome_uncertain" {
+		t.Fatalf("unavailable mock registration = %#v", unavailable)
+	}
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+		t.Fatalf("same-base unavailable reconcile: %v", err)
+	}
+	if _, applied := transport.counts(); applied != 3 {
+		t.Fatalf("unavailable readback resent apply: %d", applied)
+	}
+
+	if err := credentialStore.Set(context.Background(), "signing", "mock-proof-v4"); err != nil {
+		t.Fatalf("rotate signing credential for fresh intent: %v", err)
+	}
+	transport.mu.Lock()
+	transport.loseAck = false
+	transport.readbackErr = nil
+	transport.mu.Unlock()
+	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
+		t.Fatalf("fresh semantic intent reconcile: %v", err)
+	}
+	if _, applied := transport.counts(); applied != 4 {
+		t.Fatalf("fresh semantic intent apply count = %d, want 4", applied)
 	}
 	rotated := readiness.Snapshot(time.Now().UTC())
 	if len(rotated.Registrations) != 1 || rotated.Registrations[0].CallbackURL == firstCallback || !rotated.Registrations[0].CallbackMatched {

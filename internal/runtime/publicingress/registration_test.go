@@ -155,6 +155,7 @@ type telegramRegistrationTransport struct {
 	currentURLs   map[string]string
 	resourceIDs   map[string]int64
 	readbackURL   string
+	readbackErr   error
 	loseAck       bool
 	identifyErr   error
 }
@@ -194,6 +195,9 @@ func (transport *telegramRegistrationTransport) RoundTrip(request *http.Request)
 		}
 		return registrationControllerResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
+		if transport.readbackErr != nil {
+			return nil, transport.readbackErr
+		}
 		callbackURL := transport.currentURLs[token]
 		if transport.readbackURL != "" {
 			callbackURL = transport.readbackURL
@@ -288,21 +292,12 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	})
 
 	transport.loseAck = true
-	transport.readbackURL = "https://hooks.example.test/stale"
-	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
-		t.Fatal("ack-loss mismatched readback returned nil")
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+		t.Fatalf("ack-loss exact readback reconcile: %v", err)
 	}
 	_, applied := transport.counts()
 	if applied != 1 {
 		t.Fatalf("initial apply count = %d, want 1", applied)
-	}
-	transport.readbackURL = ""
-	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
-		t.Fatalf("ack-loss exact readback reconcile: %v", err)
-	}
-	_, applied = transport.counts()
-	if applied != 1 {
-		t.Fatalf("ack-loss reconciliation resent provider apply: count=%d", applied)
 	}
 	first := readiness.Snapshot(time.Now().UTC())
 	if len(first.Registrations) != 1 || !first.Registrations[0].Applied || !first.Registrations[0].CallbackMatched {
@@ -317,6 +312,42 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	if applied != 1 {
 		t.Fatalf("same intent resent provider apply: count=%d", applied)
 	}
+
+	t.Run("mismatched post-launch readback terminalizes without same-base resend", func(t *testing.T) {
+		mismatchTransport := &telegramRegistrationTransport{t: t, loseAck: true, readbackURL: "https://hooks.example.test/stale"}
+		mismatchReadiness := NewReadinessOwner(true)
+		mismatchReadiness.SetRuntimeReady(true)
+		mismatchReadiness.SetExposure(ExposureEvidence{
+			GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+			ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
+		})
+		mismatchController, err := NewProviderRegistrationController(RegistrationControllerOptions{
+			CredentialOwner: snapshotOwner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
+			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: mismatchTransport}},
+			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+			StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+			Readiness:        mismatchReadiness,
+		})
+		if err != nil {
+			t.Fatalf("NewProviderRegistrationController mismatch: %v", err)
+		}
+		if err := mismatchController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+			t.Fatal("mismatched readback returned nil")
+		}
+		uncertain := mismatchReadiness.Snapshot(time.Now().UTC())
+		if uncertain.PublicIngressReady || len(uncertain.Registrations) != 1 || uncertain.Registrations[0].Phase != string(registrationPhaseOutcomeUncertain) {
+			t.Fatalf("mismatched readback state = %#v", uncertain)
+		}
+		mismatchTransport.mu.Lock()
+		mismatchTransport.readbackURL = ""
+		mismatchTransport.mu.Unlock()
+		if err := mismatchController.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+			t.Fatalf("same-base uncertain reconcile: %v", err)
+		}
+		if _, applied := mismatchTransport.counts(); applied != 1 {
+			t.Fatalf("same-base uncertain registration resent apply: count=%d", applied)
+		}
+	})
 
 	transport.mu.Lock()
 	transport.identifyErr = errors.New("transient identify unavailable")
@@ -558,6 +589,181 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 	}
 	if snapshot := readiness.Snapshot(now); len(snapshot.Registrations) != 0 || controller.snapshot.routeSelected(pair.Target.Alias, pair.Target.Provider) {
 		t.Fatalf("removed registration survived atomic selection: %#v", snapshot)
+	}
+}
+
+func TestProviderRegistrationStartupHandoffPhaseBarrier(t *testing.T) {
+	registration := loadTelegramRegistrationPlan(t)
+	type fixture struct {
+		controller *ProviderRegistrationController
+		readiness  *ReadinessOwner
+		transport  *telegramRegistrationTransport
+		pair       RegistrationPair
+		exposure   Generation
+	}
+	newFixture := func(t *testing.T, effects runtimeeffects.Store) fixture {
+		t.Helper()
+		credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+		if err != nil {
+			t.Fatalf("NewFileStore: %v", err)
+		}
+		for key, value := range map[string]string{"bot": "token-v1", "signing": "signing-v1"} {
+			if err := credentialStore.Set(context.Background(), key, value); err != nil {
+				t.Fatalf("Set(%s): %v", key, err)
+			}
+		}
+		snapshots, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+		if err != nil {
+			t.Fatalf("NewSnapshotOwner: %v", err)
+		}
+		startup := testStartupAuthority(t, "handoff-predecessor")
+		now := time.Date(2026, 8, 13, 13, 0, 0, 0, time.UTC)
+		readiness := NewReadinessOwner(true)
+		transport := &telegramRegistrationTransport{t: t}
+		controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+			CredentialOwner: snapshots, EffectsStore: effects,
+			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+			StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+			Readiness:        readiness, Now: func() time.Time { return now },
+		})
+		if err != nil {
+			t.Fatalf("NewProviderRegistrationController: %v", err)
+		}
+		exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
+		readiness.SetRuntimeReady(true)
+		readiness.SetExposure(ExposureEvidence{
+			GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
+			StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
+		})
+		return fixture{controller: controller, readiness: readiness, transport: transport, pair: testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram"), exposure: exposure}
+	}
+
+	tests := []struct {
+		name      string
+		prepare   func(*testing.T) fixture
+		wantPhase registrationPhase
+		wantErr   bool
+	}{
+		{
+			name: "no attempt carries no effect",
+			prepare: func(t *testing.T) fixture {
+				return newFixture(t, &registrationEffectStore{Harness: effecttest.New(), current: true})
+			},
+			wantPhase: registrationPhaseNoAttempt,
+		},
+		{
+			name: "verified carries only settled evidence",
+			prepare: func(t *testing.T) fixture {
+				store := &registrationEffectStore{Harness: effecttest.New(), current: true}
+				f := newFixture(t, store)
+				if err := f.controller.Reconcile(context.Background(), f.exposure, []RegistrationPair{f.pair}); err != nil {
+					t.Fatalf("verified reconcile: %v", err)
+				}
+				return f
+			},
+			wantPhase: registrationPhaseVerified,
+		},
+		{
+			name: "pending exact settles before handoff",
+			prepare: func(t *testing.T) fixture {
+				store := &registrationEffectStore{Harness: effecttest.New(), current: true}
+				store.SettleErr = errors.New("injected settlement persistence failure")
+				f := newFixture(t, store)
+				if err := f.controller.Reconcile(context.Background(), f.exposure, []RegistrationPair{f.pair}); err == nil {
+					t.Fatal("initial settlement failure returned nil")
+				}
+				store.SettleErr = nil
+				return f
+			},
+			wantPhase: registrationPhaseVerified,
+		},
+		{
+			name: "pending mismatch terminalizes before handoff",
+			prepare: func(t *testing.T) fixture {
+				store := &registrationEffectStore{Harness: effecttest.New(), current: true}
+				store.SettleErr = errors.New("injected settlement persistence failure")
+				f := newFixture(t, store)
+				if err := f.controller.Reconcile(context.Background(), f.exposure, []RegistrationPair{f.pair}); err == nil {
+					t.Fatal("initial settlement failure returned nil")
+				}
+				store.SettleErr = nil
+				f.transport.mu.Lock()
+				f.transport.readbackURL = "https://hooks.example.test/stale"
+				f.transport.mu.Unlock()
+				return f
+			},
+			wantPhase: registrationPhaseOutcomeUncertain,
+		},
+		{
+			name: "pending unavailable terminalizes before handoff",
+			prepare: func(t *testing.T) fixture {
+				store := &registrationEffectStore{Harness: effecttest.New(), current: true}
+				store.SettleErr = errors.New("injected settlement persistence failure")
+				f := newFixture(t, store)
+				if err := f.controller.Reconcile(context.Background(), f.exposure, []RegistrationPair{f.pair}); err == nil {
+					t.Fatal("initial settlement failure returned nil")
+				}
+				store.SettleErr = nil
+				f.transport.mu.Lock()
+				f.transport.readbackErr = errors.New("provider readback unavailable")
+				f.transport.mu.Unlock()
+				return f
+			},
+			wantPhase: registrationPhaseOutcomeUncertain,
+		},
+		{
+			name: "pending settlement persistence failure aborts handoff",
+			prepare: func(t *testing.T) fixture {
+				store := &registrationEffectStore{Harness: effecttest.New(), current: true}
+				store.SettleErr = errors.New("injected settlement persistence failure")
+				f := newFixture(t, store)
+				if err := f.controller.Reconcile(context.Background(), f.exposure, []RegistrationPair{f.pair}); err == nil {
+					t.Fatal("initial settlement failure returned nil")
+				}
+				return f
+			},
+			wantPhase: registrationPhasePendingSettlement,
+			wantErr:   true,
+		},
+		{
+			name: "prelaunch failure aborts handoff",
+			prepare: func(t *testing.T) fixture {
+				store := newRetryingRegistrationEffectStore(launchMarkerRollback)
+				f := newFixture(t, store)
+				if err := f.controller.Reconcile(context.Background(), f.exposure, []RegistrationPair{f.pair}); err == nil {
+					t.Fatal("prelaunch failure returned nil")
+				}
+				return f
+			},
+			wantPhase: registrationPhasePrelaunch,
+			wantErr:   true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tc.prepare(t)
+			err := f.controller.PrepareStartupHandoff(context.Background())
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("PrepareStartupHandoff error = %v, wantErr=%v", err, tc.wantErr)
+			}
+			state, ok := f.controller.snapshot.state(pairKey(f.pair))
+			if !ok && tc.wantPhase == registrationPhaseNoAttempt {
+				return
+			}
+			if state.Phase != tc.wantPhase {
+				t.Fatalf("phase=%q, want %q (state=%#v)", state.Phase, tc.wantPhase, state)
+			}
+			_, applied := f.transport.counts()
+			if applied > 1 {
+				t.Fatalf("handoff barrier resent provider apply: count=%d", applied)
+			}
+			if tc.wantPhase == registrationPhaseOutcomeUncertain {
+				if state.Attempt != nil || state.Terminal == nil || state.Terminal.HasPending || state.Terminal.EffectOperationID == "" || state.Terminal.EffectAttemptID == "" || state.Terminal.EffectAttemptOrdinal != 1 {
+					t.Fatalf("terminal outcome evidence = %#v", state)
+				}
+			}
+		})
 	}
 }
 
