@@ -564,6 +564,11 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		t.Fatalf("NewProviderRegistrationController: %v", err)
 	}
 	exposure := runtimepublicingress.Generation{ID: uuid.NewString(), Mode: runtimepublicingress.ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
+	readiness.SetRuntimeReady(true)
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
+		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
+		StartupAuthorityID: startup.AuthorityID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(runtimepublicingress.EvidenceTTL),
+	})
 	pair := runtimepublicingress.RegistrationPair{
 		BindingID: "mock-hitl", PlanGeneration: planGeneration, Registration: registration,
 		CredentialKeys: map[string]string{"mock_api_key": "api"},
@@ -604,6 +609,10 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
+		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
+		StartupAuthorityID: startup.AuthorityID, ObservedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(runtimepublicingress.EvidenceTTL),
+	})
 	if err := controller.Reconcile(context.Background(), exposure, []runtimepublicingress.RegistrationPair{pair}); err != nil {
 		t.Fatalf("unchanged handoff reconcile: %v", err)
 	}
@@ -652,7 +661,6 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		t.Fatalf("callback fencing stale/current/admitted = %d/%d/%d", staleRecorder.Code, currentRecorder.Code, admitted)
 	}
 
-	readiness.SetRuntimeReady(true)
 	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
 		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
 		StartupAuthorityID: startup.AuthorityID, ObservedAt: time.Now().UTC(), ExpiresAt: rotated.Registrations[0].ExpiresAt.Add(time.Minute),

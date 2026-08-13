@@ -1,10 +1,15 @@
 package publicingress
 
 import (
+	"context"
+	"crypto/subtle"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 const (
@@ -32,6 +37,7 @@ type RegistrationEvidence struct {
 	SlotID             string    `json:"slot_id"`
 	CallbackURL        string    `json:"callback_url"`
 	StartupAuthorityID string    `json:"startup_authority_id"`
+	Phase              string    `json:"phase"`
 	Applied            bool      `json:"applied"`
 	CallbackMatched    bool      `json:"callback_matched"`
 	ObservedAt         time.Time `json:"observed_at"`
@@ -49,19 +55,167 @@ type Snapshot struct {
 	Failure              string                 `json:"failure,omitempty"`
 }
 
+// registrationProcessSnapshot is replaced as one value. Its maps and states
+// are cloned before publication so readers never observe partial selection,
+// replacement, or revocation.
+type registrationProcessSnapshot struct {
+	revision      uint64
+	exposure      *ExposureEvidence
+	registrations map[string]registrationState
+	routes        map[string]struct{}
+	failure       string
+}
+
+type RegistrationSnapshotOwner struct {
+	mu       sync.RWMutex
+	snapshot registrationProcessSnapshot
+}
+
+func newRegistrationSnapshotOwner() *RegistrationSnapshotOwner {
+	return &RegistrationSnapshotOwner{snapshot: registrationProcessSnapshot{
+		registrations: map[string]registrationState{},
+		routes:        map[string]struct{}{},
+	}}
+}
+
+func (o *RegistrationSnapshotOwner) capture() registrationProcessSnapshot {
+	if o == nil {
+		return registrationProcessSnapshot{registrations: map[string]registrationState{}, routes: map[string]struct{}{}}
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return cloneRegistrationProcessSnapshot(o.snapshot)
+}
+
+func (o *RegistrationSnapshotOwner) currentRevision(revision uint64) bool {
+	if o == nil {
+		return false
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.snapshot.revision == revision
+}
+
+func (o *RegistrationSnapshotOwner) mutate(change func(*registrationProcessSnapshot)) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	next := cloneRegistrationProcessSnapshot(o.snapshot)
+	change(&next)
+	next.revision = o.snapshot.revision + 1
+	o.snapshot = next
+	o.mu.Unlock()
+}
+
+func (o *RegistrationSnapshotOwner) setExposure(evidence ExposureEvidence) {
+	o.mutate(func(next *registrationProcessSnapshot) {
+		copy := evidence
+		next.exposure = &copy
+		next.failure = strings.TrimSpace(evidence.Failure)
+	})
+}
+
+func (o *RegistrationSnapshotOwner) revokeExposure(cause string) {
+	o.mutate(func(next *registrationProcessSnapshot) {
+		next.exposure = nil
+		next.failure = strings.TrimSpace(cause)
+	})
+}
+
+func (o *RegistrationSnapshotOwner) replaceSelected(pairs []RegistrationPair) {
+	o.mutate(func(next *registrationProcessSnapshot) {
+		selected := make(map[string]registrationState, len(pairs))
+		routes := make(map[string]struct{}, len(pairs))
+		for _, pair := range pairs {
+			key := pairKey(pair)
+			state := registrationState{Pair: pair, Phase: registrationPhaseNoAttempt}
+			if prior, ok := next.registrations[key]; ok {
+				state = cloneRegistrationState(prior)
+				state.Pair = pair
+				if !sameRegistrationSelection(prior.Pair, pair) {
+					state.SelectedBase = ""
+					state.Failure = "provider registration selection changed and is pending reconciliation"
+				}
+			}
+			selected[key] = state
+			routes[registrationRouteKey(pair.Target.Alias, pair.Target.Provider)] = struct{}{}
+		}
+		next.registrations = selected
+		next.routes = routes
+	})
+}
+
+func sameRegistrationSelection(left, right RegistrationPair) bool {
+	return left.BindingID == right.BindingID &&
+		left.PlanGeneration.Diagnostic() == right.PlanGeneration.Diagnostic() &&
+		maps.Equal(left.CredentialKeys, right.CredentialKeys) &&
+		left.Target.Selector == right.Target.Selector &&
+		left.Target.BundleHash == right.Target.BundleHash &&
+		left.Target.ServiceID == right.Target.ServiceID &&
+		left.Target.PackageKey == right.Target.PackageKey &&
+		left.Target.FlowID == right.Target.FlowID &&
+		left.Target.Alias == right.Target.Alias &&
+		left.Target.Provider == right.Target.Provider &&
+		left.Target.Generation == right.Target.Generation &&
+		left.Target.PublicationSequence == right.Target.PublicationSequence &&
+		left.Target.AdmissionPlanGeneration.Diagnostic() == right.Target.AdmissionPlanGeneration.Diagnostic() &&
+		left.Target.SigningCredentialKey == right.Target.SigningCredentialKey
+}
+
+func (o *RegistrationSnapshotOwner) state(key string) (registrationState, bool) {
+	snapshot := o.capture()
+	state, ok := snapshot.registrations[strings.TrimSpace(key)]
+	return cloneRegistrationState(state), ok
+}
+
+func (o *RegistrationSnapshotOwner) publishState(key string, state registrationState) {
+	o.mutate(func(next *registrationProcessSnapshot) {
+		if _, selected := next.registrations[strings.TrimSpace(key)]; !selected {
+			return
+		}
+		next.registrations[strings.TrimSpace(key)] = cloneRegistrationState(state)
+	})
+}
+
+func (o *RegistrationSnapshotOwner) routeSelected(alias, provider string) bool {
+	snapshot := o.capture()
+	_, ok := snapshot.routes[registrationRouteKey(alias, provider)]
+	return ok
+}
+
+func cloneRegistrationProcessSnapshot(source registrationProcessSnapshot) registrationProcessSnapshot {
+	out := registrationProcessSnapshot{
+		revision:      source.revision,
+		registrations: make(map[string]registrationState, len(source.registrations)),
+		routes:        make(map[string]struct{}, len(source.routes)),
+		failure:       source.failure,
+	}
+	if source.exposure != nil {
+		copy := *source.exposure
+		out.exposure = &copy
+	}
+	for key, state := range source.registrations {
+		out.registrations[key] = cloneRegistrationState(state)
+	}
+	for route := range source.routes {
+		out.routes[route] = struct{}{}
+	}
+	return out
+}
+
 type ReadinessOwner struct {
-	mu                  sync.RWMutex
-	runtimeReady        bool
-	enabled             bool
-	exposure            *ExposureEvidence
-	registrations       map[string]RegistrationEvidence
-	failure             string
-	startupCurrent      func(string) (bool, error)
-	registrationCurrent func() (bool, error)
+	mu                      sync.RWMutex
+	runtimeReady            bool
+	enabled                 bool
+	registration            *RegistrationSnapshotOwner
+	startupCurrent          func(context.Context, string) (bool, error)
+	credentialEpochsCurrent func(context.Context, map[string]string) (bool, error)
+	effectAuthorityCurrent  func(context.Context, runtimeeffects.Authority) (bool, error)
 }
 
 func NewReadinessOwner(enabled bool) *ReadinessOwner {
-	return &ReadinessOwner{enabled: enabled, registrations: map[string]RegistrationEvidence{}}
+	return &ReadinessOwner{enabled: enabled, registration: newRegistrationSnapshotOwner()}
 }
 
 func (o *ReadinessOwner) SetRuntimeReady(ready bool) {
@@ -90,132 +244,174 @@ func (o *ReadinessOwner) RuntimeLoad() bool {
 	return o.runtimeReady
 }
 
-func (o *ReadinessOwner) SetStartupCurrent(check func(string) (bool, error)) {
+func (o *ReadinessOwner) SetCurrentnessChecks(
+	startup func(context.Context, string) (bool, error),
+	credentials func(context.Context, map[string]string) (bool, error),
+	effect func(context.Context, runtimeeffects.Authority) (bool, error),
+) {
 	if o == nil {
 		return
 	}
 	o.mu.Lock()
-	o.startupCurrent = check
-	o.mu.Unlock()
-}
-
-func (o *ReadinessOwner) SetRegistrationCurrent(check func() (bool, error)) {
-	if o == nil {
-		return
-	}
-	o.mu.Lock()
-	o.registrationCurrent = check
+	o.startupCurrent = startup
+	o.credentialEpochsCurrent = credentials
+	o.effectAuthorityCurrent = effect
 	o.mu.Unlock()
 }
 
 func (o *ReadinessOwner) SetExposure(evidence ExposureEvidence) {
-	if o == nil {
-		return
+	if o != nil {
+		o.registration.setExposure(evidence)
 	}
-	copy := evidence
-	o.mu.Lock()
-	o.exposure = &copy
-	o.failure = strings.TrimSpace(evidence.Failure)
-	o.mu.Unlock()
 }
 
 func (o *ReadinessOwner) RevokeExposure(cause string) {
-	if o == nil {
-		return
+	if o != nil {
+		o.registration.revokeExposure(cause)
 	}
-	o.mu.Lock()
-	o.exposure = nil
-	o.failure = strings.TrimSpace(cause)
-	for key, registration := range o.registrations {
-		registration.CallbackMatched = false
-		registration.Failure = strings.TrimSpace(cause)
-		o.registrations[key] = registration
-	}
-	o.mu.Unlock()
 }
 
-func (o *ReadinessOwner) SetRegistration(key string, evidence RegistrationEvidence) {
-	if o == nil {
-		return
-	}
-	o.mu.Lock()
-	o.registrations[strings.TrimSpace(key)] = evidence
-	o.mu.Unlock()
+type evaluatedRegistrationSnapshot struct {
+	snapshot registrationProcessSnapshot
+	output   Snapshot
+	current  map[string]bool
 }
 
-func (o *ReadinessOwner) ReplaceRegistrationKeys(keys []string) {
+func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedRegistrationSnapshot {
 	if o == nil {
-		return
-	}
-	keep := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		keep[strings.TrimSpace(key)] = struct{}{}
-	}
-	o.mu.Lock()
-	for key := range o.registrations {
-		if _, ok := keep[key]; !ok {
-			delete(o.registrations, key)
-		}
-	}
-	o.mu.Unlock()
-}
-
-func (o *ReadinessOwner) Snapshot(now time.Time) Snapshot {
-	if o == nil {
-		return Snapshot{}
+		return evaluatedRegistrationSnapshot{}
 	}
 	now = now.UTC()
 	o.mu.RLock()
-	snapshot := Snapshot{RuntimeReady: o.runtimeReady, PublicIngressEnabled: o.enabled, Failure: o.failure}
+	output := Snapshot{RuntimeReady: o.runtimeReady, PublicIngressEnabled: o.enabled}
 	startupCurrent := o.startupCurrent
-	registrationCurrent := o.registrationCurrent
+	credentialsCurrent := o.credentialEpochsCurrent
+	effectCurrent := o.effectAuthorityCurrent
+	o.mu.RUnlock()
+
+	process := o.registration.capture()
+	output.Failure = process.failure
 	exposureReady := !o.enabled
-	if o.exposure != nil {
-		copy := *o.exposure
-		snapshot.Exposure = &copy
+	if process.exposure != nil {
+		copy := *process.exposure
+		output.Exposure = &copy
 		exposureReady = copy.Failure == "" && now.Before(copy.ExpiresAt)
 	}
-	keys := make([]string, 0, len(o.registrations))
-	for key := range o.registrations {
+	if exposureReady && output.Exposure != nil && startupCurrent != nil {
+		current, err := startupCurrent(ctx, output.Exposure.StartupAuthorityID)
+		if err != nil || !current {
+			exposureReady = false
+			if err != nil {
+				output.Failure = err.Error()
+			} else {
+				output.Failure = "public ingress startup authority is no longer current"
+			}
+		}
+	}
+
+	keys := make([]string, 0, len(process.registrations))
+	for key := range process.registrations {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	registrationsReady := true
+	currentByKey := make(map[string]bool, len(keys))
 	for _, key := range keys {
-		registration := o.registrations[key]
-		snapshot.Registrations = append(snapshot.Registrations, registration)
-		if registration.Failure != "" || !registration.Applied || !registration.CallbackMatched || !now.Before(registration.ExpiresAt) {
+		state := process.registrations[key]
+		current, failure := registrationStateCurrent(ctx, now, state, process.exposure, exposureReady, credentialsCurrent, effectCurrent)
+		currentByKey[key] = current
+		if !current {
 			registrationsReady = false
 		}
-		if snapshot.Exposure == nil || strings.TrimSpace(registration.StartupAuthorityID) == "" ||
-			registration.StartupAuthorityID != snapshot.Exposure.StartupAuthorityID {
-			registrationsReady = false
+		evidence := state.evidence(current)
+		if evidence.Failure == "" {
+			evidence.Failure = failure
+		}
+		if output.Failure == "" && evidence.Failure != "" {
+			output.Failure = evidence.Failure
+		}
+		output.Registrations = append(output.Registrations, evidence)
+	}
+	if !o.registration.currentRevision(process.revision) {
+		exposureReady = false
+		registrationsReady = false
+		output.Failure = "public ingress registration snapshot changed during currentness evaluation"
+		for key := range currentByKey {
+			currentByKey[key] = false
 		}
 	}
-	o.mu.RUnlock()
-	if exposureReady && snapshot.Exposure != nil && startupCurrent != nil {
-		current, err := startupCurrent(snapshot.Exposure.StartupAuthorityID)
-		if err != nil || !current {
-			exposureReady = false
-			if err != nil {
-				snapshot.Failure = err.Error()
-			} else {
-				snapshot.Failure = "public ingress startup authority is no longer current"
-			}
+	output.PublicIngressReady = exposureReady && registrationsReady
+	output.Ready = output.RuntimeReady && output.PublicIngressReady
+	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey}
+}
+
+func registrationStateCurrent(
+	ctx context.Context,
+	now time.Time,
+	state registrationState,
+	exposure *ExposureEvidence,
+	exposureReady bool,
+	credentialsCurrent func(context.Context, map[string]string) (bool, error),
+	effectCurrent func(context.Context, runtimeeffects.Authority) (bool, error),
+) (bool, string) {
+	if state.Failure != "" {
+		return false, state.Failure
+	}
+	if !exposureReady || exposure == nil {
+		return false, "public exposure is not current"
+	}
+	if state.Phase != registrationPhaseVerified || state.LastVerified == nil || state.SelectedBase == "" || state.LastVerified.BaseFingerprint != state.SelectedBase {
+		return false, "provider registration is not verified"
+	}
+	intent := state.LastVerified
+	if intent.ExposureGenerationID != exposure.GenerationID || intent.Authority.ServeRegistration.StartupAuthorityID != exposure.StartupAuthorityID {
+		return false, "provider registration exposure or startup authority is no longer current"
+	}
+	if !now.Before(intent.ExpiresAt) {
+		return false, "provider registration evidence expired"
+	}
+	if credentialsCurrent != nil {
+		current, err := credentialsCurrent(ctx, intent.CredentialEpochs)
+		if err != nil {
+			return false, err.Error()
+		}
+		if !current {
+			return false, "public ingress credential snapshots are no longer current"
 		}
 	}
-	if registrationsReady && registrationCurrent != nil {
-		current, err := registrationCurrent()
-		if err != nil || !current {
-			registrationsReady = false
-			if err != nil {
-				snapshot.Failure = err.Error()
-			} else {
-				snapshot.Failure = "public ingress credential snapshots are no longer current"
-			}
+	if effectCurrent != nil {
+		current, err := effectCurrent(ctx, intent.Authority)
+		if err != nil {
+			return false, err.Error()
+		}
+		if !current {
+			return false, "provider registration effect authority is no longer current"
 		}
 	}
-	snapshot.PublicIngressReady = exposureReady && registrationsReady
-	snapshot.Ready = snapshot.RuntimeReady && snapshot.PublicIngressReady
-	return snapshot
+	return true, ""
+}
+
+func (o *ReadinessOwner) Snapshot(now time.Time) Snapshot {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return o.evaluate(ctx, now).output
+}
+
+func (o *ReadinessOwner) CallbackCurrent(ctx context.Context, now time.Time, alias, provider, token string) bool {
+	if o == nil {
+		return false
+	}
+	evaluated := o.evaluate(ctx, now)
+	alias = strings.TrimSpace(alias)
+	provider = strings.TrimSpace(provider)
+	token = strings.TrimSpace(token)
+	for key, state := range evaluated.snapshot.registrations {
+		if !evaluated.current[key] || state.Pair.Target.Alias != alias || state.Pair.Target.Provider != provider || state.LastVerified == nil {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(state.LastVerified.CallbackToken), []byte(token)) == 1 {
+			return o.registration.currentRevision(evaluated.snapshot.revision)
+		}
+	}
+	return false
 }

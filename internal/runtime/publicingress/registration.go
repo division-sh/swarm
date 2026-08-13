@@ -63,27 +63,48 @@ type RegistrationControllerOptions struct {
 }
 
 type ProviderRegistrationController struct {
-	opts          RegistrationControllerOptions
-	reconcileMu   sync.Mutex
-	mu            sync.RWMutex
-	states        map[string]registrationState
-	managedRoutes map[string]struct{}
+	opts        RegistrationControllerOptions
+	reconcileMu sync.Mutex
+	snapshot    *RegistrationSnapshotOwner
 }
 
+type registrationPhase string
+
+const (
+	registrationPhaseNoAttempt         registrationPhase = "no_attempt"
+	registrationPhasePrelaunch         registrationPhase = "pre_launch"
+	registrationPhasePendingSettlement registrationPhase = "pending_settlement"
+	registrationPhaseVerified          registrationPhase = "verified"
+)
+
 type registrationState struct {
-	Pair             RegistrationPair
-	BaseFingerprint  string
-	IntentID         string
-	CallbackToken    string
-	CallbackURL      string
-	SlotID           string
-	Applied          bool
-	Matched          bool
-	ObservedAt       time.Time
-	ExpiresAt        time.Time
-	Failure          string
-	Authority        runtimeeffects.Authority
-	CredentialEpochs map[string]string
+	Pair         RegistrationPair
+	SelectedBase string
+	LastVerified *registrationIntent
+	Attempt      *registrationAttempt
+	Phase        registrationPhase
+	Failure      string
+}
+
+type registrationIntent struct {
+	BaseFingerprint      string
+	ExposureGenerationID string
+	IntentID             string
+	CallbackToken        string
+	CallbackURL          string
+	SlotID               string
+	ObservedAt           time.Time
+	ExpiresAt            time.Time
+	Authority            runtimeeffects.Authority
+	CredentialEpochs     map[string]string
+	Applied              bool
+	Matched              bool
+	Pending              runtimeregistration.PendingApply
+	HasPending           bool
+}
+
+type registrationAttempt struct {
+	Intent registrationIntent
 }
 
 type admittedPair struct {
@@ -107,17 +128,12 @@ func NewProviderRegistrationController(opts RegistrationControllerOptions) (*Pro
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	controller := &ProviderRegistrationController{opts: opts, states: map[string]registrationState{}, managedRoutes: map[string]struct{}{}}
-	opts.Readiness.SetStartupCurrent(func(expectedAuthorityID string) (bool, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		return controller.StartupCurrent(ctx, expectedAuthorityID)
-	})
-	opts.Readiness.SetRegistrationCurrent(func() (bool, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		return controller.CredentialsCurrent(ctx)
-	})
+	controller := &ProviderRegistrationController{opts: opts, snapshot: opts.Readiness.registration}
+	opts.Readiness.SetCurrentnessChecks(
+		controller.StartupCurrent,
+		controller.credentialEpochsCurrent,
+		opts.EffectsStore.IsExternalEffectAuthorityCurrent,
+	)
 	return controller, nil
 }
 
@@ -134,29 +150,6 @@ func (c *ProviderRegistrationController) StartupCurrent(ctx context.Context, exp
 	}
 	authority := serveRegistrationAuthority(startup, uuid.NewString(), c.opts.Posture, c.opts.Now())
 	return c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, authority)
-}
-
-func (c *ProviderRegistrationController) CredentialsCurrent(ctx context.Context) (bool, error) {
-	if c == nil {
-		return false, fmt.Errorf("provider registration controller is required")
-	}
-	c.mu.RLock()
-	states := make([]map[string]string, 0, len(c.states))
-	for _, state := range c.states {
-		epochs := make(map[string]string, len(state.CredentialEpochs))
-		for key, epoch := range state.CredentialEpochs {
-			epochs[key] = epoch
-		}
-		states = append(states, epochs)
-	}
-	c.mu.RUnlock()
-	for _, epochs := range states {
-		current, err := c.credentialEpochsCurrent(ctx, epochs)
-		if err != nil || !current {
-			return current, err
-		}
-	}
-	return true, nil
 }
 
 func (c *ProviderRegistrationController) credentialEpochsCurrent(ctx context.Context, epochs map[string]string) (bool, error) {
@@ -188,44 +181,27 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	if err := startup.Validate(); err != nil {
 		return fmt.Errorf("provider registration startup authority: %w", err)
 	}
+	c.snapshot.replaceSelected(pairs)
 	admitted := make([]admittedPair, 0, len(pairs))
 	for _, pair := range pairs {
-		c.mu.Lock()
-		c.managedRoutes[registrationRouteKey(pair.Target.Alias, pair.Target.Provider)] = struct{}{}
-		c.mu.Unlock()
 		candidate, err := c.admitAndIdentify(ctx, exposure, pair)
 		if err != nil {
-			c.recordFailure(pairKey(pair), pair, startup.AuthorityID, err)
+			c.recordFailure(pairKey(pair), pair, err)
 			return err
 		}
 		admitted = append(admitted, candidate)
 	}
 	if err := rejectSlotCollisions(admitted); err != nil {
 		for _, pair := range admitted {
-			c.recordFailure(pairKey(pair.pair), pair.pair, startup.AuthorityID, err)
+			c.recordFailure(pairKey(pair.pair), pair.pair, err)
 		}
 		return err
 	}
-	keys := make([]string, 0, len(admitted))
 	for _, pair := range admitted {
-		key := pairKey(pair.pair)
-		keys = append(keys, key)
 		if err := c.reconcilePair(ctx, exposure, startup, pair); err != nil {
 			return err
 		}
 	}
-	c.opts.Readiness.ReplaceRegistrationKeys(keys)
-	c.mu.Lock()
-	keep := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		keep[key] = struct{}{}
-	}
-	for key := range c.states {
-		if _, ok := keep[key]; !ok {
-			delete(c.states, key)
-		}
-	}
-	c.mu.Unlock()
 	return nil
 }
 
@@ -289,80 +265,142 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 
 func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair) error {
 	key := pairKey(candidate.pair)
-	c.mu.RLock()
-	current, exists := c.states[key]
-	c.mu.RUnlock()
-	if exists && current.BaseFingerprint == candidate.base {
-		current.Authority = serveRegistrationAuthority(startup, current.IntentID, c.opts.Posture, c.opts.Now())
-		return c.refreshReadback(ctx, startup, candidate, current, nil)
+	state, _ := c.snapshot.state(key)
+	state.Pair = candidate.pair
+	state.SelectedBase = candidate.base
+	state.Failure = ""
+	if state.Attempt != nil && state.Attempt.Intent.BaseFingerprint == candidate.base {
+		if state.Phase == registrationPhasePendingSettlement {
+			c.publishState(key, state)
+			return c.refreshReadback(ctx, candidate, state, true)
+		}
+		return c.launchAttempt(ctx, exposure, startup, candidate, state)
 	}
+	if state.LastVerified != nil && state.LastVerified.BaseFingerprint == candidate.base {
+		intent := cloneRegistrationIntent(*state.LastVerified)
+		intent.Authority = serveRegistrationAuthority(startup, intent.IntentID, c.opts.Posture, c.opts.Now())
+		state.LastVerified = &intent
+		state.Attempt = nil
+		state.Phase = registrationPhaseVerified
+		c.publishState(key, state)
+		return c.refreshReadback(ctx, candidate, state, false)
+	}
+	intent, err := c.newRegistrationIntent(exposure, startup, candidate)
+	if err != nil {
+		state.Failure = err.Error()
+		state.Phase = registrationPhaseNoAttempt
+		c.publishState(key, state)
+		return err
+	}
+	state.Attempt = &registrationAttempt{Intent: intent}
+	state.Phase = registrationPhasePrelaunch
+	c.publishState(key, state)
+	return c.launchAttempt(ctx, exposure, startup, candidate, state)
+}
+
+func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair) (registrationIntent, error) {
 	intentID := uuid.NewString()
 	token, err := randomToken(32)
 	if err != nil {
-		return err
+		return registrationIntent{}, err
 	}
 	callbackURL, err := CallbackURL(exposure, candidate.pair.Target.Alias, candidate.pair.Target.Provider, token)
 	if err != nil {
-		return err
+		return registrationIntent{}, err
 	}
-	state := registrationState{
-		Pair: candidate.pair, BaseFingerprint: candidate.base, IntentID: intentID, CallbackToken: token,
-		CallbackURL: callbackURL, SlotID: candidate.slotID, CredentialEpochs: candidateCredentialEpochs(candidate),
+	return registrationIntent{
+		BaseFingerprint: candidate.base, ExposureGenerationID: exposure.ID,
+		IntentID: intentID, CallbackToken: token, CallbackURL: callbackURL, SlotID: candidate.slotID,
+		Authority:        serveRegistrationAuthority(startup, intentID, c.opts.Posture, c.opts.Now()),
+		CredentialEpochs: candidateCredentialEpochs(candidate),
+	}, nil
+}
+
+func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, exposure Generation, startup runtimestartupownership.Authority, candidate admittedPair, state registrationState) error {
+	key := pairKey(candidate.pair)
+	if state.Attempt == nil {
+		return fmt.Errorf("provider registration pre-launch attempt is missing")
 	}
-	c.publishState(key, startup.AuthorityID, state)
+	intent := cloneRegistrationIntent(state.Attempt.Intent)
+	intent.ExposureGenerationID = exposure.ID
+	intent.Authority = serveRegistrationAuthority(startup, intent.IntentID, c.opts.Posture, c.opts.Now())
+	state.Attempt.Intent = intent
+	state.Phase = registrationPhasePrelaunch
+	state.Failure = ""
+	c.publishState(key, state)
 	if err := c.revalidateCredentials(ctx, candidate); err != nil {
 		state.Failure = err.Error()
-		c.publishState(key, startup.AuthorityID, state)
+		c.publishState(key, state)
 		return err
 	}
 	apply, err := candidate.pair.Registration.Operation(packs.RegistrationOperationApply)
 	if err != nil {
+		state.Failure = err.Error()
+		c.publishState(key, state)
 		return err
 	}
-	input, err := apply.Prepare(map[string]any{"callback_url": callbackURL})
+	input, err := apply.Prepare(map[string]any{"callback_url": intent.CallbackURL})
 	if err != nil {
+		state.Failure = err.Error()
+		c.publishState(key, state)
 		return err
 	}
-	credentials := candidateCredentials(candidate)
-	authority := serveRegistrationAuthority(startup, intentID, c.opts.Posture, c.opts.Now())
-	if !authority.Valid() {
+	if !intent.Authority.Valid() {
 		return fmt.Errorf("serve registration effect authority is invalid")
 	}
-	state.Authority = authority
 	effectController := runtimeeffects.NewController(c.opts.EffectsStore).WithExecutionPosture(c.opts.Posture)
 	effectCtx := runtimeeffects.WithController(ctx, effectController)
-	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
-	effectCtx = runtimeeffects.WithExecutionMode(effectCtx, authority.ExecutionMode)
+	effectCtx = runtimeeffects.WithAuthority(effectCtx, intent.Authority)
+	effectCtx = runtimeeffects.WithExecutionMode(effectCtx, intent.Authority.ExecutionMode)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(c.opts.RuntimeInstanceID, candidate.pair.Target.BundleHash))
-	result, applyErr := c.opts.HTTP.Apply(effectCtx, apply.ToolID(), apply.Tool(), input, credentials, map[string]string{
-		"binding_id": candidate.pair.BindingID, "target": candidate.pair.Target.Selector, "intent_id": intentID, "slot_id": candidate.slotID,
+	result, applyErr := c.opts.HTTP.Apply(effectCtx, apply.ToolID(), apply.Tool(), input, candidateCredentials(candidate), map[string]string{
+		"binding_id": candidate.pair.BindingID, "target": candidate.pair.Target.Selector, "intent_id": intent.IntentID, "slot_id": candidate.slotID,
 	})
 	if applyErr != nil && result.Pending == nil {
 		state.Failure = applyErr.Error()
-		c.publishState(key, startup.AuthorityID, state)
+		state.Attempt.Intent = intent
+		state.Phase = registrationPhasePrelaunch
+		c.publishState(key, state)
 		return applyErr
 	}
-	state.Applied = result.Acknowledged
-	return c.refreshReadback(effectCtx, startup, candidate, state, result.Pending)
+	intent.Applied = result.Acknowledged || result.Pending != nil
+	if result.Pending != nil {
+		intent.Pending = *result.Pending
+		intent.HasPending = true
+	}
+	state.Attempt.Intent = intent
+	state.Phase = registrationPhasePendingSettlement
+	state.Failure = ""
+	c.publishState(key, state)
+	return c.refreshReadback(effectCtx, candidate, state, true)
 }
 
-func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, startup runtimestartupownership.Authority, candidate admittedPair, state registrationState, pending *runtimeregistration.PendingApply) error {
-	current, err := c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, state.Authority)
+func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, candidate admittedPair, state registrationState, fromAttempt bool) error {
+	key := pairKey(candidate.pair)
+	active := state.activeIntent()
+	if active == nil {
+		return fmt.Errorf("provider registration intent is missing")
+	}
+	intent := cloneRegistrationIntent(*active)
+	current, err := c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, intent.Authority)
 	if err != nil || !current {
 		if err == nil {
 			err = fmt.Errorf("provider registration startup authority is no longer current")
 		}
 		state.Failure = err.Error()
-		state.Matched = false
-		c.publishState(pairKey(candidate.pair), startup.AuthorityID, state)
+		c.publishState(key, state)
 		return err
 	}
 	readback, err := candidate.pair.Registration.Operation(packs.RegistrationOperationReadback)
 	if err != nil {
+		state.Failure = err.Error()
+		c.publishState(key, state)
 		return err
 	}
 	input, err := readback.Prepare(map[string]any{})
 	if err != nil {
+		state.Failure = err.Error()
+		c.publishState(key, state)
 		return err
 	}
 	result, readErr := c.opts.HTTP.Read(ctx, readback.ToolID(), readback.Tool(), input, candidateCredentials(candidate))
@@ -372,30 +410,42 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, st
 		if projectErr != nil {
 			readErr = projectErr
 		} else {
-			exact = subtle.ConstantTimeCompare([]byte(strings.TrimSpace(fmt.Sprint(projected["callback_url"]))), []byte(state.CallbackURL)) == 1
+			exact = subtle.ConstantTimeCompare([]byte(strings.TrimSpace(fmt.Sprint(projected["callback_url"]))), []byte(intent.CallbackURL)) == 1
 			if !exact {
 				readErr = fmt.Errorf("provider callback readback does not match the current registration intent")
 			}
 		}
 	}
-	if pending != nil {
-		if settleErr := pending.SettleReadback(ctx, exact, readErr); settleErr != nil && !exact {
-			readErr = settleErr
-		} else if settleErr != nil {
+	if intent.HasPending && exact {
+		pending := intent.Pending
+		if settleErr := pending.SettleReadback(ctx, true, nil); settleErr != nil {
+			intent.Pending = pending
+			state.setActiveIntent(intent, fromAttempt)
+			state.Failure = settleErr.Error()
+			c.publishState(key, state)
 			return settleErr
 		}
+		intent.HasPending = false
+	}
+	if readErr != nil {
+		intent.Matched = false
+		state.setActiveIntent(intent, fromAttempt)
+		state.Failure = readErr.Error()
+		c.publishState(key, state)
+		return readErr
 	}
 	now := c.opts.Now().UTC()
-	state.Applied = state.Applied || exact
-	state.Matched = exact
-	state.ObservedAt = now
-	state.ExpiresAt = now.Add(EvidenceTTL)
+	intent.Applied = true
+	intent.Matched = true
+	intent.ObservedAt = now
+	intent.ExpiresAt = now.Add(EvidenceTTL)
+	intent.HasPending = false
+	state.LastVerified = &intent
+	state.Attempt = nil
+	state.Phase = registrationPhaseVerified
 	state.Failure = ""
-	if readErr != nil {
-		state.Failure = readErr.Error()
-	}
-	c.publishState(pairKey(candidate.pair), startup.AuthorityID, state)
-	return readErr
+	c.publishState(key, state)
+	return nil
 }
 
 func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Context, candidate admittedPair) error {
@@ -419,36 +469,7 @@ func (c *ProviderRegistrationController) revalidateCredentials(ctx context.Conte
 }
 
 func (c *ProviderRegistrationController) CallbackCurrent(ctx context.Context, alias, provider, token string) bool {
-	if c == nil {
-		return false
-	}
-	c.mu.RLock()
-	var authority runtimeeffects.Authority
-	var epochs map[string]string
-	for _, state := range c.states {
-		if state.Pair.Target.Alias != strings.TrimSpace(alias) || state.Pair.Target.Provider != strings.TrimSpace(provider) {
-			continue
-		}
-		if !state.Matched || subtle.ConstantTimeCompare([]byte(state.CallbackToken), []byte(strings.TrimSpace(token))) != 1 {
-			continue
-		}
-		authority = state.Authority
-		epochs = make(map[string]string, len(state.CredentialEpochs))
-		for key, epoch := range state.CredentialEpochs {
-			epochs[key] = epoch
-		}
-		break
-	}
-	c.mu.RUnlock()
-	if !authority.Valid() {
-		return false
-	}
-	credentialsCurrent, err := c.credentialEpochsCurrent(ctx, epochs)
-	if err != nil || !credentialsCurrent {
-		return false
-	}
-	current, err := c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, authority)
-	return err == nil && current
+	return c != nil && c.opts.Readiness.CallbackCurrent(ctx, c.opts.Now().UTC(), alias, provider, token)
 }
 
 func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler {
@@ -458,9 +479,7 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 			http.NotFound(response, request)
 			return
 		}
-		c.mu.RLock()
-		_, managed := c.managedRoutes[registrationRouteKey(parts[1], parts[2])]
-		c.mu.RUnlock()
+		managed := c.snapshot.routeSelected(parts[1], parts[2])
 		if !managed || !c.CallbackCurrent(request.Context(), parts[1], parts[2], request.URL.Query().Get("swarm_callback_generation")) {
 			http.NotFound(response, request)
 			return
@@ -469,21 +488,87 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 	})
 }
 
-func (c *ProviderRegistrationController) publishState(key, startupAuthorityID string, state registrationState) {
-	c.mu.Lock()
-	c.states[key] = state
-	c.mu.Unlock()
-	c.opts.Readiness.SetRegistration(key, RegistrationEvidence{
-		BindingID: state.Pair.BindingID, Target: state.Pair.Target.Selector, Provider: state.Pair.Target.Provider, Alias: state.Pair.Target.Alias,
-		IntentID: state.IntentID, SlotID: state.SlotID, StartupAuthorityID: startupAuthorityID,
-		CallbackURL: state.CallbackURL,
-		Applied:     state.Applied, CallbackMatched: state.Matched, ObservedAt: state.ObservedAt, ExpiresAt: state.ExpiresAt, Failure: state.Failure,
-	})
+func (c *ProviderRegistrationController) publishState(key string, state registrationState) {
+	c.snapshot.publishState(key, state)
 }
 
-func (c *ProviderRegistrationController) recordFailure(key string, pair RegistrationPair, startupAuthorityID string, err error) {
-	state := registrationState{Pair: pair, Failure: err.Error()}
-	c.publishState(key, startupAuthorityID, state)
+func (c *ProviderRegistrationController) recordFailure(key string, pair RegistrationPair, err error) {
+	state, _ := c.snapshot.state(key)
+	state.Pair = pair
+	state.Failure = err.Error()
+	if state.Phase == "" {
+		state.Phase = registrationPhaseNoAttempt
+	}
+	c.publishState(key, state)
+}
+
+func (s registrationState) activeIntent() *registrationIntent {
+	if s.Attempt != nil {
+		intent := cloneRegistrationIntent(s.Attempt.Intent)
+		return &intent
+	}
+	if s.LastVerified != nil {
+		intent := cloneRegistrationIntent(*s.LastVerified)
+		return &intent
+	}
+	return nil
+}
+
+func (s *registrationState) setActiveIntent(intent registrationIntent, fromAttempt bool) {
+	copy := cloneRegistrationIntent(intent)
+	if fromAttempt {
+		if s.Attempt == nil {
+			s.Attempt = &registrationAttempt{}
+		}
+		s.Attempt.Intent = copy
+		return
+	}
+	s.LastVerified = &copy
+}
+
+func (s registrationState) evidence(current bool) RegistrationEvidence {
+	evidence := RegistrationEvidence{
+		BindingID: s.Pair.BindingID, Target: s.Pair.Target.Selector, Provider: s.Pair.Target.Provider, Alias: s.Pair.Target.Alias,
+		Phase: string(s.Phase), Failure: s.Failure, CallbackMatched: current,
+	}
+	intent := s.activeIntent()
+	if intent == nil {
+		return evidence
+	}
+	evidence.IntentID = intent.IntentID
+	evidence.SlotID = intent.SlotID
+	evidence.CallbackURL = intent.CallbackURL
+	evidence.StartupAuthorityID = intent.Authority.ServeRegistration.StartupAuthorityID
+	evidence.Applied = intent.Applied
+	evidence.ObservedAt = intent.ObservedAt
+	evidence.ExpiresAt = intent.ExpiresAt
+	return evidence
+}
+
+func cloneRegistrationState(source registrationState) registrationState {
+	out := source
+	if source.LastVerified != nil {
+		intent := cloneRegistrationIntent(*source.LastVerified)
+		out.LastVerified = &intent
+	}
+	if source.Attempt != nil {
+		out.Attempt = &registrationAttempt{Intent: cloneRegistrationIntent(source.Attempt.Intent)}
+	}
+	return out
+}
+
+func cloneRegistrationIntent(source registrationIntent) registrationIntent {
+	out := source
+	out.CredentialEpochs = cloneStringMap(source.CredentialEpochs)
+	return out
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	out := make(map[string]string, len(source))
+	for key, value := range source {
+		out[key] = value
+	}
+	return out
 }
 
 func pairKey(pair RegistrationPair) string {

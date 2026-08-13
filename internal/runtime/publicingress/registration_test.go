@@ -37,6 +37,110 @@ type registrationEffectStore struct {
 	current bool
 }
 
+type launchMarkerFaultMode string
+
+const (
+	launchMarkerRollback launchMarkerFaultMode = "rollback"
+	launchMarkerAckLoss  launchMarkerFaultMode = "commit_then_error"
+)
+
+type retryingRegistrationEffectStore struct {
+	mu             sync.Mutex
+	mode           launchMarkerFaultMode
+	faultPending   bool
+	current        bool
+	byOperation    map[string]runtimeeffects.Attempt
+	states         map[string]runtimeeffects.State
+	operationOrder []string
+}
+
+func newRetryingRegistrationEffectStore(mode launchMarkerFaultMode) *retryingRegistrationEffectStore {
+	return &retryingRegistrationEffectStore{
+		mode: mode, faultPending: true, current: true,
+		byOperation: map[string]runtimeeffects.Attempt{}, states: map[string]runtimeeffects.State{},
+	}
+}
+
+func (s *retryingRegistrationEffectStore) IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.current, nil
+}
+
+func (s *retryingRegistrationEffectStore) AuthorizeExternalAttempt(_ context.Context, authority runtimeeffects.Authority, request runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prior, exists := s.byOperation[request.OperationID]; exists {
+		state := s.states[prior.AttemptID]
+		if state == runtimeeffects.StateAuthorized {
+			return prior, nil
+		}
+		if state != runtimeeffects.StateTerminalFailure {
+			return runtimeeffects.Attempt{}, errors.New("provider registration replay refused")
+		}
+		attemptID, err := runtimeeffects.AttemptID(request.OperationID, prior.Ordinal+1)
+		if err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+		attempt := runtimeeffects.Attempt{
+			OperationID: request.OperationID, AttemptID: attemptID, Authority: authority,
+			Kind: request.Kind, Class: request.Class, Adapter: request.Adapter, Transport: request.Transport,
+			Ordinal: prior.Ordinal + 1, AuthorizedAt: request.Now,
+		}
+		s.byOperation[request.OperationID] = attempt
+		s.states[attemptID] = runtimeeffects.StateAuthorized
+		return attempt, nil
+	}
+	attempt := runtimeeffects.Attempt{
+		OperationID: request.OperationID, AttemptID: request.AttemptID, Authority: authority,
+		Kind: request.Kind, Class: request.Class, Adapter: request.Adapter, Transport: request.Transport,
+		Ordinal: 1, AuthorizedAt: request.Now,
+	}
+	s.byOperation[request.OperationID] = attempt
+	s.states[attempt.AttemptID] = runtimeeffects.StateAuthorized
+	s.operationOrder = append(s.operationOrder, request.OperationID)
+	return attempt, nil
+}
+
+func (s *retryingRegistrationEffectStore) MarkExternalAttemptLaunched(_ context.Context, attempt runtimeeffects.Attempt, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.faultPending {
+		s.faultPending = false
+		if s.mode == launchMarkerAckLoss {
+			s.states[attempt.AttemptID] = runtimeeffects.StateLaunched
+		}
+		return errors.New("injected launch marker failure")
+	}
+	s.states[attempt.AttemptID] = runtimeeffects.StateLaunched
+	return nil
+}
+
+func (s *retryingRegistrationEffectStore) MarkExternalAttemptResponseObserved(_ context.Context, attempt runtimeeffects.Attempt, _ map[string]any, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.states[attempt.AttemptID] = runtimeeffects.StateResponseObserved
+	return nil
+}
+
+func (s *retryingRegistrationEffectStore) SettleExternalAttempt(_ context.Context, settlement runtimeeffects.Settlement) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.states[settlement.AttemptID] = settlement.State
+	return nil
+}
+
+func (s *retryingRegistrationEffectStore) attempts() (string, int, runtimeeffects.State) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.operationOrder) != 1 {
+		return "", 0, ""
+	}
+	operationID := s.operationOrder[0]
+	attempt := s.byOperation[operationID]
+	return operationID, attempt.Ordinal, s.states[attempt.AttemptID]
+}
+
 func (s *registrationEffectStore) IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -52,6 +156,7 @@ type telegramRegistrationTransport struct {
 	resourceIDs   map[string]int64
 	readbackURL   string
 	loseAck       bool
+	identifyErr   error
 }
 
 func (transport *telegramRegistrationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -62,6 +167,9 @@ func (transport *telegramRegistrationTransport) RoundTrip(request *http.Request)
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/getMe"):
 		transport.identifyCount++
+		if transport.identifyErr != nil {
+			return nil, transport.identifyErr
+		}
 		resourceID := int64(42)
 		if configured := transport.resourceIDs[token]; configured > 0 {
 			resourceID = configured
@@ -210,6 +318,34 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		t.Fatalf("same intent resent provider apply: count=%d", applied)
 	}
 
+	transport.mu.Lock()
+	transport.identifyErr = errors.New("transient identify unavailable")
+	transport.mu.Unlock()
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+		t.Fatal("transient identify failure returned nil")
+	}
+	failedObservation := readiness.Snapshot(time.Now().UTC())
+	if failedObservation.PublicIngressReady || len(failedObservation.Registrations) != 1 || failedObservation.Registrations[0].IntentID == "" {
+		t.Fatalf("transient identify failure destroyed verified lifecycle state: %#v", failedObservation)
+	}
+	failedCallback := httptest.NewRecorder()
+	controller.Handler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("observation-failed registration reached callback handler")
+	})).ServeHTTP(failedCallback, httptest.NewRequest(http.MethodPost, firstCallback, nil))
+	if failedCallback.Code != http.StatusNotFound {
+		t.Fatalf("observation-failed callback status=%d, want 404", failedCallback.Code)
+	}
+	transport.mu.Lock()
+	transport.identifyErr = nil
+	transport.mu.Unlock()
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+		t.Fatalf("recover transient identify failure: %v", err)
+	}
+	_, applied = transport.counts()
+	if applied != 1 {
+		t.Fatalf("transient identify recovery resent provider apply: count=%d", applied)
+	}
+
 	startup = testStartupAuthority(t, "runtime-b")
 	readiness.SetExposure(ExposureEvidence{
 		GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
@@ -328,6 +464,161 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	restarted := restartedReadiness.Snapshot(time.Now().UTC())
 	if len(restarted.Registrations) != 1 || !strings.HasPrefix(restarted.Registrations[0].CallbackURL, restartedExposure.PublicOrigin) || restarted.Registrations[0].CallbackURL == routed.Registrations[0].CallbackURL {
 		t.Fatalf("process restart registration = %#v", restarted.Registrations)
+	}
+}
+
+func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentness(t *testing.T) {
+	registration := loadTelegramRegistrationPlan(t)
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for key, value := range map[string]string{"bot": "token-v1", "signing": "signing-v1"} {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("Set(%s): %v", key, err)
+		}
+	}
+	snapshotOwner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatalf("NewSnapshotOwner: %v", err)
+	}
+	effectsStore := &registrationEffectStore{Harness: effecttest.New(), current: true}
+	effectsStore.SettleErr = errors.New("injected settlement acknowledgment loss")
+	transport := &telegramRegistrationTransport{t: t}
+	readiness := NewReadinessOwner(true)
+	startup := testStartupAuthority(t, "runtime-a")
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+		CredentialOwner: snapshotOwner, EffectsStore: effectsStore,
+		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+		StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+		Readiness:        readiness, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewProviderRegistrationController: %v", err)
+	}
+	exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
+	readiness.SetRuntimeReady(true)
+	readiness.SetExposure(ExposureEvidence{
+		GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+		ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
+	})
+	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+		t.Fatal("settlement acknowledgment loss returned nil")
+	}
+	pending := readiness.Snapshot(now)
+	if pending.PublicIngressReady || len(pending.Registrations) != 1 || pending.Registrations[0].Phase != string(registrationPhasePendingSettlement) {
+		t.Fatalf("pending settlement readiness = %#v", pending)
+	}
+	_, applied := transport.counts()
+	if applied != 1 {
+		t.Fatalf("pending settlement apply count=%d, want 1", applied)
+	}
+	effectsStore.SettleErr = nil
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+		t.Fatalf("settle original attempt by exact readback: %v", err)
+	}
+	settled := readiness.Snapshot(now)
+	if !settled.PublicIngressReady || settled.Registrations[0].Phase != string(registrationPhaseVerified) {
+		t.Fatalf("settled registration readiness = %#v", settled)
+	}
+	_, applied = transport.counts()
+	if applied != 1 {
+		t.Fatalf("settlement recovery resent provider apply: count=%d", applied)
+	}
+
+	handlerCalls := 0
+	handler := controller.Handler(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		handlerCalls++
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	callbackURL := settled.Registrations[0].CallbackURL
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, callbackURL, nil))
+	if recorder.Code != http.StatusNoContent || handlerCalls != 1 {
+		t.Fatalf("current callback status/calls=%d/%d, want 204/1", recorder.Code, handlerCalls)
+	}
+	now = now.Add(EvidenceTTL)
+	expired := httptest.NewRecorder()
+	handler.ServeHTTP(expired, httptest.NewRequest(http.MethodPost, callbackURL, nil))
+	if expired.Code != http.StatusNotFound || handlerCalls != 1 || readiness.Snapshot(now).PublicIngressReady {
+		t.Fatalf("expired callback status/calls=%d/%d snapshot=%#v", expired.Code, handlerCalls, readiness.Snapshot(now))
+	}
+
+	readiness.RevokeExposure("managed tunnel stopped")
+	revoked := httptest.NewRecorder()
+	handler.ServeHTTP(revoked, httptest.NewRequest(http.MethodPost, callbackURL, nil))
+	if revoked.Code != http.StatusNotFound || handlerCalls != 1 {
+		t.Fatalf("revoked callback status/calls=%d/%d, want 404/1", revoked.Code, handlerCalls)
+	}
+	if err := controller.Reconcile(context.Background(), exposure, nil); err != nil {
+		t.Fatalf("remove selected registrations: %v", err)
+	}
+	if snapshot := readiness.Snapshot(now); len(snapshot.Registrations) != 0 || controller.snapshot.routeSelected(pair.Target.Alias, pair.Target.Provider) {
+		t.Fatalf("removed registration survived atomic selection: %#v", snapshot)
+	}
+}
+
+func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t *testing.T) {
+	registration := loadTelegramRegistrationPlan(t)
+	for _, mode := range []launchMarkerFaultMode{launchMarkerRollback, launchMarkerAckLoss} {
+		t.Run(string(mode), func(t *testing.T) {
+			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatalf("NewFileStore: %v", err)
+			}
+			for key, value := range map[string]string{"bot": "token-v1", "signing": "signing-v1"} {
+				if err := credentialStore.Set(context.Background(), key, value); err != nil {
+					t.Fatalf("Set(%s): %v", key, err)
+				}
+			}
+			credentials, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+			if err != nil {
+				t.Fatalf("NewSnapshotOwner: %v", err)
+			}
+			effectsStore := newRetryingRegistrationEffectStore(mode)
+			transport := &telegramRegistrationTransport{t: t}
+			readiness := NewReadinessOwner(true)
+			startup := testStartupAuthority(t, "runtime-a")
+			controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+				CredentialOwner: credentials, EffectsStore: effectsStore,
+				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+				StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+				Readiness:        readiness,
+			})
+			if err != nil {
+				t.Fatalf("NewProviderRegistrationController: %v", err)
+			}
+			now := time.Now().UTC()
+			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
+			readiness.SetRuntimeReady(true)
+			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
+			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
+
+			if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
+				t.Fatal("launch marker failure returned nil")
+			}
+			if _, applied := transport.counts(); applied != 0 {
+				t.Fatalf("provider dispatched before durable launch marker: count=%d", applied)
+			}
+			firstOperation, ordinal, state := effectsStore.attempts()
+			if firstOperation == "" || ordinal != 1 || state != runtimeeffects.StateTerminalFailure {
+				t.Fatalf("prelaunch lifecycle operation=%q ordinal=%d state=%q", firstOperation, ordinal, state)
+			}
+			if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+				t.Fatalf("retry proven prelaunch failure: %v", err)
+			}
+			operation, ordinal, state := effectsStore.attempts()
+			if operation != firstOperation || ordinal != 2 || state != runtimeeffects.StateSettled {
+				t.Fatalf("retry lifecycle operation=%q ordinal=%d state=%q, want same/2/settled", operation, ordinal, state)
+			}
+			if _, applied := transport.counts(); applied != 1 {
+				t.Fatalf("provider retry dispatch count=%d, want 1", applied)
+			}
+		})
 	}
 }
 

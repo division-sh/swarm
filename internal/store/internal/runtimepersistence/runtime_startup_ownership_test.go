@@ -10,6 +10,7 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -113,6 +114,81 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 				}
 			})
 
+			for _, marker := range []struct {
+				name      string
+				committed bool
+			}{
+				{name: "launch marker rollback", committed: false},
+				{name: "launch marker committed acknowledgment loss", committed: true},
+			} {
+				t.Run("provider registration prelaunch retry after "+marker.name, func(t *testing.T) {
+					operationID := uuid.NewString()
+					request := runtimeeffects.AuthorizeRequest{
+						OperationID: operationID, AttemptID: uuid.NewString(), Kind: registration.Kind, Class: registration.Class,
+						Adapter: registration.Adapter, Transport: registration.Transport,
+						RequestFingerprint: runtimeeffects.Fingerprint([]byte("provider-registration-prelaunch-" + marker.name)),
+						Lineage:            map[string]string{"binding_id": "hitl", "intent_id": authority.ID}, Now: time.Now().UTC(),
+					}
+					first, err := store.AuthorizeExternalAttempt(ctx, authority, request)
+					if err != nil {
+						t.Fatalf("authorize first prelaunch attempt: %v", err)
+					}
+					if marker.committed {
+						if err := store.MarkExternalAttemptLaunched(ctx, first, time.Now().UTC()); err != nil {
+							t.Fatalf("commit launch marker: %v", err)
+						}
+					}
+					failureErr := runtimefailures.New(
+						runtimefailures.ClassDependencyUnavailable,
+						"provider_registration_prelaunch_rejected",
+						"provider_registration",
+						"dispatch",
+						map[string]any{"launch_rejected": true},
+					)
+					failure, ok := runtimefailures.EnvelopeFromError(failureErr)
+					if !ok {
+						t.Fatal("prelaunch failure envelope is missing")
+					}
+					if err := store.SettleExternalAttempt(ctx, runtimeeffects.Settlement{
+						OperationID: first.OperationID, AttemptID: first.AttemptID, Authority: authority,
+						State: runtimeeffects.StateTerminalFailure, Failure: &failure,
+						Evidence: map[string]any{"launch_rejected": true}, Now: time.Now().UTC(),
+					}); err != nil {
+						t.Fatalf("terminalize proven prelaunch attempt: %v", err)
+					}
+					request.AttemptID = uuid.NewString()
+					retry, err := store.AuthorizeExternalAttempt(ctx, authority, request)
+					if err != nil {
+						t.Fatalf("authorize fresh provider-registration retry: %v", err)
+					}
+					if retry.OperationID != first.OperationID || retry.AttemptID == first.AttemptID || retry.Ordinal != first.Ordinal+1 {
+						t.Fatalf("retry identity = %#v, first = %#v", retry, first)
+					}
+				})
+			}
+
+			t.Run("provider registration authorization acknowledgment loss resumes same prelaunch attempt", func(t *testing.T) {
+				operationID := uuid.NewString()
+				request := runtimeeffects.AuthorizeRequest{
+					OperationID: operationID, AttemptID: uuid.NewString(), Kind: registration.Kind, Class: registration.Class,
+					Adapter: registration.Adapter, Transport: registration.Transport,
+					RequestFingerprint: runtimeeffects.Fingerprint([]byte("provider-registration-authorization-ack-loss")),
+					Lineage:            map[string]string{"binding_id": "hitl", "intent_id": authority.ID}, Now: time.Now().UTC(),
+				}
+				first, err := store.AuthorizeExternalAttempt(ctx, authority, request)
+				if err != nil {
+					t.Fatalf("authorize committed prelaunch attempt: %v", err)
+				}
+				request.AttemptID = uuid.NewString()
+				resumed, err := store.AuthorizeExternalAttempt(ctx, authority, request)
+				if err != nil {
+					t.Fatalf("resume authorization after acknowledgment loss: %v", err)
+				}
+				if resumed.OperationID != first.OperationID || resumed.AttemptID != first.AttemptID || resumed.Ordinal != first.Ordinal {
+					t.Fatalf("resumed identity = %#v, first = %#v", resumed, first)
+				}
+			})
+
 			t.Run("settle rollback", func(t *testing.T) {
 				attempt, err := authorize("settle-rollback")
 				if err != nil {
@@ -132,6 +208,15 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 				restore()
 				if got := selectedStoreAttemptState(t, ctx, db, attempt.AttemptID); got != string(runtimeeffects.StateLaunched) {
 					t.Fatalf("settle rollback state=%q, want launched", got)
+				}
+				if err := store.SettleExternalAttempt(ctx, runtimeeffects.Settlement{
+					OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: authority,
+					State: runtimeeffects.StateSettled, Evidence: map[string]any{"authority": "provider_readback"}, Now: time.Now().UTC(),
+				}); err != nil {
+					t.Fatalf("settle original attempt after acknowledgment recovery: %v", err)
+				}
+				if got := selectedStoreAttemptState(t, ctx, db, attempt.AttemptID); got != string(runtimeeffects.StateSettled) {
+					t.Fatalf("settled original attempt state=%q, want settled", got)
 				}
 			})
 

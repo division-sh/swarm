@@ -108,7 +108,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 		if err := result.Pending.SettleReadback(context.Background(), false, errors.New("callback mismatch")); err == nil {
 			t.Fatal("mismatched readback returned nil")
 		}
-		if err := harness.RequireState("provider_registration", runtimeeffects.StateOutcomeUncertain); err != nil {
+		if err := harness.RequireState("provider_registration", runtimeeffects.StateLaunched); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -178,7 +178,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 		if strings.Contains(err.Error(), "acknowledgment_lost") {
 			t.Fatalf("prelaunch persistence failure was mislabeled as provider acknowledgment loss: %v", err)
 		}
-		if err := harness.RequireState("provider_registration", runtimeeffects.StateAuthorized); err != nil {
+		if err := harness.RequireState("provider_registration", runtimeeffects.StateTerminalFailure); err != nil {
 			t.Fatal(err)
 		}
 	})

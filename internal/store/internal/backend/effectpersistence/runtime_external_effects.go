@@ -135,7 +135,10 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 	if existing, found, err := loadExistingExternalAttemptPostgres(ctx, tx, req.OperationID); err != nil {
 		return runtimeeffects.Attempt{}, err
 	} else if found {
-		attempt, retry, err := authorizeClaudePrelaunchRetryPostgres(ctx, tx, authority, req, existing)
+		if attempt, resumed := resumeProviderRegistrationAuthorization(authority, req, existing); resumed {
+			return attempt, nil
+		}
+		attempt, retry, err := authorizePrelaunchRetryPostgres(ctx, tx, authority, req, existing)
 		if err != nil {
 			return runtimeeffects.Attempt{}, err
 		}
@@ -186,8 +189,12 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 		if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
 			return err
 		} else if found {
+			if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
+				attempt = resumed
+				return nil
+			}
 			var retry bool
-			attempt, retry, err = authorizeClaudePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
+			attempt, retry, err = authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
 			if err != nil {
 				return err
 			}
@@ -737,23 +744,23 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 	return existing, true, nil
 }
 
-func authorizeClaudePrelaunchRetryPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool, error) {
-	if !claudePrelaunchRetryEligible(authority, req, existing) {
+func authorizePrelaunchRetryPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool, error) {
+	if !prelaunchRetryEligible(authority, req, existing) {
 		return runtimeeffects.Attempt{}, false, nil
 	}
 	return insertExternalRetryAttemptPostgres(ctx, tx, authority, req, existing.attemptOrdinal+1)
 }
 
-func authorizeClaudePrelaunchRetrySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool, error) {
-	if !claudePrelaunchRetryEligible(authority, req, existing) {
+func authorizePrelaunchRetrySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool, error) {
+	if !prelaunchRetryEligible(authority, req, existing) {
 		return runtimeeffects.Attempt{}, false, nil
 	}
 	attempt, err := insertExternalRetryAttemptSQLiteTx(ctx, tx, authority, req, existing.attemptOrdinal+1)
 	return attempt, true, err
 }
 
-func claudePrelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) bool {
-	if req.Adapter != "claude_cli" || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
+func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) bool {
+	if (req.Adapter != "claude_cli" && req.Adapter != "provider_registration") || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
 		existing.attemptState != string(runtimeeffects.StateTerminalFailure) {
 		return false
 	}
@@ -769,6 +776,15 @@ func claudePrelaunchRetryEligible(authority runtimeeffects.Authority, req runtim
 	}
 	launchRejected, _ := failure.Detail.Attributes["launch_rejected"].(bool)
 	return launchRejected && failure.Retryable
+}
+
+func resumeProviderRegistrationAuthorization(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool) {
+	if req.Adapter != "provider_registration" || existing.operationState != string(runtimeeffects.StateAuthorized) ||
+		existing.attemptState != string(runtimeeffects.StateAuthorized) || existing.launched ||
+		!existing.matchesRetryAuthority(authority) || !existing.matchesRequest(req) {
+		return runtimeeffects.Attempt{}, false
+	}
+	return externalAuthorizedAttempt(authority, req, existing.attemptID, existing.attemptOrdinal), true
 }
 
 func insertExternalRetryAttemptPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, ordinal int) (runtimeeffects.Attempt, bool, error) {
