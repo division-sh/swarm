@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/google/uuid"
 )
 
@@ -91,7 +92,7 @@ func TestValidateSource_RejectsUndefinedWorkspaceClass(t *testing.T) {
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
 				Value: map[string]any{
@@ -139,9 +140,6 @@ packages:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	if _, ok := source.AgentEntries()["shared-worker"]; ok {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened aliases")
-	}
 	err = validateAgentWorkspaceClasses(source, map[string]string{"dedicated": "per-agent"})
 	if err == nil || !strings.Contains(err.Error(), `project packages/project-a agent shared-worker references undefined workspace_class "missing"`) {
 		t.Fatalf("validateAgentWorkspaceClasses error = %v, want qualified scoped-agent failure", err)

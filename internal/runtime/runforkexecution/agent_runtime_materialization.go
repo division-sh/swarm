@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -33,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -56,6 +58,7 @@ type SelectedContractAgentRuntimeOptions struct {
 	MCPClient           *runtimemcp.Client
 	AgentFactory        runtimemanager.AgentFactory
 	AgentManagerOptions runtimemanager.AgentManagerOptions
+	ProcessCapability   runtimestartupownership.ProcessCapability
 	QuiescenceTimeout   time.Duration
 }
 
@@ -142,6 +145,35 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 	if err != nil {
 		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, err
 	}
+	if options.ProcessCapability == nil {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration provenance requires the process topology capability")
+	}
+	plan, exists, err := options.ProcessCapability.CurrentSourceSet(ctx)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("prove selected-contract source-set authority: %w", err)
+	}
+	if !exists {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration provenance requires an installed source-set plan")
+	}
+	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}.Normalize()
+	if err := coordinate.Validate(); err != nil {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract declaration source coordinate: %w", err)
+	}
+	sourceCurrent := false
+	for _, source := range plan.Sources {
+		if source.Normalize().Key() == coordinate.Key() {
+			sourceCurrent = true
+			break
+		}
+	}
+	if !sourceCurrent {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, errors.New("selected-contract declaration source is not current in the process source-set plan")
+	}
+	topology, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeEphemeral)
+	if err != nil {
+		return selectedContractAgentRuntimePlan{Proof: proof, Options: options}, fmt.Errorf("selected-contract declaration topology: %w", err)
+	}
 	recordsByIdentity := map[agentidentity.Identity]runtimemanager.PersistedAgent{}
 	configured := make([]agentidentity.Identity, 0, len(records))
 	for _, rec := range records {
@@ -154,6 +186,7 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 		}
 		rec.Status = "ephemeral"
 		rec.HiredBy = "selected-contract-fork-agent-runtime"
+		rec.Topology = topology
 		recordsByIdentity[identity] = rec
 		configured = append(configured, identity)
 	}
@@ -269,7 +302,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		}
 	}()
 	for _, rec := range req.AgentRuntime.Records {
-		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !errors.Is(err, runtimemanager.ErrAgentAlreadyExists) {
+		if err := manager.MaterializeAdmittedAgentForExecution(ctx, rec); err != nil {
 			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
 		identity, err := rec.Config.ConcreteIdentity()

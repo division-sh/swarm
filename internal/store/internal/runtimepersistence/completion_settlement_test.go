@@ -314,9 +314,9 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	}
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,?,?,?,?,?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?)`,
+		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at,topology_authority_kind,topology_admission,execution_lifetime) VALUES (?,?,?,?,?,?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?,'static_declaration_plan',?,'durable_managed')`,
 			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
-			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now); err != nil {
+			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now, testAgentTopologyJSON(t)); err != nil {
 			t.Fatalf("seed completion agent: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,'active',?,?)`,
@@ -327,9 +327,9 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 		}
 	} else {
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$8)`,
+		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at,topology_authority_kind,topology_admission,execution_lifetime) VALUES ($1,$2,$3,$4,$5,$6,$7,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$8,'static_declaration_plan',$9::jsonb,'durable_managed')`,
 			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
-			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now); err != nil {
+			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now, testAgentTopologyJSON(t)); err != nil {
 			t.Fatalf("seed completion agent: %v", err)
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)`,

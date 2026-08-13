@@ -3,6 +3,8 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -49,6 +50,9 @@ func TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency(t *testing.T) {
 	if executor.calls[0].BundleHash != runStartTestBundleHash || !executor.calls[0].Force || executor.calls[0].DryRun {
 		t.Fatalf("bundle.delete request = %#v", executor.calls[0])
 	}
+	if _, err := uuid.Parse(executor.calls[0].OperationID); err != nil {
+		t.Fatalf("bundle.delete operation id = %q: %v", executor.calls[0].OperationID, err)
+	}
 
 	replay := rpcCall(t, handler, body)
 	if replay.Error != nil {
@@ -64,6 +68,39 @@ func TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency(t *testing.T) {
 	}
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("bundle.delete conflict data = %#v, want %s", data, IdempotencyConflictCode)
+	}
+}
+
+func TestOperatorBundleDeleteRetryUsesFreshOccurrenceWithExactReplayAuthority(t *testing.T) {
+	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash, err: errors.New("post-commit refresh failed")}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
+			Ready: func() bool { return true }, Database: fakePinger{},
+			Idempotency: newRecordingAPIIdempotencyStore(), BundleDelete: executor,
+		}),
+	})
+	body := `{"jsonrpc":"2.0","id":"delete","method":"bundle.delete","params":{"bundle_hash":"` + runStartTestBundleHash + `","idempotency_key":"post-commit-replay"}}`
+	if first := rpcCall(t, handler, body); first.Error == nil {
+		t.Fatal("first bundle.delete error = nil")
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("first bundle.delete calls = %d, want 1", len(executor.calls))
+	}
+	firstOperationID := executor.calls[0].OperationID
+	firstReplayKeyHash := executor.calls[0].ReplayKeyHash
+	if firstReplayKeyHash == "" {
+		t.Fatal("first bundle.delete replay key hash is empty")
+	}
+	executor.err = nil
+	if replay := rpcCall(t, handler, body); replay.Error != nil {
+		t.Fatalf("bundle.delete retry error = %#v", replay.Error)
+	}
+	if len(executor.calls) != 2 || executor.calls[1].OperationID == firstOperationID {
+		t.Fatalf("bundle.delete retry operation ids = %#v, want fresh invocation occurrences", executor.calls)
+	}
+	if executor.calls[1].ReplayKeyHash != firstReplayKeyHash {
+		t.Fatalf("bundle.delete retry replay key hashes = %#v, want exact keyed recovery authority", executor.calls)
 	}
 }
 
@@ -127,75 +164,22 @@ func TestOperatorBundleDeleteNonForceMissingBundleError(t *testing.T) {
 	}
 }
 
-func TestOperatorBundleDeleteDeactivatesLoadedRuntimeContext(t *testing.T) {
-	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
-	manager := newBundleDeleteRuntimeContextManager(t)
-	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Now:             func() time.Time { return now },
-			Ready:           func() bool { return true },
-			Database:        fakePinger{},
-			Idempotency:     newRecordingAPIIdempotencyStore(),
-			RuntimeContexts: manager,
-			BundleDelete:    executor,
-		}),
-	})
-
-	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"bundle.delete","params":{"bundle_hash":"`+runStartTestBundleHash+`","idempotency_key":"runtime-context-delete"}}`)
-	if resp.Error != nil {
-		t.Fatalf("bundle.delete error = %#v", resp.Error)
-	}
-	if result := asMap(t, resp.Result); result["deleted"] != true {
-		t.Fatalf("bundle.delete result = %#v, want deleted", result)
-	}
-	lookup := manager.LookupBundleHashStatus(runStartTestBundleHash)
-	if lookup.Loaded() || lookup.Cause != swruntime.RuntimeContextCauseUnloaded {
-		t.Fatalf("runtime context lookup after bundle.delete = %#v, want unloaded", lookup)
-	}
-}
-
-func TestOperatorBundleDeleteForceDoesNotInferRuntimeDeactivationFromResult(t *testing.T) {
+func TestOperatorBundleDeleteDoesNotInterpretExecutorResultAsRuntimeAuthority(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name   string
-		result bundledelete.Result
+		name  string
+		force bool
 	}{
-		{
-			name: "pre_cleanup_inventory_failure_stays_loaded",
-			result: bundledelete.Result{
-				OK:             false,
-				Status:         "partial_failure",
-				OperationName:  bundledelete.DefaultOperationName,
-				BundleHash:     runStartTestBundleHash,
-				Force:          true,
-				PartialFailure: true,
-				Errors:         []bundledelete.PartialError{{Scope: "managed_containers", Message: "inventory failed"}},
-			},
-		},
-		{
-			name: "cleanup_started_partial_failure_deactivates",
-			result: bundledelete.Result{
-				OK:             false,
-				Status:         "partial_failure",
-				OperationName:  bundledelete.DefaultOperationName,
-				BundleHash:     runStartTestBundleHash,
-				Force:          true,
-				PartialFailure: true,
-				Cleanup: preservationcleanup.Result{
-					OperationName: preservationcleanup.BundleForceDeleteOperationName,
-					AppliedAt:     now,
-					ControlledBy:  preservationcleanup.BundleForceDeleteControlledBy,
-				},
-				Errors: []bundledelete.PartialError{{Scope: "managed_containers", Message: "stop failed"}},
-			},
-		},
+		{name: "non_force", force: false},
+		{name: "force", force: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := newBundleDeleteRuntimeContextManager(t)
-			executor := &staticBundleDeleteResultExecutor{result: tt.result}
+			executor := &staticBundleDeleteResultExecutor{result: bundledelete.Result{
+				OK: true, Status: "completed", OperationName: bundledelete.DefaultOperationName,
+				BundleHash: runStartTestBundleHash, Force: tt.force, Deleted: true,
+			}}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
 				Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -208,13 +192,13 @@ func TestOperatorBundleDeleteForceDoesNotInferRuntimeDeactivationFromResult(t *t
 				}),
 			})
 
-			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"bundle.delete","params":{"bundle_hash":"`+runStartTestBundleHash+`","force":true,"idempotency_key":"runtime-context-partial-`+tt.name+`"}}`)
+			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"delete","method":"bundle.delete","params":{"bundle_hash":"`+runStartTestBundleHash+`","force":`+fmt.Sprint(tt.force)+`,"idempotency_key":"runtime-context-owner-`+tt.name+`"}}`)
 			if resp.Error != nil {
-				t.Fatalf("bundle.delete partial error = %#v", resp.Error)
+				t.Fatalf("bundle.delete error = %#v", resp.Error)
 			}
 			lookup := manager.LookupBundleHashStatus(runStartTestBundleHash)
 			if !lookup.Loaded() {
-				t.Fatalf("runtime context lookup after force result = %#v, want coordinator-owned quiescence only", lookup)
+				t.Fatalf("runtime context lookup after executor result = %#v, want coordinator-owned quiescence only", lookup)
 			}
 		})
 	}
@@ -268,6 +252,14 @@ func TestOperatorBundleDeleteNonForceUsesOwnerChainAndIdempotency(t *testing.T) 
 	}
 	if executor.calls[1].BundleHash != runStartTestBundleHash || executor.calls[1].Force || !executor.calls[1].DryRun {
 		t.Fatalf("bundle.delete explicit force false request = %#v", executor.calls[1])
+	}
+	if executor.calls[0].OperationID == executor.calls[1].OperationID {
+		t.Fatalf("separate bundle.delete requests reused operation id %q", executor.calls[0].OperationID)
+	}
+	for i, call := range executor.calls {
+		if _, err := uuid.Parse(call.OperationID); err != nil {
+			t.Fatalf("bundle.delete call %d operation id = %q: %v", i, call.OperationID, err)
+		}
 	}
 }
 

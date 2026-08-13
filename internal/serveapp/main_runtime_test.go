@@ -35,6 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -1588,6 +1589,68 @@ func TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostg
 	assertServedSessionCleanupQuiesced(t, proof)
 }
 
+func TestRunServeRuntimeBundleDeleteNonForceQuiescesLoadedAgentsBeforeTopologyRemovalPostgres(t *testing.T) {
+	rt := startServedLiveAgentProofRuntime(t, servedparity.BackendExplicitPostgres)
+	var before, running int
+	if err := rt.DB.QueryRowContext(context.Background(), `
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'active' AND lifecycle_phase = 'running')
+		FROM agents
+	`).Scan(&before, &running); err != nil {
+		t.Fatalf("read agents before non-force bundle.delete: %v", err)
+	}
+	if before == 0 || running != before {
+		t.Fatalf("agents before non-force bundle.delete = total:%d running:%d, want nonzero all running", before, running)
+	}
+
+	response := requestServedJSONRPC(t, rt.Endpoint, "bundle.delete", map[string]any{
+		"bundle_hash": rt.BundleHash, "force": false,
+		"idempotency_key": "issue-2125-bundle-non-force-" + uuid.NewString(),
+	})
+	if response.Error != nil {
+		t.Fatalf("bundle.delete error = %#v", response.Error)
+	}
+	var result struct {
+		OK      bool `json:"ok"`
+		Deleted bool `json:"deleted"`
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode bundle.delete result: %v", err)
+	}
+	if !result.OK || !result.Deleted {
+		t.Fatalf("bundle.delete result = %#v, want completed deletion", result)
+	}
+
+	var quiesced int
+	if err := rt.DB.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM agents
+		WHERE lifecycle_phase = 'registered' AND lifecycle_run_mode = 'stopped'
+	`).Scan(&quiesced); err != nil {
+		t.Fatalf("read agents after non-force bundle.delete: %v", err)
+	}
+	if quiesced != before {
+		t.Fatalf("quiesced agents after non-force bundle.delete = %d, want %d", quiesced, before)
+	}
+	var bundleExists bool
+	if err := rt.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, rt.BundleHash).Scan(&bundleExists); err != nil {
+		t.Fatalf("read bundle after non-force bundle.delete: %v", err)
+	}
+	if bundleExists {
+		t.Fatalf("bundle %s survived non-force bundle.delete", rt.BundleHash)
+	}
+	var rawPlan []byte
+	if err := rt.DB.QueryRowContext(context.Background(), `SELECT plan FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&rawPlan); err != nil {
+		t.Fatalf("read process topology after non-force bundle.delete: %v", err)
+	}
+	var plan runtimeagenttopology.SourceSetPlan
+	if err := json.Unmarshal(rawPlan, &plan); err != nil {
+		t.Fatalf("decode process topology after non-force bundle.delete: %v", err)
+	}
+	if len(plan.Sources) != 0 || len(plan.Agents) != 0 {
+		t.Fatalf("process topology after non-force bundle.delete = %#v, want empty complete source set", plan)
+	}
+}
+
 func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
 	proof := startServedSessionCleanupProof(t)
 	var result struct {
@@ -1602,6 +1665,44 @@ func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testin
 		t.Fatalf("served runtime.nuke result = %#v", result)
 	}
 	assertServedSessionCleanupQuiesced(t, proof)
+}
+
+func TestRunServeRuntimeNukeWithBundlesClearsProcessTopologyBeforeCleanupPostgres(t *testing.T) {
+	proof := startServedSessionCleanupProof(t)
+	var result struct {
+		OK             bool   `json:"ok"`
+		Status         string `json:"status"`
+		IncludeBundles bool   `json:"include_bundles"`
+	}
+	runServedSessionCleanupMutation(t, proof, "runtime.nuke", map[string]any{
+		"include_bundles": true, "idempotency_key": "issue-2125-runtime-nuke-bundles-" + uuid.NewString(),
+	}, &result)
+	if !result.OK || result.Status != "completed" || !result.IncludeBundles {
+		t.Fatalf("served runtime.nuke include_bundles result = %#v", result)
+	}
+	assertServedSessionCleanupQuiesced(t, proof)
+
+	var bundleExists bool
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, proof.BundleHash).Scan(&bundleExists); err != nil {
+		t.Fatalf("read served bundle after runtime.nuke: %v", err)
+	}
+	if bundleExists {
+		t.Fatalf("bundle %s survived include_bundles runtime.nuke", proof.BundleHash)
+	}
+	var rawPlan []byte
+	if err := proof.DB.QueryRowContext(context.Background(), `SELECT plan FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&rawPlan); err != nil {
+		t.Fatalf("read process topology after runtime.nuke: %v", err)
+	}
+	var plan runtimeagenttopology.SourceSetPlan
+	if err := json.Unmarshal(rawPlan, &plan); err != nil {
+		t.Fatalf("decode process topology after runtime.nuke: %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("validate process topology after runtime.nuke: %v", err)
+	}
+	if len(plan.Sources) != 0 || len(plan.Agents) != 0 {
+		t.Fatalf("process topology after runtime.nuke = %#v, want empty complete source set", plan)
+	}
 }
 
 type servedSessionCleanupProof struct {
@@ -2500,6 +2601,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		t.Fatalf("build %s conversation fork source identity: %v", backend, err)
 	}
 	ctx := context.Background()
+	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, fixture.RunID, identity.FlowInstancePath)
 	capabilityIDs := make([]string, 0, 2)
 	var capabilityStore managedcapabilities.Persistence
 	switch backend {
@@ -2548,9 +2650,10 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			{`INSERT INTO agents (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,'researcher','regular','openai_compatible',TRUE,'authored',$8::jsonb)`,
-				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor}},
+				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
+				topology_authority_kind, topology_admission, execution_lifetime
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,'researcher','regular','openai_compatible',TRUE,'authored',$8::jsonb,$9,$10::jsonb,$11)`,
+				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime}},
 			{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -2582,9 +2685,10 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			{`INSERT INTO agents (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
-			) VALUES (?,?,?,?,?,?,?,'researcher','regular','openai_compatible',1,'authored',?)`,
-				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor}},
+				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
+				topology_authority_kind, topology_admission, execution_lifetime
+			) VALUES (?,?,?,?,?,?,?,'researcher','regular','openai_compatible',1,'authored',?,?,?,?)`,
+				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime}},
 			{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -2622,6 +2726,19 @@ type servedConversationForkCounts struct {
 	Events    int
 	Mailbox   int
 	Mutations int
+}
+
+func serveTestFlowReadinessTopologyValues(t testing.TB, runID, instancePath string) (string, string, string) {
+	t.Helper()
+	admission, err := runtimeagenttopology.FlowReadinessAdmission(runID, instancePath, "serve-test-flow-readiness-plan-v1")
+	if err != nil {
+		t.Fatalf("construct serve test flow-readiness topology: %v", err)
+	}
+	raw, err := json.Marshal(admission)
+	if err != nil {
+		t.Fatalf("encode serve test flow-readiness topology: %v", err)
+	}
+	return string(admission.Authority.Kind), string(raw), string(admission.Lifetime)
 }
 
 func servedConversationForkLiveCounts(t *testing.T, db *sql.DB, backend, runID string) servedConversationForkCounts {
@@ -7322,6 +7439,201 @@ func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *te
 	}
 }
 
+func TestRunServeRuntimeBundleDeleteRefreshesSurvivingGenerationPostgres(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	dsn, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	firstRoot := writeServeRuntimeAgentSlugFixture(t, "delete-source-set-a", "alpha-worker")
+	secondRoot := writeServeRuntimeAgentSlugFixture(t, "delete-source-set-b", "beta-worker")
+	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
+	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
+	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
+	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath: writeServeRuntimeTestConfig(t), BundleHash: firstHash, BundleHashes: []string{secondHash},
+		PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres",
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+		TestLLMRuntime: runtimellm.NoopRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
+			contextsReady <- contexts
+		},
+	})
+	serve.waitForReadyLine()
+	var contexts *runtimepkg.RuntimeContextManager
+	select {
+	case contexts = <-contextsReady:
+	case <-time.After(serveRuntimeReadyTimeout):
+		t.Fatal("timed out waiting for multi-bundle runtime contexts")
+	}
+	var predecessorGrantID, predecessorRevision string
+	var predecessorGeneration uint64
+	if err := db.QueryRowContext(ctx, `
+		SELECT grant_id::text, runtime_generation, source_set_revision
+		FROM runtime_generation_grants
+		WHERE bundle_hash = $1 AND state = 'admitted'
+		ORDER BY created_at DESC, state_version DESC
+		LIMIT 1
+	`, secondHash).Scan(&predecessorGrantID, &predecessorGeneration, &predecessorRevision); err != nil {
+		t.Fatalf("read surviving predecessor grant: %v", err)
+	}
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
+	response := requestServedJSONRPCWithTimeout(t, endpoint, "bundle.delete", map[string]any{
+		"bundle_hash": firstHash, "force": false,
+		"idempotency_key": "issue-2125-survivor-refresh-" + uuid.NewString(),
+	}, 30*time.Second)
+	if response.Error != nil {
+		t.Fatalf("bundle.delete error = %#v", response.Error)
+	}
+	var result struct {
+		OK      bool `json:"ok"`
+		Deleted bool `json:"deleted"`
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode bundle.delete result: %v", err)
+	}
+	if !result.OK || !result.Deleted {
+		t.Fatalf("bundle.delete result = %#v, want completed deletion", result)
+	}
+	if lookup := contexts.LookupBundleHashStatus(firstHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded {
+		t.Fatalf("deleted runtime context state = %#v, want unloaded", lookup)
+	}
+	if lookup := contexts.LookupBundleHashStatus(secondHash); lookup.State != runtimepkg.RuntimeContextStateLoaded {
+		t.Fatalf("surviving runtime context state = %#v, want loaded", lookup)
+	}
+
+	var rawPlan []byte
+	if err := db.QueryRowContext(ctx, `SELECT plan FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&rawPlan); err != nil {
+		t.Fatalf("read source-set head after bundle delete: %v", err)
+	}
+	var plan runtimeagenttopology.SourceSetPlan
+	if err := json.Unmarshal(rawPlan, &plan); err != nil {
+		t.Fatalf("decode source-set head after bundle delete: %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("validate source-set head after bundle delete: %v", err)
+	}
+	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != secondHash {
+		t.Fatalf("source-set head after bundle delete = %#v, want sole survivor %s", plan.Sources, secondHash)
+	}
+	var successorGrantID, successorRevision string
+	var successorGeneration uint64
+	if err := db.QueryRowContext(ctx, `
+		SELECT grant_id::text, runtime_generation, source_set_revision
+		FROM runtime_generation_grants
+		WHERE bundle_hash = $1 AND state = 'admitted'
+		ORDER BY created_at DESC, state_version DESC
+		LIMIT 1
+	`, secondHash).Scan(&successorGrantID, &successorGeneration, &successorRevision); err != nil {
+		t.Fatalf("read surviving successor grant: %v", err)
+	}
+	if successorGrantID == predecessorGrantID || successorGeneration != predecessorGeneration+1 ||
+		successorRevision != plan.Revision || predecessorRevision == plan.Revision {
+		t.Fatalf("surviving grant rotation = predecessor:%s/%d/%s successor:%s/%d/%s plan:%s",
+			predecessorGrantID, predecessorGeneration, predecessorRevision,
+			successorGrantID, successorGeneration, successorRevision, plan.Revision)
+	}
+	var predecessorState string
+	if err := db.QueryRowContext(ctx, `
+		SELECT state
+		FROM runtime_generation_grants
+		WHERE grant_id = $1::uuid
+		ORDER BY state_version DESC
+		LIMIT 1
+	`, predecessorGrantID).Scan(&predecessorState); err != nil {
+		t.Fatalf("read surviving predecessor retirement: %v", err)
+	}
+	if predecessorState != "retired" {
+		t.Fatalf("surviving predecessor grant state = %q, want retired", predecessorState)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT agent_id, lifecycle_phase, lifecycle_run_mode, topology_admission FROM agents ORDER BY agent_id`)
+	if err != nil {
+		t.Fatalf("read lifecycle cells after bundle delete: %v", err)
+	}
+	defer rows.Close()
+	seenSurvivor := false
+	for rows.Next() {
+		var agentID, phase, runMode string
+		var rawAdmission []byte
+		if err := rows.Scan(&agentID, &phase, &runMode, &rawAdmission); err != nil {
+			t.Fatalf("scan lifecycle cell after bundle delete: %v", err)
+		}
+		var admission runtimeagenttopology.Admission
+		if err := json.Unmarshal(rawAdmission, &admission); err != nil {
+			t.Fatalf("decode %s topology admission: %v", agentID, err)
+		}
+		owner := admission.Authority.Static
+		if owner == nil || owner.BundleHash != secondHash {
+			continue
+		}
+		seenSurvivor = true
+		if owner.SourceSetRevision != plan.Revision || phase != "running" || runMode != "standard" {
+			t.Fatalf("surviving lifecycle cell = agent:%s phase:%s mode:%s topology:%#v, want running/current", agentID, phase, runMode, admission)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate lifecycle cells after bundle delete: %v", err)
+	}
+	if !seenSurvivor {
+		t.Fatal("surviving runtime has no current static lifecycle cell")
+	}
+	var rebindOperations int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_lifecycle_operations
+		WHERE operation_kind = 'source_set_rebind' AND agent_id = 'beta-worker'
+	`).Scan(&rebindOperations); err != nil {
+		t.Fatalf("count surviving topology rebind operations: %v", err)
+	}
+	if rebindOperations != 1 {
+		t.Fatalf("surviving topology rebind operations = %d, want 1", rebindOperations)
+	}
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("Run code after survivor refresh = %d\noutput:\n%s", code, serve.outputString())
+	}
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		reopened, err := store.NewPostgresStore(dsn)
+		if err != nil {
+			return storeBundle{}, err
+		}
+		storetest.BootstrapPostgresRuntimeStore(t, reopened)
+		return selectedPostgresStoreBundle(reopened, storetest.DatabaseForTest(reopened), cfg), nil
+	}
+
+	restarted := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath: writeServeRuntimeTestConfig(t), BundleHash: secondHash,
+		PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres",
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
+		TestLLMRuntime: runtimellm.NoopRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	restarted.waitForReadyLine()
+	if code := restarted.stop(); code != 0 {
+		t.Fatalf("Run code after deleted-source restart = %d\noutput:\n%s", code, restarted.outputString())
+	}
+	var removedPhase, removedTopology string
+	if err := db.QueryRowContext(ctx, `
+		SELECT lifecycle_phase, topology_admission::text
+		FROM agents
+		WHERE agent_id = 'alpha-worker'
+	`).Scan(&removedPhase, &removedTopology); err != nil {
+		t.Fatalf("read removed-source lifecycle after restart: %v", err)
+	}
+	if removedPhase != "terminated" {
+		t.Fatalf("removed-source lifecycle phase after restart = %q, want terminated", removedPhase)
+	}
+	var removalAdmission runtimeagenttopology.Admission
+	if err := json.Unmarshal([]byte(removedTopology), &removalAdmission); err != nil {
+		t.Fatalf("decode removed-source cleanup admission: %v", err)
+	}
+	if removalAdmission.Authority.Static == nil ||
+		removalAdmission.Authority.Static.BundleHash != secondHash ||
+		removalAdmission.Authority.Static.SourceSetRevision != plan.Revision {
+		t.Fatalf("removed-source cleanup admission = %#v, want current survivor grant topology", removalAdmission)
+	}
+}
+
 func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrForkchat(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -7432,14 +7744,16 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	ctx := context.Background()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
 	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
+	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, serveRuntimeUnavailableRunIDForTest, identity.FlowInstancePath)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
+			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
+			topology_authority_kind, topology_admission, execution_lifetime
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor); err != nil {
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb,$9,$10::jsonb,$11)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(cliapp.RepoRoot(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
@@ -7546,6 +7860,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
 	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
+	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, runID, identity.FlowInstancePath)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
@@ -7561,10 +7876,11 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
+			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
+			topology_authority_kind, topology_admission, execution_lifetime
 		)
-		VALUES (?,?,?,?,?,?,?,'operator','default','anthropic',TRUE,'authored',?)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor); err != nil {
+		VALUES (?,?,?,?,?,?,?,'operator','default','anthropic',TRUE,'authored',?,?,?,?)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime); err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite delivery agent: %v", err)
 	}
@@ -8912,6 +9228,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	activeSessionID := uuid.NewString()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
 	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
+	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, runID, identity.FlowInstancePath)
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
@@ -8929,10 +9246,11 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor
+			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
+			topology_authority_kind, topology_admission, execution_lifetime
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor); err != nil {
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb,$9,$10::jsonb,$11)
+	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime); err != nil {
 		t.Fatalf("seed active delivery agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

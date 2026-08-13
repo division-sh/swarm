@@ -12,8 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -31,8 +33,10 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 const selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -77,6 +81,86 @@ func selectedContractAgentTestSourceFact(t *testing.T) runtimecorrelation.Bundle
 		t.Fatalf("construct selected-contract source fact: %v", err)
 	}
 	return fact
+}
+
+func selectedContractTestDeclarationTopology(t testing.TB) runtimeagenttopology.Admission {
+	t.Helper()
+	topology, err := runtimeagenttopology.StaticAdmission(
+		"selected-contract-test-source-set-v1",
+		selectedContractAgentTestBundleHash,
+		"ephemeral",
+		runtimeagenttopology.LifetimeEphemeral,
+	)
+	if err != nil {
+		t.Fatalf("construct selected-contract declaration topology: %v", err)
+	}
+	return topology
+}
+
+func selectedContractTestProcessCapability(
+	t testing.TB,
+	ctx context.Context,
+	selected runtimestartupownership.Store,
+	loaded LoadedSelectedContractSource,
+) runtimestartupownership.ProcessCapability {
+	t.Helper()
+	if selected == nil {
+		t.Fatal("selected-contract topology fixture requires a selected store")
+	}
+	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	records, err := selectedContractStaticAgentRecords(loaded.Source)
+	if err != nil {
+		t.Fatalf("compile selected-contract declaration records: %v", err)
+	}
+	desiredByIdentity := make(map[string]runtimeagenttopology.DesiredAgent, len(records))
+	for _, record := range records {
+		identity, identityErr := record.Config.ConcreteIdentity()
+		if identityErr != nil {
+			t.Fatalf("selected-contract declaration identity: %v", identityErr)
+		}
+		revision, revisionErr := canonicaljson.Hash(record.Config)
+		if revisionErr != nil {
+			t.Fatalf("selected-contract declaration revision: %v", revisionErr)
+		}
+		candidate := runtimeagenttopology.DesiredAgent{
+			Identity: identity, Source: coordinate, ConfigRevision: revision,
+		}
+		key, keyErr := candidate.Key()
+		if keyErr != nil {
+			t.Fatalf("selected-contract declaration key: %v", keyErr)
+		}
+		if previous, exists := desiredByIdentity[key]; exists && previous != candidate {
+			t.Fatalf("selected-contract declaration %s compiles inconsistently", identity.Description())
+		}
+		desiredByIdentity[key] = candidate
+	}
+	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(desiredByIdentity))
+	for _, candidate := range desiredByIdentity {
+		desired = append(desired, candidate)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatalf("construct selected-contract source set: %v", err)
+	}
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("acquire selected-contract process capability: %v", err)
+	}
+	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), Plan: plan,
+	}); err != nil {
+		_ = capability.Release(context.Background())
+		t.Fatalf("install selected-contract source set: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := capability.Release(context.Background()); err != nil {
+			t.Errorf("release selected-contract process capability: %v", err)
+		}
+	})
+	return capability
 }
 
 func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredecessorRetirement(t *testing.T) {
@@ -359,7 +443,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 			Records: []runtimemanager.PersistedAgent{{Config: selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
 				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
-			})}},
+			}), Topology: selectedContractTestDeclarationTopology(t)}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {

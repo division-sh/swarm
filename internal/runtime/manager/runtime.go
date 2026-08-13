@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -946,20 +947,11 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 		return summary, fmt.Errorf("project lifecycle diagnostics: %w", err)
 	}
 
-	agents, err := am.store.LoadAgents(ctx)
-	if err != nil {
-		return summary, fmt.Errorf("load agents: %w", err)
-	}
-	sort.SliceStable(agents, func(i, j int) bool {
-		return agents[i].StartedAt.Before(agents[j].StartedAt)
-	})
-	for _, rec := range agents {
-		if rec.Config.ID == "" {
-			continue
-		}
-		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !errors.Is(err, ErrAgentAlreadyExists) {
-			return summary, fmt.Errorf("hydrate agent %s: %w", rec.Config.ID, err)
-		}
+	am.mu.RLock()
+	hydrated := am.startupAgentsHydrated
+	am.mu.RUnlock()
+	if !hydrated {
+		return summary, errors.New("static declaration reconciliation must hydrate agents before startup recovery")
 	}
 	if err := am.reconcileDynamicFlowRuntimeReadinessForStartup(ctx); err != nil {
 		return summary, &dynamicFlowRuntimeReadinessFinalizationError{cause: err}
@@ -1377,7 +1369,7 @@ func (am *AgentManager) replaceExecutionIdentityConfigWithTopology(
 	patch *runtimeactors.AgentConfig,
 	source semanticview.Source,
 	exact bool,
-	topology *DynamicAgentTopologyMutation,
+	topology *runtimeagenttopology.Admission,
 	expected *runtimeactors.AgentConfig,
 ) (replaceExecutionResult, error) {
 	identity = identity.Normalize()
@@ -1395,7 +1387,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	patch *runtimeactors.AgentConfig,
 	source semanticview.Source,
 	exact bool,
-	topology *DynamicAgentTopologyMutation,
+	topology *runtimeagenttopology.Admission,
 	expected *runtimeactors.AgentConfig,
 ) (replaceExecutionResult, error) {
 	am.lifecycle.executionPublishMu.Lock()
@@ -1417,6 +1409,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	current := snapshotExecution(execution)
 	currentPhase := cell.phase
 	currentRevision := cell.configRevision
+	currentTopology := cell.topology
 	currentLoopLive := execution.loopDone != nil && execution.routeToken.Valid()
 	am.lifecycle.mu.Unlock()
 	if expected != nil {
@@ -1488,7 +1481,11 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		if err != nil {
 			return replaceExecutionResult{}, err
 		}
-		if revision == currentRevision {
+		replacementTopology := currentTopology
+		if topology != nil {
+			replacementTopology = *topology
+		}
+		if lifecycleProjectionEqual(revision, replacementTopology, currentRevision, currentTopology) {
 			return replaceExecutionResult{previous: current.Config, config: current.Config}, nil
 		}
 		candidateAgent, err := am.buildAgent(updated)
@@ -2094,16 +2091,17 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runti
 		return
 	}
 
-	if ok && am.store != nil {
-		_ = am.store.UpsertAgent(ctx, PersistedAgent{
-			Config:          cfg,
-			ParentAgentID:   cfg.ParentAgent,
-			CoordinatorID:   am.resolveManagerAgentID(identity),
-			Status:          "failed",
-			HiredBy:         "runtime",
-			TemplateVersion: "",
-			StartedAt:       time.Now(),
-		})
+	if ok {
+		if _, err := am.lifecycle.terminateIdentityWithTopology(context.WithoutCancel(ctx), identity, "agent_loop_panic_threshold", AgentLifecycleFailed, nil); err != nil && am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "persist_agent_failure_failed",
+				AgentID:   agent.ID(),
+				EntityID:  entityID,
+				Failure:   failureEnvelope(err, "agent-manager", "persist_agent_failure"),
+			})
+		}
 	}
 
 	failedEvent, constructErr := newPlatformContextualRuntimeDiagnosticEvent(eventCtx, am.executionPosture, events.EventType("platform.agent_failed"), mustJSON(map[string]any{

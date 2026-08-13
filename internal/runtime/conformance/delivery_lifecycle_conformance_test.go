@@ -8,15 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -1420,26 +1424,23 @@ func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliver
 	if err != nil {
 		t.Fatalf("seed delivery agent identity: %v", err)
 	}
-	agentQuery := `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, role, model
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, 'delivery-test', 'test')
-		ON CONFLICT (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance
-		) DO NOTHING`
+	selected, ok := backend.selected.(storetest.AgentFixtureStore)
+	if !ok {
+		t.Fatalf("delivery lifecycle selected store %T lacks canonical agent fixture admission", backend.selected)
+	}
+	storetest.RequireAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID: agentID, Identity: identity, Role: "delivery-test", Type: "stub", Model: "regular", ExecutionMode: "live",
+			ResolvedLLMBackend: "anthropic", Intent: deliveryLifecycleAgentIntent(t, agentID),
+		},
+		Status: "active", HiredBy: "delivery-lifecycle-conformance", StartedAt: time.Now().UTC(),
+	})
 	sessionQuery := `
-		INSERT INTO agent_sessions (
+			INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
 		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)`
 	if !backend.postgres {
-		agentQuery = `
-			INSERT OR IGNORE INTO agents (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance, role, model
-			) VALUES (?, ?, ?, ?, ?, ?, ?, 'delivery-test', 'test')`
 		sessionQuery = `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -1450,13 +1451,24 @@ func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliver
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 	}
-	if _, err := backend.db.ExecContext(ctx, agentQuery, identityArgs...); err != nil {
-		t.Fatalf("seed delivery agent: %v", err)
-	}
 	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
 	if _, err := backend.db.ExecContext(ctx, sessionQuery, sessionArgs...); err != nil {
 		t.Fatalf("seed delivery agent session: %v", err)
 	}
+}
+
+func deliveryLifecycleAgentIntent(t testing.TB, agentID string) runtimeagentintent.Resolved {
+	t.Helper()
+	intent, err := runtimeagentintent.Resolve(
+		runtimeagentintent.SourceInline,
+		"inline",
+		"agents.yaml#agents."+strings.TrimSpace(agentID)+".intent",
+		"Settle the exact delivery lifecycle conformance route.",
+	)
+	if err != nil {
+		t.Fatalf("resolve delivery lifecycle agent intent: %v", err)
+	}
+	return intent
 }
 
 func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConformanceBackend {

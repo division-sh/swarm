@@ -17,6 +17,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -213,7 +215,21 @@ func seedProviderTriggerSmokeRuntime(
 	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
-	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	const fixtureBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	admission, err := runtimeagenttopology.StaticAdmission(
+		"provider-trigger-smoke-source-set-v1",
+		fixtureBundleHash,
+		"ephemeral",
+		runtimeagenttopology.LifetimeDurableManaged,
+	)
+	if err != nil {
+		t.Fatalf("construct provider trigger smoke topology: %v", err)
+	}
+	agentContext := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
+		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		fixtureBundleHash,
+	))
+	if err := storetest.UpsertAgentFixture(agentContext, sqliteStore, runtimemanager.PersistedAgent{
 		Config: serveTestAgentConfig(runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           servedRuntimeRootIdentity(t, agentID),
@@ -229,6 +245,7 @@ func seedProviderTriggerSmokeRuntime(
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: now,
+		Topology:  admission,
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}

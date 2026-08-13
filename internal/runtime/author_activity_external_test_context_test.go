@@ -11,6 +11,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -27,6 +28,8 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/google/uuid"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -201,6 +204,125 @@ func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps ru
 		deps.HumanTaskExpiry = owner
 	}
 	return deps
+}
+
+func installExternalRuntimeTestGeneration(
+	t testing.TB,
+	ctx context.Context,
+	selected any,
+	runtime *runtimepkg.Runtime,
+) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant) {
+	t.Helper()
+	store, ok := selected.(runtimestartupownership.Store)
+	if !ok {
+		t.Fatalf("selected runtime test owner %T lacks process capability acquisition", selected)
+	}
+	if runtime == nil || runtime.Manager == nil || runtime.Options.WorkflowModule == nil {
+		t.Fatal("external runtime test generation requires a constructed runtime and semantic source")
+	}
+	bundleHash, bundleSource := runtime.Options.BundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	desired, err := runtime.Manager.CompileStaticTopologyDesiredAgents(runtime.Options.WorkflowModule.SemanticSource(), coordinate)
+	if err != nil {
+		t.Fatalf("compile external runtime test source set: %v", err)
+	}
+	capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "external-runtime-test", BootID: uuid.NewString(), RuntimeInstanceID: runtime.Options.RuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire external runtime test process capability: %v", err)
+	}
+	current, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		_ = capability.Release(context.Background())
+		t.Fatalf("load external runtime test source set: %v", err)
+	}
+	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(current.Sources)+1)
+	for _, source := range current.Sources {
+		if source.Normalize().Key() != coordinate.Normalize().Key() {
+			sources = append(sources, source)
+		}
+	}
+	sources = append(sources, coordinate)
+	agents := make([]runtimeagenttopology.DesiredAgent, 0, len(current.Agents)+len(desired))
+	for _, agent := range current.Agents {
+		if agent.Source.Normalize().Key() != coordinate.Normalize().Key() {
+			agents = append(agents, agent)
+		}
+	}
+	agents = append(agents, desired...)
+	plan, err := runtimeagenttopology.NewSourceSetPlan(sources, agents)
+	if err != nil {
+		_ = capability.Release(context.Background())
+		t.Fatalf("construct external runtime test source set: %v", err)
+	}
+	commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
+	if exists {
+		commit.ExpectedRevision = current.Revision
+		_, err = capability.ReplaceSourceSet(ctx, commit)
+	} else {
+		_, err = capability.InstallCompleteSourceSet(ctx, commit)
+	}
+	if err != nil {
+		_ = capability.Release(context.Background())
+		t.Fatalf("commit external runtime test source set: %v", err)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: bundleHash, BundleSource: bundleSource,
+		RuntimeInstanceID: runtime.Options.RuntimeInstanceID, RuntimeGeneration: 1,
+		SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		_ = capability.Release(context.Background())
+		t.Fatalf("issue external runtime test generation grant: %v", err)
+	}
+	if err := runtime.InstallStartupGrant(grant); err != nil {
+		_ = capability.Release(context.Background())
+		t.Fatalf("install external runtime test generation grant: %v", err)
+	}
+	return capability, grant
+}
+
+func installExternalManagerTestGeneration(
+	t testing.TB,
+	ctx context.Context,
+	manager *runtimemanager.AgentManager,
+	grant runtimestartupownership.GenerationGrant,
+) {
+	t.Helper()
+	if manager == nil || grant == nil {
+		t.Fatal("external manager test generation requires a manager and generation grant")
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatalf("load external manager test grant evidence: %v", err)
+	}
+	plan, err := grant.SourceSetPlan(ctx)
+	if err != nil {
+		t.Fatalf("load external manager test source set: %v", err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(
+		evidence.SourceSetRevision,
+		evidence.BundleHash,
+		evidence.BundleSource,
+		runtimeagenttopology.LifetimeDurableManaged,
+	)
+	if err != nil {
+		t.Fatalf("construct external manager test topology admission: %v", err)
+	}
+	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
+		t.Fatalf("install external manager test generation: %v", err)
+	}
+}
+
+func releaseExternalRuntimeTestCapability(t testing.TB, capability runtimestartupownership.ProcessCapability) {
+	t.Helper()
+	if capability == nil {
+		return
+	}
+	if err := capability.Release(context.Background()); err != nil {
+		t.Fatalf("release external runtime test process capability: %v", err)
+	}
 }
 
 type externalRuntimeTestDurableEventStore interface {

@@ -25,7 +25,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	module := loadAgentFreeRuntimeWorkflowModule(t)
-	if got := len(module.SemanticSource().AgentEntries()); got != 0 {
+	if got := len(semanticview.AgentDeclarations(module.SemanticSource())); got != 0 {
 		t.Fatalf("agent-free fixture has %d semantic agents", got)
 	}
 
@@ -86,7 +86,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
-	if got := len(module.SemanticSource().AgentEntries()); got == 0 {
+	if got := len(semanticview.AgentDeclarations(module.SemanticSource())); got == 0 {
 		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
 	}
 
@@ -125,7 +125,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	t.Cleanup(func() { _ = rt.Shutdown() })
-	if err := rt.Manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered", Model: "regular"})); err != nil {
+	if err := registerRuntimeTestAgent(rt.Manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered", Model: "regular"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 

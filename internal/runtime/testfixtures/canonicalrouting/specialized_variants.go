@@ -57,6 +57,52 @@ pins:
 	return root
 }
 
+// CopyManagedNativeLifecycle owns the route-bearing shell used by the runtime
+// startup capability test. The test varies only the declared agent identity.
+func CopyManagedNativeLifecycle(t testing.TB, agentID string) string {
+	t.Helper()
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		t.Fatal("managed-native lifecycle fixture requires an agent ID")
+	}
+	root := CopyExample(t, RootIngress)
+	writeClosedVariantFile(t, root, "package.yaml", `name: managed-native-lifecycle
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows: []
+`)
+	writeClosedVariantFile(t, root, "schema.yaml", `name: managed-native-lifecycle
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [task.requested]
+`)
+	writeClosedVariantFile(t, root, "agents.yaml", fmt.Sprintf(`%s:
+  id: %s
+  type: stub
+  role: researcher
+  model: regular
+  intent: prompts/%s.md
+  native_tools:
+    web_search: true
+  subscriptions:
+    - task.requested
+  emit_events: []
+`, agentID, agentID, agentID))
+	writeClosedVariantFile(t, root, filepath.Join("prompts", agentID+".md"), "Operate as the managed native lifecycle test agent.\n")
+	for file, contents := range map[string]string{
+		"nodes.yaml":  "{}\n",
+		"events.yaml": "task.requested:\n  swarm:\n    source: external\n",
+		"policy.yaml": "{}\n",
+		"tools.yaml":  "{}\n",
+	} {
+		writeClosedVariantFile(t, root, file, contents)
+	}
+	return root
+}
+
 // CopyDescribeStageGraph owns the route-bearing shell around the CLI stage
 // graph fixture; stage/timer/join content remains its distinct test concept.
 func CopyDescribeStageGraph(t testing.TB) string {

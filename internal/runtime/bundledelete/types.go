@@ -10,11 +10,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/google/uuid"
 )
 
 const (
-	DefaultOperationName = "bundle.delete"
-	ForceControlledBy    = DefaultOperationName
+	DefaultOperationName      = "bundle.delete"
+	ForceControlledBy         = DefaultOperationName
+	FinalMutationReplayWindow = 24 * time.Hour
 )
 
 var (
@@ -49,12 +51,14 @@ func (e *ActiveRunsRemainError) Is(target error) bool {
 }
 
 type Request struct {
-	ActorTokenID string
-	RequestHash  string
-	BundleHash   string
-	Force        bool
-	DryRun       bool
-	RequestedAt  time.Time
+	OperationID   string
+	ActorTokenID  string
+	RequestHash   string
+	ReplayKeyHash string
+	BundleHash    string
+	Force         bool
+	DryRun        bool
+	RequestedAt   time.Time
 }
 
 type Result struct {
@@ -124,7 +128,10 @@ type TimerRef struct {
 }
 
 type FinalMutationRequest struct {
+	OperationID   string
 	OperationName string
+	RequestHash   string
+	ReplayKeyHash string
 	BundleHash    string
 	RequestedAt   time.Time
 }
@@ -153,6 +160,12 @@ type Finalizer interface {
 	ApplyBundleDeleteFinalMutation(context.Context, FinalMutationRequest) (FinalMutationResult, error)
 }
 
+// FinalMutationReplayer is implemented by the process topology owner that can
+// prove and complete an already-committed bundle/source-set operation.
+type FinalMutationReplayer interface {
+	ReplayBundleDeleteFinalMutation(context.Context, FinalMutationRequest) (FinalMutationResult, error)
+}
+
 type LockManager interface {
 	AcquireBundleDelete(context.Context) (LockLease, bool, error)
 }
@@ -170,11 +183,16 @@ type ManagedContainerStopper interface {
 }
 
 func NormalizeRequest(req Request, now time.Time) (Request, error) {
+	req.OperationID = strings.TrimSpace(req.OperationID)
 	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
 	req.RequestHash = strings.TrimSpace(req.RequestHash)
+	req.ReplayKeyHash = strings.TrimSpace(req.ReplayKeyHash)
 	req.BundleHash = strings.TrimSpace(req.BundleHash)
 	if req.ActorTokenID == "" {
 		return Request{}, fmt.Errorf("%w: actor token id is required", ErrInvalidRequest)
+	}
+	if _, err := uuid.Parse(req.OperationID); err != nil {
+		return Request{}, fmt.Errorf("%w: operation_id is invalid: %v", ErrInvalidRequest, err)
 	}
 	if req.BundleHash == "" {
 		return Request{}, fmt.Errorf("%w: bundle_hash is required", ErrInvalidRequest)

@@ -1,9 +1,7 @@
 package runtimepersistence
 
 import (
-	"bytes"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -31,11 +29,11 @@ func TestAgentTopologyMutationProductionConsumersStatic(t *testing.T) {
 		agentWrites[name] += count
 	}
 	for name, want := range map[string]int{
-		"authorizeAgentTopologyMutation":                4,
-		"AuthorizePostgresDynamicAgentTopologyMutation": 1,
-		"AuthorizeSQLiteDynamicAgentTopologyMutation":   1,
-		"AuthorizePostgresRawAgentTopologyMutation":     1,
-		"AuthorizeSQLiteRawAgentTopologyMutation":       1,
+		"authorizeAgentTopologyMutation":                2,
+		"AuthorizePostgresDynamicAgentTopologyMutation": 0,
+		"AuthorizeSQLiteDynamicAgentTopologyMutation":   0,
+		"AuthorizePostgresRawAgentTopologyMutation":     0,
+		"AuthorizeSQLiteRawAgentTopologyMutation":       0,
 	} {
 		if got := storeCalls[name]; got != want {
 			t.Fatalf("production %s calls = %d, want %d", name, got, want)
@@ -43,9 +41,7 @@ func TestAgentTopologyMutationProductionConsumersStatic(t *testing.T) {
 	}
 	wantWrites := map[string]int{
 		"lifecycle.go":                       4,
-		"catalog.go":                         1,
 		"external_effect_authority_store.go": 2,
-		"sqlite_catalog.go":                  1,
 	}
 	if len(agentWrites) != len(wantWrites) {
 		t.Fatalf("production agents-table writers = %#v, want %#v", agentWrites, wantWrites)
@@ -57,46 +53,8 @@ func TestAgentTopologyMutationProductionConsumersStatic(t *testing.T) {
 	}
 
 	managerCalls, _ := inspectAgentTopologyProductionPackage(t, filepath.Join(repoRootForRuntimeWriterGuard(t), "internal", "runtime", "manager"))
-	if got := managerCalls["UpsertAgent"]; got != 3 {
-		t.Fatalf("production UpsertAgent calls in manager = %d, want three classified lifecycle/fallback consumers", got)
-	}
-}
-
-func TestTerminalTopologyClassificationUsesTypedTargetPhase(t *testing.T) {
-	path := filepath.Join(repoRootForRuntimeWriterGuard(t), "internal", "store", "internal", "backend", "agentpersistence", "dynamic_topology.go")
-	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var classification ast.Expr
-	for _, declaration := range parsed.Decls {
-		fn, ok := declaration.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "lifecycleAgentTopologyMutation" {
-			continue
-		}
-		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			element, ok := node.(*ast.KeyValueExpr)
-			if !ok {
-				return true
-			}
-			key, ok := element.Key.(*ast.Ident)
-			if ok && key.Name == "changesDesiredSet" {
-				classification = element.Value
-				return false
-			}
-			return true
-		})
-	}
-	if classification == nil {
-		t.Fatal("lifecycle topology classification is missing")
-	}
-	var rendered bytes.Buffer
-	if err := format.Node(&rendered, token.NewFileSet(), classification); err != nil {
-		t.Fatal(err)
-	}
-	const want = "req.Agent != nil || req.TargetPhase == runtimemanager.AgentLifecycleTerminated"
-	if got := rendered.String(); got != want {
-		t.Fatalf("lifecycle topology classification = %q, want %q", got, want)
+	if got := managerCalls["UpsertAgent"]; got != 0 {
+		t.Fatalf("production UpsertAgent calls in manager = %d, want zero raw topology writers", got)
 	}
 }
 

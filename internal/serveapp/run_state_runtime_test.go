@@ -256,20 +256,21 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
-	if err := am.SpawnAgent(serveTestAgentConfig(runtimeactors.AgentConfig{
+	runID := uuid.NewString()
+	registerServeTestDurableAgent(t, pg, am, serveTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
+		Identity:      servedRuntimeRootIdentity(t, testAgent.id),
+		Role:          "worker",
+		Type:          "stub",
 		Model:         "regular",
 		Subscriptions: []string{"scan.requested"},
-	})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
+	}))
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	defer func() { _ = am.Shutdown() }()
 
-	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, pg, runID, entityID)
@@ -380,20 +381,21 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
-	if err := am.SpawnAgent(serveTestAgentConfig(runtimeactors.AgentConfig{
+	runID := uuid.NewString()
+	registerServeTestDurableAgent(t, pg, am, serveTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
+		Identity:      servedRuntimeRootIdentity(t, testAgent.id),
+		Role:          "worker",
+		Type:          "stub",
 		Model:         "regular",
 		Subscriptions: []string{"scan.requested"},
-	})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
+	}))
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext())); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
 	defer func() { _ = am.Shutdown() }()
 
-	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := publishRunStatusRootEvent(t, eb, runID, entityID)
 	seedRunStatusEntityState(t, pg, runID, entityID)

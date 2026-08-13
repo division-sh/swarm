@@ -58,7 +58,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"),
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestTopologyAdmission(t),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"),
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestTopologyAdmission(t),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"),
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestTopologyAdmission(t),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		return agent, nil
 	})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"),
+		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestTopologyAdmission(t),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}

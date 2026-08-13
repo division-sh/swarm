@@ -75,7 +75,7 @@ func TestValidateSelectedBackendCredentialForActiveAgents_MockWaiverInvariant(t 
 		ExecutionPosture:  executionposture.Live,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live", ID: "recovered-agent", Role: "recovered",
 		Model: "regular",
 	})); err != nil {

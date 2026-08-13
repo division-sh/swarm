@@ -281,9 +281,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 			t.Errorf("shutdown directive integration manager: %v", err)
 		}
 	})
-	if err := manager.SpawnAgent(withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
+	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -351,9 +349,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 			t.Errorf("shutdown canonical source manager: %v", err)
 		}
 	})
-	if err := manager.SpawnAgent(withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular"})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
+	materializeAPITestAgent(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -383,6 +379,38 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 		t.Fatalf("existing-run directive error = %#v", explicit.Error)
 	}
 	assertRunBundleIdentity(t, db, existingRunID, bootFact.BundleHash(), storerunlifecycle.BundleSourceEphemeral)
+}
+
+func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
+	t.Helper()
+	cfg.Identity = agentidentitytest.RootRuntime(t, cfg.ID, "api-test")
+	if cfg.Role == "" {
+		cfg.Role = "api-test"
+	}
+	if cfg.Type == "" {
+		cfg.Type = "stub"
+	}
+	storetest.RequireAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+		Config: cfg, Status: "active", HiredBy: "api-test",
+	})
+	persisted, err := selected.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("load admitted API test agent: %v", err)
+	}
+	var admitted *runtimemanager.PersistedAgent
+	for i := range persisted {
+		if persisted[i].Config.ID == cfg.ID {
+			admitted = &persisted[i]
+			break
+		}
+	}
+	if admitted == nil {
+		t.Fatalf("admitted API test agent %s is missing", cfg.ID)
+	}
+	admitted.Config = cfg
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, *admitted); err != nil {
+		t.Fatalf("materialize API test agent: %v", err)
+	}
 }
 
 func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *testing.T) {

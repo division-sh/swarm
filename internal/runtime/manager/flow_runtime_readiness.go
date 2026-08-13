@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -756,7 +757,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := am.reconcileDynamicFlowAgentSet(ctx, source, readiness.InstancePath, records, persistedAgents, topologyAuthority); err != nil {
 		return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 	}
-	if err := am.verifyDynamicFlowAgents(ctx, readiness.InstancePath, records); err != nil {
+	if err := am.verifyDynamicFlowAgents(ctx, readiness.InstancePath, records, topologyAuthority); err != nil {
 		return fmt.Errorf("verify dynamic flow agents for %s: %w", readiness.InstancePath, err)
 	}
 	if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan); err != nil {
@@ -1015,7 +1016,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 	instancePath string,
 	expected []PersistedAgent,
 	persisted map[runtimeagentidentity.Identity]PersistedAgent,
-	topologyAuthority DynamicAgentTopologyMutation,
+	topologyAuthority runtimeagenttopology.Admission,
 ) error {
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	expectedIdentities := make(map[runtimeagentidentity.Identity]struct{}, len(expected))
@@ -1064,9 +1065,7 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", identity.Description(), err)
 			}
 		}
-		removeAuthority := topologyAuthority
-		removeAuthority.desiredPresent = false
-		if err := am.teardownIdentityWithTopology(ctx, identity, "teardown", &removeAuthority); err != nil {
+		if err := am.teardownIdentityWithTopology(ctx, identity, "teardown", &topologyAuthority); err != nil {
 			return fmt.Errorf("retire removed dynamic flow agent %s: %w", identity.Description(), err)
 		}
 		delete(persisted, identity)
@@ -1076,9 +1075,8 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 		if err != nil {
 			return err
 		}
-		presentAuthority := topologyAuthority
-		presentAuthority.desiredPresent = true
-		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[identity], &presentAuthority); err != nil {
+		rec.Topology = topologyAuthority
+		if err := am.reconcileDynamicFlowAgent(ctx, source, rec, persisted[identity], &topologyAuthority); err != nil {
 			return fmt.Errorf("reconcile dynamic flow agent %s: %w", identity.Description(), err)
 		}
 	}
@@ -1090,8 +1088,14 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	source semanticview.Source,
 	rec PersistedAgent,
 	persisted PersistedAgent,
-	topology *DynamicAgentTopologyMutation,
+	topology *runtimeagenttopology.Admission,
 ) error {
+	if topology == nil || !rec.Topology.Equal(*topology) {
+		return errors.New("dynamic flow agent requires the exact readiness topology admission")
+	}
+	if err := rec.Topology.Validate(); err != nil {
+		return fmt.Errorf("expected dynamic flow agent topology: %w", err)
+	}
 	identity, err := rec.Config.ConcreteIdentity()
 	if err != nil {
 		return err
@@ -1102,11 +1106,17 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	}
 	existing, live := am.getAgentConfigIdentity(identity)
 	actualRevision := ""
+	actualTopology := runtimeagenttopology.Admission{}
 	if live {
 		actualRevision, err = lifecycleConfigRevision(PersistedAgent{Config: existing})
 		if err != nil {
 			return err
 		}
+		state, found := am.lifecycle.stateByIdentity(identity)
+		if !found {
+			return fmt.Errorf("agent %s is process-ready without lifecycle state", identity.Description())
+		}
+		actualTopology = state.Topology
 	}
 	persistedIdentity := runtimeagentidentity.Identity{}
 	persistedRevision := ""
@@ -1114,6 +1124,9 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 		persistedIdentity, err = persisted.Config.ConcreteIdentity()
 		if err != nil {
 			return err
+		}
+		if err := persisted.Topology.Validate(); err != nil {
+			return fmt.Errorf("persisted dynamic flow agent %s topology: %w", identity.Description(), err)
 		}
 		persistedRevision, err = lifecycleConfigRevision(persisted)
 		if err != nil {
@@ -1126,12 +1139,12 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	if live && persistedIdentity.IsZero() {
 		return fmt.Errorf("agent %s is process-ready without durable registration", identity.Description())
 	}
-	if live && actualRevision != persistedRevision {
-		return fmt.Errorf("agent %s process and durable revisions disagree", identity.Description())
+	if live && (actualRevision != persistedRevision || !actualTopology.Equal(persisted.Topology)) {
+		return fmt.Errorf("agent %s process and durable lifecycle facts disagree", identity.Description())
 	}
 	if !live && !persistedIdentity.IsZero() {
 		adopt := am.adoptPersistedAgentForLifecycle
-		if persistedRevision != expectedRevision {
+		if persistedRevision != expectedRevision || !persisted.Topology.Equal(rec.Topology) {
 			adopt = func(ctx context.Context, _ semanticview.Source, rec PersistedAgent) error {
 				return am.adoptPersistedAgentLifecycleOnly(ctx, rec)
 			}
@@ -1141,9 +1154,10 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 		}
 		live = true
 		actualRevision = persistedRevision
+		actualTopology = persisted.Topology
 	}
 	if live {
-		if actualRevision == expectedRevision {
+		if actualRevision == expectedRevision && actualTopology.Equal(rec.Topology) {
 			return nil
 		}
 		return am.reconfigureAgentIdentityExactWithTopology(ctx, source, identity, rec.Config, topology)
@@ -1151,19 +1165,27 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, true, source, topology)
 }
 
-func dynamicFlowAgentTopologyAuthority(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (DynamicAgentTopologyMutation, error) {
+func dynamicFlowAgentTopologyAuthority(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (runtimeagenttopology.Admission, error) {
 	fingerprint, err := canonicaljson.Hash(plan)
 	if err != nil {
-		return DynamicAgentTopologyMutation{}, err
+		return runtimeagenttopology.Admission{}, err
 	}
-	return DynamicAgentTopologyMutation{
-		runID:           strings.TrimSpace(plan.RunID),
-		instancePath:    strings.Trim(strings.TrimSpace(plan.Identity.InstancePath), "/"),
-		planFingerprint: fingerprint,
-	}, nil
+	return runtimeagenttopology.FlowReadinessAdmission(
+		strings.TrimSpace(plan.RunID),
+		strings.Trim(strings.TrimSpace(plan.Identity.InstancePath), "/"),
+		fingerprint,
+	)
 }
 
-func (am *AgentManager) verifyDynamicFlowAgents(ctx context.Context, instancePath string, expected []PersistedAgent) error {
+func (am *AgentManager) verifyDynamicFlowAgents(
+	ctx context.Context,
+	instancePath string,
+	expected []PersistedAgent,
+	topology runtimeagenttopology.Admission,
+) error {
+	if err := topology.Validate(); err != nil {
+		return fmt.Errorf("verify dynamic flow topology admission: %w", err)
+	}
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	expectedByIdentity := make(map[runtimeagentidentity.Identity]PersistedAgent, len(expected))
 	for _, rec := range expected {
@@ -1236,8 +1258,17 @@ func (am *AgentManager) verifyDynamicFlowAgents(ctx context.Context, instancePat
 		if err != nil {
 			return err
 		}
-		if liveRevision != expectedRevision || storedRevision != expectedRevision {
-			return fmt.Errorf("declared agent %s readiness revision mismatch", identity.Description())
+		state, ok := am.lifecycle.stateByIdentity(identity)
+		if !ok {
+			return fmt.Errorf("declared agent %s has no process lifecycle state", identity.Description())
+		}
+		if liveRevision != expectedRevision || storedRevision != expectedRevision ||
+			!state.Topology.Equal(topology) || !stored.Topology.Equal(topology) {
+			return fmt.Errorf(
+				"declared agent %s readiness facts mismatch: expected_revision=%s live_revision=%s stored_revision=%s live_topology_equal=%t stored_topology_equal=%t",
+				identity.Description(), expectedRevision, liveRevision, storedRevision,
+				state.Topology.Equal(topology), stored.Topology.Equal(topology),
+			)
 		}
 	}
 	return nil

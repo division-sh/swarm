@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -60,6 +61,9 @@ type AgentManager struct {
 	lifecycle                       *agentLifecycleCoordinator
 	roles                           PersistenceRoles
 	baseContext                     context.Context
+	staticTopology                  runtimeagenttopology.Admission
+	staticSourceSet                 runtimeagenttopology.SourceSetPlan
+	startupAgentsHydrated           bool
 
 	runMu              sync.Mutex
 	authBreakerTripped bool
@@ -81,6 +85,57 @@ type AgentManager struct {
 	dynamicFlowReadinessSignal   chan struct{}
 
 	testAfterDynamicFlowReadinessAdmission func()
+}
+
+// InstallStartupTopology binds the selected-store generation writer and the
+// exact declaration plan before startup recovery can read or mutate agents.
+func (am *AgentManager) InstallStartupTopology(store AgentLifecyclePersistence, admission runtimeagenttopology.Admission, plan runtimeagenttopology.SourceSetPlan) error {
+	if am == nil || store == nil {
+		return errors.New("startup agent lifecycle persistence is required")
+	}
+	if err := admission.Validate(); err != nil {
+		return fmt.Errorf("startup static topology admission: %w", err)
+	}
+	if admission.Authority.Kind != runtimeagenttopology.AuthorityStaticDeclarationPlan || admission.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+		return errors.New("startup agent topology requires durable static declaration authority")
+	}
+	if err := plan.Validate(); err != nil {
+		return fmt.Errorf("startup source-set plan: %w", err)
+	}
+	if admission.Authority.Static.SourceSetRevision != plan.Revision {
+		return errors.New("startup static topology admission differs from complete source-set plan")
+	}
+	if err := am.lifecycle.installPersistence(store); err != nil {
+		return err
+	}
+	am.mu.Lock()
+	am.staticTopology = admission
+	am.staticSourceSet = plan
+	am.mu.Unlock()
+	return nil
+}
+
+func (am *AgentManager) completeStaticSourceSet() (runtimeagenttopology.SourceSetPlan, error) {
+	am.mu.RLock()
+	plan := am.staticSourceSet
+	am.mu.RUnlock()
+	if err := plan.Validate(); err != nil {
+		return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("complete static source set is not installed: %w", err)
+	}
+	return plan, nil
+}
+
+func (am *AgentManager) staticTopologyAdmission() (runtimeagenttopology.Admission, error) {
+	if am == nil {
+		return runtimeagenttopology.Admission{}, errors.New("agent manager is required")
+	}
+	am.mu.RLock()
+	admission := am.staticTopology
+	am.mu.RUnlock()
+	if err := admission.Validate(); err != nil {
+		return runtimeagenttopology.Admission{}, fmt.Errorf("static declaration topology is not installed: %w", err)
+	}
+	return admission, nil
 }
 
 var (
@@ -297,24 +352,9 @@ func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) erro
 	return am.bus.Publish(ctx, evt)
 }
 
-func (am *AgentManager) SpawnAgent(cfg models.AgentConfig) error {
-	var err error
-	cfg, err = bindRuntimeCreatedIdentity(cfg, "manager.spawn_agent")
-	if err != nil {
-		return err
-	}
-	cfg.NormalizeEntityID()
-	rec := PersistedAgent{
-		Config:  cfg,
-		Status:  "active",
-		HiredBy: "runtime",
-	}
-	return am.spawnAgentInternal(am.runtimeContext(), rec, true)
-}
-
-// RegisterEphemeralAgentForExecution constructs an in-memory agent with the
-// normal runtime construction path without persisting it as current-run truth.
-func (am *AgentManager) RegisterEphemeralAgentForExecution(ctx context.Context, rec PersistedAgent) error {
+// MaterializeAdmittedAgentForExecution constructs process-local execution from
+// an already sealed topology admission without writing durable topology truth.
+func (am *AgentManager) MaterializeAdmittedAgentForExecution(ctx context.Context, rec PersistedAgent) error {
 	if am == nil {
 		return errors.New("agent manager is required")
 	}
@@ -324,50 +364,6 @@ func (am *AgentManager) RegisterEphemeralAgentForExecution(ctx context.Context, 
 		return err
 	}
 	return am.spawnAgentInternal(ctx, rec, false)
-}
-
-// SpawnEphemeralClone creates a task-scoped clone of a base agent. Ephemeral
-// clones are persisted with status=ephemeral so crash recovery does not hydrate
-// them as permanent agents.
-func (am *AgentManager) SpawnEphemeralClone(baseIdentity runtimeagentidentity.Identity, cloneAgentID string) error {
-	baseIdentity = baseIdentity.Normalize()
-	cloneAgentID = strings.TrimSpace(cloneAgentID)
-	if err := baseIdentity.Validate(); err != nil {
-		return fmt.Errorf("base agent identity: %w", err)
-	}
-	if cloneAgentID == "" {
-		return errors.New("cloneAgentID is required")
-	}
-	baseExecution, ok := am.lifecycle.executionSnapshotByIdentity(baseIdentity)
-	if !ok {
-		return fmt.Errorf("%w: %s", ErrAgentNotFound, baseIdentity.Description())
-	}
-	baseCfg := baseExecution.Config
-	cloneCfg := baseCfg
-	cloneCfg.ID = cloneAgentID
-	cloneCfg.Identity = runtimeagentidentity.Identity{}
-	var err error
-	cloneCfg, err = bindRuntimeCreatedIdentity(cloneCfg, "manager.ephemeral_clone")
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(cloneCfg.ParentAgent) == "" {
-		cloneCfg.ParentAgent = baseIdentity.AgentID()
-	}
-	rec := PersistedAgent{
-		Config:        cloneCfg,
-		ParentAgentID: baseIdentity.AgentID(),
-		Status:        "ephemeral",
-		HiredBy:       "shard-dispatcher",
-		StartedAt:     time.Now().UTC(),
-	}
-	if err := am.spawnAgentInternal(am.runtimeContext(), rec, true); err != nil {
-		if errors.Is(err, ErrAgentAlreadyExists) {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
 
 func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAgent, persist bool) error {
@@ -380,7 +376,7 @@ func (am *AgentManager) spawnAgentInternalForSource(
 	persist bool,
 	source semanticview.Source,
 ) error {
-	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, persist, source, nil)
+	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, persist, source, &rec.Topology)
 }
 
 func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
@@ -388,8 +384,15 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	rec PersistedAgent,
 	persist bool,
 	source semanticview.Source,
-	topology *DynamicAgentTopologyMutation,
+	topology *runtimeagenttopology.Admission,
 ) error {
+	if topology == nil {
+		return errors.New("agent lifecycle topology admission is required")
+	}
+	if err := topology.Validate(); err != nil {
+		return fmt.Errorf("agent lifecycle topology admission: %w", err)
+	}
+	rec.Topology = *topology
 	identity, err := rec.Config.ConcreteIdentity()
 	if err != nil {
 		return fmt.Errorf("agent %q requires a concrete identity: %w", strings.TrimSpace(rec.Config.ID), err)
@@ -421,14 +424,8 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
-	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, a, subscriptionAdmission, topology); err != nil {
+	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, a, subscriptionAdmission, *topology); err != nil {
 		return err
-	}
-	if persist && am.lifecycle.store == nil && am.store != nil {
-		if err := am.store.UpsertAgent(ctx, rec); err != nil {
-			am.lifecycle.unregisterIdentity(identity)
-			return fmt.Errorf("persist agent %s: %w", rec.Config.ID, err)
-		}
 	}
 
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
@@ -633,7 +630,7 @@ func (am *AgentManager) reconfigureAgentIdentityExactWithTopology(
 	source semanticview.Source,
 	identity runtimeagentidentity.Identity,
 	cfg models.AgentConfig,
-	topology *DynamicAgentTopologyMutation,
+	topology *runtimeagenttopology.Admission,
 ) error {
 	result, err := am.replaceExecutionIdentityConfigWithTopology(
 		ctx,
@@ -649,12 +646,7 @@ func (am *AgentManager) reconfigureAgentIdentityExactWithTopology(
 	if err != nil {
 		return err
 	}
-	if result.transitioned && am.lifecycle.store == nil && am.store != nil {
-		rec := PersistedAgent{Config: result.config, Status: "active", HiredBy: "reconfigure"}
-		if err := am.store.UpsertAgent(ctx, rec); err != nil {
-			return fmt.Errorf("persist reconfigured agent %s: %w", identity.Description(), err)
-		}
-	}
+	_ = result
 	return nil
 }
 
@@ -694,7 +686,7 @@ func (am *AgentManager) teardownIdentityWithTopology(
 	ctx context.Context,
 	identity runtimeagentidentity.Identity,
 	trigger string,
-	topology *DynamicAgentTopologyMutation,
+	topology *runtimeagenttopology.Admission,
 ) error {
 	_, err := am.lifecycle.terminateIdentityWithTopology(ctx, identity, trigger, AgentLifecycleTerminated, topology)
 	if err != nil {

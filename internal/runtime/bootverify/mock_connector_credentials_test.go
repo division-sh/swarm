@@ -14,6 +14,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 func TestCredentialChecksConsumeExactMockConnectorAdmission(t *testing.T) {
@@ -173,9 +174,6 @@ func TestMockOnlyPostureRequiresMockAgentsAndExactActivityResponses(t *testing.T
 
 func TestCredentialChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source, plan := scopedAliasMockConnectorFixture(t, true)
-	if _, flattened := source.AgentEntries()["shared-worker"]; flattened {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
-	}
 
 	reachability := mockConnectorEffectReachability(t, source, plan)
 	liveAgents := strings.Join(reachability.LiveAgentIDs(), "\n")
@@ -231,9 +229,6 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 
 func TestNativeToolChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source, _ := scopedAliasMockConnectorFixtureWithNativeTools(t, true)
-	if _, exists := source.AgentEntries()["shared-worker"]; exists {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
-	}
 	findings := newCheckerContext(context.Background(), source, Options{}).nativeTools()
 	joined := fmt.Sprint(findings)
 	for _, want := range []string{
@@ -335,7 +330,7 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 			}},
 		}}
 	}
-	source := semanticview.Wrap(bundle)
+	source := semanticviewtest.WrapRootAgents(bundle)
 	plan, err := providerconnectors.CompileMockResponsePlan(source)
 	if err != nil {
 		t.Fatalf("CompileMockResponsePlan: %v", err)

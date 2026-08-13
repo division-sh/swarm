@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ import (
 func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, agentID string, entityID string, memory agentmemory.Plan, flowPath string) {
 	t.Helper()
 	identity := testAgentIdentity(t, agentID, flowPath)
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            agentID,
 			Identity:      identity,

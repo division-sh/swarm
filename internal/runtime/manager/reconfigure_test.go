@@ -51,7 +51,7 @@ func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) 
 		FlowPath:      "review/inst-1",
 		Tools:         []string{"tool-old"},
 	})
-	if err := am.SpawnAgent(cfg); err != nil {
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
@@ -89,7 +89,7 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 		ID:            "same-current-agent", Tools: []string{"tool-a"},
 		Memory: agentmemory.Authored(true), FlowPath: "same-current/instance",
 	})
-	if err := am.SpawnAgent(cfg); err != nil {
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(context.Background())
@@ -132,7 +132,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Authored(true), FlowPath: "review/inst-1"})
-	if err := am.SpawnAgent(cfg); err != nil {
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
@@ -155,7 +155,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Authored(true), FlowPath: "support/inst-1"})
-	if err := am.SpawnAgent(cfg); err != nil {
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
@@ -182,7 +182,7 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
 	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Authored(false), FlowPath: "support/inst-1"})
-	if err := am.SpawnAgent(cfg); err != nil {
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}); err != nil {

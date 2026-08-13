@@ -2,20 +2,21 @@ package apiv1
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
-	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/google/uuid"
 )
 
-const bundleDeleteIdempotencyTTL = 24 * time.Hour
+const bundleDeleteIdempotencyTTL = bundledelete.FinalMutationReplayWindow
 
 func OperatorBundleDeleteHandlers(opts BundleDeleteHandlerOptions) map[string]MethodHandler {
 	if opts.Executor == nil || opts.Idempotency == nil {
@@ -49,6 +50,8 @@ func executeBundleDelete(ctx context.Context, req Request, opts BundleDeleteHand
 	if err != nil {
 		return nil, err
 	}
+	operationID := uuid.NewString()
+	replayKeyHash := bundleDeleteReplayKeyHash(req, idempotencyKey)
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
@@ -59,12 +62,14 @@ func executeBundleDelete(ctx context.Context, req Request, opts BundleDeleteHand
 		Now:            now,
 	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		result, err := opts.Executor.Execute(ctx, bundledelete.Request{
-			ActorTokenID: req.ActorTokenID,
-			RequestHash:  req.RequestHash,
-			BundleHash:   bundleHash,
-			Force:        force,
-			DryRun:       dryRun,
-			RequestedAt:  now,
+			OperationID:   operationID,
+			ActorTokenID:  req.ActorTokenID,
+			RequestHash:   req.RequestHash,
+			ReplayKeyHash: replayKeyHash,
+			BundleHash:    bundleHash,
+			Force:         force,
+			DryRun:        dryRun,
+			RequestedAt:   now,
 		})
 		if err != nil {
 			return apiidempotency.Completion{}, err
@@ -88,46 +93,16 @@ func executeBundleDelete(ctx context.Context, req Request, opts BundleDeleteHand
 		}
 		return nil, fmt.Errorf("decode bundle.delete response: %w", err)
 	}
-	if !replay {
-		deactivateRuntimeContextAfterBundleDelete(opts, stored)
-	}
 	return stored, nil
 }
 
-func deactivateRuntimeContextAfterBundleDelete(opts BundleDeleteHandlerOptions, result bundledelete.Result) {
-	if opts.RuntimeContexts == nil || result.Force || result.DryRun || strings.TrimSpace(result.BundleHash) == "" {
-		return
+func bundleDeleteReplayKeyHash(req Request, idempotencyKey string) string {
+	if idempotencyKey == "" {
+		return ""
 	}
-	if !bundleDeleteMadeRuntimeContextUnavailable(result) {
-		return
-	}
-	cause := swruntime.RuntimeContextCauseUnloaded
-	if result.PartialFailure && !result.Deleted {
-		cause = swruntime.RuntimeContextCauseUnavailable
-	}
-	opts.RuntimeContexts.DeactivateBundleHash(result.BundleHash, cause)
-}
-
-func bundleDeleteMadeRuntimeContextUnavailable(result bundledelete.Result) bool {
-	if result.Deleted {
-		return true
-	}
-	if !result.Force || !result.PartialFailure {
-		return false
-	}
-	if !result.Cleanup.AppliedAt.IsZero() {
-		return true
-	}
-	if len(result.Cleanup.Runs) > 0 || len(result.Cleanup.Deliveries) > 0 || len(result.Cleanup.Sessions) > 0 || len(result.Cleanup.Timers) > 0 {
-		return true
-	}
-	if !result.Containers.AppliedAt.IsZero() || len(result.Containers.Selected) > 0 || len(result.Containers.Stopped) > 0 || len(result.Containers.Failed) > 0 {
-		return true
-	}
-	if !result.FinalMutation.AppliedAt.IsZero() || result.FinalMutation.RunsMarkedDeleted > 0 || result.FinalMutation.BundleRowsDeleted > 0 {
-		return true
-	}
-	return false
+	identity := req.Method + "\x00" + req.ActorTokenID + "\x00" + idempotencyKey
+	digest := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(digest[:])
 }
 
 func bundleDeleteError(bundleHash string, err error) error {

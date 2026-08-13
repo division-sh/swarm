@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -156,6 +157,7 @@ type selectedAPICapabilityRequest struct {
 	ManagedCredentials      runtimemanagedcredentials.Store
 	ProviderCredentials     runtimecredentials.Store
 	ExecutionPosture        executionposture.Posture
+	ProcessCapability       runtimestartupownership.ProcessCapability
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)
@@ -193,7 +195,6 @@ func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {
 		SessionResetter:                s.SessionResetter,
 		ConversationStore:              s.ConversationStore,
 		ManagerStore:                   s.ManagerStore,
-		ManagerLifecycleStore:          s.ManagerLifecycleStore,
 		ManagerLifecycleDiagnostics:    s.ManagerLifecycleDiagnostics,
 		ManagerPersistenceRoles:        s.ManagerPersistenceRoles,
 		EffectsStore:                   s.EffectsStore,
@@ -211,7 +212,6 @@ func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {
 		DecisionCardHumanTasks:         s.DecisionCardHumanTasks,
 		DecisionCardDraftExpiry:        s.DecisionCardDraftExpiry,
 		HumanTaskExpiry:                s.HumanTaskExpiry,
-		StartupOwnership:               s.StartupOwnership,
 		MailboxStore:                   s.MailboxStore,
 		ToolEntityStore:                s.ToolEntityStore,
 		HumanTaskStore:                 s.HumanTaskStore,

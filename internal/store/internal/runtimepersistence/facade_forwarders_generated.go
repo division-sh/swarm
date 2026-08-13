@@ -69,8 +69,8 @@ func (s *PostgresStore) AcquireLiveSession(ctx context.Context, identity agentme
 	return s.lLMPostgresOwner.AcquireLiveSession(ctx, identity, lockOwner)
 }
 
-func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req startupownership.AcquireRequest) (startupownership.Lease, error) {
-	return s.startupPostgresOwner.AcquireRuntimeStartupOwnership(ctx, req)
+func (s *PostgresStore) AcquireProcessCapability(ctx context.Context, req startupownership.AcquireRequest) (startupownership.ProcessCapability, error) {
+	return s.startupPostgresOwner.AcquireProcessCapability(ctx, req)
 }
 
 func (s *PostgresStore) ActivateDeliveryAuthority(ctx context.Context, authority deliverylifecycle.ExecutionAuthority) error {
@@ -179,10 +179,6 @@ func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context
 
 func (s *PostgresStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
 	return s.eventPostgresOwner.CommitAPIEventPublication(ctx, command)
-}
-
-func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
-	return s.agentPostgresOwner.CommitAgentLifecycleTransition(ctx, req)
 }
 
 func (s *PostgresStore) CommitDecisionCardOperation(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
@@ -909,10 +905,6 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 	return s.runForkPostgresOwner.RecordRunForkSelectedContractRouteRecovery(ctx, req)
 }
 
-func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Context, previous *startupownership.Authority, next ...startupownership.Authority) error {
-	return s.startupPostgresOwner.RecordRuntimeStartupAuthorityTransition(ctx, previous, next...)
-}
-
 func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRecord) error {
 	return s.budgetPostgresOwner.RecordSpend(ctx, rec)
 }
@@ -1137,10 +1129,6 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update ll
 	return s.lLMPostgresOwner.UpdateLiveSessionWatchdog(ctx, update)
 }
 
-func (s *PostgresStore) UpsertAgent(ctx context.Context, rec manager.PersistedAgent) error {
-	return s.agentPostgresOwner.UpsertAgent(ctx, rec)
-}
-
 func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
 	return s.postgres.UpsertBundleCatalog(ctx, req)
 }
@@ -1173,8 +1161,8 @@ func (s *SQLiteRuntimeStore) AcquireLiveSession(ctx context.Context, identity ag
 	return s.lLMSQLiteOwner.AcquireLiveSession(ctx, identity, lockOwner)
 }
 
-func (s *SQLiteRuntimeStore) AcquireRuntimeStartupOwnership(ctx context.Context, req startupownership.AcquireRequest) (startupownership.Lease, error) {
-	return s.lLMSQLiteOwner.AcquireRuntimeStartupOwnership(ctx, req)
+func (s *SQLiteRuntimeStore) AcquireProcessCapability(ctx context.Context, req startupownership.AcquireRequest) (startupownership.ProcessCapability, error) {
+	return s.startupSQLiteOwner.AcquireProcessCapability(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ActivateDeliveryAuthority(ctx context.Context, authority deliverylifecycle.ExecutionAuthority) error {
@@ -1259,10 +1247,6 @@ func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx co
 
 func (s *SQLiteRuntimeStore) CommitAPIEventPublication(ctx context.Context, command bus.APIEventPublicationCommand) (bus.CommittedAPIEventPublication, error) {
 	return s.eventSQLiteOwner.CommitAPIEventPublication(ctx, command)
-}
-
-func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
-	return s.agentSQLiteOwner.CommitAgentLifecycleTransition(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) CommitDecisionCardOperation(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
@@ -1897,10 +1881,6 @@ func (s *SQLiteRuntimeStore) RecordOperatorConversationForkChat(ctx context.Cont
 	return s.runForkSQLiteOwner.RecordOperatorConversationForkChat(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) RecordRuntimeStartupAuthorityTransition(ctx context.Context, previous *startupownership.Authority, next ...startupownership.Authority) error {
-	return s.lLMSQLiteOwner.RecordRuntimeStartupAuthorityTransition(ctx, previous, next...)
-}
-
 func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRecord) error {
 	return s.budgetSQLiteOwner.RecordSpend(ctx, rec)
 }
@@ -2119,10 +2099,6 @@ func (s *SQLiteRuntimeStore) TransitionRuntimeIngressState(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
 	return s.lLMSQLiteOwner.UpdateLiveSessionWatchdog(ctx, update)
-}
-
-func (s *SQLiteRuntimeStore) UpsertAgent(ctx context.Context, rec manager.PersistedAgent) error {
-	return s.agentSQLiteOwner.UpsertAgent(ctx, rec)
 }
 
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec llm.ConversationRecord) error {

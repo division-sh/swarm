@@ -94,12 +94,37 @@ func (s *BundleDeletePostgresOwner) ApplyBundleDeleteFinalMutation(ctx context.C
 	if s == nil || s.backend == nil {
 		return bundledelete.FinalMutationResult{}, fmt.Errorf("postgres store is required")
 	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return bundledelete.FinalMutationResult{}, err
+	}
+	var result bundledelete.FinalMutationResult
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = applyBundleDeleteFinalMutationTx(txctx, tx, req)
+		return err
+	})
+	return result, err
+}
+
+// ApplyBundleDeleteFinalMutationInRetainedTransaction lets the startup owner
+// compose bundle deletion with its topology-head update without exporting a
+// transaction-bearing method on a semantic owner.
+func ApplyBundleDeleteFinalMutationInRetainedTransaction(s *BundleDeletePostgresOwner, ctx context.Context, tx *sql.Tx, req bundledelete.FinalMutationRequest) (bundledelete.FinalMutationResult, error) {
+	if s == nil {
+		return bundledelete.FinalMutationResult{}, fmt.Errorf("postgres bundle delete owner is required")
+	}
+	return applyBundleDeleteFinalMutationTx(ctx, tx, req)
+}
+
+// applyBundleDeleteFinalMutationTx is the private retained-session operation
+// used when bundle deletion must commit with the topology source-set head.
+func applyBundleDeleteFinalMutationTx(ctx context.Context, tx *sql.Tx, req bundledelete.FinalMutationRequest) (bundledelete.FinalMutationResult, error) {
+	if tx == nil {
+		return bundledelete.FinalMutationResult{}, fmt.Errorf("bundle delete retained transaction is required")
+	}
 	bundleHash := strings.TrimSpace(req.BundleHash)
 	if bundleHash == "" {
 		return bundledelete.FinalMutationResult{}, fmt.Errorf("%w: bundle_hash is required", bundledelete.ErrInvalidRequest)
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return bundledelete.FinalMutationResult{}, err
 	}
 	now := req.RequestedAt.UTC()
 	if now.IsZero() {
@@ -109,19 +134,9 @@ func (s *BundleDeletePostgresOwner) ApplyBundleDeleteFinalMutation(ctx context.C
 	if operationName == "" {
 		operationName = bundledelete.DefaultOperationName
 	}
-	tx, err := s.backend.BeginTx(ctx, nil)
-	if err != nil {
-		return bundledelete.FinalMutationResult{}, fmt.Errorf("begin bundle delete final mutation tx: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
 
 	var lockedHash string
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT bundle_hash
 		FROM bundles
 		WHERE bundle_hash = $1
@@ -174,10 +189,6 @@ func (s *BundleDeletePostgresOwner) ApplyBundleDeleteFinalMutation(ctx context.C
 	result.RunsMarkedDeleted = int(updated)
 	result.BundleRowsDeleted = int(deleted)
 	result.Deleted = deleted > 0
-	if err := tx.Commit(); err != nil {
-		return bundledelete.FinalMutationResult{}, fmt.Errorf("commit bundle delete final mutation tx: %w", err)
-	}
-	committed = true
 	return result, nil
 }
 

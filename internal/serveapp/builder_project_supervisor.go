@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -26,7 +27,9 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 type runtimeProjectSupervisor struct {
@@ -42,6 +45,8 @@ type runtimeProjectSupervisor struct {
 	providerCredentials  runtimecredentials.Store
 	providerTriggers     *providertriggers.CatalogSnapshot
 	processWorkOwner     *worklifetime.Process
+	processCapability    runtimestartupownership.ProcessCapability
+	runtimeGeneration    uint64
 	loadProviderCatalog  func() (*providertriggers.CatalogSnapshot, error)
 	loadChannelPacks     func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
 	onRuntimePublished   func(context.Context) error
@@ -73,6 +78,18 @@ type runtimeProjectSupervisor struct {
 	pendingReplacement              *pendingRuntimeReplacement
 	sourceReplacementDisabledReason string
 	executionPosture                executionposture.Posture
+}
+
+func (s *runtimeProjectSupervisor) SetProcessCapability(capability runtimestartupownership.ProcessCapability) {
+	if s == nil {
+		return
+	}
+	s.operationMu.Lock()
+	s.processCapability = capability
+	if s.runtimeGeneration == 0 {
+		s.runtimeGeneration = 1
+	}
+	s.operationMu.Unlock()
 }
 
 func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.RuntimeContextManager, fact runtimecorrelation.BundleSourceFact, identity runtimecontracts.BundleIdentity) {
@@ -356,6 +373,12 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("load project: %w", err)
 	}
+	if module == nil {
+		return builderpkg.ProjectStatus{}, errors.New("loaded project workflow module is required")
+	}
+	if module.SemanticSource() == nil {
+		return builderpkg.ProjectStatus{}, errors.New("loaded project semantic source is required")
+	}
 	authoredSource := semanticview.Wrap(bundle)
 	candidateCatalog := s.providerTriggers
 	if s.loadProviderCatalog != nil {
@@ -511,7 +534,6 @@ type processAdmissionCandidate struct {
 
 type pendingRuntimeReplacement struct {
 	mu          sync.Mutex
-	handoff     *runtime.StartupOwnershipHandoff
 	publication *runtime.PreparedRuntimeContextReplacement
 	root        string
 	source      semanticview.Source
@@ -522,6 +544,18 @@ type pendingRuntimeReplacement struct {
 	admission   *processAdmissionCandidate
 	freeze      *startupHandoffFreeze
 	finalized   bool
+}
+
+type sourceSetReplacementAttempt struct {
+	replaceOperationID string
+	restoreOperationID string
+}
+
+func newSourceSetReplacementAttempt() sourceSetReplacementAttempt {
+	return sourceSetReplacementAttempt{
+		replaceOperationID: uuid.NewString(),
+		restoreOperationID: uuid.NewString(),
+	}
 }
 
 type startupHandoffFreeze struct {
@@ -555,6 +589,104 @@ func cloneProcessAdmissionCandidate(candidate *processAdmissionCandidate) *proce
 	return &cloned
 }
 
+func (s *runtimeProjectSupervisor) installProcessGenerationGrant(ctx context.Context, rt *runtime.Runtime, plan runtimeagenttopology.SourceSetPlan) error {
+	if s == nil || rt == nil {
+		return errors.New("runtime replacement generation grant requires a runtime")
+	}
+	if s.processCapability == nil {
+		return errors.New("runtime replacement requires the process topology capability")
+	}
+	current, exists, err := s.processCapability.CurrentSourceSet(ctx)
+	if err != nil {
+		return err
+	}
+	if !exists || current.Revision != plan.Revision {
+		return errors.New("runtime replacement generation grant requires the committed complete source set")
+	}
+	s.runtimeGeneration++
+	_, bundleSource := rt.Options.BundleSourceFact.StorageValues()
+	grant, err := s.processCapability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: rt.Options.BundleSourceFact.BundleHash(), BundleSource: bundleSource,
+		RuntimeInstanceID: s.runtimeInstanceID, RuntimeGeneration: s.runtimeGeneration,
+		SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		return err
+	}
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		_ = grant.Retire(context.Background())
+		return err
+	}
+	return nil
+}
+
+func replacementSourceSetPlan(manager *runtime.RuntimeContextManager, replacedHash string, candidate runtime.BundleContext) (runtimeagenttopology.SourceSetPlan, error) {
+	sources := []runtimeagenttopology.SourceCoordinate{}
+	agents := []runtimeagenttopology.DesiredAgent{}
+	appendContext := func(contextDef runtime.BundleContext) error {
+		bundleHash, bundleSource := contextDef.BundleSourceFact.StorageValues()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+		if contextDef.Runtime == nil || contextDef.Runtime.Manager == nil {
+			return errors.New("runtime replacement source-set compilation requires the candidate runtime manager")
+		}
+		desired, err := contextDef.Runtime.Manager.CompileStaticTopologyDesiredAgents(contextDef.Source, coordinate)
+		if err != nil {
+			return err
+		}
+		sources = append(sources, coordinate)
+		agents = append(agents, desired...)
+		return nil
+	}
+	if manager != nil {
+		for _, loaded := range manager.LoadedContexts() {
+			if loaded.BundleHash() == strings.TrimSpace(replacedHash) {
+				continue
+			}
+			if err := appendContext(loaded); err != nil {
+				return runtimeagenttopology.SourceSetPlan{}, err
+			}
+		}
+	}
+	if candidate.BundleSourceFact.Validate() == nil {
+		if err := appendContext(candidate); err != nil {
+			return runtimeagenttopology.SourceSetPlan{}, err
+		}
+	}
+	return runtimeagenttopology.NewSourceSetPlan(sources, agents)
+}
+
+func (s *runtimeProjectSupervisor) replaceCommittedSourceSet(ctx context.Context, plan runtimeagenttopology.SourceSetPlan, attempt sourceSetReplacementAttempt) (runtimeagenttopology.SourceSetPlan, error) {
+	if s == nil || s.processCapability == nil {
+		return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime replacement requires the process topology capability")
+	}
+	previous, exists, err := s.processCapability.CurrentSourceSet(ctx)
+	if err != nil {
+		return runtimeagenttopology.SourceSetPlan{}, err
+	}
+	if !exists {
+		return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime replacement requires an installed source set")
+	}
+	if previous.Revision == plan.Revision {
+		return previous, nil
+	}
+	_, err = s.processCapability.ReplaceSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+		OperationID:      attempt.replaceOperationID,
+		ExpectedRevision: previous.Revision, Plan: plan,
+	})
+	return previous, err
+}
+
+func (s *runtimeProjectSupervisor) restoreCommittedSourceSet(ctx context.Context, expected, previous runtimeagenttopology.SourceSetPlan, attempt sourceSetReplacementAttempt) error {
+	if expected.Revision == previous.Revision {
+		return nil
+	}
+	_, err := s.processCapability.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+		OperationID:      attempt.restoreOperationID,
+		ExpectedRevision: expected.Revision, Plan: previous,
+	})
+	return err
+}
+
 func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 	if s == nil {
 		return nil
@@ -572,13 +704,6 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 	s.mu.RUnlock()
 	if current != pending {
 		return nil
-	}
-	if !pending.finalized {
-		if err := pending.handoff.Finalize(); err != nil {
-			s.setReady(false)
-			return fmt.Errorf("finalize retained runtime startup ownership handoff: %w", err)
-		}
-		pending.finalized = true
 	}
 	if err := pending.publication.Publish(); err != nil {
 		s.setReady(false)
@@ -718,6 +843,10 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			BundleSourceFact: fact, BundleIdentity: identity, Source: source,
 			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, WorkOwner: workOwner, StandingTargets: plannedTargets,
 		}
+		candidatePlan, err := replacementSourceSetPlan(manager, oldHash, contextDef)
+		if err != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("compile replacement source set: %w", err)
+		}
 		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}
@@ -769,9 +898,15 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			restoreErr := s.completeFailedQuiescenceAndRestore(ctx, manager, oldContextDef, oldRT, freeze)
 			return s.CurrentProject(), errors.Join(fmt.Errorf("quiesce predecessor runtime before replacement: %w", err), restoreErr)
 		}
-		handoff, err := newRT.PrepareStartupOwnershipHandoff(oldRT)
+		topologyAttempt := newSourceSetReplacementAttempt()
+		previousPlan, err := s.replaceCommittedSourceSet(ctx, candidatePlan, topologyAttempt)
 		if err != nil {
 			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
+		}
+		restorePredecessor := func(cause error) error {
+			topologyErr := s.restoreCommittedSourceSet(context.Background(), candidatePlan, previousPlan, topologyAttempt)
+			restartErr := s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze)
+			return errors.Join(cause, topologyErr, restartErr)
 		}
 		transitionRetained := false
 		var publication *runtime.PreparedRuntimeContextReplacement
@@ -780,19 +915,19 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 				if publication != nil {
 					_ = publication.Discard()
 				}
-				_ = handoff.Rollback()
 			}
 		}()
+		if err := s.installProcessGenerationGrant(ctx, newRT, candidatePlan); err != nil {
+			return s.CurrentProject(), restorePredecessor(err)
+		}
 		if err := s.startCurrentRuntime(ctx, newRT); err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
+			return s.CurrentProject(), restorePredecessor(err)
 		}
 		targets, _, err := newRT.EnsureStandingReplacementTargets(ctx, oldRT)
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
+			return s.CurrentProject(), restorePredecessor(err)
 		}
 		contextDef.StandingTargets = targets
 		if admissionCandidate == nil {
@@ -802,18 +937,11 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		}
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
-		}
-		if err := handoff.Commit(); err != nil {
-			discardErr := publication.Discard()
-			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			rollbackErr := handoff.Rollback()
-			return s.CurrentProject(), errors.Join(err, discardErr, rollbackErr, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
+			return s.CurrentProject(), restorePredecessor(err)
 		}
 		pending := &pendingRuntimeReplacement{
-			handoff: handoff, publication: publication,
-			root: resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
+			publication: publication,
+			root:        resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
 			admission: cloneProcessAdmissionCandidate(admissionCandidate), freeze: freeze,
 		}
 		s.mu.Lock()
@@ -825,7 +953,13 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		s.mu.Unlock()
 		transitionRetained = true
 		if err := s.completePendingReplacement(); err != nil {
-			return s.CurrentProject(), err
+			s.mu.Lock()
+			if s.pendingReplacement == pending {
+				s.pendingReplacement = nil
+			}
+			s.mu.Unlock()
+			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
+			return s.CurrentProject(), restorePredecessor(err)
 		}
 		return s.CurrentProject(), nil
 	}
@@ -835,8 +969,33 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			return builderpkg.ProjectStatus{}, err
 		}
 	}
+	var previousPlan runtimeagenttopology.SourceSetPlan
+	var candidatePlan runtimeagenttopology.SourceSetPlan
+	var topologyAttempt sourceSetReplacementAttempt
+	if s.processCapability != nil {
+		contextDef := runtime.BundleContext{
+			BundleSourceFact: fact, BundleIdentity: identity, Source: source,
+			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, WorkOwner: workOwner,
+		}
+		var err error
+		candidatePlan, err = replacementSourceSetPlan(nil, "", contextDef)
+		if err != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("compile initial runtime source set: %w", err)
+		}
+		topologyAttempt = newSourceSetReplacementAttempt()
+		previousPlan, err = s.replaceCommittedSourceSet(ctx, candidatePlan, topologyAttempt)
+		if err != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("commit initial runtime source set: %w", err)
+		}
+		if err := s.installProcessGenerationGrant(ctx, newRT, candidatePlan); err != nil {
+			return builderpkg.ProjectStatus{}, errors.Join(err, s.restoreCommittedSourceSet(context.Background(), candidatePlan, previousPlan, topologyAttempt))
+		}
+	}
 	if err := s.startCurrentRuntime(ctx, newRT); err != nil {
 		_ = s.shutdownCurrentRuntime(context.Background(), newRT)
+		if s.processCapability != nil {
+			return builderpkg.ProjectStatus{}, errors.Join(err, s.restoreCommittedSourceSet(context.Background(), candidatePlan, previousPlan, topologyAttempt))
+		}
 		return builderpkg.ProjectStatus{}, err
 	}
 	if admissionCandidate != nil {
@@ -963,10 +1122,8 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	if restoredWorkOwner == nil {
 		return fmt.Errorf("restore predecessor runtime construction: runtime occurrence is required")
 	}
-	handoff, err := restored.PrepareStartupOwnershipHandoff(predecessor)
-	if err != nil {
-		return fmt.Errorf("restore predecessor ownership: %w", err)
-	}
+	predecessorContext.Runtime = restored
+	predecessorContext.WorkOwner = restoredWorkOwner
 	transitionRetained := false
 	var publication *runtime.PreparedRuntimeContextReplacement
 	defer func() {
@@ -974,9 +1131,15 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 			if publication != nil {
 				_ = publication.Discard()
 			}
-			_ = handoff.Rollback()
 		}
 	}()
+	restoredPlan, err := replacementSourceSetPlan(manager, "", predecessorContext)
+	if err != nil {
+		return fmt.Errorf("compile restored predecessor source set: %w", err)
+	}
+	if err := s.installProcessGenerationGrant(ctx, restored, restoredPlan); err != nil {
+		return fmt.Errorf("restore predecessor generation grant: %w", err)
+	}
 	if err := s.startCurrentRuntime(s.runtimeStartContext(context.Background()), restored); err != nil {
 		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		return fmt.Errorf("restart predecessor runtime: %w", err)
@@ -986,22 +1149,15 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		return fmt.Errorf("restore predecessor standing targets: %w", err)
 	}
-	predecessorContext.Runtime = restored
-	predecessorContext.WorkOwner = restoredWorkOwner
 	predecessorContext.StandingTargets = targets
 	publication, err = manager.PrepareRestoredBundleHashReplacementPublication(predecessorContext.BundleHash(), predecessorContext)
 	if err != nil {
 		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
 		return fmt.Errorf("prepare predecessor runtime context restoration: %w", err)
 	}
-	if err := handoff.Commit(); err != nil {
-		discardErr := publication.Discard()
-		_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
-		return errors.Join(fmt.Errorf("commit predecessor ownership restoration: %w", err), discardErr)
-	}
 	pending := &pendingRuntimeReplacement{
-		handoff: handoff, publication: publication,
-		root: predecessorRoot, source: predecessorContext.Source, bundle: predecessorBundle,
+		publication: publication,
+		root:        predecessorRoot, source: predecessorContext.Source, bundle: predecessorBundle,
 		fact: predecessorContext.BundleSourceFact, identity: predecessorContext.BundleIdentity, runtime: restored,
 		freeze: freeze,
 	}
@@ -1009,8 +1165,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	if s.pendingReplacement != nil {
 		s.mu.Unlock()
 		quiesceErr := s.quiesceCurrentRuntimeWithOptions(context.Background(), restored, s.replacementShutdown)
-		rollbackErr := handoff.Rollback()
-		return errors.Join(errors.New("runtime replacement transition is already pending"), quiesceErr, rollbackErr)
+		return errors.Join(errors.New("runtime replacement transition is already pending"), quiesceErr)
 	}
 	s.pendingReplacement = pending
 	s.mu.Unlock()

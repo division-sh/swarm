@@ -24,6 +24,7 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -100,7 +101,7 @@ func claudeStartupAgentSource(ids ...string) semanticview.Source {
 		}
 		agents[id] = runtimecontracts.AgentRegistryEntry{ID: id, Role: id}
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Agents: agents})
+	return semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{Agents: agents})
 }
 
 func TestValidateClaudeStartupConfig_RequiresWorkspaceAndGateway(t *testing.T) {
@@ -136,7 +137,7 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	opts := RuntimeOptions{
@@ -166,7 +167,7 @@ func TestValidateClaudeManagedAgentWorkspaces_RequiresResolvedContainerTargets(t
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
@@ -180,7 +181,7 @@ func TestValidateClaudeManagedAgentWorkspaces_PropagatesResolverErrors(t *testin
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
@@ -194,7 +195,7 @@ func TestValidateClaudeManagedAgentWorkspaces_AcceptsContainerTargets(t *testing
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
@@ -219,7 +220,7 @@ func TestValidateClaudeManagedAgentWorkspaces_RequiresWorkspaceForRecoveredManag
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "recovered-agent", Role: "recovered"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
@@ -416,7 +417,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForAgentSo
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
@@ -442,7 +443,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForRecover
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "recovered-agent",
 		Role:          "recovered",
@@ -474,7 +475,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_StartupPromptMatchesCanonicalNor
 		Role:          "campaign_coordinator",
 		Config:        json.RawMessage(`{}`),
 	})
-	if err := manager.SpawnAgent(agentCfg); err != nil {
+	if err := registerRuntimeTestAgent(manager, agentCfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -510,7 +511,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnl
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
@@ -537,7 +538,7 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 	cfg := &config.Config{}
 	cfg.LLM.Backend = llmselection.BackendClaudeCLI
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	profile, err := cfg.LLMBackendProfile()
@@ -559,9 +560,6 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 
 func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source := ambiguousScopedClaudeStartupSource(t)
-	if _, exists := source.AgentEntries()["shared-worker"]; exists {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
-	}
 	mocked, total, unmocked := declaredAgentMockCensus(source)
 	if mocked != 1 || total != 3 {
 		t.Fatalf("mock census = mocked:%d total:%d unmocked:%#v, want 1/3", mocked, total, unmocked)
@@ -635,7 +633,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenMCPOnlyCLIStartup
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
@@ -666,7 +664,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_SeparatesStaticInventoryFromNoCu
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analysis-agent",
 		Role:          "analysis",
@@ -715,7 +713,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AllowsEmptyConcreteSurfaceWhenSt
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "validation-agent",
 		Role:          "validation",
@@ -754,7 +752,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsExplicitValidationOnlyPro
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
@@ -787,7 +785,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTo
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
 		Role:          "market_research",
@@ -815,7 +813,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsFullyDeniedToolPlan(t *te
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -848,7 +846,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_SeparatesProviderNativeSurfaceFr
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
@@ -899,7 +897,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_ComparesProviderNativeSurfaceOnl
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "trend-research-agent",
 		Role:          "trend_research",
@@ -942,7 +940,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedProviderN
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "trend-research-agent",
 		Role:          "trend_research",
@@ -986,7 +984,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenNativeBuiltinVisi
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
 		Role:          "campaign_coordinator",
@@ -1037,7 +1035,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesVisibilityOnlyWhenNoExplicit
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := newClaudeStartupManager()
-			if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+			if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 				t.Fatalf("SpawnAgent: %v", err)
 			}
 			exec := &startupProbeToolExecutor{
@@ -1074,7 +1072,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_DoesNotCallSchemaOnlyEmptyObject
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "lifecycle-coordinator", Role: "lifecycle_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "lifecycle-coordinator", Role: "lifecycle_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -1112,7 +1110,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_UsesVisibilityOnlyWhenVisibleToo
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -1148,7 +1146,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenExplicitProbeSafe
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -1184,7 +1182,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableP
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{
@@ -1211,7 +1209,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonVal
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	manager := newClaudeStartupManager()
-	if err := manager.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	exec := &startupProbeToolExecutor{

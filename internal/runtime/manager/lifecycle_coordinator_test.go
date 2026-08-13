@@ -124,11 +124,11 @@ func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Con
 		return AgentLifecycleTransitionResult{}, fmt.Errorf("probe lifecycle cell absent")
 	}
 	result := AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, TransitionID: uuid.NewString(), AgentID: req.AgentID,
+		OperationID: req.OperationID, TransitionID: uuid.NewString(), Identity: req.Identity, AgentID: req.AgentID,
 		PreviousEpoch: p.cell.Epoch, RuntimeEpoch: req.TargetEpoch,
 		PreviousGeneration: p.cell.Generation, Generation: req.TargetGeneration,
 		PreviousPhase: p.cell.Phase, Phase: req.TargetPhase,
-		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
 	}
 	p.cell = lifecycleProbeCell{Epoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase}
 	p.exists = true
@@ -636,6 +636,6 @@ func lifecycleTestPersistedAgent(t testing.TB) PersistedAgent {
 			ExecutionMode: "live", ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
 			Identity: runtimeagentidentitytest.RootRuntime(t, "agent-lifecycle-test", "lifecycle-test"),
 		}),
-		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
+		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(), Topology: managerTestTopologyAdmission(t),
 	}
 }

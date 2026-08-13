@@ -63,7 +63,11 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		t.Fatalf("release overflow credential setup failed: %v\n%s", secrets.err, secrets.output)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	// This release-binary proof runs alongside the repository's CPU-heavy
+	// PostgreSQL and catalog packages under go test ./.... Keep the semantic
+	// queue-overflow assertion strict while allowing the helper process enough
+	// wall time to emit its deterministic burst under full-suite contention.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(
 		ctx,

@@ -118,7 +118,7 @@ type startupRecoveryOrderStore interface {
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimemanager.ManagerPersistence
-	runtimemanager.AgentLifecyclePersistence
+	storetest.AgentFixtureStore
 }
 
 type startupRecoveryOrderLLM struct{}
@@ -228,7 +228,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 				EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
-				ManagerStore: selected, ManagerLifecycleStore: selected,
+				ManagerStore:            selected,
 				ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: selected,
 				PipelineObligations: selected.PipelineObligations(),
 
@@ -247,13 +247,17 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
+			capability, grant := installExternalRuntimeTestGeneration(t, ctx, selected, runtime)
 			t.Cleanup(func() {
 				if err := runtime.Shutdown(); err != nil {
 					t.Errorf("shutdown startup-order runtime: %v", err)
 				}
+				if err := capability.Release(context.Background()); err != nil {
+					t.Errorf("release startup-order process capability: %v", err)
+				}
 			})
-			if err := runtime.Manager.SpawnAgent(agentConfig); err != nil {
-				t.Fatalf("persist startup-order agent: %v", err)
+			if err := runtime.Manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
+				t.Fatalf("persist startup-order declared agent: %v", err)
 			}
 			if err := runtime.Manager.Shutdown(); err != nil {
 				t.Fatalf("retire constructed manager before startup-order replacement: %v", err)
@@ -267,10 +271,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				return startupRecoveryOrderAgent{id: cfg.ID, subscriptions: subscriptions}, nil
 			}, runtimemanager.AgentManagerOptions{
 				ExecutionPosture: executionposture.Live,
-				BaseContext:      ctx, LifecycleStore: selected, DeliveryStore: selected, SemanticSource: source,
+				BaseContext:      ctx, LifecycleStore: storetest.AgentLifecycleFixture(selected), DeliveryStore: selected, SemanticSource: source,
 				PersistenceRoles:  externalRuntimeTestManagerBusRoles(runtime.Bus),
 				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
+			installExternalManagerTestGeneration(t, ctx, runtime.Manager, grant)
 
 			if err := runtime.Start(ctx); err != nil {
 				t.Fatalf("Start: %v", err)
@@ -419,7 +424,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 						EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 						RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
-						ManagerStore: selected, ManagerLifecycleStore: selected,
+						ManagerStore:            selected,
 						ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: activationProbe,
 						PipelineObligations: selected.PipelineObligations(),
 
@@ -437,6 +442,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					if runtimeErr != nil {
 						t.Fatalf("NewRuntime: %v", runtimeErr)
 					}
+					capability, _ := installExternalRuntimeTestGeneration(t, currentCtx, selected, runtime)
 					startErr := runtime.Start(currentCtx)
 					if test.wantDenied {
 						if startErr == nil {
@@ -468,6 +474,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					if shutdownErr := runtime.Shutdown(); shutdownErr != nil {
 						t.Fatalf("shutdown startup-decision runtime: %v", shutdownErr)
 					}
+					releaseExternalRuntimeTestCapability(t, capability)
 					joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
 					if _, joinErr := processOwner.Join(joinCtx); joinErr != nil {

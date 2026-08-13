@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 
 type operatorDeadLetterEvidenceStore interface {
 	authorActivityReceiptStore
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+	agentfixture.Store
 	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error)
 	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
@@ -39,7 +40,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "agent-a", "global")
-			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+			if err := agentfixture.Upsert(ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),
@@ -131,7 +132,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "terminal-agent", "global")
-			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+			if err := agentfixture.Upsert(ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),

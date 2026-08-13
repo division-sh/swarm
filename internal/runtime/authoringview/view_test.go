@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
@@ -294,7 +295,7 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 		},
 	}
 	addAuthoringViewAgentOwners(bundle)
-	view := mustBuild(t, semanticview.Wrap(bundle), nil)
+	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
 
 	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
 		len(view.Root.RequiredAgents.Agents) != 1 ||
@@ -625,7 +626,7 @@ func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	}
 	addAuthoringViewAgentOwners(bundle)
 
-	view := mustBuild(t, semanticview.Wrap(bundle), nil)
+	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
 
 	rootAgent := agentByID(t, view.Root.Agents, "root-agent")
 	assertDefaultedAgentField(t, rootAgent, "type", runtimecontracts.DefaultAgentType)
@@ -657,7 +658,7 @@ func TestBuildRendersEffectivePublicAgentNameInsteadOfLocalCoordinate(t *testing
 			},
 		},
 	}
-	view := mustBuild(t, semanticview.Wrap(bundle), nil)
+	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
 	if len(view.Root.Agents) != 1 || view.Root.Agents[0].ID != "public-worker" {
 		t.Fatalf("root agents = %#v, want effective public-worker readback", view.Root.Agents)
 	}

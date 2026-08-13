@@ -242,7 +242,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		CredentialOwner: snapshotOwner, EffectsStore: effectsStore,
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-		StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+		StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 		Readiness:        readiness,
 	})
 	if err != nil {
@@ -251,7 +251,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
 	readiness.SetRuntimeReady(true)
 	readiness.SetExposure(ExposureEvidence{
-		GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
 	})
 	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
@@ -277,7 +277,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 			CredentialOwner: snapshotOwner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
 			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: distinctTransport}},
 			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-			StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+			StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 			Readiness:        distinctReadiness,
 		})
 		if err != nil {
@@ -318,14 +318,14 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		mismatchReadiness := NewReadinessOwner(true)
 		mismatchReadiness.SetRuntimeReady(true)
 		mismatchReadiness.SetExposure(ExposureEvidence{
-			GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+			GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 			ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
 		})
 		mismatchController, err := NewProviderRegistrationController(RegistrationControllerOptions{
 			CredentialOwner: snapshotOwner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
 			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: mismatchTransport}},
 			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-			StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+			StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 			Readiness:        mismatchReadiness,
 		})
 		if err != nil {
@@ -379,7 +379,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 
 	startup = testStartupAuthority(t, "runtime-b")
 	readiness.SetExposure(ExposureEvidence{
-		GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL),
 	})
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
@@ -464,7 +464,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		t.Fatalf("callback route change readiness = %#v", routed)
 	}
 	readiness.SetExposure(ExposureEvidence{
-		GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: routed.Registrations[0].ObservedAt, ExpiresAt: routed.Registrations[0].ExpiresAt.Add(time.Minute),
 	})
 	if expired := readiness.Snapshot(routed.Registrations[0].ExpiresAt); expired.Ready || expired.PublicIngressReady {
@@ -476,7 +476,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		CredentialOwner: snapshotOwner, EffectsStore: effectsStore,
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-		StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+		StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 		Readiness:        restartedReadiness,
 	})
 	if err != nil {
@@ -523,7 +523,7 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 		CredentialOwner: snapshotOwner, EffectsStore: effectsStore,
 		HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 		Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-		StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+		StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 		Readiness:        readiness, Now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -532,7 +532,7 @@ func TestProviderRegistrationRetainsSettlementIdentityAndSharesCallbackCurrentne
 	exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 	readiness.SetRuntimeReady(true)
 	readiness.SetExposure(ExposureEvidence{
-		GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID,
+		GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID,
 		ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
 	})
 	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
@@ -624,7 +624,7 @@ func TestProviderRegistrationStartupHandoffPhaseBarrier(t *testing.T) {
 			CredentialOwner: snapshots, EffectsStore: effects,
 			HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 			Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-			StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+			StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 			Readiness:        readiness, Now: func() time.Time { return now },
 		})
 		if err != nil {
@@ -634,7 +634,7 @@ func TestProviderRegistrationStartupHandoffPhaseBarrier(t *testing.T) {
 		readiness.SetRuntimeReady(true)
 		readiness.SetExposure(ExposureEvidence{
 			GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
-			StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
+			StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL),
 		})
 		return fixture{controller: controller, readiness: readiness, transport: transport, pair: testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram"), exposure: exposure}
 	}
@@ -806,7 +806,7 @@ func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t
 				CredentialOwner: credentials, EffectsStore: effectsStore,
 				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-				StartupAuthority: func() (startupownership.Authority, error) { return startup, nil },
+				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil },
 				Readiness:        readiness,
 			})
 			if err != nil {
@@ -815,7 +815,7 @@ func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t
 			now := time.Now().UTC()
 			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
 			readiness.SetRuntimeReady(true)
-			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
+			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
 			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram:telegram")
 
 			if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
@@ -908,13 +908,16 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 	}
 }
 
-func testStartupAuthority(t *testing.T, owner string) startupownership.Authority {
+func testStartupAuthority(t *testing.T, owner string) startupownership.GrantEvidence {
 	t.Helper()
-	authority, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
-		OwnerID: owner, BootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64),
-	}, "test")
-	if err != nil {
-		t.Fatalf("NewColdAuthority: %v", err)
+	authority := startupownership.GrantEvidence{
+		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: owner,
+		ProcessBootID: uuid.NewString(), BundleHash: "bundle-v1:sha256:" + strings.Repeat("d", 64), BundleSource: "ephemeral",
+		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1, SourceSetRevision: "test-source-set",
+		StateVersion: 3, State: startupownership.GrantAdmitted,
+	}
+	if err := authority.Validate(); err != nil {
+		t.Fatalf("test startup grant: %v", err)
 	}
 	return authority
 }

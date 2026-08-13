@@ -275,9 +275,6 @@ func TestValidateNativeToolBootConfig_FallbackFileIORequiresWorkspaceExecutionTa
 
 func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
 	source := scopedNativeToolAgentFixture(t)
-	if _, exists := source.AgentEntries()["shared-worker"]; exists {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
-	}
 	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nil, nil)
 	if err == nil {
 		t.Fatal("ValidateNativeToolBootConfig unexpectedly ignored scoped native-tool agents")

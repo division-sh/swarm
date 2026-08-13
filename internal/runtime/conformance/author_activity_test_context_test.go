@@ -11,6 +11,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -27,6 +28,8 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/google/uuid"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -136,6 +139,90 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 		opts.ProcessWorkOwner = conformanceTestProcessOwner(t)
 	}
 	return opts
+}
+
+func installConformanceRuntimeStartupGrant(t testing.TB, ctx context.Context, selected any, rt *runtimepkg.Runtime) runtimestartupownership.ProcessCapability {
+	t.Helper()
+	store, ok := selected.(runtimestartupownership.Store)
+	if !ok {
+		t.Fatalf("conformance selected store %T lacks process capability acquisition", selected)
+	}
+	if rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
+		t.Fatal("conformance runtime grant requires a constructed runtime and semantic source")
+	}
+	bundleHash, bundleSource := rt.Options.BundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(rt.Options.WorkflowModule.SemanticSource(), coordinate)
+	if err != nil {
+		t.Fatalf("compile conformance runtime source set: %v", err)
+	}
+	capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "conformance-runtime-test", BootID: uuid.NewString(), RuntimeInstanceID: rt.Options.RuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire conformance process capability: %v", err)
+	}
+	release := true
+	defer func() {
+		if release {
+			_ = capability.Release(context.Background())
+		}
+	}()
+	current, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatalf("load conformance source set: %v", err)
+	}
+	sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(current.Sources)+1)
+	for _, source := range current.Sources {
+		if source.Normalize().Key() != coordinate.Normalize().Key() {
+			sources = append(sources, source)
+		}
+	}
+	sources = append(sources, coordinate)
+	agents := make([]runtimeagenttopology.DesiredAgent, 0, len(current.Agents)+len(desired))
+	for _, agent := range current.Agents {
+		if agent.Source.Normalize().Key() != coordinate.Normalize().Key() {
+			agents = append(agents, agent)
+		}
+	}
+	agents = append(agents, desired...)
+	plan, err := runtimeagenttopology.NewSourceSetPlan(sources, agents)
+	if err != nil {
+		t.Fatalf("construct conformance source set: %v", err)
+	}
+	commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
+	if exists {
+		commit.ExpectedRevision = current.Revision
+		_, err = capability.ReplaceSourceSet(ctx, commit)
+	} else {
+		_, err = capability.InstallCompleteSourceSet(ctx, commit)
+	}
+	if err != nil {
+		t.Fatalf("commit conformance source set: %v", err)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: bundleHash, BundleSource: bundleSource, RuntimeInstanceID: rt.Options.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue conformance runtime generation grant: %v", err)
+	}
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		t.Fatalf("install conformance runtime generation grant: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = rt.Shutdown()
+		select {
+		case <-capability.Done():
+			return
+		default:
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Errorf("release conformance process capability: %v", err)
+		}
+	})
+	release = false
+	return capability
 }
 
 type testAuthorActivityCatalogRegistrar interface {

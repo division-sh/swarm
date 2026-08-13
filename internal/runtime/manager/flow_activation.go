@@ -570,7 +570,7 @@ func validateAutoEmitPayload(source semanticview.Source, flowID, eventType strin
 	return nil
 }
 
-func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, source semanticview.Source) error {
+func (am *AgentManager) VerifyStaticFlowRequiredAgents(source semanticview.Source) error {
 	if am == nil || source == nil {
 		return nil
 	}
@@ -578,10 +578,10 @@ func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, sour
 	if err != nil {
 		return err
 	}
-	return am.spawnStaticAgentRecords(ctx, records)
+	return am.verifyStaticAgentRecords(records)
 }
 
-func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticview.Source) error {
+func (am *AgentManager) VerifyStaticAgents(source semanticview.Source) error {
 	if am == nil || source == nil {
 		return nil
 	}
@@ -589,13 +589,46 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 	if err != nil {
 		return err
 	}
-	return am.spawnStaticAgentRecords(ctx, records)
+	return am.verifyStaticAgentRecords(records)
 }
 
-func (am *AgentManager) spawnStaticAgentRecords(ctx context.Context, records []PersistedAgent) error {
+func (am *AgentManager) verifyStaticAgentRecords(records []PersistedAgent) error {
+	topology, err := am.staticTopologyAdmission()
+	if err != nil {
+		return err
+	}
 	for _, rec := range records {
-		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !errors.Is(err, ErrAgentAlreadyExists) {
+		if err := am.resolveAgentModel(&rec.Config); err != nil {
 			return err
+		}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return err
+		}
+		snapshot, ok := am.lifecycle.executionSnapshotByIdentity(identity)
+		if !ok {
+			return fmt.Errorf("static declaration %s was not hydrated by source-set reconciliation", identity.Description())
+		}
+		expectedRevision, err := lifecycleConfigRevision(rec)
+		if err != nil {
+			return err
+		}
+		actualRevision, err := lifecycleConfigRevision(PersistedAgent{Config: snapshot.Config})
+		if err != nil {
+			return err
+		}
+		state, ok := am.lifecycle.stateByIdentity(identity)
+		if !ok {
+			return fmt.Errorf("static declaration %s has no reconciled lifecycle state", identity.Description())
+		}
+		if expectedRevision != actualRevision {
+			return fmt.Errorf(
+				"static declaration %s config revision %s differs from reconciled execution %s",
+				identity.Description(), expectedRevision, actualRevision,
+			)
+		}
+		if !state.Topology.Equal(topology) {
+			return fmt.Errorf("static declaration %s topology differs from reconciled execution", identity.Description())
 		}
 	}
 	return nil

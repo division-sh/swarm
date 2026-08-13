@@ -78,14 +78,20 @@ func (startupReadinessWorkflowModule) ActionRegistry() runtimepipeline.ActionReg
 
 func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.BackgroundNode) *Runtime {
 	t.Helper()
+	fact := testBundleSourceFact(t, runtimeTestBundleHash)
+	_, grant, err := newRuntimeTestProcessCapability(t, nil, nil, fact, authorActivityTestRuntimeInstanceID)
+	if err != nil {
+		t.Fatalf("construct startup readiness generation grant: %v", err)
+	}
 	return &Runtime{
 		Config:         testOperationalRuntimeConfig(),
 		SystemNodes:    nodes,
 		workOccurrence: runtimeTestOccurrence(t, runtimeTestBundleHash),
+		startupGrant:   grant,
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,
 			WorkflowModule:                   startupReadinessWorkflowModule{},
-			BundleSourceFact:                 testBundleSourceFact(t, runtimeTestBundleHash),
+			BundleSourceFact:                 fact,
 		},
 	}
 }

@@ -71,11 +71,13 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 					INSERT INTO agents (
 						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 						flow_scope_key, flow_instance_id, flow_instance,
-						role, model, memory_enabled, memory_source
+						role, model, memory_enabled, memory_source,
+						topology_authority_kind, topology_admission, execution_lifetime
 					)
 					VALUES ('invalid-memory-postgres', 'schema-negative-test', 'runtime_created', 'present',
-						'review', 'one', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default')
-				`)
+						'review', 'one', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default',
+						'static_declaration_plan', $1::jsonb, 'durable_managed')
+				`, testAgentTopologyJSON(t))
 				return err
 			},
 		},
@@ -86,11 +88,13 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 					INSERT INTO agents (
 						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 						flow_scope_key, flow_instance_id, flow_instance,
-						role, model, memory_enabled, memory_source
+						role, model, memory_enabled, memory_source,
+						topology_authority_kind, topology_admission, execution_lifetime
 					)
 					VALUES ('invalid-memory-sqlite', 'schema-negative-test', 'runtime_created', 'present',
-						'review', 'one', 'review/one', 'reviewer', 'regular', 1, 'platform_default')
-				`)
+						'review', 'one', 'review/one', 'reviewer', 'regular', 1, 'platform_default',
+						'static_declaration_plan', ?, 'durable_managed')
+				`, testAgentTopologyJSON(t))
 				return err
 			},
 		},
@@ -155,16 +159,18 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					flow_scope_key, flow_instance_id, flow_instance,
 					role, model, llm_backend, memory_enabled, memory_source,
 					parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
-					runtime_descriptor, status
+					runtime_descriptor, status,
+					topology_authority_kind, topology_admission, execution_lifetime
 				) VALUES (
 					$1, $2, $3, $4, $5, $6, $7,
 					'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
 					NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-					$8::jsonb, 'active'
+					$8::jsonb, 'active',
+					'static_declaration_plan', $9::jsonb, 'durable_managed'
 				)
 			`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 				identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
-				tt.runtimeDescriptor); err != nil {
+				tt.runtimeDescriptor, testAgentTopologyJSON(t)); err != nil {
 				t.Fatalf("seed agent row: %v", err)
 			}
 

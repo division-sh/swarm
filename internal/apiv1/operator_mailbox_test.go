@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"strings"
 	"testing"
 	"time"
@@ -261,7 +262,7 @@ func countAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
 }
 
 type activeAPIV1RuntimeBusAgentStore interface {
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+	storetest.AgentFixtureStore
 }
 
 func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID string) {
@@ -271,7 +272,7 @@ func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner act
 func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID, flowPath string) {
 	t.Helper()
 	identity := runtimebustest.Identity(t, agentID, flowPath)
-	if err := owner.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(ctx, owner, runtimemanager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "observer", FlowID: "global", FlowPath: identity.FlowInstance(),
 			Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),

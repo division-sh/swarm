@@ -44,9 +44,9 @@ func hostileRawAgentID(entry runtimecontracts.AgentRegistryEntry) string {
 	return entry.ID
 }
 
-func hostileMapKeyAgentID(source Source) []string {
+func hostileMapKeyAgentID(bundle *runtimecontracts.WorkflowContractBundle) []string {
 	var out []string
-	for key := range source.AgentEntries() {
+	for key := range bundle.AgentEntries() {
 		out = append(out, key)
 	}
 	return out
@@ -66,7 +66,7 @@ func hostileLegacyContractLookup(bundle *runtimecontracts.WorkflowContractBundle
 }
 `)}
 	findings := loadAgentNameOwnershipFindings(t, root, overlay)
-	want := map[string]bool{"raw_agent_registry_id": false, "unclassified_agent_entries": false, "unclassified_agent_map_range": false, "legacy_agent_contract_lookup": false}
+	want := map[string]bool{"raw_agent_registry_id": false, "unclassified_agent_map_range": false, "legacy_agent_contract_lookup": false}
 	for _, finding := range findings {
 		if _, ok := want[finding.Kind]; ok && strings.Contains(finding.Enclosing, "hostile") {
 			want[finding.Kind] = true
@@ -137,9 +137,6 @@ func collectAgentNameOwnershipFindings(path string, file *ast.File, info *types.
 			if agentNameGuardIsRawID(selector, info) && !agentNameGuardRawIDAllowed(path, enclosing) {
 				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "raw_agent_registry_id"})
 			}
-			if agentNameGuardIsAgentEntriesCall(selector, info) && !agentNameGuardAgentEntriesAllowed(path, enclosing) {
-				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "unclassified_agent_entries"})
-			}
 			if agentNameGuardIsLegacyContractLookup(selector, info) && !agentNameGuardLegacyContractLookupAllowed(path, enclosing) {
 				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "legacy_agent_contract_lookup"})
 			}
@@ -209,30 +206,8 @@ func agentNameGuardIsRawID(selector *ast.SelectorExpr, info *types.Info) bool {
 	return named.Obj().Name() == "AgentRegistryEntry" && named.Obj().Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/contracts"
 }
 
-func agentNameGuardIsAgentEntriesCall(selector *ast.SelectorExpr, info *types.Info) bool {
-	if selector == nil || selector.Sel == nil || selector.Sel.Name != "AgentEntries" || info == nil {
-		return false
-	}
-	function, ok := info.Uses[selector.Sel].(*types.Func)
-	return ok && function.Pkg() != nil && function.Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/semanticview"
-}
-
 func agentNameGuardRawIDAllowed(path, enclosing string) bool {
 	return path == "internal/runtime/contracts/workflow_contract_effective.go" && enclosing == "DeclaredAgentID"
-}
-
-func agentNameGuardAgentEntriesAllowed(path, enclosing string) bool {
-	allowed := map[string]struct{}{
-		"internal/runtime/requiredagents/fulfillment.go::RootScope":                                 {},
-		"internal/runtime/runtime.go::(*Runtime).publishBootCompleted":                              {},
-		"internal/runtime/semanticview/agent_declarations.go::AgentDeclarations":                    {},
-		"internal/runtime/semanticview/agent_contract_projection.go::ScopedAgentContractProjection": {},
-		"internal/runtime/tools/emit_runtime.go::NewEmitRegistry":                                   {},
-		"internal/serveapp/main.go::serveBootRegistryDetail":                                        {},
-		"internal/serveapp/main.go::serveLifecycleSourceCounts":                                     {},
-	}
-	_, ok := allowed[path+"::"+enclosing]
-	return ok
 }
 
 func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {

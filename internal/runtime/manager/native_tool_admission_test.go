@@ -18,7 +18,7 @@ func TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator(t *testing.T
 		},
 	})
 
-	err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{
+	err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-1",
 		Role:          "worker",
@@ -43,7 +43,7 @@ func TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator(t *testing.
 			return nil
 		},
 	})
-	if err := am.SpawnAgent(managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker"})); err != nil {
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "worker-1", Role: "worker"})); err != nil {
 		t.Fatalf("SpawnAgent setup: %v", err)
 	}
 

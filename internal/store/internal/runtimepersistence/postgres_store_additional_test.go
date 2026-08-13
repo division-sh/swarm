@@ -31,6 +31,7 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -135,7 +136,7 @@ func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *Postg
 	if targetEpoch == 0 {
 		targetEpoch = 1
 	}
-	result, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+	result, err := agentfixture.Commit(ctx, pg, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "test-terminate-" + identity.AgentID(),
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "test", ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
 		TargetEpoch: targetEpoch, TargetGeneration: generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
@@ -661,7 +662,7 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		Config:        []byte(`{}`),
 		Identity:      specMemoryIdentity(agentID, "global").Agent,
 	})
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config:    cfg,
 		Status:    "active",
 		HiredBy:   "test",
@@ -1277,7 +1278,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("expected entity_id required")
 	}
 
-	if _, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{}); err == nil {
+	if _, err := agentfixture.Commit(ctx, pg, runtimemanager.AgentLifecycleTransition{}); err == nil {
 		t.Fatalf("expected lifecycle transition fields required")
 	}
 
@@ -2438,7 +2439,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 		Status:  "active",
 		HiredBy: "test",
 	}
-	if err := pg.UpsertAgent(ctx, rec); err != nil {
+	if err := agentfixture.Upsert(ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	agents, err := pg.LoadAgents(ctx)
@@ -2458,7 +2459,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 		t.Fatalf("expected agent loaded")
 	}
 
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{ExecutionMode: "live"}}); err == nil {
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{ExecutionMode: "live"}}); err == nil {
 		t.Fatalf("expected agent id required error")
 	}
 }
@@ -2500,7 +2501,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 		}),
 		Status: "active",
 	}
-	if err := pg.UpsertAgent(ctx, rec); err != nil {
+	if err := agentfixture.Upsert(ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 
@@ -2673,16 +2674,18 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 			flow_scope_key, flow_instance_id, flow_instance,
 			role, model, llm_backend, memory_enabled, memory_source,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
-			runtime_descriptor, status
+			runtime_descriptor, status,
+			topology_authority_kind, topology_admission, execution_lifetime
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
 			NULL, NULL, $8::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			$9::jsonb, 'active'
+			$9::jsonb, 'active',
+			'static_declaration_plan', $10::jsonb, 'durable_managed'
 		)
 	`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
-		`{"system_prompt":"x","subscriptions":["wrong"]}`, `{"type":"review-worker"}`); err != nil {
+		`{"system_prompt":"x","subscriptions":["wrong"]}`, `{"type":"review-worker"}`, testAgentTopologyJSON(t)); err != nil {
 		t.Fatalf("seed agent row: %v", err)
 	}
 
@@ -2707,16 +2710,18 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing
 			flow_scope_key, flow_instance_id, flow_instance,
 			role, model, llm_backend, memory_enabled, memory_source,
 			parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
-			runtime_descriptor, status
+			runtime_descriptor, status,
+			topology_authority_kind, topology_admission, execution_lifetime
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			'reviewer', '', 'anthropic', FALSE, 'platform_default',
 			NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			$8::jsonb, 'active'
+			$8::jsonb, 'active',
+			'static_declaration_plan', $9::jsonb, 'durable_managed'
 		)
 	`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
-		`{"type":"review-worker"}`); err != nil {
+		`{"type":"review-worker"}`, testAgentTopologyJSON(t)); err != nil {
 		t.Fatalf("seed agent row: %v", err)
 	}
 
@@ -2736,7 +2741,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "testco", "testco", "TestCo", "operating")
 	a1Identity := testAgentIdentity(t, "a1", "")
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
 			Identity: a1Identity,
 			Role:     "role",
@@ -2755,25 +2760,6 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	terminateSpecAgentViaLifecycle(t, ctx, pg, a1Identity)
-	ephemeralIdentity := testAgentIdentity(t, "ephemeral-shard-1", "")
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "ephemeral-shard-1",
-			Identity: ephemeralIdentity,
-			Role:     "worker",
-			FlowID:   "worker",
-			Type:     "sonnet",
-			Model:    "regular",
-			Memory:   agentmemory.PlatformDefault(),
-			EntityID: "",
-			Config:   json.RawMessage(`{}`),
-		}),
-		Status:          "ephemeral",
-		HiredBy:         "runtime",
-		StartedAt:       time.Now().UTC(),
-		TemplateVersion: "v2",
-	}); err != nil {
-		t.Fatalf("UpsertAgent ephemeral: %v", err)
-	}
 	agents, err := pg.LoadAgents(ctx)
 	if err != nil {
 		t.Fatalf("LoadAgents: %v", err)
@@ -2782,14 +2768,11 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		if a.Config.ID == "a1" {
 			t.Fatal("expected terminated agent to be excluded from LoadAgents")
 		}
-		if a.Config.ID == "ephemeral-shard-1" {
-			t.Fatal("expected ephemeral agent to be excluded from LoadAgents")
-		}
 	}
 
 	ceoID := "operator-" + entityID
 	ceoIdentity := testAgentIdentity(t, ceoID, "operating/global")
-	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	_ = agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
 			Identity: ceoIdentity,
 			Role:     "operator",
@@ -2912,17 +2895,19 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
 			role, model, llm_backend, memory_enabled, memory_source,
-			config, runtime_descriptor, status, created_at
+			config, runtime_descriptor, status, created_at,
+			topology_authority_kind, topology_admission, execution_lifetime
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			'worker', 'regular', 'anthropic', FALSE, 'platform_default',
 			'{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"}'::jsonb,
 			'{"type":"review-worker"}'::jsonb,
 			'active',
-			now()
+			now(),
+			'static_declaration_plan', $8::jsonb, 'durable_managed'
 		)
 	`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
-		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath); err != nil {
+		identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, testAgentTopologyJSON(t)); err != nil {
 		t.Fatalf("seed legacy agent row: %v", err)
 	}
 	_, err = pg.LoadAgents(ctx)
@@ -2949,7 +2934,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
 			Identity: testAgentIdentity(t, "agent-cleanup-1", "global"),
 			Role:     "worker",

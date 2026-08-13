@@ -82,7 +82,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("operator read identity fields: %v", err)
 	}
-	if err := selected.UpsertAgent(ctx, manager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(ctx, selected, manager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
 			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Intent: intent,

@@ -16,7 +16,9 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testcatalog"
 )
 
@@ -126,15 +128,24 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 			t.Errorf("join tier-8 runtime process owner: %v", err)
 		}
 	})
-	return runtime.NewRuntime(testAuthorActivityContext(context.Background()), runtime.RuntimeDeps{Config: testRuntimeConfig(), Options: runtime.RuntimeOptions{
-		SelfCheck:           false,
-		WorkflowModule:      module,
-		LLMRuntime:          runtimellm.NoopRuntime{},
-		ProviderCredentials: tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key"),
-		RuntimeInstanceID:   authorActivityTestRuntimeInstanceID,
-		BundleSourceFact:    authorActivityTestBundleSourceFact,
-		ProcessWorkOwner:    processOwner,
-	}})
+	selected := storetest.StartSQLiteRuntimeStore(t)
+	cfg := testRuntimeConfig()
+	deps := catalogSQLiteRuntimeDeps(
+		cfg,
+		selected,
+		runtimepipeline.NewWorkflowPersistence(selected),
+		module,
+		newScriptedLLMRuntime(),
+		processOwner,
+	)
+	deps.Options.LLMRuntime = runtimellm.NoopRuntime{}
+	deps.Options.ProviderCredentials = tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key")
+	rt, err := runtime.NewRuntime(testAuthorActivityContext(context.Background()), deps)
+	if err != nil {
+		return nil, err
+	}
+	installCatalogRuntimeStartupGrant(t, testAuthorActivityContext(context.Background()), selected, rt)
+	return rt, nil
 
 }
 

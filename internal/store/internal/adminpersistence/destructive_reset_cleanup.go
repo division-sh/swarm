@@ -17,6 +17,41 @@ func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context
 	if s == nil || s.backend == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("postgres store is required")
 	}
+	txOptions := (*sql.TxOptions)(nil)
+	if req.Result.DryRun {
+		txOptions = &sql.TxOptions{ReadOnly: true}
+	}
+	tx, err := s.backend.BeginTx(ctx, txOptions)
+	if err != nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
+	}
+	out, err := applyDestructiveResetCleanupTx(ctx, tx, req)
+	if err != nil {
+		_ = tx.Rollback()
+		return destructivereset.CleanupResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("commit destructive reset cleanup tx: %w", err)
+	}
+	return out, nil
+}
+
+// ApplyDestructiveResetCleanupInRetainedTransaction lets the startup owner
+// compose cleanup with its topology-head update without exporting a
+// transaction-bearing method on a semantic owner.
+func ApplyDestructiveResetCleanupInRetainedTransaction(s *DestructiveResetPostgresOwner, ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
+	if s == nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("postgres destructive reset owner is required")
+	}
+	return applyDestructiveResetCleanupTx(ctx, tx, req)
+}
+
+// applyDestructiveResetCleanupTx is the retained-session operation used when
+// cleanup and the complete topology plan must share one commit.
+func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
+	if tx == nil {
+		return destructivereset.CleanupResult{}, fmt.Errorf("destructive reset retained transaction is required")
+	}
 	now := req.RequestedAt.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -29,35 +64,16 @@ func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context
 		return destructivereset.CleanupResult{}, err
 	}
 	out := destructivereset.CleanupResult{
-		OperationName:  strings.TrimSpace(req.Result.OperationName),
-		DryRun:         req.Result.DryRun,
-		IncludeBundles: req.Result.IncludeBundles,
-		AppliedAt:      now,
+		OperationName: strings.TrimSpace(req.Result.OperationName), DryRun: req.Result.DryRun,
+		IncludeBundles: req.Result.IncludeBundles, AppliedAt: now,
 	}
 	if out.OperationName == "" {
 		out.OperationName = destructivereset.DefaultOperationName
 	}
-	txOptions := (*sql.TxOptions)(nil)
-	if req.Result.DryRun {
-		txOptions = &sql.TxOptions{ReadOnly: true}
-	}
-	tx, err := s.backend.BeginTx(ctx, txOptions)
-	if err != nil {
-		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	if req.Result.DryRun {
 		out.RunIDs = runIDs
-		rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeBundles)
-		if err != nil {
-			return destructivereset.CleanupResult{}, err
-		}
-		out.Tables = rows
-		if err := tx.Commit(); err != nil {
-			return destructivereset.CleanupResult{}, fmt.Errorf("commit destructive reset cleanup dry-run tx: %w", err)
-		}
-		return out, nil
+		out.Tables, err = destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeBundles)
+		return out, err
 	}
 
 	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs); err != nil {
@@ -93,9 +109,6 @@ func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context
 		rows[i].DeletedRows = deleted
 	}
 	out.Tables = rows
-	if err := tx.Commit(); err != nil {
-		return destructivereset.CleanupResult{}, fmt.Errorf("commit destructive reset cleanup tx: %w", err)
-	}
 	return out, nil
 }
 

@@ -46,9 +46,6 @@ shared-worker:
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	source := semanticview.Wrap(bundle)
-	if _, ok := source.AgentEntries()["shared-worker"]; ok {
-		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened aliases")
-	}
 	joined := findingsText(workspaceClassFindings(source))
 	for _, want := range []string{
 		`project packages/project-a agent shared-worker references undefined workspace_class "missing"`,

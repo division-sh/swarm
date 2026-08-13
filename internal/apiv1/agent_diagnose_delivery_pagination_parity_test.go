@@ -25,7 +25,7 @@ import (
 
 type agentDiagnosePaginationStore interface {
 	AgentReadStore
-	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
+	storetest.AgentFixtureStore
 }
 
 func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
@@ -72,7 +72,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 			}
 			agentID := "diagnose-agent"
 			identity := agentidentitytest.Runtime(t, agentID, "diagnose-pagination-test", "diagnose", "one", "diagnose/one")
-			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+			if err := storetest.UpsertAgentFixture(ctx, selected, runtimemanager.PersistedAgent{
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					FlowID: "diagnose", FlowPath: identity.FlowInstance(),

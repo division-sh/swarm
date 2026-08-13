@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -53,6 +54,7 @@ type Bus interface {
 
 type PersistedAgent struct {
 	Config              models.AgentConfig
+	Topology            runtimeagenttopology.Admission
 	ParentAgentID       string
 	CoordinatorID       string
 	Status              string
@@ -106,7 +108,6 @@ const (
 )
 
 type AgentPersistence interface {
-	UpsertAgent(ctx context.Context, rec PersistedAgent) error
 	LoadAgents(ctx context.Context) ([]PersistedAgent, error)
 }
 
@@ -144,19 +145,8 @@ type AgentLifecycleTransition struct {
 	RunMode            AgentRunMode
 	Agent              *PersistedAgent
 	Subordinate        sessions.LifecycleMutationPlan
-	DynamicTopology    *DynamicAgentTopologyMutation
+	Topology           runtimeagenttopology.Admission
 	Now                time.Time
-}
-
-type DynamicAgentTopologyMutation struct {
-	runID           string
-	instancePath    string
-	planFingerprint string
-	desiredPresent  bool
-}
-
-func (m DynamicAgentTopologyMutation) AuthorityFacts() (runID, instancePath, planFingerprint string, desiredPresent bool) {
-	return m.runID, m.instancePath, m.planFingerprint, m.desiredPresent
 }
 
 type AgentLifecycleState struct {
@@ -167,6 +157,7 @@ type AgentLifecycleState struct {
 	Phase          AgentLifecyclePhase
 	ConfigRevision string
 	RunMode        AgentRunMode
+	Topology       runtimeagenttopology.Admission
 }
 
 type AgentLifecycleTransitionResult struct {
@@ -182,6 +173,7 @@ type AgentLifecycleTransitionResult struct {
 	Phase              AgentLifecyclePhase               `json:"phase"`
 	ConfigRevision     string                            `json:"config_revision"`
 	RunMode            AgentRunMode                      `json:"run_mode"`
+	Topology           runtimeagenttopology.Admission    `json:"topology"`
 	Subordinate        sessions.LifecycleMutationOutcome `json:"subordinate"`
 	Replayed           bool                              `json:"-"`
 }

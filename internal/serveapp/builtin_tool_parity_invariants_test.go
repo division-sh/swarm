@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -41,12 +42,26 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			intent, err := runtimeagentintent.Resolve(
+				runtimeagentintent.SourceInline,
+				"inline",
+				"agents.yaml#agents.agent-1.intent",
+				"Exercise the configured runtime tool.",
+			)
+			if err != nil {
+				t.Fatalf("resolve test agent intent: %v", err)
+			}
 			bundle := testWorkflowValidationBundle()
 			bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 				"agent-1": {
-					ID:          "agent-1",
-					Tools:       []string{tc.configuredTool},
-					Permissions: tc.permissions,
+					ID:             "agent-1",
+					Type:           "worker",
+					Role:           "worker",
+					Model:          "regular",
+					ResolvedIntent: intent,
+					Subscriptions:  []string{"platform.run.started"},
+					Tools:          []string{tc.configuredTool},
+					Permissions:    tc.permissions,
 				},
 			}
 			source := semanticviewtest.WrapRootAgents(bundle)

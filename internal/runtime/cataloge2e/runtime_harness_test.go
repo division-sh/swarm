@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtime "github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,6 +30,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -163,27 +165,28 @@ func (d catalogExpectedDocument) triggerFlowPrefix() string {
 }
 
 type runtimeHarness struct {
-	t              *testing.T
-	backend        catalogRuntimeBackend
-	ctx            context.Context
-	cancel         context.CancelFunc
-	db             *sql.DB
-	pg             *store.PostgresStore
-	sqlite         *store.SQLiteRuntimeStore
-	reopenedSQLite *store.SQLiteRuntimeStore
-	rt             *runtime.Runtime
-	processOwner   *worklifetime.Process
-	workflow       catalogWorkflowPersistence
-	llm            *scriptedLLMRuntime
-	bundle         *runtimecontracts.WorkflowContractBundle
-	initialState   string
-	startedAt      time.Time
-	publishedIDs   map[string]struct{}
-	publishedOrder []string
-	eventEntityIDs map[string]string
-	previews       map[string]runtimepipeline.HandlerPreview
-	shutdownOnce   sync.Once
-	mu             sync.Mutex
+	t               *testing.T
+	backend         catalogRuntimeBackend
+	ctx             context.Context
+	cancel          context.CancelFunc
+	db              *sql.DB
+	pg              *store.PostgresStore
+	sqlite          *store.SQLiteRuntimeStore
+	reopenedSQLite  *store.SQLiteRuntimeStore
+	rt              *runtime.Runtime
+	processOwner    *worklifetime.Process
+	processTopology runtimestartupownership.ProcessCapability
+	workflow        catalogWorkflowPersistence
+	llm             *scriptedLLMRuntime
+	bundle          *runtimecontracts.WorkflowContractBundle
+	initialState    string
+	startedAt       time.Time
+	publishedIDs    map[string]struct{}
+	publishedOrder  []string
+	eventEntityIDs  map[string]string
+	previews        map[string]runtimepipeline.HandlerPreview
+	shutdownOnce    sync.Once
+	mu              sync.Mutex
 }
 
 type catalogWorkflowPersistence interface {
@@ -288,6 +291,13 @@ func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend c
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	var selected runtimestartupownership.Store
+	if pg != nil {
+		selected = pg
+	} else {
+		selected = sqlite
+	}
+	processTopology := installCatalogRuntimeStartupGrant(t, ctx, selected, rt)
 	if !start {
 		installCatalogHarnessDeliveryAuthority(t, ctx, rt, pg, sqlite)
 	}
@@ -304,28 +314,94 @@ func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend c
 		startedAt = transcript.observationBoundary()
 	}
 	h := &runtimeHarness{
-		t:              t,
-		backend:        backend,
-		ctx:            ctx,
-		cancel:         cancel,
-		db:             db,
-		pg:             pg,
-		sqlite:         sqlite,
-		reopenedSQLite: reopenedSQLite,
-		rt:             rt,
-		processOwner:   processOwner,
-		workflow:       rt.Pipeline,
-		llm:            llmRuntime,
-		bundle:         bundle,
-		initialState:   strings.TrimSpace(rootSchema.InitialState),
-		startedAt:      startedAt,
-		publishedIDs:   map[string]struct{}{},
-		publishedOrder: []string{},
-		eventEntityIDs: map[string]string{},
-		previews:       map[string]runtimepipeline.HandlerPreview{},
+		t:               t,
+		backend:         backend,
+		ctx:             ctx,
+		cancel:          cancel,
+		db:              db,
+		pg:              pg,
+		sqlite:          sqlite,
+		reopenedSQLite:  reopenedSQLite,
+		rt:              rt,
+		processOwner:    processOwner,
+		processTopology: processTopology,
+		workflow:        rt.Pipeline,
+		llm:             llmRuntime,
+		bundle:          bundle,
+		initialState:    strings.TrimSpace(rootSchema.InitialState),
+		startedAt:       startedAt,
+		publishedIDs:    map[string]struct{}{},
+		publishedOrder:  []string{},
+		eventEntityIDs:  map[string]string{},
+		previews:        map[string]runtimepipeline.HandlerPreview{},
 	}
 	t.Cleanup(h.shutdown)
 	return h
+}
+
+func installCatalogRuntimeStartupGrant(
+	t testing.TB,
+	ctx context.Context,
+	selected runtimestartupownership.Store,
+	rt *runtime.Runtime,
+) runtimestartupownership.ProcessCapability {
+	t.Helper()
+	if selected == nil || rt == nil || rt.Manager == nil || rt.Options.WorkflowModule == nil {
+		t.Fatal("catalog runtime startup grant requires a selected store and constructed runtime")
+	}
+	bundleHash, bundleSource := rt.Options.BundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(rt.Options.WorkflowModule.SemanticSource(), coordinate)
+	if err != nil {
+		t.Fatalf("compile catalog runtime source set: %v", err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatalf("construct catalog runtime source set: %v", err)
+	}
+	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "catalog-runtime-harness", BootID: uuid.NewString(), RuntimeInstanceID: rt.Options.RuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatalf("acquire catalog runtime process capability: %v", err)
+	}
+	t.Cleanup(func() {
+		select {
+		case <-capability.Done():
+			return
+		default:
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Errorf("release catalog runtime process capability: %v", err)
+		}
+	})
+	current, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatalf("load catalog runtime source set: %v", err)
+	}
+	if !exists || current.Revision != plan.Revision {
+		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
+		if exists {
+			commit.ExpectedRevision = current.Revision
+			_, err = capability.ReplaceSourceSet(ctx, commit)
+		} else {
+			_, err = capability.InstallCompleteSourceSet(ctx, commit)
+		}
+		if err != nil {
+			t.Fatalf("commit catalog runtime source set: %v", err)
+		}
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: bundleHash, BundleSource: bundleSource, RuntimeInstanceID: rt.Options.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue catalog runtime generation grant: %v", err)
+	}
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		t.Fatalf("install catalog runtime generation grant: %v", err)
+	}
+	return capability
 }
 
 func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process) runtime.RuntimeDeps {
@@ -349,7 +425,6 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		LiveSessionAcquirer:            pg,
 		SessionResetter:                pg,
 		ManagerStore:                   pg,
-		ManagerLifecycleStore:          pg,
 		ManagerLifecycleDiagnostics:    pg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState: pg, LifecycleEffects: pg,
@@ -371,7 +446,6 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		DecisionCardHumanTasks:   pg,
 		DecisionCardDraftExpiry:  pg,
 		HumanTaskExpiry:          pg,
-		StartupOwnership:         pg,
 		MailboxStore:             pg,
 		ToolEntityStore:          pg,
 		HumanTaskStore:           pg,
@@ -409,7 +483,6 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		LiveSessionAcquirer:            sqlite,
 		SessionResetter:                sqlite,
 		ManagerStore:                   sqlite,
-		ManagerLifecycleStore:          sqlite,
 		ManagerLifecycleDiagnostics:    sqlite,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState: sqlite, LifecycleEffects: sqlite,
@@ -431,7 +504,6 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		DecisionCardHumanTasks:   sqlite,
 		DecisionCardDraftExpiry:  sqlite,
 		HumanTaskExpiry:          sqlite,
-		StartupOwnership:         sqlite,
 		MailboxStore:             sqlite,
 		ToolEntityStore:          sqlite,
 		HumanTaskStore:           sqlite,
@@ -481,12 +553,21 @@ func (h *runtimeHarness) shutdown() {
 		return
 	}
 	h.shutdownOnce.Do(func() {
-		if h.cancel != nil {
-			h.cancel()
-		}
 		if h.rt != nil {
 			if err := h.rt.Shutdown(); err != nil {
 				h.t.Errorf("shutdown catalog runtime: %v", err)
+			}
+		}
+		if h.cancel != nil {
+			h.cancel()
+		}
+		if h.processTopology != nil {
+			select {
+			case <-h.processTopology.Done():
+			default:
+				if err := h.processTopology.Release(context.Background()); err != nil {
+					h.t.Errorf("release catalog process topology capability: %v", err)
+				}
 			}
 		}
 		if h.processOwner != nil {
@@ -553,6 +634,13 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 		cancel()
 		h.t.Fatalf("reopen catalog runtime: %v", err)
 	}
+	var selected runtimestartupownership.Store
+	if pg != nil {
+		selected = pg
+	} else {
+		selected = sqlite
+	}
+	processTopology := installCatalogRuntimeStartupGrant(h.t, ctx, selected, rt)
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		cancel()
 		h.t.Fatalf("prepare reopened author activity catalog: %v", err)
@@ -565,7 +653,8 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	reopened := &runtimeHarness{
 		t: h.t, backend: h.backend, ctx: ctx, cancel: cancel, db: db, pg: pg, sqlite: sqlite,
 		rt: rt, processOwner: processOwner, workflow: rt.Pipeline, llm: llmRuntime, bundle: bundle,
-		initialState: h.initialState, startedAt: h.startedAt,
+		processTopology: processTopology,
+		initialState:    h.initialState, startedAt: h.startedAt,
 		publishedIDs: cloneCatalogStringSet(h.publishedIDs), publishedOrder: append([]string(nil), h.publishedOrder...),
 		eventEntityIDs: cloneCatalogStringMap(h.eventEntityIDs), previews: cloneCatalogPreviews(h.previews),
 	}

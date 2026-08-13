@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 func TestNewSourceProvider_UsesDeclaredAgentEmitEventsOnly(t *testing.T) {
@@ -71,22 +72,7 @@ func TestNewSourceProvider_UsesEffectiveDeclaredNameForMailboxRole(t *testing.T)
 }
 
 func authorityTestSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
-	if bundle == nil {
-		return nil
-	}
-	if bundle.URIRegistry.Agents == nil {
-		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
-	}
-	if bundle.URIRegistry.ByURI == nil {
-		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{}
-	}
-	for localID := range bundle.Agents {
-		uri := "swarm-test://root/agents/" + localID
-		ref := runtimecontracts.ContractURIRef{Kind: "agent", LocalID: localID, Full: uri}
-		bundle.URIRegistry.Agents[localID] = ref
-		bundle.URIRegistry.ByURI[uri] = ref
-	}
-	return semanticview.Wrap(bundle)
+	return semanticviewtest.WrapRootAgents(bundle)
 }
 
 func TestNewSourceProvider_UsesEffectiveSystemNodeProduces(t *testing.T) {

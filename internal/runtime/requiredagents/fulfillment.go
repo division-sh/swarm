@@ -52,7 +52,7 @@ func RootScope(source semanticview.Source) (Scope, bool) {
 			return scope, true
 		}
 	}
-	scope.Agents = source.AgentEntries()
+	scope.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
 	return scope, true
 }
 

@@ -38,6 +38,7 @@ import (
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
 	storeworkspace "github.com/division-sh/swarm/internal/store/internal/workspace"
@@ -61,6 +62,7 @@ type SQLiteRuntimeStore struct {
 	eventSQLiteOwner             *storeevent.EventSQLiteOwner
 	runtimeIngressSQLiteOwner    *storeingress.RuntimeIngressSQLiteOwner
 	lLMSQLiteOwner               *storellm.LLMSQLiteOwner
+	startupSQLiteOwner           *storestartupownership.StartupSQLiteOwner
 	managedCapabilitySQLiteOwner *storemanagedcapability.ManagedCapabilitySQLiteOwner
 	mailboxSQLiteOwner           *storemailbox.MailboxSQLiteOwner
 	operatorRunSQLite            *storeoperatorsurface.RunSQLite

@@ -404,7 +404,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	testInbound := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
 	rt.InboundGateway = testInbound.InboundGateway
 
-	if err := am.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(am, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.id,
 		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
@@ -509,7 +509,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	})
 	rt.Manager = am
 
-	if err := am.SpawnAgent(runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+	if err := registerRuntimeTestAgent(am, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.id,
 		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),

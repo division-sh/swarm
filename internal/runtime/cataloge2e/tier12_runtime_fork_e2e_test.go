@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -70,7 +71,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	sourceBefore := selectedContractSourceRunCounts(t, h.db, sourceRunID)
 	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
-	loader, selection := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
+	loader, selection, selectedSource := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
+	installCatalogSelectedSourceTopology(t, h.ctx, h, selectedSource)
 	materialized, err := materializeSelectedContractForkCleanupProbe(t, h.ctx, h.pg, loader, selection, sourceRunID, forkAt)
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution cleanup probe: %v", err)
@@ -99,6 +101,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		ContractSelection:   selection,
 		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 			Config:            cfg,
+			ProcessCapability: h.processTopology,
 			ExecutionPosture:  executionposture.Live,
 			EntityStore:       h.pg,
 			HumanTaskStore:    h.pg,
@@ -177,7 +180,7 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 	return owner
 }
 
-func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, runfork.RunForkContractSelection) {
+func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, runfork.RunForkContractSelection, runtimerunforkexecution.LoadedSelectedContractSource) {
 	t.Helper()
 	loader := runtimerunforkexecution.ContractBundleSourceLoader{
 		RepoRoot:         repoRoot,
@@ -190,7 +193,76 @@ func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, rep
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	return loader, runforkadmission.SelectedContractSelection(loaded.Source, fixtureRoot)
+	if loaded.Cleanup != nil {
+		t.Cleanup(func() {
+			if err := loaded.Cleanup(); err != nil {
+				t.Errorf("cleanup selected-contract fixture source: %v", err)
+			}
+		})
+	}
+	return loader, runforkadmission.SelectedContractSelection(loaded.Source, fixtureRoot), loaded
+}
+
+func installCatalogSelectedSourceTopology(t testing.TB, ctx context.Context, h *runtimeHarness, loaded runtimerunforkexecution.LoadedSelectedContractSource) {
+	t.Helper()
+	if h == nil || h.processTopology == nil || h.rt == nil || h.rt.Manager == nil {
+		t.Fatal("catalog selected source topology requires a live process capability")
+	}
+	bundleHash, bundleSource := loaded.BundleSourceFact.StorageValues()
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
+	desired, err := h.rt.Manager.CompileStaticTopologyDesiredAgents(loaded.Source, coordinate)
+	if err != nil {
+		t.Fatalf("compile selected-contract source topology: %v", err)
+	}
+	current, exists, err := h.processTopology.CurrentSourceSet(ctx)
+	if err != nil || !exists {
+		t.Fatalf("load catalog process source set: exists=%t err=%v", exists, err)
+	}
+	sources := append([]runtimeagenttopology.SourceCoordinate(nil), current.Sources...)
+	sourcePresent := false
+	for _, source := range sources {
+		if source.Normalize().Key() == coordinate.Normalize().Key() {
+			sourcePresent = true
+			break
+		}
+	}
+	if !sourcePresent {
+		sources = append(sources, coordinate)
+	}
+	agents := append([]runtimeagenttopology.DesiredAgent(nil), current.Agents...)
+	for _, candidate := range desired {
+		key, keyErr := candidate.Key()
+		if keyErr != nil {
+			t.Fatalf("selected-contract desired agent key: %v", keyErr)
+		}
+		replaced := false
+		for i := range agents {
+			existingKey, existingErr := agents[i].Key()
+			if existingErr != nil {
+				t.Fatalf("current desired agent key: %v", existingErr)
+			}
+			if existingKey == key {
+				agents[i] = candidate
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			agents = append(agents, candidate)
+		}
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan(sources, agents)
+	if err != nil {
+		t.Fatalf("construct selected-contract complete source set: %v", err)
+	}
+	if plan.Revision == current.Revision {
+		return
+	}
+	if _, err := h.processTopology.ReplaceSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: current.Revision, Plan: plan,
+	}); err != nil {
+		t.Fatalf("commit selected-contract complete source set: %v", err)
+	}
 }
 
 func materializeSelectedContractForkCleanupProbe(

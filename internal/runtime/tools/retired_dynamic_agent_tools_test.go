@@ -88,15 +88,10 @@ func TestValidateRetiredDynamicAgentToolReferencesRejectsEveryToolHandlerDisposi
 
 type retiredDynamicAgentToolSource struct {
 	semanticview.Source
-	rootAgents map[string]runtimecontracts.AgentRegistryEntry
 	rootTools  map[string]runtimecontracts.ToolSchemaEntry
 	rootPolicy runtimecontracts.PolicyDocument
 	projects   []semanticview.ProjectScope
 	flows      []semanticview.FlowScope
-}
-
-func (s retiredDynamicAgentToolSource) AgentEntries() map[string]runtimecontracts.AgentRegistryEntry {
-	return s.rootAgents
 }
 
 func (s retiredDynamicAgentToolSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
@@ -119,7 +114,8 @@ func retiredToolSourceForScope(
 	source := retiredDynamicAgentToolSource{}
 	switch scope {
 	case "root":
-		source.rootAgents, source.rootTools, source.rootPolicy = agents, tools, policy
+		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents}}
+		source.rootTools, source.rootPolicy = tools, policy
 	case "project":
 		source.projects = []semanticview.ProjectScope{{Key: "project-fixture", Agents: agents, Tools: tools, Policy: policy}}
 	case "flow":

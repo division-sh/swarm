@@ -212,13 +212,15 @@ rows:
 
   - id: runtime_context_unload_deactivation
     category: runtime_context
-    concept: loaded contexts fail closed after authoritative unload/deactivation from delete or nuke.
+    concept: coordinators quiesce loaded contexts before authoritative delete or nuke topology mutation.
     classification: implemented_proof
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: RuntimeContextManager lifecycle state}
     proof_refs:
       - {kind: go_test, name: TestRuntimeContextManagerDeactivatesPinnedContextFailClosed}
-      - {kind: go_test, name: TestOperatorBundleDeleteDeactivatesLoadedRuntimeContext}
+      - {kind: go_test, name: TestCoordinatorNonForceQuiescesBeforeFinalMutation}
+      - {kind: go_test, name: TestCoordinatorNonForceShutdownFailureBlocksFinalMutation}
+      - {kind: go_test, name: TestRunServeRuntimeBundleDeleteNonForceQuiescesLoadedAgentsBeforeTopologyRemovalPostgres}
       - {kind: go_test, name: TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts}
 
   - id: fork_same_bundle_disk

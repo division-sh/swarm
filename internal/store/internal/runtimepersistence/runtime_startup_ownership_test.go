@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -33,14 +35,81 @@ import (
 )
 
 func testStartupAcquireRequest(ownerID string) runtimestartupownership.AcquireRequest {
-	return runtimestartupownership.AcquireRequest{OwnerID: ownerID, BootID: uuid.NewString(), BundleHash: testCanonicalBundleHash}
+	return runtimestartupownership.AcquireRequest{
+		OwnerID: ownerID, BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	}
 }
 
 type startupAuthorityParityStore interface {
 	runtimestartupownership.Store
-	runtimestartupownership.Recorder
 	runtimeeffects.Store
 	runtimeeffects.RecoveryStore
+}
+
+func admitRegistrationTestGeneration(
+	t *testing.T,
+	ctx context.Context,
+	store startupAuthorityParityStore,
+	ownerID string,
+) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant, runtimestartupownership.GrantEvidence) {
+	t.Helper()
+	req := testStartupAcquireRequest(ownerID)
+	capability, err := store.AcquireProcessCapability(ctx, req)
+	if err != nil {
+		t.Fatalf("AcquireProcessCapability: %v", err)
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatalf("build registration source set: %v", err)
+	}
+	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatalf("install registration source set: %v", err)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue registration generation grant: %v", err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle registration generation probes: %v", err)
+	}
+	evidence, err := grant.AdmitExecution(ctx)
+	if err != nil {
+		t.Fatalf("admit registration generation: %v", err)
+	}
+	return capability, grant, evidence
+}
+
+func rotateRegistrationTestGeneration(
+	t *testing.T,
+	ctx context.Context,
+	capability runtimestartupownership.ProcessCapability,
+	current runtimestartupownership.GenerationGrant,
+	previous runtimestartupownership.GrantEvidence,
+) (runtimestartupownership.GenerationGrant, runtimestartupownership.GrantEvidence) {
+	t.Helper()
+	if err := current.Retire(ctx); err != nil {
+		t.Fatalf("retire predecessor registration generation: %v", err)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: previous.BundleHash, BundleSource: previous.BundleSource,
+		RuntimeInstanceID: previous.RuntimeInstanceID, RuntimeGeneration: previous.RuntimeGeneration + 1,
+		SourceSetRevision: previous.SourceSetRevision,
+	})
+	if err != nil {
+		t.Fatalf("issue successor registration generation: %v", err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle successor registration probes: %v", err)
+	}
+	evidence, err := grant.AdmitExecution(ctx)
+	if err != nil {
+		t.Fatalf("admit successor registration generation: %v", err)
+	}
+	return grant, evidence
 }
 
 type selectedRegistrationSettlementStore struct {
@@ -143,15 +212,8 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			store, db := tc.store(t)
-			lease, err := store.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("registration-owner-a"))
-			if err != nil {
-				t.Fatalf("AcquireRuntimeStartupOwnership: %v", err)
-			}
-			t.Cleanup(func() { _ = lease.Release(testAuthorActivityContext()) })
-			startup, err := lease.Authority()
-			if err != nil {
-				t.Fatalf("Authority: %v", err)
-			}
+			capability, grant, startup := admitRegistrationTestGeneration(t, ctx, store, "registration-owner-a")
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 			authority := testServeRegistrationAuthority(startup)
 			if current, err := store.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || !current {
 				t.Fatalf("initial registration authority current=%v err=%v", current, err)
@@ -375,28 +437,11 @@ func TestProviderRegistrationAuthorityAndApplyJournalParity(t *testing.T) {
 				t.Fatalf("known attempt state=%q, want settled", got)
 			}
 
-			successorBundleHash := "bundle-v1:sha256:" + strings.Repeat("e", 64)
-			handoff, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
-				CandidateOwnerID: "registration-owner-b", CandidateBootID: uuid.NewString(),
-				CandidateBundleHash: successorBundleHash,
-			})
-			if err != nil {
-				t.Fatalf("PrepareHandoff: %v", err)
-			}
-			if _, err := handoff.MarkProbesSettled(ctx, nil); err != nil {
-				t.Fatalf("MarkProbesSettled: %v", err)
-			}
-			if _, err := handoff.Commit(ctx); err != nil {
-				t.Fatalf("Commit: %v", err)
-			}
-			successor, err := handoff.Finalize(ctx)
-			if err != nil {
-				t.Fatalf("Finalize: %v", err)
-			}
+			_, successor := rotateRegistrationTestGeneration(t, ctx, capability, grant, startup)
 			if current, err := store.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("predecessor registration authority current=%v err=%v, want false", current, err)
 			}
-			successorCtx := testAuthorActivityContextForBundle(successorBundleHash)
+			successorCtx := ctx
 			successorAuthority := testServeRegistrationAuthority(successor)
 			uncertain, err := store.AuthorizeExternalAttempt(successorCtx, successorAuthority, runtimeeffects.AuthorizeRequest{
 				OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: registration.Kind, Class: registration.Class,
@@ -445,15 +490,8 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			selected, db := tc.store(t)
-			lease, err := selected.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("registration-controller-predecessor"))
-			if err != nil {
-				t.Fatalf("AcquireRuntimeStartupOwnership: %v", err)
-			}
-			t.Cleanup(func() { _ = lease.Release(testAuthorActivityContext()) })
-			startup, err := lease.Authority()
-			if err != nil {
-				t.Fatalf("predecessor authority: %v", err)
-			}
+			capability, grant, startup := admitRegistrationTestGeneration(t, ctx, selected, "registration-controller-predecessor")
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
 
 			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 			if err != nil {
@@ -476,7 +514,7 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 				CredentialOwner: credentials, EffectsStore: faulting,
 				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
 				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
-				StartupAuthority: func() (runtimestartupownership.Authority, error) { return startup, nil },
+				StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) { return startup, nil },
 				Readiness:        readiness, Now: func() time.Time { return now },
 			})
 			if err != nil {
@@ -529,22 +567,7 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 				t.Fatalf("pre-handoff barrier resent apply: %d", transport.applies())
 			}
 
-			handoff, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
-				CandidateOwnerID: "registration-controller-successor", CandidateBootID: uuid.NewString(), CandidateBundleHash: testCanonicalBundleHash,
-			})
-			if err != nil {
-				t.Fatalf("PrepareHandoff: %v", err)
-			}
-			if _, err := handoff.MarkProbesSettled(ctx, nil); err != nil {
-				t.Fatalf("MarkProbesSettled: %v", err)
-			}
-			if _, err := handoff.Commit(ctx); err != nil {
-				t.Fatalf("Commit: %v", err)
-			}
-			startup, err = handoff.Finalize(ctx)
-			if err != nil {
-				t.Fatalf("Finalize: %v", err)
-			}
+			grant, startup = rotateRegistrationTestGeneration(t, ctx, capability, grant, startup)
 			if current, err := selected.IsExternalEffectAuthorityCurrent(ctx, testServeRegistrationAuthorityFromIdentity(startup, pending.Registrations[0].IntentID)); err != nil || !current {
 				t.Fatalf("successor registration authority current=%v err=%v", current, err)
 			}
@@ -669,10 +692,10 @@ func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChan
 	}
 }
 
-func setSelectedStoreExposure(readiness *runtimepublicingress.ReadinessOwner, exposure runtimepublicingress.Generation, startup runtimestartupownership.Authority, now time.Time) {
+func setSelectedStoreExposure(readiness *runtimepublicingress.ReadinessOwner, exposure runtimepublicingress.Generation, startup runtimestartupownership.GrantEvidence, now time.Time) {
 	readiness.SetExposure(runtimepublicingress.ExposureEvidence{
 		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
-		StartupAuthorityID: startup.AuthorityID, ObservedAt: now, ExpiresAt: now.Add(runtimepublicingress.EvidenceTTL),
+		StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(runtimepublicingress.EvidenceTTL),
 	})
 }
 
@@ -742,17 +765,17 @@ func selectedStoreExternalEffectCount(t *testing.T, ctx context.Context, db *sql
 	return count
 }
 
-func testServeRegistrationAuthority(startup runtimestartupownership.Authority) runtimeeffects.Authority {
+func testServeRegistrationAuthority(startup runtimestartupownership.GrantEvidence) runtimeeffects.Authority {
 	return testServeRegistrationAuthorityFromIdentity(startup, uuid.NewString())
 }
 
-func testServeRegistrationAuthorityFromIdentity(startup runtimestartupownership.Authority, intentID string) runtimeeffects.Authority {
+func testServeRegistrationAuthorityFromIdentity(startup runtimestartupownership.GrantEvidence, intentID string) runtimeeffects.Authority {
 	return runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityServeRegistration, ID: intentID,
-		ExecutionOwner: startup.OwnerID, LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: startup.Generation,
+		ExecutionOwner: startup.ProcessOwnerID, LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: startup.RuntimeGeneration,
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
-			IntentID: intentID, StartupAuthorityID: startup.AuthorityID, StartupStateVersion: startup.StateVersion,
+			IntentID: intentID, StartupAuthorityID: startup.GrantID, StartupStateVersion: startup.StateVersion,
 		},
 	}
 }
@@ -768,7 +791,7 @@ func selectedStoreAttemptState(t *testing.T, ctx context.Context, db *sql.DB, at
 	return state
 }
 
-func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T) {
+func TestRuntimeProcessCapabilityTransitionsPersistWithBackendParity(t *testing.T) {
 	tests := []struct {
 		name  string
 		store func(*testing.T) (startupAuthorityParityStore, *sql.DB)
@@ -791,136 +814,324 @@ func TestRuntimeStartupAuthorityTransitionsPersistWithBackendParity(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			store, db := tc.store(t)
-			lease, err := store.AcquireRuntimeStartupOwnership(ctx, testStartupAcquireRequest("owner-a"))
+			selected, db := tc.store(t)
+			req := testStartupAcquireRequest("owner-a")
+			capability, err := selected.AcquireProcessCapability(ctx, req)
 			if err != nil {
-				t.Fatalf("AcquireRuntimeStartupOwnership: %v", err)
+				t.Fatalf("AcquireProcessCapability: %v", err)
 			}
-			t.Cleanup(func() { _ = lease.Release(context.Background()) })
-			active, err := lease.Authority()
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			authority, err := capability.Evidence()
+			if err != nil || authority.State != runtimestartupownership.StateActive {
+				t.Fatalf("active capability = %#v err=%v", authority, err)
+			}
+			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
-				t.Fatalf("Authority: %v", err)
+				t.Fatal(err)
 			}
-			probeAuthority := runtimeeffects.Authority{
-				Kind: runtimeeffects.AuthorityStartupProbe, ID: uuid.NewString(), ExecutionOwner: active.OwnerID,
-				LeaseExpiresAt: time.Now().UTC().Add(time.Hour), FenceGeneration: active.Generation,
-				ExecutionMode: runtimeeffects.ExecutionModeLive,
-				StartupProbe: runtimeeffects.StartupProbeAuthority{
-					ProbeID: uuid.NewString(), StartupAuthorityID: active.AuthorityID, StartupStateVersion: active.StateVersion,
-					ActorID: "agent-a", ExecutionKind: "normal_agent", ExecutionAuthorityID: active.AuthorityID,
-				},
+			if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+				t.Fatalf("InstallCompleteSourceSet: %v", err)
 			}
-			probeAuthority.ID = probeAuthority.StartupProbe.ProbeID
-			probeCurrent := func() (bool, error) {
-				switch store.(type) {
-				case *PostgresStore:
-					return externalEffectAuthorityCurrentPostgres(ctx, db, probeAuthority)
-				case *SQLiteRuntimeStore:
-					return externalEffectAuthorityCurrentSQLite(ctx, db, probeAuthority)
-				default:
-					return false, nil
-				}
+			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+				BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+				RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+			})
+			if err != nil {
+				t.Fatalf("IssueGenerationGrant: %v", err)
 			}
-			if current, err := probeCurrent(); err != nil || !current {
-				t.Fatalf("initial startup probe authority current=%v err=%v, want true", current, err)
-			}
-			if _, err := lease.MarkProbesSettled(ctx, nil); err != nil {
+			if _, err := grant.MarkProbesSettled(ctx, []string{uuid.NewString()}); err != nil {
 				t.Fatalf("MarkProbesSettled: %v", err)
 			}
-			if current, err := probeCurrent(); err != nil || current {
-				t.Fatalf("superseded startup probe authority current=%v err=%v, want false", current, err)
-			}
-			if _, err := lease.AdmitExecution(ctx); err != nil {
+			if _, err := grant.AdmitExecution(ctx); err != nil {
 				t.Fatalf("AdmitExecution: %v", err)
 			}
-			first, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
-				CandidateOwnerID: "owner-b", CandidateBootID: uuid.NewString(),
-				CandidateBundleHash: "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-			})
-			if err != nil {
-				t.Fatalf("PrepareHandoff first: %v", err)
+			if err := capability.Release(ctx); err != nil {
+				t.Fatalf("Release: %v", err)
 			}
-			if _, err := first.MarkProbesSettled(ctx, []string{uuid.NewString()}); err != nil {
-				t.Fatalf("first MarkProbesSettled: %v", err)
+			select {
+			case <-grant.Done():
+			default:
+				t.Fatal("process release did not retire generation grant")
 			}
-			committed, err := first.Commit(ctx)
-			if err != nil {
-				t.Fatalf("first Commit: %v", err)
+
+			placeholder := "?"
+			if tc.name == "postgres" {
+				placeholder = "$1::uuid"
 			}
-			finalized, err := first.Finalize(ctx)
-			if err != nil {
-				t.Fatalf("first Finalize: %v", err)
+			var authorityFacts int
+			var authorityState string
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*), MAX(state) FROM runtime_startup_authority_facts WHERE authority_id="+placeholder, authority.AuthorityID).Scan(&authorityFacts, &authorityState); err != nil {
+				t.Fatalf("read process authority facts: %v", err)
 			}
-			if err := store.RecordRuntimeStartupAuthorityTransition(ctx, &committed, finalized); err == nil || !strings.Contains(err.Error(), "compare-and-set predecessor mismatch") {
-				t.Fatalf("stale transition error = %v, want exact predecessor rejection", err)
+			if authorityFacts != 2 || authorityState != string(runtimestartupownership.StateReleased) {
+				t.Fatalf("process authority facts=%d state=%q, want 2/released", authorityFacts, authorityState)
 			}
-			second, err := lease.PrepareHandoff(ctx, runtimestartupownership.HandoffRequest{
-				CandidateOwnerID: "owner-c", CandidateBootID: uuid.NewString(),
-				CandidateBundleHash: "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-			})
-			if err != nil {
-				t.Fatalf("PrepareHandoff second: %v", err)
+			grantEvidence, err := grant.Evidence()
+			if err == nil {
+				t.Fatalf("retired grant still returned evidence: %#v", grantEvidence)
 			}
-			restored, err := second.Rollback(ctx)
-			if err != nil {
-				t.Fatalf("second Rollback: %v", err)
+			var grantFacts int
+			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_generation_grants WHERE process_authority_id="+placeholder, authority.AuthorityID).Scan(&grantFacts); err != nil {
+				t.Fatalf("read generation grant facts: %v", err)
 			}
-			var count int
-			var ordinal uint64
-			var state string
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*),MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE lease_authority_id=$1`, restored.LeaseAuthorityID).Scan(&count, &ordinal); err != nil {
-				if err := db.QueryRowContext(ctx, `SELECT COUNT(*),MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE lease_authority_id=?`, restored.LeaseAuthorityID).Scan(&count, &ordinal); err != nil {
-					t.Fatalf("query transition facts: %v", err)
-				}
-			}
-			if err := db.QueryRowContext(ctx, `SELECT state FROM runtime_startup_authority_facts WHERE lease_authority_id=$1 ORDER BY transition_ordinal DESC LIMIT 1`, restored.LeaseAuthorityID).Scan(&state); err != nil {
-				if err := db.QueryRowContext(ctx, `SELECT state FROM runtime_startup_authority_facts WHERE lease_authority_id=? ORDER BY transition_ordinal DESC LIMIT 1`, restored.LeaseAuthorityID).Scan(&state); err != nil {
-					t.Fatalf("query transition head: %v", err)
-				}
-			}
-			if count != 10 || ordinal != 10 || state != string(runtimestartupownership.StateActive) {
-				t.Fatalf("transition facts count=%d ordinal=%d state=%s, want 10/10/active", count, ordinal, state)
+			if grantFacts != 4 {
+				t.Fatalf("generation grant facts=%d, want prepared/probe_settled/admitted/retired", grantFacts)
 			}
 		})
 	}
 }
 
-func TestPostgresStore_AcquireRuntimeStartupOwnership_DeniesCompetingOwner(t *testing.T) {
+func TestPostgresProcessCapabilityReleaseAllowsCleanSuccessor(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
+	selected := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
 
-	lease1, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-1"))
+	first, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-1"))
 	if err != nil {
-		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-1): %v", err)
+		t.Fatalf("AcquireProcessCapability(runtime-1): %v", err)
 	}
-	t.Cleanup(func() { _ = lease1.Release(testAuthorActivityContext()) })
-
-	lease2, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-2"))
-	if lease2 != nil {
-		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-2) lease = %#v, want nil", lease2)
+	if err := first.Release(ctx); err != nil {
+		t.Fatalf("Release(runtime-1): %v", err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "shared runtime store already owned by another runtime instance") {
-		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-2) error = %v, want explicit ownership denial", err)
+	second, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("runtime-2"))
+	if err != nil {
+		t.Fatalf("AcquireProcessCapability(runtime-2): %v", err)
+	}
+	if err := second.Release(ctx); err != nil {
+		t.Fatalf("Release(runtime-2): %v", err)
 	}
 }
 
-func TestPostgresStore_AcquireRuntimeStartupOwnership_ReleaseAllowsSuccessor(t *testing.T) {
+func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendParity(t *testing.T) {
+	const secondBundleHash = "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	tests := []struct {
+		name  string
+		store func(*testing.T) startupAuthorityParityStore
+	}{
+		{name: "postgres", store: func(t *testing.T) startupAuthorityParityStore {
+			_, db, _ := testutil.StartPostgres(t)
+			return admitTestPostgresStore(t, db)
+		}},
+		{name: "sqlite", store: func(t *testing.T) startupAuthorityParityStore {
+			return newBootstrappedSQLiteRuntimeStoreForTest(t)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			selected := tc.store(t)
+			capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("source-set-operations"))
+			if err != nil {
+				t.Fatalf("AcquireProcessCapability: %v", err)
+			}
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+
+			firstSource := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+			secondSource := runtimeagenttopology.SourceCoordinate{BundleHash: secondBundleHash, BundleSource: "persisted"}
+			firstAgent := runtimeagenttopology.DesiredAgent{Identity: testAgentIdentity(t, "source-agent", ""), Source: firstSource, ConfigRevision: "config-v1"}
+			secondAgent := runtimeagenttopology.DesiredAgent{Identity: testAgentIdentity(t, "second-agent", ""), Source: secondSource, ConfigRevision: "config-v1"}
+			initial, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{firstSource}, []runtimeagenttopology.DesiredAgent{firstAgent})
+			if err != nil {
+				t.Fatal(err)
+			}
+			installed, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: initial})
+			if err != nil || installed.Operation != runtimeagenttopology.OperationInstallCompleteSourceSet || !hasAgentTopologyChange(installed.Changes, runtimeagenttopology.AgentAdded) {
+				t.Fatalf("install result=%#v err=%v", installed, err)
+			}
+
+			changedFirst := firstAgent
+			changedFirst.ConfigRevision = "config-v2"
+			replacement, err := runtimeagenttopology.NewSourceSetPlan(
+				[]runtimeagenttopology.SourceCoordinate{firstSource, secondSource},
+				[]runtimeagenttopology.DesiredAgent{changedFirst, secondAgent},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replaceReq := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: initial.Revision, Plan: replacement}
+			replaced, err := capability.ReplaceSourceSet(ctx, replaceReq)
+			if err != nil || replaced.Operation != runtimeagenttopology.OperationReplaceSourceSet || !hasAgentTopologyChange(replaced.Changes, runtimeagenttopology.AgentChanged) || !hasAgentTopologyChange(replaced.Changes, runtimeagenttopology.AgentAdded) {
+				t.Fatalf("replace result=%#v err=%v", replaced, err)
+			}
+			replayed, err := capability.ReplaceSourceSet(ctx, replaceReq)
+			if err != nil || !replayed.Replayed || replayed.CurrentRevision != replacement.Revision {
+				t.Fatalf("replace replay result=%#v err=%v", replayed, err)
+			}
+
+			restored, err := capability.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), ExpectedRevision: replacement.Revision, Plan: initial,
+			})
+			if err != nil || restored.Operation != runtimeagenttopology.OperationRestoreSourceSet || !hasAgentTopologyChange(restored.Changes, runtimeagenttopology.AgentChanged) || !hasAgentTopologyChange(restored.Changes, runtimeagenttopology.AgentRemoved) {
+				t.Fatalf("restore result=%#v err=%v", restored, err)
+			}
+
+			if _, err := capability.ReplaceSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), ExpectedRevision: initial.Revision, Plan: replacement,
+			}); err != nil {
+				t.Fatalf("prepare remove source: %v", err)
+			}
+			firstRemoveID := uuid.NewString()
+			removed, err := capability.RemoveBundleSource(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: firstRemoveID, ExpectedRevision: replacement.Revision, Plan: initial, RemovedSource: &secondSource,
+			})
+			if err != nil || removed.Operation != runtimeagenttopology.OperationRemoveBundleSource || !hasAgentTopologyChange(removed.Changes, runtimeagenttopology.AgentChanged) || !hasAgentTopologyChange(removed.Changes, runtimeagenttopology.AgentRemoved) {
+				t.Fatalf("remove result=%#v err=%v", removed, err)
+			}
+			if _, err := capability.ReplaceSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), ExpectedRevision: initial.Revision, Plan: replacement,
+			}); err != nil {
+				t.Fatalf("prepare recurring source removal: %v", err)
+			}
+			secondRemoveID := uuid.NewString()
+			if firstRemoveID == secondRemoveID {
+				t.Fatal("recurring source removals shared an operation identity")
+			}
+			removedAgain, err := capability.RemoveBundleSource(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: secondRemoveID, ExpectedRevision: replacement.Revision, Plan: initial, RemovedSource: &secondSource,
+			})
+			if err != nil || removedAgain.Replayed || removedAgain.CurrentRevision != initial.Revision || removedAgain.OperationID != secondRemoveID {
+				t.Fatalf("recurring remove result=%#v err=%v", removedAgain, err)
+			}
+			currentAfterSecondRemove, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || currentAfterSecondRemove.Revision != initial.Revision {
+				t.Fatalf("current source set after recurring remove=%#v exists=%v err=%v", currentAfterSecondRemove, exists, err)
+			}
+
+			empty, err := runtimeagenttopology.EmptySourceSetPlan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			reset, err := capability.ApplyDestructiveResetTopology(ctx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), ExpectedRevision: initial.Revision, Plan: empty,
+			})
+			if err != nil || reset.Operation != runtimeagenttopology.OperationApplyDestructiveResetTopology || !hasAgentTopologyChange(reset.Changes, runtimeagenttopology.AgentRemoved) {
+				t.Fatalf("reset result=%#v err=%v", reset, err)
+			}
+			current, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || current.Revision != empty.Revision {
+				t.Fatalf("current source set=%#v exists=%v err=%v", current, exists, err)
+			}
+		})
+	}
+}
+
+func TestPostgresProcessCapabilitySessionLossRetiresAndRejectsNonterminalSuccessor(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-
-	lease1, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-1"))
+	selected := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	req := testStartupAcquireRequest("lost-session-owner")
+	capability, err := selected.AcquireProcessCapability(ctx, req)
 	if err != nil {
-		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-1): %v", err)
+		t.Fatalf("AcquireProcessCapability: %v", err)
 	}
-	if err := lease1.Release(testAuthorActivityContext()); err != nil {
-		t.Fatalf("Release(runtime-1): %v", err)
+	authority, err := capability.Evidence()
+	if err != nil {
+		t.Fatalf("Evidence: %v", err)
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral"}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatalf("InstallCompleteSourceSet: %v", err)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource,
+		RuntimeInstanceID: req.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("IssueGenerationGrant: %v", err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("MarkProbesSettled: %v", err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("AdmitExecution: %v", err)
 	}
 
-	lease2, err := pg.AcquireRuntimeStartupOwnership(testAuthorActivityContext(), testStartupAcquireRequest("runtime-2"))
+	var retainedPID int
+	if err := db.QueryRowContext(ctx, `
+		SELECT pid FROM pg_locks
+		WHERE locktype = 'advisory' AND granted
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		ORDER BY pid LIMIT 1
+	`).Scan(&retainedPID); err != nil {
+		t.Fatalf("find retained process session: %v", err)
+	}
+	var terminated bool
+	if err := db.QueryRowContext(ctx, `SELECT pg_terminate_backend($1)`, retainedPID).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminate retained process session pid=%d terminated=%v err=%v", retainedPID, terminated, err)
+	}
+	if err := grant.ProveCurrent(ctx); err == nil {
+		t.Fatal("lost retained session still proved current")
+	}
+	select {
+	case <-capability.Done():
+	default:
+		t.Fatal("process capability was not terminal before loss returned")
+	}
+	select {
+	case <-grant.Done():
+	default:
+		t.Fatal("generation grant was not terminal before loss returned")
+	}
+
+	successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("successor"))
+	if successor != nil {
+		t.Fatalf("nonterminal predecessor admitted successor %#v", successor)
+	}
+	var acquisitionErr *runtimestartupownership.AcquisitionError
+	if !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
+		t.Fatalf("successor acquisition error=%v, want typed takeover_required", err)
+	}
+	var currentRevision string
+	if err := db.QueryRowContext(ctx, `SELECT revision FROM agent_topology_source_set_head WHERE singleton_id = 1`).Scan(&currentRevision); err != nil {
+		t.Fatalf("read source-set head after denied successor: %v", err)
+	}
+	if currentRevision != plan.Revision {
+		t.Fatalf("source-set revision after denied successor=%q, want %q", currentRevision, plan.Revision)
+	}
+	var lifecycleRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents`).Scan(&lifecycleRows); err != nil || lifecycleRows != 0 {
+		t.Fatalf("lifecycle rows after denied successor=%d err=%v, want zero", lifecycleRows, err)
+	}
+	var headState string
+	if err := db.QueryRowContext(ctx, `SELECT state FROM runtime_startup_authority_facts WHERE authority_id=$1::uuid ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&headState); err != nil || headState != string(runtimestartupownership.StateActive) {
+		t.Fatalf("durable predecessor state=%q err=%v, want active", headState, err)
+	}
+}
+
+func TestPostgresProcessCapabilityRejectsAmbiguousPriorOwner(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	selected := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	first, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("prior-owner"))
 	if err != nil {
-		t.Fatalf("AcquireRuntimeStartupOwnership(runtime-2): %v", err)
+		t.Fatalf("AcquireProcessCapability(prior): %v", err)
 	}
-	if err := lease2.Release(testAuthorActivityContext()); err != nil {
-		t.Fatalf("Release(runtime-2): %v", err)
+	if err := first.Release(ctx); err != nil {
+		t.Fatalf("Release(prior): %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET snapshot='{}'::jsonb WHERE transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts)`); err != nil {
+		t.Fatalf("corrupt prior durable head: %v", err)
+	}
+	capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("ambiguous-successor"))
+	if capability != nil {
+		t.Fatalf("ambiguous prior owner admitted capability %#v", capability)
+	}
+	var acquisitionErr *runtimestartupownership.AcquisitionError
+	if !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionPriorOwnerAmbiguous {
+		t.Fatalf("ambiguous prior acquisition error=%v, want typed prior_owner_ambiguous", err)
+	}
+}
+
+func hasAgentTopologyChange(changes []runtimeagenttopology.DesiredAgentChange, kind runtimeagenttopology.AgentChangeKind) bool {
+	for _, change := range changes {
+		if change.Kind == kind {
+			return true
+		}
+	}
+	return false
 }

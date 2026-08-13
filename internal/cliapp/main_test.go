@@ -21,12 +21,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -4794,7 +4796,7 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			source := semanticview.Wrap(tc.bundle)
+			source := semanticviewtest.WrapRootAgents(tc.bundle)
 			verifyErr := VerifyBundle(context.Background(), source, executionposture.Live)
 			if tc.wantErr {
 				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.errContains) {
@@ -4840,11 +4842,32 @@ func addTestAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {
 	if bundle.URIRegistry.ByURI == nil {
 		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{}
 	}
-	for localID := range bundle.Agents {
+	if bundle.Events == nil {
+		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{}
+	}
+	if _, ok := bundle.Events["test.input"]; !ok {
+		bundle.Events["test.input"] = runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}}
+	}
+	for localID, entry := range bundle.Agents {
 		uri := "swarm-test://root/agents/" + localID
 		ref := runtimecontracts.ContractURIRef{Kind: "agent", LocalID: localID, Full: uri}
 		bundle.URIRegistry.Agents[localID] = ref
 		bundle.URIRegistry.ByURI[uri] = ref
+		entry.Role = localID
+		entry.Model = "regular"
+		entry.Subscriptions = []string{"test.input"}
+		entry.Intent = runtimeagentintent.Source{Kind: runtimeagentintent.SourceInline, Inline: "Validate this test declaration."}
+		resolved, err := runtimeagentintent.Resolve(
+			runtimeagentintent.SourceInline,
+			"inline",
+			"agents.yaml#agents."+localID+".intent",
+			"Validate this test declaration.",
+		)
+		if err != nil {
+			panic(fmt.Sprintf("resolve test agent intent: %v", err))
+		}
+		entry.ResolvedIntent = resolved
+		bundle.Agents[localID] = entry
 	}
 }
 

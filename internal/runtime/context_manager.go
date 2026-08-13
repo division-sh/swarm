@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/packs"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -17,6 +18,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
@@ -46,11 +48,12 @@ const (
 	RuntimeContextStateLoaded   RuntimeContextState = "loaded"
 	RuntimeContextStateUnloaded RuntimeContextState = "unloaded"
 
-	RuntimeContextCauseNotLoaded          = "runtime_context_not_loaded"
-	RuntimeContextCauseUnavailable        = "runtime_context_unavailable"
-	RuntimeContextCauseUnloaded           = "runtime_context_unloaded"
-	RuntimeContextCauseReplacing          = "runtime_context_replacing"
-	RuntimeContextCauseStandingSuppressed = "standing_service_suppressed"
+	RuntimeContextCauseNotLoaded           = "runtime_context_not_loaded"
+	RuntimeContextCauseUnavailable         = "runtime_context_unavailable"
+	RuntimeContextCauseUnloaded            = "runtime_context_unloaded"
+	RuntimeContextCauseReplacing           = "runtime_context_replacing"
+	RuntimeContextCauseSourceSetTransition = "runtime_context_source_set_transition"
+	RuntimeContextCauseStandingSuppressed  = "standing_service_suppressed"
 )
 
 func (c BundleContext) normalized() BundleContext {
@@ -107,6 +110,24 @@ type PreparedRuntimeContextReplacement struct {
 	publication *replacementPublication
 	published   bool
 	discarded   bool
+}
+
+type runtimeSourceSetTransitionEntry struct {
+	bundleHash string
+	entry      *runtimeContextEntry
+	prepared   *PreparedStaticSourceSetGenerationRefresh
+	fresh      bool
+}
+
+// PreparedRuntimeSourceSetTransition owns the temporary admission fence for
+// every surviving loaded runtime while process composition changes the global
+// complete source set.
+type PreparedRuntimeSourceSetTransition struct {
+	mu      sync.Mutex
+	manager *RuntimeContextManager
+	entries []runtimeSourceSetTransitionEntry
+	done    bool
+	locked  bool
 }
 
 // PreparedStandingServicePublication owns one fresh, unselectable standing
@@ -356,6 +377,7 @@ type RuntimeContextDeactivationResult struct {
 
 type RuntimeContextManager struct {
 	mu                         sync.RWMutex
+	sourceSetMu                sync.Mutex
 	availability               RunBundleAvailabilityReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
@@ -2097,6 +2119,199 @@ func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID strin
 		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, availability, nil
 	}
 	return m.LookupBundleHashStatus(availability.BundleHash), availability, nil
+}
+
+// PrepareSourceSetTransition fences every surviving loaded runtime before the
+// selected-store source-set head changes. A prior failed post-commit refresh
+// is adopted so replay can complete it without reopening stale authority.
+func (m *RuntimeContextManager) PrepareSourceSetTransition(
+	_ context.Context,
+	plan runtimeagenttopology.SourceSetPlan,
+) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
+	return m.prepareSourceSetTransition(plan, false)
+}
+
+// PreparePendingSourceSetTransition adopts only survivors left fenced by an
+// earlier committed source-set mutation. An ordinary duplicate with no
+// pending transition is a no-op and does not rotate loaded generations.
+func (m *RuntimeContextManager) PreparePendingSourceSetTransition(
+	_ context.Context,
+	plan runtimeagenttopology.SourceSetPlan,
+) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
+	return m.prepareSourceSetTransition(plan, true)
+}
+
+func (m *RuntimeContextManager) prepareSourceSetTransition(
+	plan runtimeagenttopology.SourceSetPlan,
+	pendingOnly bool,
+) (_ *PreparedRuntimeSourceSetTransition, prepareErr error) {
+	if m == nil {
+		return nil, errors.New("runtime context manager is required")
+	}
+	if err := plan.Validate(); err != nil {
+		return nil, fmt.Errorf("runtime source-set transition plan: %w", err)
+	}
+	m.sourceSetMu.Lock()
+	keepLock := false
+	defer func() {
+		if !keepLock {
+			m.sourceSetMu.Unlock()
+		}
+	}()
+	wanted := make(map[string]struct{}, len(plan.Sources))
+	for _, source := range plan.Sources {
+		wanted[source.Normalize().Key()] = struct{}{}
+	}
+	transition := &PreparedRuntimeSourceSetTransition{manager: m, locked: true}
+	m.mu.Lock()
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if entry == nil || entry.context == nil || entry.runtime == nil || entry.workOwner == nil {
+			continue
+		}
+		state := entry.state
+		if state == "" {
+			state = RuntimeContextStateLoaded
+		}
+		loaded := state == RuntimeContextStateLoaded
+		pending := state == RuntimeContextStateUnloaded && entry.cause == RuntimeContextCauseSourceSetTransition
+		if (!loaded && !pending) || (pendingOnly && !pending) {
+			continue
+		}
+		bundle, source := entry.context.BundleSourceFact.StorageValues()
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundle, BundleSource: source}.Normalize()
+		if _, survives := wanted[coordinate.Key()]; !survives {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("loaded runtime context %s is absent from successor source set", bundleHash)
+		}
+		transition.entries = append(transition.entries, runtimeSourceSetTransitionEntry{
+			bundleHash: bundleHash, entry: entry, fresh: loaded,
+		})
+	}
+	if len(transition.entries) == 0 {
+		m.mu.Unlock()
+		return nil, nil
+	}
+	for i := range transition.entries {
+		item := &transition.entries[i]
+		if !item.fresh {
+			continue
+		}
+		item.entry.state = RuntimeContextStateUnloaded
+		item.entry.cause = RuntimeContextCauseSourceSetTransition
+	}
+	m.mu.Unlock()
+	for i := range transition.entries {
+		item := &transition.entries[i]
+		prepared, err := item.entry.runtime.PrepareStaticSourceSetGenerationRefresh(plan, item.entry.context.Source)
+		if err != nil {
+			for j := i - 1; j >= 0; j-- {
+				transition.entries[j].prepared.Abort()
+			}
+			return nil, errors.Join(
+				fmt.Errorf("prepare surviving runtime context %s: %w", item.bundleHash, err),
+				transition.abortFresh(),
+			)
+		}
+		item.prepared = prepared
+	}
+	keepLock = true
+	return transition, nil
+}
+
+func (p *PreparedRuntimeSourceSetTransition) abortFresh() error {
+	if p == nil || p.manager == nil {
+		return nil
+	}
+	p.manager.mu.Lock()
+	defer p.manager.mu.Unlock()
+	for _, item := range p.entries {
+		if !item.fresh || item.entry.state != RuntimeContextStateUnloaded || item.entry.cause != RuntimeContextCauseSourceSetTransition {
+			continue
+		}
+		item.entry.state = RuntimeContextStateLoaded
+		item.entry.cause = ""
+	}
+	return nil
+}
+
+func (p *PreparedRuntimeSourceSetTransition) release() {
+	if p == nil || p.manager == nil || !p.locked {
+		return
+	}
+	p.locked = false
+	p.manager.sourceSetMu.Unlock()
+}
+
+// Abort restores only contexts fenced by this pre-commit attempt. Contexts
+// adopted from an earlier committed-but-incomplete refresh remain fenced.
+func (p *PreparedRuntimeSourceSetTransition) Abort() error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return nil
+	}
+	p.done = true
+	for i := len(p.entries) - 1; i >= 0; i-- {
+		if p.entries[i].prepared != nil {
+			p.entries[i].prepared.Abort()
+		}
+	}
+	err := p.abortFresh()
+	p.release()
+	return err
+}
+
+// Commit refreshes every survivor to the committed plan and publishes all of
+// them together. Any failure leaves the complete survivor set unavailable.
+func (p *PreparedRuntimeSourceSetTransition) Commit(
+	ctx context.Context,
+	capability runtimestartupownership.ProcessCapability,
+) error {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.done {
+		return errors.New("prepared runtime source-set transition is already settled")
+	}
+	if capability == nil {
+		p.done = true
+		for i := len(p.entries) - 1; i >= 0; i-- {
+			if p.entries[i].prepared != nil {
+				p.entries[i].prepared.Abort()
+			}
+		}
+		p.release()
+		return errors.New("runtime source-set transition requires process capability")
+	}
+	p.done = true
+	defer p.release()
+	for i := range p.entries {
+		item := &p.entries[i]
+		if err := item.prepared.Commit(ctx, capability); err != nil {
+			for j := len(p.entries) - 1; j > i; j-- {
+				p.entries[j].prepared.Abort()
+			}
+			return fmt.Errorf("refresh surviving runtime context %s: %w", item.bundleHash, err)
+		}
+	}
+	p.manager.mu.Lock()
+	defer p.manager.mu.Unlock()
+	for _, item := range p.entries {
+		if item.entry.state != RuntimeContextStateUnloaded || item.entry.cause != RuntimeContextCauseSourceSetTransition {
+			return fmt.Errorf("surviving runtime context %s changed during source-set transition", item.bundleHash)
+		}
+	}
+	for _, item := range p.entries {
+		item.entry.state = RuntimeContextStateLoaded
+		item.entry.cause = ""
+	}
+	return nil
 }
 
 func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {

@@ -235,14 +235,16 @@ func seedAgentLifecycleSession(t *testing.T, ctx context.Context, db *sql.DB, ru
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source
+			role, model, memory_enabled, memory_source,
+			topology_authority_kind, topology_admission, execution_lifetime
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'test', TRUE, 'authored')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'test', TRUE, 'authored',
+		        'static_declaration_plan', $8::jsonb, 'durable_managed')
 		ON CONFLICT (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance
 		) DO NOTHING
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, testAgentTopologyJSON(t)); err != nil {
 		t.Fatalf("seed lifecycle agent %s: %v", fields.AgentID, err)
 	}
 	if _, err := db.ExecContext(ctx, `

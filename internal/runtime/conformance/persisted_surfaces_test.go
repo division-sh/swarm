@@ -254,7 +254,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
@@ -439,7 +439,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
@@ -977,7 +977,7 @@ func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conf
 func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
@@ -1005,7 +1005,6 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		RunLifecycleCandidates:      pg,
 		RuntimeLogStore:             pg,
 		ManagerStore:                pg,
-		ManagerLifecycleStore:       pg,
 		ManagerLifecycleDiagnostics: pg,
 		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
 		SessionResetter:             pg,
@@ -1023,6 +1022,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
 	t.Cleanup(func() { _ = rt.Shutdown() })
 
 	startErr := rt.Start(ctx)
@@ -1073,7 +1073,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1097,7 +1097,6 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		RunLifecycleCandidates:      pg,
 		RuntimeLogStore:             pg,
 		ManagerStore:                &conformanceManagerReplayStore{},
-		ManagerLifecycleStore:       pg,
 		ManagerLifecycleDiagnostics: pg,
 		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
 		SessionResetter:             pg,
@@ -1114,6 +1113,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
+	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
 	if err := rt.Start(ctx); err == nil || !strings.Contains(err.Error(), "recover pipeline obligations before delivery enumeration") {
 		t.Fatalf("Start error = %v, want boot-fatal recovery exhaustion failure", err)
 	}
@@ -1319,7 +1319,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1371,7 +1371,6 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		RunLifecycleCandidates:      pg,
 		RuntimeLogStore:             pg,
 		ManagerStore:                managerStore,
-		ManagerLifecycleStore:       pg,
 		ManagerLifecycleDiagnostics: pg,
 		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
 		SessionResetter:             pg,
@@ -1400,6 +1399,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		SessionResetter:  pg,
 		PersistenceRoles: conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
+	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1865,7 +1865,7 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	if err != nil {
 		t.Fatalf("derive conformance agent prompt: %v", err)
 	}
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(ctx, pg, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,
@@ -1891,28 +1891,18 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) runtimeeffects.LifecycleToken {
 	t.Helper()
 	seedConformanceAgent(t, ctx, pg, agentID)
-	result, err := pg.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
-		OperationID:      uuid.NewString(),
-		OperationKind:    "start",
-		RequestHash:      "conformance-start-" + agentID,
-		AgentID:          agentID,
-		Identity:         conformanceAgentIdentity(t, agentID),
-		Trigger:          "conformance_test",
-		ExpectedPhase:    runtimemanager.AgentLifecycleRegistered,
-		TargetEpoch:      1,
-		TargetGeneration: 1,
-		TargetPhase:      runtimemanager.AgentLifecycleRunning,
-		ConfigRevision:   "conformance-revision",
-		RunMode:          runtimemanager.AgentRunModeStandard,
-		Now:              time.Now().UTC(),
-	})
+	identity := conformanceAgentIdentity(t, agentID)
+	result, found, err := pg.LoadAgentLifecycleState(ctx, identity)
 	if err != nil {
-		t.Fatalf("start agent lifecycle %s: %v", agentID, err)
+		t.Fatalf("load running agent lifecycle %s: %v", agentID, err)
+	}
+	if !found || result.Phase != runtimemanager.AgentLifecycleRunning {
+		t.Fatalf("running agent lifecycle %s = %#v found=%t", agentID, result, found)
 	}
 	return runtimeeffects.LifecycleToken{
 		RuntimeEpoch: result.RuntimeEpoch,
-		AgentID:      result.AgentID,
-		Identity:     result.Identity,
+		AgentID:      agentID,
+		Identity:     identity,
 		Generation:   result.Generation,
 	}
 }

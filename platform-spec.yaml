@@ -12608,10 +12608,13 @@ platform_tables:
         - api_idempotency
         - runtime_ingress_state
         - agents
+        - agent_topology_source_set_head
+        - agent_topology_source_set_operations
         - agent_lifecycle_operations
         - agent_lifecycle_transition_facts
         - agent_lifecycle_diagnostic_outbox
         - runtime_startup_authority_facts
+        - runtime_generation_grants
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
         - run_fork_selected_contract_runtime_executions
@@ -13022,6 +13025,37 @@ platform_tables:
             CHECK ((output_kind = 'raw' AND pack_id IS NULL AND pack_version IS NULL AND manifest_hash IS NULL AND observed_generation_id IS NULL) OR (output_kind = 'normalized' AND pack_id IS NOT NULL AND pack_version IS NOT NULL AND manifest_hash IS NOT NULL AND observed_generation_id IS NOT NULL)),
             INDEX idx_inbound_publication_events_event (event_id)
         );
+    agent_topology_source_set_head:
+      description: >-
+        The one current complete desired topology for all admitted loaded bundle sources.
+        Omission is removal. Runtime generations, individual bundles, process maps, and
+        lifecycle rows are consumers and cannot publish partial desired sets.
+      ddl: |
+        CREATE TABLE agent_topology_source_set_head (
+            singleton_id       INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            revision           TEXT NOT NULL,
+            plan               JSONB NOT NULL,
+            operation_id       UUID NOT NULL,
+            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    agent_topology_source_set_operations:
+      description: >-
+        Immutable idempotent outcomes for the five closed complete-source-set operations.
+        The request hash binds operation kind, predecessor, exact complete plan, and exact
+        removed source when applicable. operation_id is a fresh opaque identity for one
+        logical mutation occurrence; it is retained only while retrying that same occurrence
+        and must never be derived solely from revisions, content, bundle identity, or source
+        coordinates. A later recurrence of an identical transition has a distinct operation_id.
+      ddl: |
+        CREATE TABLE agent_topology_source_set_operations (
+            operation_id       UUID PRIMARY KEY,
+            operation_kind     TEXT NOT NULL CHECK (operation_kind IN ('install_complete_source_set','replace_source_set','restore_source_set','remove_bundle_source','apply_destructive_reset_topology')),
+            request_hash       TEXT NOT NULL,
+            previous_revision TEXT,
+            current_revision  TEXT NOT NULL,
+            result             JSONB NOT NULL,
+            created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
     agents:
       description: >-
         Runtime agent registry keyed by the complete concrete agent identity.
@@ -13063,6 +13097,9 @@ platform_tables:
             lifecycle_config_revision   TEXT NOT NULL DEFAULT '',
             lifecycle_run_mode          TEXT NOT NULL DEFAULT 'stopped' CHECK (lifecycle_run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),
             lifecycle_last_transition_id UUID,
+            topology_authority_kind     TEXT NOT NULL CHECK (topology_authority_kind IN ('static_declaration_plan', 'flow_readiness_plan')),
+            topology_admission          JSONB NOT NULL,
+            execution_lifetime          TEXT NOT NULL CHECK (execution_lifetime = 'durable_managed'),
             status                      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'terminated', 'failed')),
             turn_count                  INTEGER NOT NULL DEFAULT 0,
             last_active_at              TIMESTAMPTZ,
@@ -13128,7 +13165,7 @@ platform_tables:
     agent_lifecycle_operations:
       description: >-
         Durable operation/outcome owner for per-agent lifecycle create, start, restart,
-        reconfigure, teardown, stop, self-release, and failure transitions. The selected
+        reconfigure, source-set topology rebind, teardown, stop, self-release, and failure transitions. The selected
         store commits the authoritative agents lifecycle cell, immutable transition fact,
         operation outcome, API projection when applicable, and diagnostic outbox atomically.
         Reintroducing a terminated readiness-owned agent ID is a deterministic `restart`
@@ -13150,7 +13187,7 @@ platform_tables:
             flow_scope_key     TEXT NOT NULL,
             flow_instance_id   TEXT NOT NULL,
             flow_instance      TEXT NOT NULL,
-            operation_kind     TEXT NOT NULL CHECK (operation_kind IN ('spawn', 'start', 'restart', 'reconfigure', 'teardown', 'stop', 'self_release', 'fail')),
+            operation_kind     TEXT NOT NULL CHECK (operation_kind IN ('spawn', 'start', 'restart', 'reconfigure', 'source_set_rebind', 'teardown', 'stop', 'self_release', 'fail')),
             request_hash       TEXT NOT NULL,
             expected_epoch     BIGINT NOT NULL,
             expected_generation BIGINT NOT NULL,
@@ -13756,27 +13793,50 @@ platform_tables:
         termination reasons. superseded is represented by successor_session_id IS NOT NULL. Terminated
         rows are historical lineage and are never resurrected into live ownership.'
     runtime_startup_authority_facts:
-      description: 'Append-only typed evidence for cold-start and prepared-handoff runtime ownership authority. Every boot, probe census, handoff transition, commit, rollback, finalization, and release is bound to exact owner, boot, lease generation, and bundle identity; an owner string or borrowed lease pointer is never sufficient execution authority.'
+      description: 'Append-only typed evidence for the one process-composition-owned retained selected-store capability. Runtime generations consume revocable grants and cannot acquire, release, copy, or replace this authority.'
       ddl: |
         CREATE TABLE runtime_startup_authority_facts (
             fact_id             UUID PRIMARY KEY,
             authority_id        UUID NOT NULL,
-            lease_authority_id  UUID NOT NULL,
             transition_ordinal  BIGINT NOT NULL CHECK (transition_ordinal > 0),
-            generation          BIGINT NOT NULL CHECK (generation > 0),
             state_version       BIGINT NOT NULL CHECK (state_version > 0),
-            state               TEXT NOT NULL CHECK (state IN ('active','prepared','probe_settled','admitted','committed','rolled_back','finalized','released')),
+            state               TEXT NOT NULL CHECK (state IN ('active','released')),
             owner_id            TEXT NOT NULL,
             boot_id             UUID NOT NULL,
-            bundle_hash         TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            runtime_instance_id UUID NOT NULL,
             backend             TEXT NOT NULL,
-            handoff_id          UUID,
             snapshot            JSONB NOT NULL,
             created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE (lease_authority_id, transition_ordinal),
+            UNIQUE (authority_id, transition_ordinal),
             UNIQUE (authority_id, state_version),
-            INDEX idx_runtime_startup_lease (lease_authority_id, transition_ordinal),
+            INDEX idx_runtime_startup_authority (authority_id, transition_ordinal),
             INDEX idx_runtime_startup_boot (boot_id, created_at)
+        );
+    runtime_generation_grants:
+      description: >-
+        Append-only state transitions for exact revocable runtime-generation grants issued
+        by the retained process capability. A grant binds one runtime instance, generation,
+        bundle source coordinate, and complete source-set revision. Copied evidence is not
+        authority and every readiness/execution/lifecycle admission re-proves the retained
+        selected-store session.
+      ddl: |
+        CREATE TABLE runtime_generation_grants (
+            fact_id               UUID PRIMARY KEY,
+            grant_id              UUID NOT NULL,
+            process_authority_id  UUID NOT NULL,
+            process_owner_id      TEXT NOT NULL,
+            state_version         BIGINT NOT NULL CHECK (state_version > 0),
+            state                 TEXT NOT NULL CHECK (state IN ('prepared','probe_settled','admitted','retired')),
+            bundle_hash           TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            bundle_source         TEXT NOT NULL CHECK (bundle_source IN ('persisted','ephemeral')),
+            runtime_instance_id   UUID NOT NULL,
+            runtime_generation    BIGINT NOT NULL CHECK (runtime_generation > 0),
+            source_set_revision   TEXT NOT NULL,
+            snapshot              JSONB NOT NULL,
+            created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (grant_id, state_version),
+            INDEX idx_runtime_generation_grant_head (grant_id, state_version),
+            INDEX idx_runtime_generation_grant_runtime (runtime_instance_id, runtime_generation)
         );
     managed_agent_capability_surfaces:
       description: 'Canonical selected-store owner for the exact managed-agent capability surface used by one provider turn or one startup probe. The immutable planned maximum combines the complete typed concrete actor identity, contract definitions, toolcapabilities decisions, provider policy, and exact transport bindings. actor_id is only an indexed projection of the typed actor identity retained in the integrity-checked surface; it is never capability authority by itself. Typed delivery evidence may only confirm or narrow that plan; effective visible/callable facts are mechanically derived and persisted in surface. surface_id is deterministic for one exact authority and plan, while integrity_hash covers the complete planned/observed/effective value. Provider turns and startup probes are disjoint authority variants. Missing, mismatched, or reused authority is invalid; flat tool-name arrays are not an alternate persistence owner.'
@@ -16374,7 +16434,7 @@ multi_bundle_persistence:
         - Under agent_identity_model.current_supported_posture, RuntimeContextManager admission rejects duplicate authored agent_id slugs across registered loaded BundleContexts before API readiness; the unsupported shape must name the duplicate slug and conflicting bundle hashes/source labels rather than prefix, alias, remap, or otherwise disambiguate the slug.
         - event.publish and run.start select a loaded BundleContext by explicit canonical bundle_hash for create-new work or by runs.bundle_hash/runs.bundle_source for existing-run work. Missing, deleted, or unloaded contexts fail closed rather than falling back to ambient boot state.
         - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
-        - Successful bundle.delete, force bundle.delete partial failure after force-controlled cleanup begins, and successful or partial runtime.nuke with include_bundles=true consume RuntimeContextManager deactivation for loaded matching contexts. runtime.nuke include_bundles=false must not deactivate bundle contexts.
+        - The bundle-delete coordinator quiesces a loaded matching BundleContext before any real non-force final mutation and before force-controlled cleanup. RuntimeContextManager performs that typed quiescence while the retiring agents still hold the predecessor source-set revision; the API handler never infers deactivation from a returned result. Successful or partial runtime.nuke with include_bundles=true consumes its own coordinator-owned RuntimeContextManager deactivation. runtime.nuke include_bundles=false must not deactivate bundle contexts.
         - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox decision event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
         - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery are disabled for every context until bundle-scoped recovery filters are promoted. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
@@ -16517,17 +16577,32 @@ multi_bundle_persistence:
           bundle_source=persisted with a missing bundle row.
       runtime_context_deactivation:
         status: implemented_for_runtime_context_manager_unload_first_slice
-        canonical_owner: internal/runtime.RuntimeContextManager
+        canonical_owner: internal/runtime/bundledelete.Coordinator sequencing through internal/runtime.RuntimeContextManager.QuiesceBundleRuntime
         consumed_by:
-          - /v1/rpc bundle.delete
+          - internal/runtime/bundledelete non-force and force execution
           - /v1/rpc runtime.nuke when include_bundles=true
           - internal/apiv1 runtime context admission helpers
         rule: >
-          In DB-loaded RuntimeContextManager mode, successful bundle.delete for a loaded bundle_hash MUST mark that
-          BundleContext unloaded before later supported admission paths can select it again. bundle.delete --force
-          partial failure after force-controlled cleanup has begun MUST also fail closed by marking the matching context
-          unavailable. Non-force active-run refusal, dry-run delete, missing bundle errors, and idempotency conflicts MUST
-          NOT deactivate a loaded context because those operations do not establish bundle unavailability.
+          In DB-loaded RuntimeContextManager mode, every real bundle.delete for a loaded bundle_hash MUST quiesce and
+          join that BundleContext before force cleanup or the non-force final bundle/topology mutation. Static agents
+          self-release to the non-running registered state while their predecessor source-set revision is still current;
+          only then may the selected-store finalizer atomically remove the source and bundle. Before that deletion can
+          report completion, process composition MUST rotate every surviving loaded runtime to an admitted successor
+          generation grant and rebind every surviving static lifecycle cell to the committed complete source-set
+          revision without changing its execution generation, phase, run mode, or config revision. Survivors remain
+          unselectable until the complete set converges; partial rebind failure MUST NOT publish stale runtime authority
+          or report completed deletion. The atomic bundle/source-set mutation MUST retain its exact final result in the
+          source-set operation ledger together with the exact API request hash. A retry after that commit keeps the same
+          keyed operation identity even when the bundle is absent from planning, verifies the stored request and final mutation, and completes only pending survivor
+          refreshes against the current plan before returning success. An ordinary duplicate with no pending refresh
+          MUST NOT rotate generations or repeat lifecycle transitions. A later startup MUST terminalize any nonterminal
+          persisted identity omitted from the current complete source-set plan through the current admitted generation
+          grant; it MUST NOT reconstruct the
+          removed source coordinate as mutation authority, and an already terminated identity is an inert historical row.
+          A failure after quiescence remains fail-closed with the context unavailable. Non-force active-run refusal,
+          dry-run delete, missing bundle errors, and idempotency
+          conflicts MUST NOT quiesce the context. The API handler renders/idempotently replays the coordinator result
+          and MUST NOT interpret result fields as independent runtime-deactivation authority.
       reader_invariant: >
         Bundle availability readers MUST read runs.bundle_source before consulting bundles. Readers only look up bundles
         when bundle_source=persisted. bundle_source in (ephemeral, deleted) returns BUNDLE_UNAVAILABLE without a
@@ -16540,6 +16615,7 @@ multi_bundle_persistence:
     force_owner_chain:
       - acquire shared destructive-operation mutex/idempotency owner
       - plan affected runs and deliveries for the bundle_hash
+      - quiesce and join the loaded matching BundleContext while its predecessor topology revision is current
       - quiesce and terminalize active runs under run-control/runtime recovery owners
       - cancel or drain retryable deliveries and pending queues under delivery owners
       - stop/clean runtime containers and process-owned resources for the affected runs
@@ -33308,11 +33384,76 @@ durable_pipeline_processing_obligation_authority:
     PPO-PRV-001: SQL and backend synchronization mechanics are private to selected-store adapters; public connection and transaction context values cannot establish or redirect PostgreSQL session-lock authority. Bundle delete and destructive reset acquire operation-specific opaque leases on their own exact PostgreSQL sessions, retain those leases across external work, and use separate short operation-owned transactions for persistence. Layered API idempotency and administrative leases reserve independent capacity and cannot borrow a surrounding transaction or wait on their own session.
     PPO-PAR-001: Named parent terminalization is typed, transactional, and linearized with claim registration before either durable mutation.
 
+agent_topology_authority:
+  owner: process composition retained selected-store capability plus the typed AgentManager lifecycle coordinator
+  source_set:
+    owner: agent_topology_source_set_head
+    rule: >-
+      One complete, sorted StaticDeclarationPlan covers every currently admitted loaded
+      bundle source. InstallCompleteSourceSet, ReplaceSourceSet, RestoreSourceSet,
+      RemoveBundleSource, and ApplyDestructiveResetTopology are the only writers. Each
+      operation owns its transaction and returns a typed exact diff. Omission means removal;
+      partial per-runtime or per-bundle desired writers are forbidden. Each logical operation
+      receives one fresh opaque operation identity before orchestration, carries that exact
+      identity through retries of the same occurrence, and never reuses a content-derived
+      identity for a later identical transition.
+    ordering: >-
+      Process composition compiles and commits the complete source set, reconciles durable
+      lifecycle cells, and verifies convergence before any agent hydration, route publication,
+      readiness publication, provider call, or managed execution. Bundle-source removal first
+      quiesces and joins the matching runtime generation while its agents retain the predecessor
+      source-set revision, then reserves every surviving runtime generation and static lifecycle
+      cell before committing the source-set removal with the named destructive mutation. After
+      commit, one source_set_rebind transition preserves each survivor's execution generation,
+      phase, run mode, and config revision while replacing its admission and lifecycle persistence
+      grant with the admitted successor. All surviving contexts publish together only after complete
+      convergence; stale or partially rebound survivors remain unselectable and deletion cannot
+      report completion. The same retained transaction records the exact bundle-delete final
+      mutation, exact API request hash, opaque keyed replay-authority digest, and original request
+      time in the source-set operation ledger. Every API invocation receives a fresh operation
+      identity. If final API completion fails after commit, a keyed retry may recover exactly one
+      matching committed record only within the API's 24-hour idempotency window; an unkeyed retry,
+      an expired authority, a conflicting request, or ambiguous evidence fails closed. If planning
+      observes the bundle already absent, exact replay adopts only survivors still fenced by the
+      committed source-set transition. A replay with no pending survivor is a no-op and must not
+      rotate a loaded generation or repeat lifecycle
+      persistence. On later startup, a persisted static lifecycle identity absent from the
+      complete current plan is terminalized only through the current runtime generation grant and
+      its matching admission; a removed source coordinate is never reconstructed as lifecycle
+      authority. Already terminated identities are inert and cannot be terminalized again.
+  admission:
+    variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
+    rule: >-
+      Every lifecycle construction carries exactly one sealed topology variant and one
+      orthogonal execution lifetime. Static admission binds the global source-set revision
+      and exact bundle source coordinate. Flow readiness binds the exact keyed readiness
+      plan. Ephemeral execution is nonpersistable. No zero variant, free-string authority,
+      inferred owner, HiredBy interpretation, or flat declaration fallback exists.
+  process_capability:
+    owner: one retained selected-store session acquired only by process composition
+    acquisition: >-
+      Acquisition reads the global durable authority head on the retained session. A
+      nonterminal or ambiguous predecessor returns typed takeover_required or
+      prior_owner_ambiguous; advisory-lock possession alone is insufficient. Explicit
+      takeover policy belongs to #2157.
+    grants: >-
+      Exact revocable grants bind one runtime instance/generation, bundle source coordinate,
+      and source-set revision. Readiness, grant-state changes, execution admission, and every
+      durable lifecycle mutation re-prove the retained session. Retained-session failure
+      retires the process capability, every grant, and runtime readiness before return.
+    forbidden: >-
+      Runtime acquisition or release, memory fallback, copied-evidence authority, borrowed
+      SQL handles, compatibility adoption, and parallel lifecycle persistence owners.
+  fresh_store: >-
+    The topology fields, source-set tables, process authority, and generation grants are
+    strict fresh-schema facts. Migration, tolerant readers, inferred old rows, dual writes,
+    and compatibility paths are unsupported.
+
 agent_lifecycle_authority:
   owner: typed AgentManager lifecycle coordinator plus the selected SQLite/Postgres store
   durable_cell:
     table: agents
-    fields: [lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id]
+    fields: [lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id, topology_authority_kind, topology_admission, execution_lifetime]
     rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority.
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
