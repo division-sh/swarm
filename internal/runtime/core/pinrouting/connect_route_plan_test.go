@@ -232,26 +232,150 @@ func TestConnectSourceEndpointMatchesEnforcesProducerModeMatrix(t *testing.T) {
 }
 
 func withConnectSourceMode(endpoint ConnectRoutePlanEndpoint, mode string) ConnectRoutePlanEndpoint {
-	if strings.TrimSpace(mode) == runtimecontracts.FlowModeTemplate {
+	switch strings.TrimSpace(mode) {
+	case runtimecontracts.FlowModeSingleton:
+		endpoint.kind = connectEndpointSingletonFlow
+	case runtimecontracts.FlowModeTemplate:
 		endpoint.kind = connectEndpointTemplateFlow
-	} else {
+	default:
 		endpoint.kind = connectEndpointStaticFlow
 	}
 	return endpoint
 }
 
-func TestConnectRoutePlanRootToNestedStaticUsesStructuralTargetOwner(t *testing.T) {
-	plan := ConnectRoutePlan{
-		source: newConnectRoutePlanEndpoint(
-			ConnectEndpointRoleProducer, true, "", "", "root", "", "validate.requested", "validate.requested", "", nil,
-		),
-		receiver: newConnectRoutePlanEndpoint(
-			ConnectEndpointRoleConsumer, false, "child", "child", runtimecontracts.FlowModeStatic,
-			"validate", "validation.done", "child/validation.done", "", nil,
-		),
+func TestCompiledConnectEndpointPreservesReceiverModeMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		root      bool
+		mode      string
+		wantKind  connectEndpointKind
+		assertion func(ConnectRoutePlanEndpoint) bool
+	}{
+		{name: "root", root: true, mode: "root", wantKind: connectEndpointRoot, assertion: ConnectRoutePlanEndpoint.IsRoot},
+		{name: "external", mode: "external", wantKind: connectEndpointExternalIngress, assertion: ConnectRoutePlanEndpoint.IsExternalIngress},
+		{name: "static", mode: runtimecontracts.FlowModeStatic, wantKind: connectEndpointStaticFlow, assertion: ConnectRoutePlanEndpoint.IsStatic},
+		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, wantKind: connectEndpointSingletonFlow, assertion: ConnectRoutePlanEndpoint.IsSingleton},
+		{name: "template", mode: runtimecontracts.FlowModeTemplate, wantKind: connectEndpointTemplateFlow, assertion: ConnectRoutePlanEndpoint.IsTemplate},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, test.root, "receiver", "receiver", test.mode, "input", "work.ready", "receiver/work.ready", "", nil)
+			if endpoint.kind != test.wantKind || !test.assertion(endpoint) {
+				t.Fatalf("endpoint mode = %d, want %d", endpoint.kind, test.wantKind)
+			}
+		})
 	}
-	if !plan.StructuralTargetOwnerEligible() {
-		t.Fatal("root-to-nested-static plan must consume the admitted current-delivery owner")
+}
+
+func TestConnectRoutePlanStructuralTargetOwnerProofMatrix(t *testing.T) {
+	entityID := eventtest.UUID("compiled-structural-owner")
+	rootOwner := events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: "workflow", FlowInstance: eventtest.UUID("compiled-structural-run"), EntityID: entityID,
+	})
+	rootRoutingSource, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatalf("root routing source: %v", err)
+	}
+	rootSourceEvent, err := AdmitSourceEvent(events.EventType("validate.requested"), rootRoutingSource)
+	if err != nil {
+		t.Fatalf("admit root source event: %v", err)
+	}
+	staticTarget := events.RouteIdentity{FlowID: "child", FlowInstance: "child"}
+	rootToStatic := ConnectRoutePlan{
+		source:     newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "root", "output", "validate.requested", "validate.requested", "", nil),
+		receiver:   newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "child", "child", runtimecontracts.FlowModeStatic, "validate", "validation.done", "child/validation.done", "", nil),
+		targetKind: ConnectTargetKindTarget, resolutionKind: ConnectResolutionStatic, target: staticTarget,
+	}
+	singletonReceiver := rootToStatic
+	singletonReceiver.receiver = newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "child", "child", runtimecontracts.FlowModeSingleton, "validate", "validation.done", "child/validation.done", "", nil)
+	templateReceiver := rootToStatic
+	templateReceiver.receiver = newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "child", "child", runtimecontracts.FlowModeTemplate, "validate", "validation.done", "child/validation.done", "", nil)
+	nestedStatic := rootToStatic
+	nestedStatic.source = newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "child", "child", runtimecontracts.FlowModeStatic, "output", "work.ready", "child/work.ready", "", nil)
+	nestedStatic.receiver = newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "grandchild", "child/grandchild", runtimecontracts.FlowModeStatic, "input", "work.ready", "child/grandchild/work.ready", "", nil)
+	nestedStatic.target = events.RouteIdentity{FlowID: "grandchild", FlowInstance: "child/grandchild"}
+	nestedOwner := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "child", FlowInstance: "child", EntityID: entityID})
+	nestedRoutingSource, err := events.NewStaticFlowRoutingSource(nestedOwner.Route())
+	if err != nil {
+		t.Fatalf("nested routing source: %v", err)
+	}
+	nestedSourceEvent, err := AdmitSourceEvent(events.EventType("child/work.ready"), nestedRoutingSource)
+	if err != nil {
+		t.Fatalf("admit nested source event: %v", err)
+	}
+	siblingReceiver := rootToStatic
+	siblingReceiver.source = newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "left", "left", runtimecontracts.FlowModeStatic, "output", "work.ready", "left/work.ready", "", nil)
+	siblingReceiver.receiver = newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "right", "right", runtimecontracts.FlowModeStatic, "input", "work.ready", "right/work.ready", "", nil)
+	siblingReceiver.target = events.RouteIdentity{FlowID: "right", FlowInstance: "right"}
+	siblingOwner := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "left", FlowInstance: "left", EntityID: entityID})
+	siblingRoutingSource, err := events.NewStaticFlowRoutingSource(siblingOwner.Route())
+	if err != nil {
+		t.Fatalf("sibling routing source: %v", err)
+	}
+	siblingSourceEvent, err := AdmitSourceEvent(events.EventType("left/work.ready"), siblingRoutingSource)
+	if err != nil {
+		t.Fatalf("admit sibling source event: %v", err)
+	}
+	wrongRootRoutingSource, err := events.NewRootRoutingSource(eventtest.UUID("unrelated-root-owner"))
+	if err != nil {
+		t.Fatalf("unrelated root routing source: %v", err)
+	}
+	wrongRootSourceEvent, err := AdmitSourceEvent(events.EventType("validate.requested"), wrongRootRoutingSource)
+	if err != nil {
+		t.Fatalf("admit unrelated root source event: %v", err)
+	}
+	wrongNestedRoutingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: "child", FlowInstance: "child", EntityID: eventtest.UUID("unrelated-nested-owner"),
+	})
+	if err != nil {
+		t.Fatalf("unrelated nested routing source: %v", err)
+	}
+	wrongNestedSourceEvent, err := AdmitSourceEvent(events.EventType("child/work.ready"), wrongNestedRoutingSource)
+	if err != nil {
+		t.Fatalf("admit unrelated nested source event: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		plan    ConnectRoutePlan
+		target  events.RouteIdentity
+		current events.DeliveryTargetOwnership
+		source  SourceEvent
+		want    bool
+		wantErr bool
+	}{
+		{name: "root to static", plan: rootToStatic, target: staticTarget, current: rootOwner, source: rootSourceEvent, want: true},
+		{name: "nested static descendant", plan: nestedStatic, target: nestedStatic.target, current: nestedOwner, source: nestedSourceEvent, want: true},
+		{name: "singleton receiver is distinct", plan: singletonReceiver, target: staticTarget, current: rootOwner, source: rootSourceEvent},
+		{name: "template receiver is distinct", plan: templateReceiver, target: staticTarget, current: rootOwner, source: rootSourceEvent},
+		{name: "sibling path is not nested", plan: siblingReceiver, target: siblingReceiver.target, current: siblingOwner, source: siblingSourceEvent},
+		{name: "entityless current target cannot authorize", plan: rootToStatic, target: staticTarget, current: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "workflow", FlowInstance: "root"}), source: rootSourceEvent},
+		{name: "root source and current owner disagree", plan: rootToStatic, target: staticTarget, current: rootOwner, source: wrongRootSourceEvent},
+		{name: "nested source and current owner disagree", plan: nestedStatic, target: nestedStatic.target, current: nestedOwner, source: wrongNestedSourceEvent},
+		{name: "wrong target blueprint fails", plan: rootToStatic, target: events.RouteIdentity{FlowID: "other", FlowInstance: "other"}, current: rootOwner, source: rootSourceEvent, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			proof, ok, err := test.plan.ProveStructuralTargetOwner(test.target, test.current, test.source)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("proof error = %v, wantErr %v", err, test.wantErr)
+			}
+			if ok != test.want {
+				t.Fatalf("proof admitted = %v, want %v", ok, test.want)
+			}
+			if !ok {
+				if !proof.Empty() {
+					t.Fatalf("rejected proof = %#v, want zero", proof)
+				}
+				return
+			}
+			if err := proof.Validate(); err != nil {
+				t.Fatalf("validate proof: %v", err)
+			}
+			wantTarget := test.target.Normalized()
+			if got := proof.TargetOwner().Route(); got.FlowID != wantTarget.FlowID || got.FlowInstance != wantTarget.FlowInstance || got.EntityID != entityID {
+				t.Fatalf("proof owner = %#v, want exact static target %#v with current entity", got, wantTarget)
+			}
+		})
 	}
 }
 

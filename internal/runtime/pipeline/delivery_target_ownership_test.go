@@ -142,34 +142,6 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 	}
 }
 
-func TestClassifyDeliveryTargetOwnershipAllowsTypedStructuralOwnerForEntitylessHandler(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
-	evt := eventtest.RunCreatingRootIngress(
-		eventtest.UUID("delivery-target-structural-owner"), events.EventType("review/one/work.ready"),
-		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
-	)
-	handler, err := AdmitDeliveryTargetHandler(source, "review", "entityless")
-	if err != nil {
-		t.Fatalf("admit handler: %v", err)
-	}
-	route := events.RouteIdentity{
-		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("structural-owner"),
-	}
-	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient("entityless"),
-		Blueprint:            events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
-		Handler:              handler.ForEvent("work.ready"),
-		StructuralOwner:      events.MustExistingEntityTarget(route),
-		AllowStructuralOwner: true,
-	})
-	if err != nil {
-		t.Fatalf("classify structural owner: %v", err)
-	}
-	if !owner.ExistingEntity() || owner.Route() != route {
-		t.Fatalf("owner = %#v, want typed structural owner %#v", owner, route)
-	}
-}
-
 func TestClassifyDeliveryTargetOwnershipUsesUnambiguousHandlerFlowOwner(t *testing.T) {
 	source := deliveryTargetOwnershipSource()
 	evt := eventtest.RunCreatingRootIngress(

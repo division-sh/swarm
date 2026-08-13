@@ -63,6 +63,7 @@ type eventPublicationParams struct {
 	TargetRoute            events.RouteIdentity
 	TargetRouteSet         bool
 	PublicInputEndpoint    *semanticview.AuthoredEventEndpoint
+	APIEventEndpoint       *runtimebus.APIEventPublicationEndpoint
 	RunID                  string
 	SourceEventID          string
 	IdempotencyKey         string
@@ -96,7 +97,7 @@ type publicInputAcknowledgedPublisher interface {
 
 type apiEventAcknowledgedPublisher interface {
 	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
-	PublishAPIEventAcknowledged(context.Context, events.Event, *semanticview.AuthoredEventEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error)
+	PublishAPIEventAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error)
 }
 
 func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]MethodHandler {
@@ -218,9 +219,21 @@ func executeOperatorEventPublication(
 				resolution := resolveEventPublicationTemplateInputEndpoint(selectedOpts.Source, requestedEventName, resolvedEventName)
 				switch resolution.Kind {
 				case eventPublicationEndpointOrdinary:
+					if resolution.FlowID != "" {
+						endpoint, err := runtimebus.NewOrdinaryFlowAPIEventPublicationEndpoint(selectedOpts.Source, resolution.FlowID, resolvedEventName)
+						if err != nil {
+							return apiidempotency.Completion{}, err
+						}
+						params.APIEventEndpoint = &endpoint
+					}
 				case eventPublicationEndpointTemplate:
 					params.PublicInputEndpoint = &resolution.Endpoint
-				case eventPublicationEndpointInvalidTemplate:
+					endpoint, err := runtimebus.NewTemplateAPIEventPublicationEndpoint(selectedOpts.Source, resolution.Endpoint)
+					if err != nil {
+						return apiidempotency.Completion{}, err
+					}
+					params.APIEventEndpoint = &endpoint
+				case eventPublicationEndpointInvalid, eventPublicationEndpointInvalidTemplate:
 					return apiidempotency.Completion{}, resolution.ApplicationError(requestedEventName)
 				default:
 					return apiidempotency.Completion{}, errors.New("event publication endpoint resolution is incomplete")
@@ -244,7 +257,7 @@ func executeOperatorEventPublication(
 			if !ok || publisher == nil {
 				return apiidempotency.Completion{}, errors.New("event.publish requires atomic selected-store publication and API completion")
 			}
-			committed, replay, err := publisher.PublishAPIEventAcknowledged(ctx, publication, params.PublicInputEndpoint, idempotency, completion)
+			committed, replay, err := publisher.PublishAPIEventAcknowledged(ctx, publication, params.APIEventEndpoint, idempotency, completion)
 			if err != nil {
 				if errors.Is(err, apiidempotency.ErrConflict) {
 					return apiidempotency.Completion{}, err
@@ -649,11 +662,13 @@ const (
 	eventPublicationEndpointUnknown eventPublicationEndpointKind = iota
 	eventPublicationEndpointOrdinary
 	eventPublicationEndpointTemplate
+	eventPublicationEndpointInvalid
 	eventPublicationEndpointInvalidTemplate
 )
 
 type eventPublicationEndpointResolution struct {
 	Kind       eventPublicationEndpointKind
+	FlowID     string
 	Endpoint   semanticview.AuthoredEventEndpoint
 	Reason     string
 	Candidates []string
@@ -694,12 +709,10 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 	}
 	scopes := make(map[string]semanticview.FlowScope)
 	templateOwners := make(map[string]struct{})
+	ordinaryOwners := make(map[string]struct{})
 	for _, scope := range source.FlowScopes() {
 		flowID := strings.TrimSpace(scope.ID)
 		scopes[flowID] = scope
-		if !strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
 		for local := range scope.Events {
 			local = runtimeeventidentity.Normalize(local)
 			canonical := canonicalFlowEventName(source, scope, local)
@@ -707,8 +720,13 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 			if scoped {
 				matches = canonical == resolvedEventName && flowScopedEventNameMatches(requestedEventName, scope, local, canonical)
 			}
-			if matches {
+			if !matches {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
 				templateOwners[flowID] = struct{}{}
+			} else {
+				ordinaryOwners[flowID] = struct{}{}
 			}
 		}
 	}
@@ -751,7 +769,31 @@ func resolveEventPublicationTemplateInputEndpoint(source semanticview.Source, re
 			sort.Strings(owners)
 			return eventPublicationEndpointResolution{Kind: eventPublicationEndpointInvalidTemplate, Reason: "missing_template_input_endpoint", Candidates: owners}
 		}
+		if len(ordinaryOwners) == 1 {
+			for flowID := range ordinaryOwners {
+				return eventPublicationEndpointResolution{Kind: eventPublicationEndpointOrdinary, FlowID: flowID}
+			}
+		}
+		if len(ordinaryOwners) > 1 {
+			owners := make([]string, 0, len(ordinaryOwners))
+			for owner := range ordinaryOwners {
+				owners = append(owners, owner)
+			}
+			sort.Strings(owners)
+			return eventPublicationEndpointResolution{Kind: eventPublicationEndpointInvalid, Reason: "ambiguous_ordinary_event_endpoint", Candidates: owners}
+		}
 		return ordinary
+	}
+	if len(ordinaryOwners) > 0 {
+		owners := make([]string, 0, len(ordinaryOwners)+len(templateOwners))
+		for owner := range ordinaryOwners {
+			owners = append(owners, owner)
+		}
+		for owner := range templateOwners {
+			owners = append(owners, owner)
+		}
+		sort.Strings(owners)
+		return eventPublicationEndpointResolution{Kind: eventPublicationEndpointInvalid, Reason: "ambiguous_event_endpoint_owner", Candidates: owners}
 	}
 	if len(candidates) > 1 {
 		ids := make([]string, 0, len(candidates))

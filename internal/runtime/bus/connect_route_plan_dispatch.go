@@ -332,7 +332,13 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
 			return out, nil
 		}
-		out.DeliveryIntents = append(out.DeliveryIntents, connectRoutePlanDeliveryIntents(plan, routes, liveRoutes, routeCreatedInPlan)...)
+		projection, _ := selectedRunTargetOwnerProjectionFromContext(ctx)
+		sourceEvent, _ := runtimepinrouting.SourceEventFromEvent(evt)
+		intents, err := connectRoutePlanDeliveryIntents(plan, routes, liveRoutes, routeCreatedInPlan, projection.currentTarget, sourceEvent)
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+		out.DeliveryIntents = append(out.DeliveryIntents, intents...)
 		out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(liveRoutes)...)
 		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
 	}
@@ -474,12 +480,24 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
 	if plan.ReceiverEndpoint().IsRoot() {
-		target := evt.TargetRoute().Normalized()
 		rootFlowID := strings.TrimSpace(r.source.WorkflowName())
 		rootInstance := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 		if rootFlowID == "" || rootInstance == "" {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver requires canonical workflow identity")
 		}
+		if projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx); ok && projection.required {
+			owner, err := projection.resolveSelectedRoute(events.RouteIdentity{
+				FlowID: rootFlowID, FlowInstance: rootInstance,
+			}, runtimepinrouting.StructuralTargetOwnerProof{})
+			if err != nil {
+				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, fmt.Errorf("resolve exact root connect receiver owner: %w", err)
+			}
+			if !owner.ExistingEntity() {
+				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, fmt.Errorf("root connect receiver requires exact existing selected-run owner, got %s", owner.Code())
+			}
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Target: owner.Route()}, TemplateInstanceLifecycleDecision{}, nil
+		}
+		target := evt.TargetRoute().Normalized()
 		if target.FlowID != "" && target.FlowID != rootFlowID {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
 		}
@@ -562,7 +580,13 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 		return nil, nil
 	}
 	if projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx); ok {
-		return projection.pinRoutingDescriptors(plans), nil
+		var sourceEvent runtimepinrouting.SourceEvent
+		if evt, present := runtimecorrelation.InboundEventFromContext(ctx); present {
+			if admitted, err := runtimepinrouting.SourceEventFromEvent(evt); err == nil {
+				sourceEvent = admitted
+			}
+		}
+		return projection.pinRoutingDescriptors(plans, sourceEvent)
 	}
 	if r.loadDescriptors == nil {
 		return nil, nil
@@ -867,7 +891,7 @@ func connectRoutePlanLiveRecipients(routes []runtimepinrouting.ConnectDeliveryRo
 	return normalizeRoutePlanLiveRecipients(out)
 }
 
-func connectRoutePlanDeliveryIntents(plan runtimepinrouting.ConnectRoutePlan, routes, liveRoutes []runtimepinrouting.ConnectDeliveryRoute, routeCreatedInPlan bool) []RoutePlanDeliveryIntent {
+func connectRoutePlanDeliveryIntents(plan runtimepinrouting.ConnectRoutePlan, routes, liveRoutes []runtimepinrouting.ConnectDeliveryRoute, routeCreatedInPlan bool, currentTarget events.DeliveryTargetOwnership, sourceEvent runtimepinrouting.SourceEvent) ([]RoutePlanDeliveryIntent, error) {
 	receiverEvent := plan.ReceiverLocalEvent()
 	intents := routePlanDeliveryIntentsFromConnectRoutes(routes, routeIntentProducerConnectRoutePlan, receiverEvent)
 	liveAgents := make(map[agentidentity.Identity]struct{}, len(liveRoutes))
@@ -878,7 +902,15 @@ func connectRoutePlanDeliveryIntents(plan runtimepinrouting.ConnectRoutePlan, ro
 	}
 	for index := range intents {
 		intent := &intents[index]
-		intent.AllowStructuralOwner = routeCreatedInPlan || plan.StructuralTargetOwnerEligible()
+		if intent.Recipient.IsNode() {
+			proof, ok, err := plan.ProveStructuralTargetOwner(intent.TargetBlueprint, currentTarget, sourceEvent)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				intent.StructuralOwnerProof = proof
+			}
+		}
 		if !intent.Recipient.IsAgent() {
 			continue
 		}
@@ -886,7 +918,7 @@ func connectRoutePlanDeliveryIntents(plan runtimepinrouting.ConnectRoutePlan, ro
 			intent.PendingAgentLifecycle = true
 		}
 	}
-	return intents
+	return intents, nil
 }
 
 func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFailure) runtimepinrouting.TargetFailure {

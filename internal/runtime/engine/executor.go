@@ -24,6 +24,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -3185,12 +3186,14 @@ func nextPersistenceSafeEmitTime(now, previous time.Time) time.Time {
 }
 
 func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
+	delivery, deliveryPresent := runtimedelivery.RouteFromContext(frame.ctx)
 	input := runtimepinrouting.ResolutionInput{
-		Source:        e.deps.Source,
-		FlowID:        strings.TrimSpace(frame.req.FlowID.String()),
-		EventType:     strings.TrimSpace(eventType),
-		RoutingSource: frame.req.ProducerSource,
-		ParentRoute:   parentRouteFromState(frame.state.State.StateCarrier.Metadata),
+		Source:               e.deps.Source,
+		FlowID:               strings.TrimSpace(frame.req.FlowID.String()),
+		EventType:            strings.TrimSpace(eventType),
+		RoutingSource:        frame.req.ProducerSource,
+		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Metadata),
+		CurrentDeliveryOwner: runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 	}
 	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)
 	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {
@@ -3199,13 +3202,13 @@ func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, env
 	return resolution, nil
 }
 
-func parentRouteFromState(metadata map[string]any) events.RouteIdentity {
+func structuralParentFromState(metadata map[string]any) runtimepinrouting.PersistedStructuralParent {
 	route := runtimeflowidentity.ParentRouteFromMetadata(metadata).Normalized()
-	return events.RouteIdentity{
+	return runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
 		FlowID:       route.FlowID,
 		FlowInstance: route.FlowInstance,
 		EntityID:     route.EntityID,
-	}.Normalized()
+	})
 }
 
 func emitSourceRoute(frame *executionFrame) events.RouteIdentity {

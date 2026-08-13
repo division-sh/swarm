@@ -985,6 +985,7 @@ seam_families:
       - internal/runtime/bus/target_owner_projection.go
       - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/eventbus_route_generation_plan_test.go
+      - internal/runtime/bus/eventbus_receiver_structure_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [route_plan_source_reason, route_plan]

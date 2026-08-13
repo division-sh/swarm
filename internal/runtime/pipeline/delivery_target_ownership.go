@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -109,8 +110,7 @@ type DeliveryTargetOwnershipRequest struct {
 	Blueprint            events.RouteIdentity
 	Handler              DeliveryTargetHandler
 	Candidates           []DeliveryTargetOwnerCandidate
-	StructuralOwner      events.DeliveryTargetOwnership
-	AllowStructuralOwner bool
+	StructuralOwnerProof runtimepinrouting.StructuralTargetOwnerProof
 }
 
 // ClassifyDeliveryTargetOwnership is the single receiver-side owner for exact
@@ -142,15 +142,29 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if requirement == handlerEntitylessSafe && len(existing)+len(materializing) > 0 {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("entityless-safe handler has selected entity ownership evidence for flow instance %q", blueprint.FlowInstance)
 	}
-	if len(existing) == 0 && len(materializing) == 0 && req.AllowStructuralOwner && !req.StructuralOwner.Empty() {
-		structural := req.StructuralOwner.Route()
-		if structural.EntityID != "" {
-			ownerRoute := blueprint
-			ownerRoute.EntityID = structural.EntityID
-			if req.StructuralOwner.MaterializingEntity() {
-				materializing = append(materializing, ownerRoute)
-			} else if req.StructuralOwner.ExistingEntity() {
-				existing = append(existing, ownerRoute)
+	if len(existing)+len(materializing) == 0 && !req.StructuralOwnerProof.Empty() {
+		if err := req.StructuralOwnerProof.Validate(); err != nil {
+			return events.DeliveryTargetOwnership{}, err
+		}
+		if req.StructuralOwnerProof.TargetBlueprint() != blueprint {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("compiled structural target-owner proof does not match receiver blueprint")
+		}
+		owner := req.StructuralOwnerProof.TargetOwner()
+		if owner.MaterializingEntity() {
+			present := false
+			for _, candidate := range materializing {
+				present = present || candidate == owner.Route()
+			}
+			if !present {
+				materializing = append(materializing, owner.Route())
+			}
+		} else if owner.ExistingEntity() {
+			present := false
+			for _, candidate := range existing {
+				present = present || candidate == owner.Route()
+			}
+			if !present {
+				existing = append(existing, owner.Route())
 			}
 		}
 	}

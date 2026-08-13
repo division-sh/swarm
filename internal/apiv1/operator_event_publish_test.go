@@ -482,6 +482,60 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	}
 }
 
+func TestOperatorEventPublishSQLiteCarriesExactOrdinaryFlowEndpoint(t *testing.T) {
+	ctx := context.Background()
+	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
+	const canonicalEventName = "repo-scaffold/repo_scaffold.repo_commit_succeeded"
+	bus, err := newScopedAPITestEventBus(t, selected, runtimebus.EventBusOptions{
+		ContractBundle: source, BundleSourceFact: runStartTestBundleSourceFact(),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
+	body := eventPublishBody("", runStartTestBundleHash, canonicalEventName, `{"topic":"medicine"}`, "", "idem-flow-scoped-sqlite")
+
+	published := rpcCall(t, handler, body)
+	if published.Error != nil {
+		t.Fatalf("event.publish flow-scoped SQLite error = %#v", published.Error)
+	}
+	result := asMap(t, published.Result)
+	eventID := stringValue(t, result["event_id"], "event_id")
+	runID := stringValue(t, result["run_id"], "run_id")
+	deliveries := asSlice(t, result["deliveries"])
+	if len(deliveries) != 1 {
+		t.Fatalf("deliveries = %#v, want one exact static node delivery", deliveries)
+	}
+	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", "repo-observer", "pending", 1)
+	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(selected), runID, eventID, canonicalEventName, "cli-publish:"+actorTokenID(testToken))
+
+	var rawTarget string
+	if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `
+		SELECT delivery_target_route
+		FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'repo-observer'
+	`, eventID).Scan(&rawTarget); err != nil {
+		t.Fatalf("load exact static delivery target: %v", err)
+	}
+	var target map[string]any
+	if err := json.Unmarshal([]byte(rawTarget), &target); err != nil {
+		t.Fatalf("decode exact static delivery target: %v", err)
+	}
+	route := asMap(t, target["route"])
+	if target["kind"] != "entityless_receiver" || route["flow_id"] != "repo-scaffold" || route["flow_instance"] != "repo-scaffold" {
+		t.Fatalf("delivery target = %#v, want exact entityless repo-scaffold owner", target)
+	}
+
+	replay := rpcCall(t, handler, body)
+	if replay.Error != nil {
+		t.Fatalf("event.publish flow-scoped SQLite replay error = %#v", replay.Error)
+	}
+	if got := countSQLiteEventsByName(t, storetest.DatabaseForTest(selected), canonicalEventName); got != 1 {
+		t.Fatalf("event rows after replay = %d, want 1", got)
+	}
+}
+
 func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -1238,6 +1292,14 @@ func TestOperatorEventPublishNewRunTemplateInputHandsExactEndpointToPublicAdmiss
 	}
 	publisher := &publicInputPublishProbe{EventBus: bus}
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, publisher, source)
+	resolved, err := resolveEventPublicationEventName(source, "operating/opco.product_initialization_requested")
+	if err != nil {
+		t.Fatalf("resolve template event: %v", err)
+	}
+	resolution := resolveEventPublicationTemplateInputEndpoint(source, "operating/opco.product_initialization_requested", resolved)
+	if _, err := runtimebus.NewTemplateAPIEventPublicationEndpoint(source, resolution.Endpoint); err != nil {
+		t.Fatalf("admit template API endpoint: resolution=%#v err=%v", resolution, err)
+	}
 
 	response := rpcCall(t, handler, eventPublishBody(
 		"", runStartTestBundleHash, "operating/opco.product_initialization_requested",
@@ -1250,16 +1312,25 @@ func TestOperatorEventPublishNewRunTemplateInputHandsExactEndpointToPublicAdmiss
 		t.Fatalf("public-input admission calls = %d, want 1", publisher.publicInputCalls)
 	}
 	endpoint := publisher.endpoint
-	if endpoint.FlowID != "operating" || endpoint.PinName != "opco.product_initialization_requested" {
-		t.Fatalf("public-input endpoint = flow:%q pin:%q, want operating.opco.product_initialization_requested", endpoint.FlowID, endpoint.PinName)
+	if endpoint.Kind != "template_input" || endpoint.PublicInput.FlowID != "operating" || endpoint.PublicInput.PinName != "opco.product_initialization_requested" {
+		t.Fatalf("public-input endpoint = %#v, want operating.opco.product_initialization_requested", endpoint)
 	}
-	if endpoint.Event.Canonical != "operating/opco.product_initialization_requested" {
-		t.Fatalf("public-input resolved event = %q, want operating/opco.product_initialization_requested", endpoint.Event.Canonical)
+	if endpoint.PublicInput.Event.Canonical != "operating/opco.product_initialization_requested" {
+		t.Fatalf("public-input resolved event = %q, want operating/opco.product_initialization_requested", endpoint.PublicInput.Event.Canonical)
 	}
 }
 
 func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscopedTemplate(t *testing.T) {
 	const eventName = "review.requested"
+	staticSource := semanticview.Wrap(flowScopedEventPublishTestBundle())
+	staticResolution := resolveEventPublicationTemplateInputEndpoint(
+		staticSource,
+		"repo-scaffold/repo_scaffold.repo_commit_succeeded",
+		"repo-scaffold/repo_scaffold.repo_commit_succeeded",
+	)
+	if staticResolution.Kind != eventPublicationEndpointOrdinary || staticResolution.FlowID != "repo-scaffold" {
+		t.Fatalf("ordinary flow endpoint resolution = %#v, want exact repo-scaffold owner", staticResolution)
+	}
 
 	rootAndTemplate := semanticview.Wrap(eventPublishRootTemplateCollisionTestBundle())
 	if resolution := resolveEventPublicationTemplateInputEndpoint(rootAndTemplate, eventName, eventName); resolution.Kind != eventPublicationEndpointOrdinary {
@@ -2089,7 +2160,7 @@ func (p *plainEventPublisher) AdmitBundleSourceFact(ctx context.Context) (contex
 type publicInputPublishProbe struct {
 	*runtimebus.EventBus
 	publicInputCalls int
-	endpoint         semanticview.AuthoredEventEndpoint
+	endpoint         runtimebus.APIEventPublicationEndpointReadback
 }
 
 func (p *publicInputPublishProbe) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
@@ -2098,14 +2169,14 @@ func (p *publicInputPublishProbe) LookupAPIEventPublication(ctx context.Context,
 
 func (p *publicInputPublishProbe) PublishPublicInputAcknowledged(ctx context.Context, evt events.Event, endpoint semanticview.AuthoredEventEndpoint) error {
 	p.publicInputCalls++
-	p.endpoint = endpoint
+	p.endpoint = runtimebus.APIEventPublicationEndpointReadback{Kind: "template_input", PublicInput: endpoint}
 	return p.EventBus.PublishAcknowledged(ctx, evt)
 }
 
-func (p *publicInputPublishProbe) PublishAPIEventAcknowledged(ctx context.Context, evt events.Event, endpoint *semanticview.AuthoredEventEndpoint, request apiidempotency.Request, completion apiidempotency.Completion) (apiidempotency.Completion, bool, error) {
+func (p *publicInputPublishProbe) PublishAPIEventAcknowledged(ctx context.Context, evt events.Event, endpoint *runtimebus.APIEventPublicationEndpoint, request apiidempotency.Request, completion apiidempotency.Completion) (apiidempotency.Completion, bool, error) {
 	p.publicInputCalls++
 	if endpoint != nil {
-		p.endpoint = *endpoint
+		p.endpoint = endpoint.Readback()
 	}
 	return p.EventBus.PublishAPIEventAcknowledged(ctx, evt, nil, request, completion)
 }

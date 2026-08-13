@@ -22,6 +22,7 @@ const (
 	routePlanSourceScopedNodeRoute
 	routePlanSourceRootNodeRoute
 	routePlanSourceRootInputFlowNode
+	routePlanSourceAPIEventPublication
 	routePlanSourceRecipientMaterializer
 	routePlanSourceConnectRoutePlan
 )
@@ -51,6 +52,8 @@ func (s routePlanSource) code() string {
 		return "root_node_route"
 	case routePlanSourceRootInputFlowNode:
 		return "root_input_flow_node_route"
+	case routePlanSourceAPIEventPublication:
+		return "api_event_publication_route"
 	case routePlanSourceRecipientMaterializer:
 		return "recipient_plan_materializer"
 	case routePlanSourceConnectRoutePlan:
@@ -91,6 +94,7 @@ const (
 	routeIntentProducerScopedNodeRoute
 	routeIntentProducerRootNodeRoute
 	routeIntentProducerRootInputFlowNode
+	routeIntentProducerAPIEventPublication
 	routeIntentProducerRecipientMaterializer
 	routeIntentProducerConnectRoutePlan
 )
@@ -105,6 +109,7 @@ func (p routeIntentProducer) Normalized() routeIntentProducer {
 		routeIntentProducerScopedNodeRoute,
 		routeIntentProducerRootNodeRoute,
 		routeIntentProducerRootInputFlowNode,
+		routeIntentProducerAPIEventPublication,
 		routeIntentProducerRecipientMaterializer,
 		routeIntentProducerConnectRoutePlan:
 		return p
@@ -129,6 +134,8 @@ func (p routeIntentProducer) Source() routePlanSource {
 		return routePlanSourceRootNodeRoute
 	case routeIntentProducerRootInputFlowNode:
 		return routePlanSourceRootInputFlowNode
+	case routeIntentProducerAPIEventPublication:
+		return routePlanSourceAPIEventPublication
 	case routeIntentProducerRecipientMaterializer:
 		return routePlanSourceRecipientMaterializer
 	case routeIntentProducerConnectRoutePlan:
@@ -150,7 +157,8 @@ func (p routeIntentProducer) Reason() routePlanReason {
 		routeIntentProducerConcreteNodeRoute,
 		routeIntentProducerScopedNodeRoute,
 		routeIntentProducerRootNodeRoute,
-		routeIntentProducerRootInputFlowNode:
+		routeIntentProducerRootInputFlowNode,
+		routeIntentProducerAPIEventPublication:
 		return routePlanReasonRouteTableNode
 	case routeIntentProducerRecipientMaterializer:
 		return routePlanReasonMaterializedRoute
@@ -245,7 +253,7 @@ type RoutePlanDeliveryIntent struct {
 	Producer              routeIntentProducer
 	Persist               bool
 	PendingAgentLifecycle bool
-	AllowStructuralOwner  bool
+	StructuralOwnerProof  runtimepinrouting.StructuralTargetOwnerProof
 }
 
 type DeliveryRouteBlueprint struct {
@@ -823,6 +831,7 @@ type deliveryIntentKey struct {
 	replyContextID string
 	projection     string
 	connectClaim   events.ConnectExecutionClaim
+	structural     runtimepinrouting.StructuralTargetOwnerProof
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {
@@ -857,11 +866,11 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			replyContextID: intent.Context.ReplyContextID(),
 			projection:     intent.PayloadProjection.Fingerprint(),
 			connectClaim:   intent.ConnectClaim,
+			structural:     intent.StructuralOwnerProof,
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
 			out[idx].PendingAgentLifecycle = out[idx].PendingAgentLifecycle || intent.PendingAgentLifecycle
-			out[idx].AllowStructuralOwner = out[idx].AllowStructuralOwner || intent.AllowStructuralOwner
 			if out[idx].Handler.Empty() {
 				out[idx].Handler = intent.Handler
 			}

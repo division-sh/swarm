@@ -3688,6 +3688,25 @@ func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want st
 	}
 }
 
+func assertNodeDeliveryTarget(t *testing.T, db *sql.DB, eventID, nodeID string, want events.DeliveryTargetOwnership) {
+	t.Helper()
+	var raw string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT delivery_target_route::text
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, eventID, nodeID).Scan(&raw); err != nil {
+		t.Fatalf("load delivery target for %s: %v", nodeID, err)
+	}
+	var got events.DeliveryTargetOwnership
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode delivery target for %s: %v (raw=%s)", nodeID, err, raw)
+	}
+	if got != want {
+		t.Fatalf("delivery target for %s = %s %#v, want %s %#v", nodeID, got.Code(), got.Route(), want.Code(), want.Route())
+	}
+}
+
 func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
@@ -3771,6 +3790,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		}
 	}
 	rootSource := eventtest.RootRoutingSource(rootEntityID)
+	wantRootOwnership := events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: bundle.WorkflowName(), FlowInstance: eventBusTestRunID, EntityID: rootEntityID,
+	})
 	rootConnectProbe := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
 		events.EventType("step.begin"),
@@ -3783,7 +3805,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		rootSource,
 		time.Now().UTC(),
 	)
-	rootConnectPlan, err := eb.CheckPublishRecipientPlan(ctx, rootConnectProbe)
+	rootConnectPlan, err := eb.CheckPublishRecipientPlan(runtimedelivery.WithRoute(ctx, events.DeliveryRoute{Target: wantRootOwnership}), rootConnectProbe)
 	if err != nil {
 		t.Fatalf("root connect preflight: %v", err)
 	}
@@ -3794,6 +3816,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("root connect preflight route=%#v, want child-relay", got)
 	}
 	childTarget := rootConnectPlan.DeliveryRoutes[0].Target.Route().Normalized()
+	childOwnership := rootConnectPlan.DeliveryRoutes[0].Target
 	previewEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID)
 	previewEnvelope = events.EnvelopeForTargetRoute(previewEnvelope, childTarget)
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
@@ -3826,6 +3849,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("grandchild connect preflight failure=%q routes=%#v", grandchildConnectPlan.TargetFailure, grandchildConnectPlan.DeliveryRoutes)
 	}
 	grandchildTarget := grandchildConnectPlan.DeliveryRoutes[0].Target.Route().Normalized()
+	grandchildOwnership := grandchildConnectPlan.DeliveryRoutes[0].Target
 	storedGrandchild, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(grandchildTarget.FlowInstance))
 	if err != nil {
 		t.Fatalf("load grandchild connect target: %v", err)
@@ -3871,13 +3895,22 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if rootReturnPlan.TargetFailure != "" || len(rootReturnPlan.DeliveryRoutes) == 0 {
 		t.Fatalf("root return preflight failure=%q routes=%#v", rootReturnPlan.TargetFailure, rootReturnPlan.DeliveryRoutes)
 	}
-	if !slices.ContainsFunc(rootReturnPlan.DeliveryRoutes, func(route events.DeliveryRoute) bool {
+	rootReturnIndex := slices.IndexFunc(rootReturnPlan.DeliveryRoutes, func(route events.DeliveryRoute) bool {
 		return route.Recipient.ID() == "root-collector"
-	}) {
+	})
+	if rootReturnIndex < 0 {
 		t.Fatalf("root return preflight routes = %#v, want root-collector", rootReturnPlan.DeliveryRoutes)
 	}
+	rootReturnOwnership := rootReturnPlan.DeliveryRoutes[rootReturnIndex].Target
+	wantRootReturn := wantRootOwnership
+	if rootReturnOwnership != wantRootReturn {
+		t.Fatalf("root return target = %s %#v, want %s %#v", rootReturnOwnership.Code(), rootReturnOwnership.Route(), wantRootReturn.Code(), wantRootReturn.Route())
+	}
+	if childTarget.EntityID == rootEntityID || grandchildTarget.EntityID == childTarget.EntityID || grandchildTarget.EntityID == rootEntityID {
+		t.Fatalf("deep-chain proof identities are not distinguishable: root=%s child=%#v grandchild=%#v", rootEntityID, childTarget, grandchildTarget)
+	}
 
-	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
+	initial := eventtest.ExistingRunRootIngress(
 		"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		events.EventType("pipeline.start"),
 		"cataloge2e",
@@ -3887,32 +3920,56 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		eventBusTestRunID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
-	)); err != nil {
+	)
+	initialPlan, err := eb.CheckPublishRecipientPlan(ctx, initial)
+	if err != nil {
+		t.Fatalf("initial root preflight: %v", err)
+	}
+	if initialPlan.TargetFailure != "" || len(initialPlan.DeliveryRoutes) != 1 {
+		t.Fatalf("initial root preflight failure=%q routes=%#v, want one root-dispatcher route", initialPlan.TargetFailure, initialPlan.DeliveryRoutes)
+	}
+	if got := initialPlan.DeliveryRoutes[0]; got.Recipient.ID() != "root-dispatcher" || got.Target != wantRootReturn {
+		t.Fatalf("initial root route = %#v, want root-dispatcher with target %s %#v", got, wantRootReturn.Code(), wantRootReturn.Route())
+	}
+	initialPreviewCtx := runtimedelivery.WithRoute(ctx, initialPlan.DeliveryRoutes[0])
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(initialPreviewCtx, bundle, "root-dispatcher", initial, runtimepipeline.WorkflowState{
+		EntityID: rootEntityID,
+		Stage:    "idle",
+	}, nil); err != nil {
+		t.Fatalf("preview initial root delivery: %v", err)
+	}
+	if err := eb.Publish(ctx, initial); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
+	assertNodeDeliveryStatus(t, db, initial.ID(), "root-dispatcher", "delivered")
+	assertNodeDeliveryTarget(t, db, initial.ID(), "root-dispatcher", wantRootReturn)
 	var stepBeginEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'step.begin' ORDER BY created_at DESC LIMIT 1`).Scan(&stepBeginEventID); err != nil {
 		t.Fatalf("load step.begin event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, stepBeginEventID, "child-relay", "delivered")
+	assertNodeDeliveryTarget(t, db, stepBeginEventID, "child-relay", childOwnership)
 	var microStartEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.start' ORDER BY created_at DESC LIMIT 1`).Scan(&microStartEventID); err != nil {
 		t.Fatalf("load child/micro.start event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microStartEventID, "grandchild-worker", "delivered")
+	assertNodeDeliveryTarget(t, db, microStartEventID, "grandchild-worker", grandchildOwnership)
 	var microDoneEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/grandchild/micro.done' ORDER BY created_at DESC LIMIT 1`).Scan(&microDoneEventID); err != nil {
 		t.Fatalf("load child/grandchild/micro.done event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microDoneEventID, "child-relay", "delivered")
+	assertNodeDeliveryTarget(t, db, microDoneEventID, "child-relay", childOwnership)
 	var microRelayedEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.relayed' ORDER BY created_at DESC LIMIT 1`).Scan(&microRelayedEventID); err != nil {
 		t.Fatalf("load child/micro.relayed event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microRelayedEventID, "root-collector", "delivered")
+	assertNodeDeliveryTarget(t, db, microRelayedEventID, "root-collector", wantRootReturn)
 
 	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
@@ -3977,7 +4034,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 }
 
-func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t *testing.T) {
+func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-gates-in-child-flow")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -4049,7 +4106,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		SELECT COUNT(*)
 		FROM event_deliveries d
 		JOIN events e ON e.event_id = d.event_id
-		WHERE e.event_name = 'child/validation.done'
+		WHERE e.event_name = 'validate.requested'
 		  AND d.subscriber_type = 'node'
 		  AND d.subscriber_id = 'router'
 		  AND d.status = 'dead_letter'
@@ -4057,7 +4114,42 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		t.Fatalf("count dead-lettered exact delivery: %v", err)
 	}
 	if deadLettered != 1 {
-		t.Fatalf("dead-lettered exact deliveries = %d, want 1", deadLettered)
+		rows, _ := db.QueryContext(ctx, `
+			SELECT e.event_name, COALESCE(e.flow_instance, ''), d.subscriber_id,
+			       COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
+			FROM events e
+			LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+			ORDER BY e.created_at, e.event_id, d.subscriber_id
+		`)
+		trace := make([]string, 0)
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var eventName, flowInstance, subscriberID, status, target string
+				if scanErr := rows.Scan(&eventName, &flowInstance, &subscriberID, &status, &target); scanErr == nil {
+					trace = append(trace, eventName+" flow="+flowInstance+" subscriber="+subscriberID+" status="+status+" target="+target)
+				}
+			}
+		}
+		t.Fatalf("dead-lettered root deliveries = %d, want 1; trace=%v", deadLettered, trace)
+	}
+	var childEvents, childEntities int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE event_name IN ('child/validate.start', 'child/validation.done')
+	`).Scan(&childEvents); err != nil {
+		t.Fatalf("count undeclared child events: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM entity_state
+		WHERE flow_instance = 'child' OR flow_instance LIKE 'child/%'
+	`).Scan(&childEntities); err != nil {
+		t.Fatalf("count undeclared child entities: %v", err)
+	}
+	if childEvents != 0 || childEntities != 0 {
+		t.Fatalf("undeclared descendant mutation: events=%d entities=%d, want zero", childEvents, childEntities)
 	}
 
 	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
@@ -4214,7 +4306,13 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	defer runtimebustest.Unsubscribe(eb, "worker-inst-1")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
+	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: "grandchild", FlowInstance: "child/grandchild/inst-1", EntityID: eventtest.UUID("ent-grandchild"),
+	})
+	if err != nil {
+		t.Fatalf("concrete grandchild routing source: %v", err)
+	}
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
 		"child/grandchild/inst-1/micro.done",
 		"",
@@ -4224,6 +4322,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		"",
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")),
+		routingSource,
 		time.Time{},
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)

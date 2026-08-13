@@ -77,6 +77,7 @@ var deliveryPlannerHandlerFixtures = map[string]deliveryPlannerHandlerFixture{
 	"portfolio-node":         {flowID: "root", event: "opco.spinup_requested"},
 	"test-node":              {flowID: "root", event: "timer.check"},
 	"child-intake":           {flowID: "child", path: "child", event: "child.start"},
+	"intake":                 {flowID: "worker", path: "worker", event: "task.assigned"},
 	"project-observer":       {flowID: "root", event: "child.start"},
 	"flow-a-node":            {flowID: "flow-a", path: "flow-a", event: "task.ready"},
 	"repo-scaffold-node":     {flowID: "repo-scaffold", path: "repo-scaffold", event: "webhook.received"},
@@ -1122,7 +1123,7 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 	}
 }
 
-func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
+func TestDeliveryPlanner_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -1146,36 +1147,12 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute(t
 		}),
 	)
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), time.Time{}))
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
-		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
-	}
-	if len(plan.PersistedRecipientIDs()) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
-	}
-	if got := plan.DeliveryRoutes(); len(got) != 1 {
-		t.Fatalf("delivery routes = %#v, want child-intake semantic node route", got)
-	}
-	route := plan.DeliveryRoutes()[0]
-	if !route.Recipient.IsNode() || route.Recipient.ID() != "child-intake" {
-		t.Fatalf("delivery route = %#v, want node/child-intake", route)
-	}
-	if target := route.Target.Route(); target.FlowInstance != "child" || target.EntityID != "ent-child-owner" {
-		t.Fatalf("delivery target = %#v, want exact selected child owner", route.Target)
-	}
-	if got, want := len(plan.DeliveryIntents), 1; got != want {
-		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
-	}
-	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerScopedNodeRoute {
-		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	if _, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), time.Time{})); err == nil || !strings.Contains(err.Error(), "without exact same-instance, explicit-target, or compiled-connect authority") {
+		t.Fatalf("Plan error = %v, want missing target-owner authority", err)
 	}
 }
 
-func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *testing.T) {
+func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *testing.T) {
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
@@ -1207,35 +1184,58 @@ func TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute(t *
 	)
 	planner.rootFlowID = "root"
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
-		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
-	}
-	if got := plan.DeliveryRoutes(); len(got) != 2 {
-		t.Fatalf("delivery routes = %#v, want project-observer and child-intake semantic node routes", got)
-	}
-	routes := map[string]events.RouteIdentity{}
-	for _, route := range plan.DeliveryRoutes() {
-		if !route.Recipient.IsNode() {
-			t.Fatalf("delivery route = %#v, want node route", route)
-		}
-		routes[route.Recipient.ID()] = route.Target.Route()
-	}
-	if target, ok := routes["project-observer"]; !ok || target != (events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root-owner"}) {
-		t.Fatalf("project-observer target = %#v, ok=%v; want exact selected root owner", target, ok)
-	}
-	if target, ok := routes["child-intake"]; !ok || target.FlowInstance != "child" || target.EntityID != "ent-child-owner" {
-		t.Fatalf("child-intake target = %#v, ok=%v; want exact selected child owner", target, ok)
-	}
-	if got, want := len(plan.DeliveryIntents), 2; got != want {
-		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
+	if _, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{})); err == nil || !strings.Contains(err.Error(), `routed node "child-intake"`) {
+		t.Fatalf("Plan error = %v, want unrelated child route rejection", err)
 	}
 }
 
-func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t *testing.T) {
+func TestDeliveryPlanner_QualifiedRootInputFlowUsesTypedRouteAuthority(t *testing.T) {
+	runID := uuid.NewString()
+	planner := newDeliveryPlannerWithHandlers(t,
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					Recipient:      events.MustNodeDeliveryRecipient("intake"),
+					Path:           "worker",
+					MatchPattern:   "worker/task.assigned",
+					LocalizedEvent: "task.assigned",
+					routeSource:    subscriberRouteSourceRootInputFlow,
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
+		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "worker-owner", FlowInstance: "worker", EntityID: "ent-worker-owner",
+		}),
+	)
+
+	evt := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "worker/task.assigned", "operator", "", nil, 0, runID, "",
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, runID), time.Now().UTC(),
+	)
+	plan, err := planner.Plan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	want := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("intake"),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: "worker", FlowInstance: "worker", EntityID: "ent-worker-owner",
+		}),
+	}
+	if routes := plan.DeliveryRoutes(); len(routes) != 1 || !deliveryPlannerRoutesContain(routes, want) {
+		t.Fatalf("delivery routes = %#v, want exact root-input owner %#v", routes, want)
+	}
+	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerRootInputFlowNode {
+		t.Fatalf("intent producer = %q, want typed root-input-flow authority", got)
+	}
+}
+
+func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -1259,7 +1259,7 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 		}),
 	)
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
+	_, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"flow-b/order.completed",
 		"",
@@ -1271,35 +1271,12 @@ func TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope(t 
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-flow-b"), "flow-b/inst-1"),
 		time.Time{},
 	))
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
-		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
-	}
-	if len(plan.PersistedRecipientIDs()) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
-	}
-	if got := plan.DeliveryRoutes(); len(got) != 1 {
-		t.Fatalf("delivery routes = %#v, want flow-a-node semantic node route", got)
-	}
-	route := plan.DeliveryRoutes()[0]
-	if !route.Recipient.IsNode() || route.Recipient.ID() != "flow-a-node" {
-		t.Fatalf("delivery route = %#v, want node/flow-a-node", route)
-	}
-	if target := route.Target.Route(); target.FlowInstance != "flow-a" || target.EntityID != "ent-flow-a-owner" {
-		t.Fatalf("delivery target = %#v, want exact selected flow-a owner", route.Target)
-	}
-	if got, want := len(plan.DeliveryIntents), 1; got != want {
-		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
-	}
-	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerScopedNodeRoute {
-		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	if err == nil || !strings.Contains(err.Error(), `routed node "flow-a-node"`) {
+		t.Fatalf("Plan error = %v, want unrelated cross-flow route rejection", err)
 	}
 }
 
-func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberScope(t *testing.T) {
+func TestDeliveryPlanner_NoTargetWildcardCrossFlowRoutedNodeFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -1323,7 +1300,7 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 		}),
 	)
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
+	_, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"component-scaffold/component-a/opco.repo_scaffold_requested",
 		"",
@@ -1335,35 +1312,12 @@ func TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberSc
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-component"), "component-scaffold/component-a"),
 		time.Time{},
 	))
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
-		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
-	}
-	if len(plan.PersistedRecipientIDs()) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
-	}
-	if got := plan.DeliveryRoutes(); len(got) != 1 {
-		t.Fatalf("delivery routes = %#v, want repo-scaffold-node wildcard static-service node route", got)
-	}
-	route := plan.DeliveryRoutes()[0]
-	if !route.Recipient.IsNode() || route.Recipient.ID() != "repo-scaffold-node" {
-		t.Fatalf("delivery route = %#v, want node/repo-scaffold-node", route)
-	}
-	if target := route.Target.Route(); target.FlowInstance != "repo-scaffold" || target.EntityID != "ent-repo-owner" {
-		t.Fatalf("delivery target = %#v, want exact selected repo-scaffold owner", route.Target)
-	}
-	if got, want := len(plan.DeliveryIntents), 1; got != want {
-		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
-	}
-	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerScopedNodeRoute {
-		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	if err == nil || !strings.Contains(err.Error(), `routed node "repo-scaffold-node"`) {
+		t.Fatalf("Plan error = %v, want wildcard cross-flow route rejection", err)
 	}
 }
 
-func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRoute(t *testing.T) {
+func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeFailsClosed(t *testing.T) {
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -1387,7 +1341,7 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 		}),
 	)
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
+	_, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"child/grandchild/micro.start",
 		"",
@@ -1399,31 +1353,8 @@ func TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRou
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), "child/inst-1"),
 		time.Time{},
 	))
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if got := plan.RecipientIDs(); len(got) != 1 || got[0] != "workflow-runtime" {
-		t.Fatalf("recipients = %#v, want workflow-runtime live carrier", got)
-	}
-	if len(plan.PersistedRecipientIDs()) != 0 {
-		t.Fatalf("persisted recipients = %#v, want none for internal carrier", plan.PersistedRecipientIDs())
-	}
-	if got := plan.DeliveryRoutes(); len(got) != 1 {
-		t.Fatalf("delivery routes = %#v, want grandchild-worker semantic node route", got)
-	}
-	route := plan.DeliveryRoutes()[0]
-	if !route.Recipient.IsNode() || route.Recipient.ID() != "grandchild-worker" {
-		t.Fatalf("delivery route = %#v, want node/grandchild-worker", route)
-	}
-	if target := route.Target.Route(); target.FlowInstance != "child/inst-1/grandchild" || target.EntityID != "ent-grandchild-owner" {
-		t.Fatalf("delivery target = %#v, want exact selected grandchild owner", route.Target)
-	}
-	if got, want := len(plan.DeliveryIntents), 1; got != want {
-		t.Fatalf("route plan delivery intents = %d, want %d", got, want)
-	}
-	intent := plan.DeliveryIntents[0]
-	if intent.Producer != routeIntentProducerScopedNodeRoute {
-		t.Fatalf("route plan delivery intent = %#v, want scoped route-table node source", intent)
+	if err == nil || !strings.Contains(err.Error(), `routed node "grandchild-worker"`) {
+		t.Fatalf("Plan error = %v, want descendant route rejection", err)
 	}
 }
 
@@ -1436,11 +1367,6 @@ func TestNoTargetNodeRouteFamiliesUseExactPersistedTargetOwner(t *testing.T) {
 		{name: "root", run: TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute},
 		{name: "root local event", run: TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute},
 		{name: "root input flow", run: TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeDispatch},
-		{name: "scoped static", run: TestDeliveryPlanner_NoTargetScopedRoutedNodeUsesSemanticNodeDeliveryRoute},
-		{name: "pathless and scoped", run: TestDeliveryPlanner_NoTargetScopedEventPreservesPathlessRoutedNodeRoute},
-		{name: "cross-flow static", run: TestDeliveryPlanner_NoTargetCrossFlowStaticRoutedNodeUsesSubscriberScope},
-		{name: "wildcard static", run: TestDeliveryPlanner_NoTargetWildcardStaticServiceRoutedNodeUsesSubscriberScope},
-		{name: "descendant static", run: TestDeliveryPlanner_NoTargetDescendantScopedRoutedNodeUsesParentInstanceRoute},
 	}
 	for _, test := range tests {
 		t.Run(test.name, test.run)

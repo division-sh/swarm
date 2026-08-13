@@ -21,6 +21,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -969,6 +970,264 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	}
 	if got := store.receipts[eventID]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+}
+
+func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *testing.T) {
+	source := connectRoutePlanRootProducerStaticSource()
+	store := newTargetRouteMemoryStore()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	rootTarget := events.RouteIdentity{
+		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
+	}.Normalized()
+	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("root-dispatcher"),
+		Target:    events.MustExistingEntityTarget(rootTarget),
+	})
+	eventID := uuid.NewString()
+	evt := connectRoutePlanRootProducerEvent(
+		eventID, events.EventType("root.ready"), "root-dispatcher", "", json.RawMessage(`{"request_id":"r-1"}`), 0,
+		rootTarget.FlowInstance, "", events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootTarget.FlowInstance), rootTarget.EntityID), time.Now().UTC(),
+	)
+	want := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("consumer-node"),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: "consumer", FlowInstance: "consumer", EntityID: rootTarget.EntityID,
+		}),
+	}
+
+	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 || !deliveryRoutesContain(preflight.DeliveryRoutes, want) {
+		t.Fatalf("preflight failure/routes = %q/%#v, want exact structurally proved route %#v", preflight.TargetFailure, preflight.DeliveryRoutes, want)
+	}
+	if err := eb.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[eventID]; len(routes) != 1 || !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Route() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target.Route())
+	}
+	if got := store.receipts[eventID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(ctx, evt, nil, runtimepipelineobligation.ScopeSubscribed)
+	if err != nil {
+		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
+	}
+	if !containsString(live, "consumer-node") || !containsString(internal, "consumer-node") || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
+		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want exact persisted structural owner", live, internal, replayRoutes)
+	}
+}
+
+func TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBeforePersistence(t *testing.T) {
+	source := connectRoutePlanRootProducerStaticSource()
+	store := newTargetRouteMemoryStore()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	currentTarget := events.RouteIdentity{
+		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("unrelated-current-owner"),
+	}.Normalized()
+	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("root-dispatcher"),
+		Target:    events.MustExistingEntityTarget(currentTarget),
+	})
+	evt := connectRoutePlanRootProducerEvent(
+		uuid.NewString(), events.EventType("root.ready"), "root-dispatcher", "", json.RawMessage(`{"request_id":"hostile"}`), 0,
+		currentTarget.FlowInstance, "", events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, currentTarget.FlowInstance), currentTarget.EntityID), time.Now().UTC(),
+	)
+
+	if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+		t.Fatalf("CheckPublishRecipientPlan error = %v, want unproved structural owner rejection", err)
+	}
+	if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+		t.Fatalf("Publish error = %v, want unproved structural owner rejection", err)
+	}
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
+		t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+	}
+}
+
+func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTarget(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource()
+	store := newTargetRouteMemoryStore()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	rootTarget := events.RouteIdentity{
+		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
+	}.Normalized()
+	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("root-dispatcher"),
+		Target:    events.MustExistingEntityTarget(rootTarget),
+	})
+	eventID := uuid.NewString()
+	evt := connectRoutePlanRootProducerEvent(
+		eventID, events.EventType("root.ready"), "root-dispatcher", "", json.RawMessage(`{"request_id":"r-1"}`), 0,
+		rootTarget.FlowInstance, "", events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootTarget.FlowInstance), rootTarget.EntityID), time.Now().UTC(),
+	)
+	want := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("scout-node"),
+		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+			FlowID: "scout", FlowInstance: "scout", EntityID: runtimeflowidentity.EntityID("scout"),
+		}),
+	}
+	if want.Target.Route().EntityID == rootTarget.EntityID {
+		t.Fatal("test identities must distinguish root causal/current owner from singleton receiver owner")
+	}
+
+	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 || !deliveryRoutesContain(preflight.DeliveryRoutes, want) {
+		t.Fatalf("preflight failure/routes = %q/%#v, want exact receiver-owned route %#v", preflight.TargetFailure, preflight.DeliveryRoutes, want)
+	}
+	if got := preflight.DeliveryRoutes[0].Target.Route(); got.EntityID == rootTarget.EntityID {
+		t.Fatalf("preflight receiver target reused current root owner: %#v", got)
+	}
+
+	if err := eb.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[eventID]; len(routes) != 1 || !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Route() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target.Route())
+	}
+	if got := store.receipts[eventID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(ctx, evt, nil, runtimepipelineobligation.ScopeSubscribed)
+	if err != nil {
+		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
+	}
+	if !containsString(live, "scout-node") || !containsString(internal, "scout-node") || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
+		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want persisted singleton receiver owner", live, internal, replayRoutes)
+	}
+}
+
+func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *testing.T) {
+	source := connectRoutePlanSingletonProducerRootReceiverSource()
+	store := newTargetRouteMemoryStore()
+	runID := uuid.NewString()
+	rootEntityID := eventtest.UUID("selected-root-owner")
+	store.setTargetOwners(ActiveTargetDescriptor{
+		ID: "selected-root-owner", FlowInstance: runID, EntityID: rootEntityID,
+	})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	singletonEntityID := runtimeflowidentity.EntityID("scout")
+	if singletonEntityID == rootEntityID {
+		t.Fatal("test identities must distinguish singleton source from root receiver owner")
+	}
+	sourceRoute := events.RouteIdentity{
+		FlowID: "scout", FlowInstance: "scout", EntityID: singletonEntityID,
+	}
+	routingSource, err := events.NewStaticFlowRoutingSource(sourceRoute)
+	if err != nil {
+		t.Fatalf("singleton routing source: %v", err)
+	}
+	eventID := uuid.NewString()
+	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{
+		EntityID: singletonEntityID, FlowInstance: "scout",
+	}, sourceRoute)
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+		eventID, events.EventType("scout/scout.completed"), "scout-worker", "", []byte(`{}`), 0,
+		runID, envelope, routingSource, time.Now().UTC(),
+	)
+	want := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("root-collector"),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: rootEntityID,
+		}),
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 || !deliveryRoutesContain(preflight.DeliveryRoutes, want) {
+		t.Fatalf("preflight failure/routes = %q/%#v, want exact selected root route %#v", preflight.TargetFailure, preflight.DeliveryRoutes, want)
+	}
+	if got := preflight.DeliveryRoutes[0].Target.Route(); got.EntityID == singletonEntityID {
+		t.Fatalf("root receiver reused singleton source entity: %#v", got)
+	}
+
+	if err := eb.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[eventID]; len(routes) != 1 || !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Route() {
+		t.Fatalf("persisted event target = %#v, want %#v", got, want.Target.Route())
+	}
+}
+
+func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelectedOwnerBeforeMutation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		owners    func(string) []ActiveTargetDescriptor
+		wantError string
+	}{
+		{name: "missing", owners: func(string) []ActiveTargetDescriptor { return nil }, wantError: "target owner is missing"},
+		{name: "ambiguous", owners: func(runID string) []ActiveTargetDescriptor {
+			return []ActiveTargetDescriptor{
+				{ID: "root-owner-a", FlowInstance: runID, EntityID: eventtest.UUID("root-owner-a")},
+				{ID: "root-owner-b", FlowInstance: runID, EntityID: eventtest.UUID("root-owner-b")},
+			}
+		}, wantError: "target owner is ambiguous"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanSingletonProducerRootReceiverSource()
+			store := newTargetRouteMemoryStore()
+			runID := uuid.NewString()
+			store.setTargetOwners(tc.owners(runID)...)
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			singletonEntityID := runtimeflowidentity.EntityID("scout")
+			sourceRoute := events.RouteIdentity{FlowID: "scout", FlowInstance: "scout", EntityID: singletonEntityID}
+			routingSource, err := events.NewStaticFlowRoutingSource(sourceRoute)
+			if err != nil {
+				t.Fatalf("singleton routing source: %v", err)
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+				eventID, events.EventType("scout/scout.completed"), "scout-worker", "", []byte(`{}`), 0,
+				runID, events.EnvelopeForSourceRoute(events.EventEnvelope{EntityID: singletonEntityID, FlowInstance: "scout"}, sourceRoute),
+				routingSource, time.Now().UTC(),
+			)
+			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("CheckPublishRecipientPlan error = %v, want %q", err, tc.wantError)
+			}
+			if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("Publish error = %v, want %q", err, tc.wantError)
+			}
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 || len(store.claims) != 0 || len(store.scans) != 0 || len(store.active) != 0 {
+				t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v claims=%#v scans=%#v active=%#v",
+					store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes, store.claims, store.scans, store.active)
+			}
+		})
 	}
 }
 
@@ -3859,13 +4118,17 @@ func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t
 			if !ok {
 				t.Fatalf("resolve public input endpoint: %v", association.Err())
 			}
+			apiEndpoint, err := NewTemplateAPIEventPublicationEndpoint(source, endpoint)
+			if err != nil {
+				t.Fatalf("admit API event publication endpoint: %v", err)
+			}
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(
 				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
 				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-			committed, replay, err := eventBus.PublishAPIEventAcknowledged(ctx, evt, &endpoint, apiidempotency.Request{
+			committed, replay, err := eventBus.PublishAPIEventAcknowledged(ctx, evt, &apiEndpoint, apiidempotency.Request{
 				Method: "event.publish", ActorTokenID: "operator", IdempotencyKey: "post-commit-" + strings.ReplaceAll(test.name, " ", "-"), RequestHash: "request-hash",
 			}, completion)
 			if err != nil {
@@ -4188,6 +4451,54 @@ func connectRoutePlanRootProducerStaticSource() semanticview.Source {
 	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
 		"root.ready": {},
 	}
+	return semanticview.Wrap(bundle)
+}
+
+func connectRoutePlanRootProducerSingletonSource() semanticview.Source {
+	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id: "scout", mode: runtimecontracts.FlowModeSingleton,
+			inputs: []runtimecontracts.FlowInputEventPin{{Name: "ready", Event: "root.ready"}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"scout-node": {
+					ID: "scout-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+						"root.ready": {CreateEntity: true},
+					},
+				},
+			},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{From: ".root_ready", To: "scout.ready"}})
+	bundle.Semantics.Name = "root"
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+		Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "root_ready", Event: "root.ready"}}},
+	}}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"root.ready": {}}
+	return semanticview.Wrap(bundle)
+}
+
+func connectRoutePlanSingletonProducerRootReceiverSource() semanticview.Source {
+	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+		id: "scout", mode: runtimecontracts.FlowModeSingleton,
+		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "completed", Event: "scout.completed"}},
+	}}, []runtimecontracts.FlowPackageConnect{{From: "scout.completed", To: ".scout_completed"}})
+	bundle.Semantics.Name = "root"
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+		Inputs: runtimecontracts.FlowInputPins{
+			Events:    []string{"scout.completed"},
+			EventPins: []runtimecontracts.FlowInputEventPin{{Name: "scout_completed", Event: "scout.completed"}},
+		},
+	}}
+	rootHandler := existingOwnerHandlerFixture()
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"root-collector": {
+			ID: "root-collector", SubscribesTo: []string{"scout.completed"},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"scout.completed": rootHandler},
+		},
+	}
+	bundle.FlowTree.Root.Schema = *bundle.RootSchema
+	bundle.FlowTree.Root.Nodes = bundle.Nodes
+	bundle.Semantics.NodeHandlers["root-collector"] = map[string]runtimecontracts.SystemNodeEventHandler{"scout.completed": rootHandler}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"scout.completed": {}}
 	return semanticview.Wrap(bundle)
 }
 
