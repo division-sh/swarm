@@ -69,7 +69,16 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 	response, raw, launched, err := e.executeProviderApply(ctx, prepared, handle)
 	if err != nil {
 		if !launched {
-			return ApplyResult{}, err
+			return ApplyResult{}, handle.Fail(
+				ctx,
+				runtimeeffects.StateTerminalFailure,
+				runtimefailures.ClassDependencyUnavailable,
+				"provider_registration_prelaunch_rejected",
+				providerRegistrationSource,
+				"dispatch",
+				map[string]any{"tool": strings.TrimSpace(toolID), "launch_rejected": true},
+				err,
+			)
 		}
 		return ApplyResult{Pending: pending}, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_acknowledgment_lost", providerRegistrationSource, "dispatch", map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets))
 	}
@@ -100,7 +109,10 @@ func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause err
 		}
 		return p.handle.Succeed(ctx, map[string]any{"authority": "provider_readback", "matched": true})
 	}
-	return p.handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "provider_registration_outcome_uncertain", providerRegistrationSource, "reconcile_readback", map[string]any{"matched": false}, cause)
+	if cause == nil {
+		return fmt.Errorf("provider registration readback is not exact")
+	}
+	return cause
 }
 
 func prepareProviderRequest(toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any) (runtimecontracts.PreparedToolHTTPRequest, []string, error) {

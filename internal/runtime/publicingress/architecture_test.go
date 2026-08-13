@@ -17,6 +17,25 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 	if strings.Contains(strings.ToLower(string(registrationSource)), "telegram") {
 		t.Fatal("provider registration owner contains a provider-specific branch")
 	}
+	for _, forbidden := range []string{
+		"states        map[string]registrationState",
+		"managedRoutes map[string]struct{}",
+		"SetRegistration(",
+		"ReplaceRegistrationKeys(",
+	} {
+		if strings.Contains(string(registrationSource), forbidden) {
+			t.Fatalf("provider registration controller revived split snapshot owner %q", forbidden)
+		}
+	}
+	readinessSource, err := os.ReadFile(filepath.Join(repo, "internal", "runtime", "publicingress", "readiness.go"))
+	if err != nil {
+		t.Fatalf("read registration snapshot owner: %v", err)
+	}
+	for _, required := range []string{"type RegistrationSnapshotOwner struct", "func (o *ReadinessOwner) CallbackCurrent", "currentRevision(process.revision)"} {
+		if !strings.Contains(string(readinessSource), required) {
+			t.Fatalf("registration snapshot owner is missing currentness ratchet %q", required)
+		}
+	}
 
 	for _, root := range []string{
 		filepath.Join(repo, "internal", "store", "migrations"),

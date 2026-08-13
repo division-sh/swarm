@@ -9506,7 +9506,7 @@ tool_model:
         Shutdown revokes and joins listener/tunnel work but does not unregister the provider callback. Quick-tunnel URLs
         are development-only, ephemeral, and carry no availability guarantee.
     registration_intent:
-      owner: process-local ProviderRegistrationController
+      owner: process-local immutable RegistrationSnapshotOwner; ProviderRegistrationController is its sole registration reconciler
       slot_identity: >
         Before any provider write, every selected pair executes its compiled read-only identify operation. Slot identity is
         provider plus declared slot namespace plus the opaque provider-returned account/resource identifier. Credential
@@ -9519,27 +9519,47 @@ tool_model:
         or metadata changes; secret values and reusable secret digests are excluded from intent, journal, readiness, logs,
         and output. Startup authority fences execution and handler/readiness use but is deliberately excluded from semantic
         request identity, so an unchanged startup handoff performs no provider apply.
-      callback: '`https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits only a selected registration pair with the exact current token under current startup authority, while unregistered and stale-generation routes return not found'
+      callback: >
+        `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
+        only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
+        the same Snapshot(now) currentness predicate as readiness, including current exposure generation and nonce evidence,
+        explicit exposure revocation, evidence expiry, startup authority, effect authority, credential epochs, selected pair,
+        and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
         serve-registration authority, revalidates startup authority and all credential snapshots, commits the launched
         marker before one HTTP dispatch, and settles from the provider response. Acknowledgment loss permits readback only:
-        exact current callback URL settles by authoritative readback; mismatch or unavailable readback settles outcome
-        uncertain and never resends. Process restart or changed semantic intent creates a new token and operation; replay
-        and recovery never redispatch the old operation.
+        exact current callback URL settles the same retained operation and attempt by authoritative readback; mismatch or
+        unavailable readback remains pending and uncertain and never resends. A settlement error retains that original
+        operation and attempt until repeated exact settlement succeeds. Proven pre-launch failure terminalizes the attempt
+        with launch_rejected evidence and permits a fresh attempt under the same operation identity; an authorization whose
+        commit acknowledgment was lost resumes the same authorized attempt. No provider dispatch occurs before the durable
+        launch marker is known. Process restart or changed semantic intent creates a new token and operation; replay and
+        recovery never redispatch an old launched operation.
+      phases: >
+        The immutable process snapshot separates last_verified intent from the current attempt and publishes exactly one
+        explicit phase per selected pair: no_attempt, pre_launch, pending_settlement, or verified. Failed identify,
+        admission, collision, credential, authority, and readback observations are recorded separately from lifecycle
+        identity: they lower currentness immediately without erasing last_verified or a pending operation. Registration
+        selection, route selection, replacement, and removal publish as one atomic selected set; exposure mutation and
+        revocation use the same snapshot owner.
       observations: >
         Slot identify, callback readback, and nonce reachability are bounded, redacted, process-local read-only
-        observations. No exposure, intent, slot, readback, reachability, or readiness table is permitted.
+        observations. Transient observation failure preserves prior verified and pending lifecycle evidence while making
+        the selected registration non-current. No exposure, intent, slot, readback, reachability, or readiness table is
+        permitted.
     readiness:
-      owner: immutable PublicIngressReadinessSnapshot projected at read time
+      owner: RegistrationSnapshotOwner.Snapshot(now), projected immutably at read time
       cadence: {renewal: 30s, expiry: 90s}
       rule: >
         Public-ingress readiness requires the current startup authority, fresh nonce proof for the current exposure,
         successful apply or exact authoritative readback, fresh exact callback readback for the current intent and slot,
-        and current credential snapshots. Every human, JSON, health, and `/readyz` surface consumes the same Snapshot(now);
-        time expiry, replacement, credential change, failed renewal, stale authority, or callback mismatch lowers readiness
-        immediately. A configured runtime with no registering bindings may be locally ready and teaches the operator to
-        connect a channel; without exposure, declared ingress teaches `--expose` and the external-origin alternative.
+        and current credential snapshots. Every callback admission, human, JSON, health, and `/readyz` surface consumes the
+        same captured Snapshot(now) revision; a revision change during external currentness checks fails closed. Time expiry,
+        replacement, credential change, failed renewal, observation failure, stale authority, callback mismatch, or explicit
+        exposure revocation lowers readiness and callback admission together. A configured runtime with no registering
+        bindings may be locally ready and teaches the operator to connect a channel; without exposure, declared ingress
+        teaches `--expose` and the external-origin alternative.
     compatibility: none; no manual URL copy owner, provider-specific generic branch, alias, fallback, migration, export, purge, or legacy registration path survives
   provider_trigger_adapters:
     description: >
