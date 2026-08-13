@@ -386,6 +386,8 @@ var bundleCatalogAgentDefinitionFields = map[string]bool{
 	"intent_content_hash": true,
 	"intent_identity":     true,
 	"intent_content":      true,
+	"criteria":            true,
+	"provider_prompt":     true,
 	"subscriptions":       true,
 	"tools":               true,
 }

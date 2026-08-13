@@ -52,6 +52,28 @@ func TestPageBundleCatalogAgentsTraversesCanonicalOwnersExactlyOnce(t *testing.T
 	}
 }
 
+func TestPageBundleCatalogAgentsPreservesExecutionFrameStaticEvidence(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	definition := bundleAgentProjectionDefinition(t, "worker", "swarm://agent/worker", "intent")
+	definition["criteria"] = []any{"criteria/quality.md", "criteria/safety.md"}
+	definition["provider_prompt"] = "intent\n\n  exact provider prompt  \n"
+
+	result, err := pageBundleCatalogAgents(bundleHash, bundleAgentProjection(t, definition), bundlecatalogcontract.AgentListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Agents) != 1 {
+		t.Fatalf("agents = %d, want 1", len(result.Agents))
+	}
+	agent := result.Agents[0]
+	if !reflect.DeepEqual(agent.Criteria, []string{"criteria/quality.md", "criteria/safety.md"}) {
+		t.Fatalf("criteria = %#v", agent.Criteria)
+	}
+	if agent.ProviderPrompt != definition["provider_prompt"] {
+		t.Fatalf("provider prompt = %q, want exact %q", agent.ProviderPrompt, definition["provider_prompt"])
+	}
+}
+
 func TestPageBundleCatalogAgentsRejectsInvalidProjectionAndCursorCoordinates(t *testing.T) {
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	otherHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
