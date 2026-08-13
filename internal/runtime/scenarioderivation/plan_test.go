@@ -106,6 +106,17 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 	}
 }
 
+func TestCompileCatalogRejectsDuplicateExactFlowInputCoordinates(t *testing.T) {
+	source, identity := derivationHostileTestSource(t)
+	declarations := []Declaration{
+		{Name: "first", FlowID: "work", Input: "primary"},
+		{Name: "second", FlowID: "work", Input: "primary"},
+	}
+	if _, err := CompileCatalog(source, identity, declarations...); err == nil || !strings.Contains(err.Error(), "same exact flow/input coordinate") {
+		t.Fatalf("duplicate catalog coordinate error = %v", err)
+	}
+}
+
 func derivationHostileTestSource(t *testing.T) (semanticview.Source, scenarioexecution.EffectiveSourceIdentity) {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
