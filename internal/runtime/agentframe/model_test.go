@@ -1,6 +1,7 @@
 package agentframe
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -158,6 +159,59 @@ func TestExecutionFrameConsumesAdmittedProviderTriggerEventFactsWithoutNormaliza
 	}
 	if got.RoutingSource.Route.FlowID != route.FlowID || got.RoutingSource.Route.EntityID != route.EntityID || string(got.Payload) != `{"message":"hello","provider_update_id":"42"}` {
 		t.Fatalf("provider trigger facts were normalized or inferred: %#v", got)
+	}
+}
+
+func TestExecutionFramePreservesAndHashesExactAdmittedPayloadBytes(t *testing.T) {
+	seed, baseEvent, surface := testExecutionFrameInputs(t)
+	makeEvent := func(payload string) events.Event {
+		return eventtest.RunCreatingRootIngress(
+			baseEvent.ID(), baseEvent.Type(), "operator", baseEvent.TaskID(), json.RawMessage(payload),
+			0, baseEvent.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, baseEvent.EntityID()), time.Unix(1, 0).UTC(),
+		)
+	}
+	payloads := []string{
+		`{"b":2,"a":1}`,
+		`{"a":1,"b":2}`,
+		`{ "b":2, "a":1 }`,
+	}
+	frames := make([]Frame, 0, len(payloads))
+	for _, payload := range payloads {
+		frame := completeTestFrame(t, seed, TurnDraft{Kind: TurnInitial, Event: makeEvent(payload)}, surface)
+		if got := string(frame.Turn.Event.Payload); got != payload {
+			t.Fatalf("frame payload = %q, want exact admitted bytes %q", got, payload)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(frame.Turn.Event.PayloadBytesBase64)
+		if err != nil || string(decoded) != payload {
+			t.Fatalf("exact payload evidence = %q err=%v, want %q", decoded, err, payload)
+		}
+		_, providerInput, err := frame.ProviderInput()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rendered struct {
+			Event Event `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(providerInput), &rendered); err != nil {
+			t.Fatal(err)
+		}
+		providerBytes, err := base64.StdEncoding.DecodeString(rendered.Event.PayloadBytesBase64)
+		if err != nil || string(providerBytes) != payload {
+			t.Fatalf("provider payload evidence = %q err=%v, want %q", providerBytes, err, payload)
+		}
+		frames = append(frames, frame)
+	}
+	for i := range frames {
+		for j := i + 1; j < len(frames); j++ {
+			if frames[i].ContentHash == frames[j].ContentHash {
+				t.Fatalf("byte-distinct payloads %q and %q collapsed to hash %q", payloads[i], payloads[j], frames[i].ContentHash)
+			}
+		}
+	}
+	hostile := frames[0]
+	hostile.Turn.Event.PayloadBytesBase64 = base64.StdEncoding.EncodeToString([]byte(payloads[1]))
+	if err := hostile.Validate(); err == nil {
+		t.Fatal("frame validation accepted exact-payload evidence from a different admitted byte sequence")
 	}
 }
 

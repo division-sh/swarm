@@ -10333,7 +10333,10 @@ agent_execution_frame:
     frame_id: '`agent-frame:v1:<provider-turn-authority UUID>`; one provider-turn authority creates one frame occurrence.'
     content_hash: >
       `agent-frame-content:v1:sha256:<64 lowercase hex>` over deterministic compact JSON containing version,
-      session contract, and turn context. Validation recomputes the hash before adapter dispatch.
+      session contract, and turn context. The turn event carries `payload_bytes_base64`, the base64 encoding of the exact
+      admitted payload byte sequence, so byte-distinct admitted JSON cannot collapse when the outer deterministic JSON
+      encoding compacts the typed `payload` value. Validation proves that evidence decodes to the exact retained payload
+      bytes and recomputes the hash before adapter dispatch.
     parent_frame_id: Required for tool continuations and remediation turns and absent for initial and board-directive turns.
   session_contract:
     immutable_facts:
@@ -10352,7 +10355,9 @@ agent_execution_frame:
     admitted_event: >
       Initial, continuation, board, and remediation frames retain the typed admitted event projection including event and
       producer identities, run/task/parent/depth/execution-mode facts, exact payload bytes, source/target/target-set routes,
-      flow/entity scope, and canonical routing-source authority. Provider prompts are not an event identity owner.
+      flow/entity scope, and canonical routing-source authority. `payload` retains the admitted JSON bytes in memory and
+      `payload_bytes_base64` carries those same exact bytes through deterministic frame hashing and provider transport;
+      mismatch fails closed. Provider prompts are not an event identity owner.
     capability_plan: >
       The frame records only the pre-dispatch managed capability surface identity, plan fingerprint, authorized candidates,
       exact DefinitionHash values, authorization class, context requirement, and evidence bindings. Provider-visible,
@@ -10391,6 +10396,8 @@ agent_execution_frame:
     rule: >
       Static and effective inspection consume the same agentframe projection used by execution. They do not query turn
       history, synthesize an occurrence, inspect mutable provider evidence, or reconstruct prompt semantics in API or CLI.
+      Selector values are compared exactly; surrounding whitespace and leading or trailing slash aliases are invalid and
+      must not be normalized by the API, CLI, runtime manager, or canonical projection owner.
   retired_surfaces:
   - production raw managed Runtime.ContinueSession
   - production Conversation.Step and StepWithRole

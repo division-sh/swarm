@@ -594,6 +594,24 @@ func (v openRPCResultSchemaValidator) validateMethodResult(t *testing.T, methodN
 	}
 }
 
+func (v openRPCResultSchemaValidator) validateMethodErrorData(t *testing.T, methodName string, code int, data any) {
+	t.Helper()
+	method, ok := v.methods[methodName]
+	if !ok {
+		t.Fatalf("%s missing from generated OpenRPC methods", methodName)
+	}
+	for _, declared := range method.Errors {
+		if declared.Code != code {
+			continue
+		}
+		if err := v.validateValue("$."+methodName+".error.data", declared.Data, data); err != nil {
+			t.Fatalf("%s error data does not match generated OpenRPC schema: %v\ndata=%s", methodName, err, compactJSON(data))
+		}
+		return
+	}
+	t.Fatalf("%s missing generated OpenRPC error schema for code %d", methodName, code)
+}
+
 func (v openRPCResultSchemaValidator) validateMethodNotificationResult(t *testing.T, methodName string, result any) {
 	t.Helper()
 	method, ok := v.methods[methodName]

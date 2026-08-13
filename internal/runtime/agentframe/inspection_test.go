@@ -3,6 +3,8 @@ package agentframe
 import (
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 )
 
 func TestAgentFrameEffectiveInspectionRequiresExactConcreteIdentity(t *testing.T) {
@@ -20,5 +22,31 @@ func TestAgentFrameEffectiveInspectionRequiresExactConcreteIdentity(t *testing.T
 	_, err = InspectEffective(InspectionSelector{AgentID: "different-root-agent", Root: true}, seed)
 	if err == nil || !strings.Contains(err.Error(), "does not match concrete agent identity") {
 		t.Fatalf("root effective selector mismatch error = %v", err)
+	}
+}
+
+func TestAgentFrameInspectionRejectsNoncanonicalPathAliases(t *testing.T) {
+	session, _, _ := testExecutionFrameInputs(t)
+	prompt, err := session.ProviderPrompt.Text()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := PreviewSeed{
+		BundleHash: testBundleHash, AgentID: session.AgentIdentity.AgentID(), Intent: session.Intent,
+		Criteria: session.Criteria, ProviderPrompt: prompt,
+	}
+	for _, flow := range []string{"/review/", " review ", "review/"} {
+		if _, err := InspectStatic(InspectionSelector{BundleHash: testBundleHash, Flow: flow, AgentID: seed.AgentID}, seed); err == nil {
+			t.Fatalf("static inspection accepted noncanonical flow alias %q", flow)
+		}
+	}
+
+	identity := agentidentitytest.Runtime(t, seed.AgentID, "agent-frame-inspection-test", "review", "one", "review/one")
+	seed.AgentIdentity = &identity
+	seed.BundleSource = "persisted"
+	for _, flowInstance := range []string{"/review/one/", " review/one ", "review/one/"} {
+		if _, err := InspectEffective(InspectionSelector{AgentID: seed.AgentID, FlowInstance: flowInstance}, seed); err == nil {
+			t.Fatalf("effective inspection accepted noncanonical flow-instance alias %q", flowInstance)
+		}
 	}
 }
