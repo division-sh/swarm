@@ -537,7 +537,7 @@ func writeEntityListResult(out io.Writer, result entityListResult, opts entityLi
 		row = append(row,
 			entityDash(entityOneLine(entity.EntityType)),
 			entityDash(entityOneLine(entity.CurrentState)),
-			entityShortFlow(entity.FlowInstance),
+			cliSanitizeOneLineValue(entity.FlowInstance),
 			entityTimestampText(cliRelativeTimeNow(), entity.UpdatedAt, opts.verbose),
 		)
 		rows = append(rows, row)
@@ -726,25 +726,6 @@ func writeEntityLoopSection(out io.Writer, loops []loopruntime.PublicActivation)
 		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(loop.ID), Value: cliRenderOneLineValue(summary)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
-}
-
-var entityHashSegmentPattern = regexp.MustCompile(`^[0-9a-f]{40,}$`)
-
-const entityHashSegmentMaxRunes = 12
-
-// entityShortFlow truncates ONLY the hash-bearing flow-path segment (e.g. an
-// embedded 64-hex bundle digest); instance-discriminating segments stay intact
-// so two instances differing past a shared prefix still render as distinct,
-// round-trippable cells.
-func entityShortFlow(flow string) string {
-	flow = strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(flow))
-	segments := strings.Split(strings.Trim(flow, "/"), "/")
-	for i, segment := range segments {
-		if entityHashSegmentPattern.MatchString(segment) && len(segment) > entityHashSegmentMaxRunes {
-			segments[i] = segment[:entityHashSegmentMaxRunes] + "…"
-		}
-	}
-	return strings.Join(segments, "/")
 }
 
 func writeEntityAggregateResult(out io.Writer, result entityAggregateResult) {
