@@ -312,6 +312,146 @@
       ]
     },
     {
+      "name": "agent.frame",
+      "description": "Inspect the canonical managed agent execution-frame projection without selecting or fabricating a provider-turn occurrence. Static scope requires an exact registered bundle hash, authored flow (`root` for root), and agent id. Effective scope requires an exact agent id plus exactly one of root=true or a full concrete flow_instance. Static runtime facts and all occurrence facts are explicit unresolved values. Effective runtime/session facts are resolved from the live canonical manager owner while all occurrence facts remain explicit unresolved values. The API never reconstructs frame semantics from prompts, payload heuristics, mutable provider evidence, or turn history.\n",
+      "params": [
+        {
+          "name": "scope",
+          "required": true,
+          "schema": {
+            "enum": [
+              "static",
+              "effective"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "bundle_hash",
+          "required": false,
+          "schema": {
+            "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        {
+          "name": "flow",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "root",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "flow_instance",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/AgentExecutionFrameInspection"
+        }
+      },
+      "errors": [
+        {
+          "code": -32004,
+          "message": "Application error: AGENT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "agent_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "agent_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
+          "message": "Application error: BUNDLE_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "BUNDLE_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "bundle_hash": {
+                    "$ref": "#/components/schemas/BundleHash"
+                  }
+                },
+                "required": [
+                  "bundle_hash"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "agent.get",
       "description": "Read one agent's identity, current operational status, and references\nto its current session and last turn. Returns refs only — full session\nand transcript content is read via conversation.* methods. Ownership\nboundary: agent.* never returns transcripts.\n",
       "params": [
@@ -9566,6 +9706,769 @@
           "action",
           "outcome",
           "recorded_at"
+        ],
+        "type": "object"
+      },
+      "AgentExecutionFrameInspection": {
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "enum": [
+              "static",
+              "effective"
+            ],
+            "type": "string"
+          },
+          "selector": {
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "bundle_hash": {
+                "type": "string"
+              },
+              "flow": {
+                "type": "string"
+              },
+              "flow_instance": {
+                "type": "string"
+              },
+              "root": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "agent_id"
+            ],
+            "type": "object"
+          },
+          "session_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "agent_identity": {
+                "$ref": "#/components/schemas/AgentFrameIdentityPresence"
+              },
+              "authored_flow": {
+                "type": "string"
+              },
+              "bundle_hash": {
+                "pattern": "^bundle-v1:sha256:[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "bundle_source": {
+                "$ref": "#/components/schemas/AgentFramePresenceString"
+              },
+              "criteria": {
+                "additionalProperties": false,
+                "properties": {
+                  "identity": {
+                    "pattern": "^agent-criteria:v1:sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "references": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "references",
+                  "identity"
+                ],
+                "type": "object"
+              },
+              "flow_id": {
+                "type": "string"
+              },
+              "intent": {
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "content_hash": {
+                    "pattern": "^sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "coordinate": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "identity": {
+                    "pattern": "^agent-intent:v1:sha256:[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "local",
+                      "inline",
+                      "import"
+                    ],
+                    "type": "string"
+                  },
+                  "provenance": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "coordinate",
+                  "provenance",
+                  "content",
+                  "content_hash",
+                  "identity"
+                ],
+                "type": "object"
+              },
+              "provider": {
+                "$ref": "#/components/schemas/AgentFrameProviderPresence"
+              },
+              "provider_prompt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "bundle_hash",
+              "bundle_source",
+              "agent_id",
+              "authored_flow",
+              "agent_identity",
+              "intent",
+              "criteria",
+              "provider",
+              "provider_prompt"
+            ],
+            "type": "object"
+          },
+          "turn_context": {
+            "additionalProperties": false,
+            "properties": {
+              "capability": {
+                "$ref": "#/components/schemas/AgentFrameCapabilityPlanPresence"
+              },
+              "content_hash": {
+                "$ref": "#/components/schemas/AgentFramePresenceString"
+              },
+              "directive": {
+                "$ref": "#/components/schemas/AgentFrameDirectivePresence"
+              },
+              "event": {
+                "$ref": "#/components/schemas/AgentFrameEventPresence"
+              },
+              "frame_id": {
+                "$ref": "#/components/schemas/AgentFramePresenceString"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/AgentFrameTurnKindPresence"
+              },
+              "lifecycle": {
+                "additionalProperties": false,
+                "properties": {
+                  "loop_revision": {
+                    "$ref": "#/components/schemas/AgentFrameUnresolvedFact"
+                  },
+                  "stage": {
+                    "$ref": "#/components/schemas/AgentFrameUnresolvedFact"
+                  }
+                },
+                "required": [
+                  "stage",
+                  "loop_revision"
+                ],
+                "type": "object"
+              },
+              "pack_provenance": {
+                "$ref": "#/components/schemas/AgentFrameUnresolvedFact"
+              },
+              "parent_frame_id": {
+                "$ref": "#/components/schemas/AgentFramePresenceString"
+              },
+              "remediation": {
+                "$ref": "#/components/schemas/AgentFrameRemediationPresence"
+              }
+            },
+            "required": [
+              "frame_id",
+              "content_hash",
+              "kind",
+              "parent_frame_id",
+              "event",
+              "capability",
+              "directive",
+              "remediation",
+              "lifecycle",
+              "pack_provenance"
+            ],
+            "type": "object"
+          },
+          "version": {
+            "const": "agent-execution-frame.v1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "scope",
+          "selector",
+          "session_contract",
+          "turn_context"
+        ],
+        "type": "object"
+      },
+      "AgentFrameCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "authorization_class": {
+            "type": "string"
+          },
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/AgentFrameCapabilityBinding"
+            },
+            "type": "array"
+          },
+          "context_requirement": {
+            "type": "string"
+          },
+          "definition_hash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "definition_hash",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "AgentFrameCapabilityBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "exact_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "required_evidence_kind": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "exact_name",
+          "required_evidence_kind"
+        ],
+        "type": "object"
+      },
+      "AgentFrameCapabilityPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "authorized_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/AgentFrameCapability"
+            },
+            "type": "array"
+          },
+          "plan_fingerprint": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "surface_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "surface_id",
+          "plan_fingerprint",
+          "authorized_candidates"
+        ],
+        "type": "object"
+      },
+      "AgentFrameCapabilityPlanPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentFrameCapabilityPlan"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameDirective": {
+        "additionalProperties": false,
+        "properties": {
+          "identity": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "operator": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity",
+          "text"
+        ],
+        "type": "object"
+      },
+      "AgentFrameDirectivePresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentFrameDirective"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "chain_depth": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entity_id": {
+            "type": "string"
+          },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_event_id": {
+            "type": "string"
+          },
+          "payload": {
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "producer_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "producer_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "routing_source": {
+            "additionalProperties": false,
+            "properties": {
+              "authority": {
+                "type": "string"
+              },
+              "kind": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "route": {
+                "$ref": "#/components/schemas/AgentFrameRoute"
+              }
+            },
+            "required": [
+              "kind",
+              "route"
+            ],
+            "type": "object"
+          },
+          "run_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AgentFrameRoute"
+          },
+          "target": {
+            "$ref": "#/components/schemas/AgentFrameRoute"
+          },
+          "target_set": {
+            "items": {
+              "$ref": "#/components/schemas/AgentFrameRoute"
+            },
+            "type": "array"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "producer_type",
+          "producer_id",
+          "run_id",
+          "chain_depth",
+          "execution_mode",
+          "payload",
+          "source",
+          "target",
+          "target_set",
+          "routing_source"
+        ],
+        "type": "object"
+      },
+      "AgentFrameEventPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentFrameEvent"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "additionalProperties": false,
+            "properties": {
+              "agent_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "owner": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "source": {
+                "enum": [
+                  "declared",
+                  "runtime_created"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "agent_id",
+              "owner",
+              "source"
+            ],
+            "type": "object"
+          },
+          "route": {
+            "additionalProperties": false,
+            "properties": {
+              "instance_id": {
+                "type": "string"
+              },
+              "instance_path": {
+                "type": "string"
+              },
+              "presence": {
+                "enum": [
+                  "root",
+                  "present"
+                ],
+                "type": "string"
+              },
+              "scope_key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "presence",
+              "scope_key",
+              "instance_id",
+              "instance_path"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "route"
+        ],
+        "type": "object"
+      },
+      "AgentFrameIdentityPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentFrameIdentity"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFramePresenceString": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameProvider": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "runtime_mode": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "transport": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime_mode",
+          "provider",
+          "transport"
+        ],
+        "type": "object"
+      },
+      "AgentFrameProviderPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentFrameProvider"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameRemediation": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "AgentFrameRemediationPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentFrameRemediation"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "type": "string"
+          },
+          "flow_id": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AgentFrameTurnKindPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "enum": [
+              "initial",
+              "tool_continuation",
+              "board_directive",
+              "remediation"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentFrameUnresolvedFact": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "resolved",
+              "unresolved"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ],
         "type": "object"
       },

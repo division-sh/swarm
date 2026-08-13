@@ -17,6 +17,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 	sources := readProductionCommandSources(t)
 	wantAPIConsumers := map[string]struct{}{
 		"agent_directive.go": {},
+		"agent_frame.go":     {},
 		"agent_replay.go":    {},
 		"agent_restart.go":   {},
 		"agents.go":          {},

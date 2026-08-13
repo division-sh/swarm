@@ -693,7 +693,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	publisher.marks = nil
 	ctx = managedProviderTestContext(t, ctx, runtime, s, nil)
 
-	if _, err := runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"}); err != nil {
+	if _, err := runtime.continueSession(ctx, s, Message{Role: "user", Content: "hello"}); err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
 	if len(publisher.marks) != 1 {
@@ -735,7 +735,7 @@ func TestAnthropicAPIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(
 	publisher.marks = nil
 	publisher.markErr = errors.New("mark boom")
 
-	_, err = runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, s, Message{Role: "user", Content: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "mark inbound delivery active for reused api session: mark boom") {
 		t.Fatalf("ContinueSession err = %v, want mark failure", err)
 	}
@@ -771,7 +771,7 @@ func TestClaudeCLIRuntime_ContinueSessionFailsClosedWhenDeliveryRestampFails(t *
 	publisher.marks = nil
 	publisher.markErr = errors.New("mark boom")
 
-	_, err = runtime.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, s, Message{Role: "user", Content: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "mark inbound delivery active for reused cli session: mark boom") {
 		t.Fatalf("ContinueSession err = %v, want mark failure", err)
 	}

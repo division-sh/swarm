@@ -35,7 +35,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -882,7 +881,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
 							SelfCheck:                        false,
 							WorkflowModule:                   module,
-							LLMRuntime:                       runtimellm.NoopRuntime{},
+							LLMRuntime:                       servedNoopLLMRuntime{},
 							DisablePersistentStartupRecovery: true,
 							ProviderTriggerCatalog:           providerRegistry,
 							ProcessWorkOwner:                 processWorkOwner,
@@ -1225,7 +1224,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
-					WorkflowModule: module, LLMRuntime: runtimellm.NoopRuntime{},
+					WorkflowModule: module, LLMRuntime: servedNoopLLMRuntime{},
 					Credentials: credentials, ProviderCredentials: credentials,
 					ProviderTriggerCatalog: testProviderTriggerCatalog(t),
 					ProcessWorkOwner:       processWorkOwner,
@@ -1411,7 +1410,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					})
 					newRuntime := func(hash string, workflowModule runtimepipeline.WorkflowModule) *runtimepkg.Runtime {
 						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
-							WorkflowModule: workflowModule, LLMRuntime: runtimellm.NoopRuntime{},
+							WorkflowModule: workflowModule, LLMRuntime: servedNoopLLMRuntime{},
 							Credentials: credentials, ProviderCredentials: credentials,
 							ProviderTriggerCatalog: catalog, ProcessWorkOwner: processWorkOwner,
 							RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
@@ -1566,7 +1565,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			fact := mustServeTestEphemeralBundleSourceFact(hash)
 			newRuntime := func() *runtimepkg.Runtime {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, ProcessWorkOwner: processWorkOwner, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID}))
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, ProcessWorkOwner: processWorkOwner, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID}))
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
@@ -2018,7 +2017,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
 					SelfCheck:                        false,
 					WorkflowModule:                   stubWorkflowModule{source: source},
-					LLMRuntime:                       runtimellm.NoopRuntime{},
+					LLMRuntime:                       servedNoopLLMRuntime{},
 					DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog:           providerRegistry,
 					ProcessWorkOwner:                 processWorkOwner,
@@ -2362,7 +2361,7 @@ flows:
 	supervisor.processWorkOwner = newSupervisorTestProcessOwner(t)
 	supervisor.runtimeInstanceID = "11111111-1111-4111-8111-111111111111"
 	supervisor.createRuntime = func(ctx context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		deps.Options.LLMRuntime = runtimellm.NoopRuntime{}
+		deps.Options.LLMRuntime = servedNoopLLMRuntime{}
 		deps.Options.DisablePersistentStartupRecovery = true
 		return runtimepkg.NewRuntime(ctx, deps)
 	}

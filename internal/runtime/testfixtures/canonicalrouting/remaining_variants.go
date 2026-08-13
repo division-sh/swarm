@@ -756,8 +756,10 @@ telegram-revision:
     kind: python
     module: mocks/memory-bot.py
 `,
-		"mocks/phrase-bot.py": `def handle(input):
-    event = input.get("event") or {}
+		"mocks/phrase-bot.py": `import json
+
+def handle(input):
+    event = json.loads(input["messages"][-1]["content"]).get("event") or {}
     payload = event.get("payload") or {}
     return {
         "calls": [{
@@ -770,8 +772,10 @@ telegram-revision:
         "usage": {"input_tokens": 12, "output_tokens": 4},
     }
 `,
-		"mocks/memory-bot.py": `def handle(input):
-    event = input.get("event") or {}
+		"mocks/memory-bot.py": `import json
+
+def handle(input):
+    event = json.loads(input["messages"][-1]["content"]).get("event") or {}
     payload = event.get("payload") or {}
     messages = input.get("messages") or []
     last_role = messages[-1].get("role", "") if messages else ""

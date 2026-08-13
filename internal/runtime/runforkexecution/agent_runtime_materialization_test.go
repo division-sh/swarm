@@ -324,7 +324,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,
 				Config:           &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}},
-				LLMRuntime:       runtimellm.NoopRuntime{},
+				LLMRuntime:       runtimellm.NewNoopRuntime(runtimellm.ClaudeCLIProviderContract()),
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
 					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
 				},

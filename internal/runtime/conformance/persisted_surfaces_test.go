@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -342,7 +343,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		})
 	}
 
-	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
+	conversation := newConformanceManagedConversation(t, "agent-1", lifecycleToken.Identity, runtime)
 	conversation.SetToolExecutor(conformanceToolExecutor{})
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(lifecycleToken.Identity.AgentID()), AgentIdentity: lifecycleToken.Identity}
 	firstClaim, err := storetest.ClaimDelivery(ctx, pg, event1, route)
@@ -350,8 +351,8 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("claim first delivery: %v", err)
 	}
 	claims[event1.ID()] = firstClaim.Claim
-	if _, err := conversation.Step(newTurnContext(event1), "first"); err != nil {
-		t.Fatalf("ContinueSession(first): %v", err)
+	if _, err := conversation.RunManaged(newTurnContext(event1), runtimeagentframe.TurnDraft{Kind: runtimeagentframe.TurnInitial, Event: event1}); err != nil {
+		t.Fatalf("RunManaged(first): %v", err)
 	}
 	session := conversation.Session
 	if _, err := pg.SettleSuccess(newTurnContext(event1), firstClaim.Claim, nil, 0); err != nil {
@@ -363,8 +364,8 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("claim second delivery: %v", err)
 	}
 	claims[event2.ID()] = secondClaim.Claim
-	if _, err := conversation.Step(newTurnContext(event2), "second"); err != nil {
-		t.Fatalf("ContinueSession(second): %v", err)
+	if _, err := conversation.RunManaged(newTurnContext(event2), runtimeagentframe.TurnDraft{Kind: runtimeagentframe.TurnInitial, Event: event2}); err != nil {
+		t.Fatalf("RunManaged(second): %v", err)
 	}
 
 	var (
@@ -542,12 +543,12 @@ printf '{"result":"ok"}'
 		})
 	}
 
-	session, err := runtime.StartSession(newTurnContext(evt), "agent-1", "system", nil)
+	conversation := newConformanceManagedConversation(t, "agent-1", lifecycleToken.Identity, runtime)
+	session, err := runtime.StartSession(newTurnContext(evt), "agent-1", conversation.SystemPrompt, nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	originalSessionID := session.ID
-	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.Session = session
 	conversation.SetToolExecutor(conformanceToolExecutor{})
 	claimed, err := storetest.ClaimDelivery(ctx, pg, evt, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(lifecycleToken.Identity.AgentID()), AgentIdentity: lifecycleToken.Identity})
@@ -555,7 +556,7 @@ printf '{"result":"ok"}'
 		t.Fatalf("claim delivery before provider launch: %v", err)
 	}
 	deliveryClaim = claimed.Claim
-	_, err = conversation.Step(newTurnContext(evt), "do not classify stderr")
+	_, err = conversation.RunManaged(newTurnContext(evt), runtimeagentframe.TurnDraft{Kind: runtimeagentframe.TurnInitial, Event: evt})
 	if conversation.Session == nil {
 		t.Fatal("conversation did not retain the acquired session after provider failure")
 	}
@@ -838,14 +839,10 @@ func (m conformanceLoadedWorkflowModule) ActionRegistry() runtimepipeline.Action
 	return m.actions
 }
 
-type conformanceNoopLLMRuntime struct{}
+type conformanceNoopLLMRuntime struct{ runtimellm.NoopRuntime }
 
-func (conformanceNoopLLMRuntime) StartSession(context.Context, string, string, []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
-	return &runtimellm.Session{}, nil
-}
-
-func (conformanceNoopLLMRuntime) ContinueSession(context.Context, *runtimellm.Session, runtimellm.Message) (*runtimellm.Response, error) {
-	return &runtimellm.Response{}, nil
+func (conformanceNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
 }
 
 type conformanceRecoveryFailureEventStore struct {
@@ -1886,6 +1883,42 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
+}
+
+func newConformanceManagedConversation(t *testing.T, agentID string, identity agentidentity.Identity, runtime runtimellm.Runtime) *runtimellm.Conversation {
+	t.Helper()
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents."+agentID+".intent", "Exercise the conformance surface.")
+	if err != nil {
+		t.Fatalf("resolve conformance agent intent: %v", err)
+	}
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive conformance agent prompt: %v", err)
+	}
+	providerPrompt, err := runtimeagentintent.AssembleProviderPrompt(intent, []string{}, prompt, runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble conformance provider prompt: %v", err)
+	}
+	contract, ok := runtimellm.ProviderContractForRuntime(runtime)
+	if !ok {
+		t.Fatalf("runtime %T has no provider contract", runtime)
+	}
+	conversation, err := runtimellm.NewManagedConversation(runtimeagentframe.SessionSeed{
+		AgentIdentity:  identity,
+		Role:           "tester",
+		FlowID:         "global",
+		Intent:         intent,
+		Criteria:       []string{},
+		ProviderPrompt: providerPrompt,
+		RuntimeMode:    contract.RuntimeMode,
+		Provider:       contract.Provider,
+		Transport:      string(contract.Transport),
+		Model:          "regular",
+	}, "", nil, agentmemory.Authored(true), 10, runtime)
+	if err != nil {
+		t.Fatalf("create managed conformance conversation: %v", err)
+	}
+	return conversation
 }
 
 func seedConformanceRunningAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) runtimeeffects.LifecycleToken {

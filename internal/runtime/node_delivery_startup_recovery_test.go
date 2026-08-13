@@ -121,14 +121,10 @@ type startupRecoveryOrderStore interface {
 	storetest.AgentFixtureStore
 }
 
-type startupRecoveryOrderLLM struct{}
+type startupRecoveryOrderLLM struct{ llm.NoopRuntime }
 
-func (startupRecoveryOrderLLM) StartSession(context.Context, string, string, []llm.ToolDefinition) (*llm.Session, error) {
-	return &llm.Session{}, nil
-}
-
-func (startupRecoveryOrderLLM) ContinueSession(context.Context, *llm.Session, llm.Message) (*llm.Response, error) {
-	return &llm.Response{}, nil
+func (startupRecoveryOrderLLM) ProviderContract() llm.ProviderContract {
+	return llm.AnthropicAPIProviderContract()
 }
 
 type startupRecoveryOrderAgent struct {

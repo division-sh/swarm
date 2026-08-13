@@ -50,7 +50,10 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared runf
 	actor = resolved.Actor
 	tools := conversationForkChatToolDefinitions(prepared)
 	toolExec := newConversationForkChatToolExecutor(prepared)
-	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, resolved.Runtime)
+	conv, err := runtimellm.NewForkChatConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, resolved.Runtime)
+	if err != nil {
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("prepare conversation fork chat turn: %w", err)
+	}
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = runtimeeffects.WithExecutionMode(ctx, actor.ExecutionMode)
@@ -65,7 +68,7 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared runf
 		},
 	})
 	ctx = runtimellm.WithConversationForkSandboxInvocationPolicy(ctx, prepared.SandboxPolicy.AvailableToolNames())
-	resp, err := conv.Step(ctx, message)
+	resp, err := conv.RunForkChat(ctx, message)
 	if err != nil {
 		return runfork.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)
 	}

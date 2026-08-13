@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
@@ -17,7 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
-func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T) {
+func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "stale-test-key")
 
 	var requests []openAIResponsesRequest
@@ -39,14 +40,14 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 			if req.Model != "gpt-5.4-nano" {
 				t.Fatalf("first request model = %q, want cheap model", req.Model)
 			}
-			if !strings.Contains(req.Instructions, "system prompt") {
-				t.Fatalf("instructions = %q, want system prompt", req.Instructions)
+			if !strings.Contains(req.Instructions, "Complete the admitted business work") {
+				t.Fatalf("instructions = %q, want canonical provider prompt", req.Instructions)
 			}
 			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Name != "lookup" {
 				t.Fatalf("tools = %#v, want lookup function tool", req.Tools)
 			}
-			if !openAIResponsesRequestHasMessage(req.Input, "user", "check status") {
-				t.Fatalf("first request input missing user message: %#v", req.Input)
+			if !openAIResponsesRequestHasMessage(req.Input, "user", `"kind":"initial"`) {
+				t.Fatalf("first request input missing canonical initial execution frame: %#v", req.Input)
 			}
 			_, _ = w.Write([]byte(`{
 				"id":"resp_1",
@@ -55,6 +56,9 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 				"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}
 			}`))
 		case 2:
+			if !openAIResponsesRequestHasContinuationFrame(req.Input) {
+				t.Fatalf("second request input missing canonical continuation frame: %#v", req.Input)
+			}
 			if !openAIResponsesRequestHasFunctionCall(req.Input, "call_1") {
 				t.Fatalf("second request input missing prior function_call call_1: %#v", req.Input)
 			}
@@ -94,16 +98,12 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 		t.Fatalf("RequireProviderContract: %v", err)
 	}
 
-	ctx := llmTestWorkContext(t, runtimeactors.WithActor(harness.Context("openai-responses-tool-loop"), runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "agent-1",
-		Model:         "cheap",
-		EntityID:      "entity-1",
-		FlowPath:      "support/inst-1",
-		Memory:        testMemory(),
-	}))
-	ctx = withTestMemory(ctx, "agent-1", "support/inst-1")
-	conv := NewConversation("agent-1", "task-1", "system prompt", []ToolDefinition{{
+	ctx := testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support")
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	actor.Model = "cheap"
+	actor.EntityID = "entity-1"
+	ctx = runtimeactors.WithActor(ctx, actor)
+	tools := []ToolDefinition{{
 		Name:        "lookup",
 		Description: "Lookup status",
 		Schema: map[string]any{
@@ -113,12 +113,13 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 			},
 			"required": []any{"query"},
 		},
-	}}, testMemory(), 5, runtime)
+	}}
+	conv := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", tools, testMemory(), 5, runtime)
 	conv.SetToolExecutor(openAIToolExecutor{})
 
-	resp, err := conv.Step(ctx, "check status")
+	resp, err := conv.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("agent-1")})
 	if err != nil {
-		t.Fatalf("Step: %v", err)
+		t.Fatalf("RunManaged: %v", err)
 	}
 	if resp.Message.Content != "done" {
 		t.Fatalf("response content = %q, want done", resp.Message.Content)
@@ -167,7 +168,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
@@ -193,7 +194,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	_, err = runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("ContinueSession failure = %#v, want authentication required", failure)
@@ -301,6 +302,16 @@ func openAIResponsesRequestHasMessage(items []any, role, content string) bool {
 			continue
 		}
 		if obj["role"] == role && strings.Contains(fmtString(obj["content"]), content) {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIResponsesRequestHasContinuationFrame(items []any) bool {
+	for _, item := range items {
+		obj, ok := item.(map[string]any)
+		if ok && obj["type"] == "function_call_output" && strings.Contains(fmtString(obj["output"]), `"kind":"tool_continuation"`) {
 			return true
 		}
 	}

@@ -1600,6 +1600,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
+		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Catalog: apiStoreCaps.BundleCatalog, Effective: rt.Manager}),
 		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: stores.IdempotencyStore, ExecutionPosture: rt.ExecutionPosture}),

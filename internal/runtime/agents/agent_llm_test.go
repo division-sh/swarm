@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -13,13 +14,17 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -35,7 +40,135 @@ type staticAgentRuntimeResolver struct {
 }
 
 func (r staticAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig) (llm.AgentRuntimeResolution, error) {
-	return llm.AgentRuntimeResolution{Actor: actor, Runtime: r.runtime}, nil
+	if actor.Identity.IsZero() {
+		actor.Identity = agentidentity.Identity{
+			Name:  agentidentity.Name{AgentID: actor.ID, Owner: "agent-runtime-resolver-test", Source: agentidentity.NameSourceRuntimeCreated},
+			Route: agentidentity.RootRoute(),
+		}
+	}
+	return llm.AgentRuntimeResolution{Actor: actor, Runtime: wrapAgentTestRuntime(r.runtime)}, nil
+}
+
+const agentTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+type agentTestBehaviorRuntime interface {
+	llm.Runtime
+	continueAgentTest(context.Context, *llm.Session, llm.Message) (*llm.Response, error)
+}
+
+type agentTestRuntimeAdapter struct {
+	llm.Runtime
+}
+
+type agentTestFrameObserver interface {
+	observeAgentTestFrame(agentframe.Frame)
+}
+
+func wrapAgentTestRuntime(runtime llm.Runtime) llm.Runtime {
+	if runtime == nil {
+		runtime = llm.NewNoopRuntime(llm.MockProviderContract())
+	}
+	return &agentTestRuntimeAdapter{Runtime: runtime}
+}
+
+func (r *agentTestRuntimeAdapter) ProviderContract() llm.ProviderContract {
+	return llm.MockProviderContract()
+}
+
+func (r *agentTestRuntimeAdapter) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	session, err := r.Runtime.StartSession(ctx, agentID, systemPrompt, tools)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, errors.New("agent test runtime returned nil session")
+	}
+	if execution, ok := agentmemory.FromContext(ctx); ok {
+		session.Memory = execution.Plan
+		session.MemoryIdentity = execution.Identity
+	}
+	session.ID = eventtest.UUID("agent-test-session:" + session.ID)
+	session.SystemPrompt = systemPrompt
+	session.Tools = append([]llm.ToolDefinition(nil), tools...)
+	return session, nil
+}
+
+func (r *agentTestRuntimeAdapter) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
+	if typed, ok := r.Runtime.(llm.ManagedSessionRuntime); ok {
+		return typed.ContinueManagedSession(ctx, session, call)
+	}
+	behavior, ok := r.Runtime.(agentTestBehaviorRuntime)
+	if !ok {
+		return nil, fmt.Errorf("agent test runtime %T has no scripted managed behavior", r.Runtime)
+	}
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	if observer, ok := r.Runtime.(agentTestFrameObserver); ok {
+		observer.observeAgentTestFrame(call.Frame())
+	}
+	response, err := behavior.continueAgentTest(ctx, session, message)
+	if err != nil || response == nil || response.CapabilitySurface != nil {
+		return response, err
+	}
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		evidence := make([]managedcapabilities.DeliveryEvidence, 0, len(surface.Tools))
+		for _, tool := range surface.Tools {
+			if !tool.Capability.Visible || !tool.Capability.Callable {
+				continue
+			}
+			for _, binding := range tool.Bindings {
+				evidence = append(evidence, managedcapabilities.DeliveryEvidence{
+					BindingKind: binding.Kind, ExactName: binding.ExactName,
+					Kind: binding.RequiredEvidenceKind, Status: managedcapabilities.EvidenceConfirmed,
+				})
+			}
+		}
+		observed, observeErr := surface.Observe(evidence...)
+		if observeErr != nil {
+			return nil, observeErr
+		}
+		response.CapabilitySurface = &observed
+	}
+	return response, nil
+}
+
+func (r *agentTestRuntimeAdapter) ContinueForkChatSession(context.Context, *llm.Session, llm.ForkChatCall) (*llm.Response, error) {
+	return nil, errors.New("agent test runtime does not serve operator fork chat")
+}
+
+func (r *agentTestRuntimeAdapter) PersistConversationSnapshot(context.Context, *llm.Session) error {
+	return nil
+}
+
+func agentManagedTestContext(t testing.TB, agent *LLMAgent) context.Context {
+	t.Helper()
+	if agent == nil {
+		t.Fatal("agent test context requires agent")
+	}
+	token := runtimeeffects.LifecycleToken{
+		Identity: agent.cfg.Identity, RuntimeEpoch: 1, AgentID: agent.cfg.ID, Generation: 1,
+	}
+	admission, err := managedexecution.New(
+		managedexecution.KindNormalRuntime,
+		"agent-test-runtime",
+		1,
+		"",
+		"agent-test-census",
+		agentTestBundleHash,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("agent test admission: %v", err)
+	}
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact(agentTestBundleHash)
+	if err != nil {
+		t.Fatalf("agent test bundle source: %v", err)
+	}
+	ctx := runtimeeffects.WithLifecycleToken(context.Background(), token)
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	return runtimecorrelation.WithBundleSourceFact(ctx, fact)
 }
 
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
@@ -47,115 +180,6 @@ func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 
 		RunIDResolution: runtimeagentcontrol.RunResolutionNewRunAllocated,
 		Source:          "test",
-	}
-}
-
-func TestFormatEventForAgent_DoesNotNarrateIndependentToolSurface(t *testing.T) {
-	cfg := models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "agent-1",
-		Role:          "operator",
-		FlowID:        "task",
-		Tools:         []string{"schedule", "get_entity", "emit_example"},
-	}
-	evt := eventtest.RunCreatingRootIngress(
-		"evt-1",
-		"item.created",
-		"runtime",
-		"task-1",
-		[]byte(`{"item_id":"x"}`),
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"),
-		time.Time{},
-	)
-
-	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
-		{Name: "get_entity"},
-		{Name: "emit_example"},
-		{Name: "read_file"},
-		{
-			Name: "save_entity_field",
-			Schema: map[string]any{
-				"properties": map[string]any{
-					"field": map[string]any{
-						"enum": []any{"metadata", "metadata.region", "status"},
-					},
-				},
-			},
-		},
-	})
-	for _, stale := range []string{"Available non-emit tools", "Writable entity paths", "Available emit tools", "schedule", "get_entity", "read_file", "save_entity_field", "emit_example"} {
-		if strings.Contains(formatted, stale) {
-			t.Fatalf("event prompt retained independent capability narrative %q: %q", stale, formatted)
-		}
-	}
-}
-
-func TestFormatEventForAgent_DoesNotNarrateNativeBuiltinSurface(t *testing.T) {
-	cfg := models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "agent-1",
-		Role:          "operator",
-		FlowID:        "task",
-		NativeTools: models.NativeToolConfig{
-			FileIO: true,
-			Bash:   true,
-		},
-	}
-	evt := eventtest.RunCreatingRootIngress(
-		"evt-1",
-		"item.created",
-		"runtime",
-		"task-1",
-		[]byte(`{"item_id":"x"}`),
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"),
-		time.Time{},
-	)
-
-	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
-		{Name: "query_entities"},
-		{Name: "emit_example"},
-	})
-	for _, stale := range []string{"Available native CLI tools", "Bash", "Edit", "Read", "Write", "file_io"} {
-		if strings.Contains(formatted, stale) {
-			t.Fatalf("event prompt retained independent native capability narrative %q: %q", stale, formatted)
-		}
-	}
-}
-
-func TestFormatEventForAgent_DoesNotAdvertiseCLIOnlyControlTools(t *testing.T) {
-	cfg := models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "agent-1",
-		Role:          "operator",
-		FlowID:        "task",
-	}
-	evt := eventtest.RunCreatingRootIngress(
-		"evt-1",
-		"item.created",
-		"runtime",
-		"task-1",
-		[]byte(`{"item_id":"x"}`),
-		0,
-		"",
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"),
-		time.Time{},
-	)
-
-	formatted := formatEventForAgent(cfg, evt, []llm.ToolDefinition{
-		{Name: "query_entities"},
-	})
-	if strings.Contains(formatted, "ExitPlanMode") {
-		t.Fatalf("expected non-CLI event formatting to omit CLI-only control tools, got %q", formatted)
-	}
-	if strings.Contains(formatted, "Available control tools in this turn") {
-		t.Fatalf("expected non-CLI event formatting to omit control tool summary, got %q", formatted)
 	}
 }
 
@@ -221,6 +245,9 @@ func TestNewLLMAgent_ConsumesExactProviderPromptAssemblyWithoutConfigExpansion(t
 
 func mustBuildLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
 	t.Helper()
+	if toolExecutor == nil {
+		toolExecutor = actorScopedFactoryToolExec{}
+	}
 	if !cfg.ExecutionMode.Valid() {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
@@ -238,7 +265,18 @@ func mustBuildLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Ru
 		}
 		cfg.Prompt = prompt
 	}
-	agent, err := newLLMAgent(cfg, modelRuntime, toolExecutor, tools, LLMAgentOptions{})
+	if cfg.Identity.IsZero() {
+		if flowPath := strings.Trim(strings.TrimSpace(cfg.FlowPath), "/"); flowPath != "" {
+			scope, instance, ok := strings.Cut(flowPath, "/")
+			if !ok || strings.Contains(instance, "/") {
+				t.Fatalf("test flow path %q is not a concrete flow instance", flowPath)
+			}
+			cfg.Identity = agentidentitytest.Runtime(t, cfg.ID, "agent-llm-test", scope, instance, flowPath)
+		} else {
+			cfg.Identity = agentidentitytest.RootRuntime(t, cfg.ID, "agent-llm-test")
+		}
+	}
+	agent, err := newLLMAgent(cfg, wrapAgentTestRuntime(modelRuntime), toolExecutor, tools, LLMAgentOptions{})
 	if err != nil {
 		t.Fatalf("newLLMAgent: %v", err)
 	}
@@ -253,6 +291,11 @@ type boardTestRuntime struct {
 	startTools    []string
 	continueTools []string
 	inputs        []string
+	frames        []agentframe.Frame
+}
+
+func (r *boardTestRuntime) observeAgentTestFrame(frame agentframe.Frame) {
+	r.frames = append(r.frames, frame)
 }
 
 func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
@@ -267,7 +310,7 @@ func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt
 	}, nil
 }
 
-func (r *boardTestRuntime) ContinueSession(ctx context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
+func (r *boardTestRuntime) continueAgentTest(ctx context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
 	if s != nil {
 		r.continueTools = toolNamesForAgentTest(s.Tools)
 	}
@@ -315,13 +358,16 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		"",
+		eventtest.UUID("analysis-run"),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 		time.Time{},
 	)
 
-	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
+	if _, err := agent.OnEvent(agentManagedTestContext(t, agent), evt); err != nil {
+		if failure, ok := runtimefailures.As(err); ok {
+			t.Fatalf("OnEvent: %v attributes=%#v", err, failure.Failure.Detail.Attributes)
+		}
 		t.Fatalf("OnEvent: %v", err)
 	}
 	if rt.call != 1 {
@@ -346,10 +392,10 @@ func TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive(t *testing.T) 
 			runtime := &boardTestRuntime{steps: []*llm.Response{{Message: llm.Message{Role: "assistant", Content: "handled"}}}}
 			agent := mustBuildLLMAgent(t, models.AgentConfig{ID: "mode-agent", Role: "worker", ExecutionMode: tc.agentMode}, runtime, nil, nil)
 			evt := eventtest.RunCreatingRootIngressWithMode(
-				"mode-event", "work.requested", "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}, tc.inboundMode,
+				"mode-event", "work.requested", "runtime", "", []byte(`{}`), 0, eventtest.UUID("mode-run"), "", events.EventEnvelope{}, time.Time{}, tc.inboundMode,
 			)
 
-			_, err := agent.OnEvent(context.Background(), evt)
+			_, err := agent.OnEvent(agentManagedTestContext(t, agent), evt)
 			if tc.wantReject {
 				if err == nil || !strings.Contains(err.Error(), "mock_causal_live_agent_forbidden") {
 					t.Fatalf("OnEvent error = %v, want mock-causal live-agent rejection", err)
@@ -480,7 +526,7 @@ func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 		nil,
 	)
 
-	_, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
+	_, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("start a corpus run"))
 	if err == nil {
 		t.Fatal("expected directive without action to fail")
 	}
@@ -490,30 +536,37 @@ func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 }
 
 func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
+	rt := &boardTestRuntime{
+		steps: []*llm.Response{
+			{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
+			{
+				Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
+				ToolCalls: []llm.ToolCall{
+					{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
+				},
+			},
+			{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
+		},
+	}
 	agent := mustBuildLLMAgent(t,
 		models.AgentConfig{ExecutionMode: "live", ID: "coordinator-1", Role: "coordinator"},
-		&boardTestRuntime{
-			steps: []*llm.Response{
-				{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
-				{
-					Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
-					ToolCalls: []llm.ToolCall{
-						{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
-					},
-				},
-				{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
-			},
-		},
+		rt,
 		boardEmitExecutor{},
 		[]llm.ToolDefinition{{Name: "emit_scan_requested"}},
 	)
 
-	got, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
+	got, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("start a corpus run"))
 	if err != nil {
 		t.Fatalf("BoardStep: %v", err)
 	}
 	if got != "scan_requested emitted" && got != "Dispatching workflow now." {
 		t.Fatalf("unexpected response: %q", got)
+	}
+	if len(rt.frames) < 2 || rt.frames[0].Turn.Kind != agentframe.TurnBoardDirective || rt.frames[1].Turn.Kind != agentframe.TurnRemediation {
+		t.Fatalf("board frame kinds = %#v, want directive then remediation", rt.frames)
+	}
+	if rt.frames[1].Turn.ParentFrameID != rt.frames[0].FrameID || rt.frames[1].FrameID == rt.frames[0].FrameID {
+		t.Fatalf("board remediation chronology = first %q second parent %q second %q", rt.frames[0].FrameID, rt.frames[1].Turn.ParentFrameID, rt.frames[1].FrameID)
 	}
 }
 
@@ -535,7 +588,7 @@ func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
 }
 
 func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
-	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: llm.NoopRuntime{}}, actorScopedFactoryToolExec{}, LLMAgentOptions{})
+	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: llm.NewNoopRuntime(llm.MockProviderContract())}, actorScopedFactoryToolExec{}, LLMAgentOptions{})
 	agent, err := factory(withTestResolvedIntent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analysis-agent",
@@ -557,6 +610,15 @@ func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
 	}
 	if !containsString(names, "scoped_analysis-agent") {
 		t.Fatalf("expected actor-scoped tool to reach the conversation, got %v", names)
+	}
+}
+
+func TestBoardDirectiveToolSuccessRequiresCanonicalContinuationProjection(t *testing.T) {
+	if toolMessageHasSuccessfulResult(`[{"ok":true,"result":"retired raw result"}]`) {
+		t.Fatal("retired raw tool-result array satisfied a board directive")
+	}
+	if !toolMessageHasSuccessfulResult(`{"kind":"tool_continuation","tool_result":[{"ok":true,"result":"handled"}]}`) {
+		t.Fatal("canonical tool-continuation projection did not satisfy a board directive")
 	}
 }
 
@@ -584,13 +646,13 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 		"",
 		[]byte(`{"assignment":{"scan_id":"root-run-id","geography":"US"}}`),
 		0,
-		"run-1",
+		eventtest.UUID("market-run"),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "root-run-id"),
 		time.Time{},
 	)
 
-	if _, err := llmAgent.OnEvent(context.Background(), evt); err != nil {
+	if _, err := llmAgent.OnEvent(agentManagedTestContext(t, llmAgent), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)
 	}
 	if containsString(rt.continueTools, "read_scan_campaign") || containsString(rt.continueTools, "save_scan_campaign_mode") {
@@ -629,7 +691,7 @@ func TestLLMAgentBoardStep_UsesExactContextAwareDefinitionsForDirective(t *testi
 	}
 	agent := created.(*LLMAgent)
 
-	if _, err := agent.BoardStep(context.Background(), testBoardDirective("finish the scan")); err != nil {
+	if _, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("finish the scan")); err != nil {
 		t.Fatalf("BoardStep: %v", err)
 	}
 	wantTools := []string{"emit_market_research_scan_complete"}
@@ -675,7 +737,7 @@ func (r *directiveFactoryRuntime) StartSession(_ context.Context, agentID, syste
 	}, nil
 }
 
-func (r *directiveFactoryRuntime) ContinueSession(_ context.Context, _ *llm.Session, message llm.Message) (*llm.Response, error) {
+func (r *directiveFactoryRuntime) continueAgentTest(_ context.Context, _ *llm.Session, message llm.Message) (*llm.Response, error) {
 	r.inputs = append(r.inputs, strings.TrimSpace(message.Content))
 	if r.call >= len(r.steps) {
 		return nil, errors.New("unexpected runtime call")
@@ -748,6 +810,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		Identity:      agentidentitytest.RootRuntime(t, "campaign-coordinator", "directive-factory-test"),
 		EntityID:      eventtest.UUID("campaign-coordinator-source"),
 		Role:          "campaign_coordinator",
+		EmitEvents:    []string{"scan.requested"},
 	}, rt, &runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"campaign-coordinator": {
@@ -763,9 +826,9 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 		},
 	})
 
-	got, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
+	got, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("start a corpus run"))
 	if err != nil {
-		t.Fatalf("BoardStep: %v", err)
+		t.Fatalf("BoardStep: %v inputs=%#v events=%#v", err, rt.inputs, bus.events)
 	}
 	if got != "Dispatching workflow now." {
 		t.Fatalf("directive response = %q, want terminal emit turn text", got)
@@ -829,9 +892,9 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 		},
 	})
 
-	got, err := agent.BoardStep(context.Background(), testBoardDirective("start a corpus run"))
+	got, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("start a corpus run"))
 	if err != nil {
-		t.Fatalf("BoardStep: %v", err)
+		t.Fatalf("BoardStep: %v inputs=%#v events=%#v", err, rt.inputs, bus.events)
 	}
 	if got != "Dispatching workflow now." {
 		t.Fatalf("directive response = %q, want terminal emit turn text", got)
@@ -842,8 +905,10 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "Available emit tools") {
 		t.Fatalf("directive input retained prompt-owned emit capability truth: %q", firstOrEmpty(rt.inputs))
 	}
-	if len(rt.inputs) < 2 || !strings.Contains(rt.inputs[1], "call the appropriate emit_* tool in this turn") {
-		t.Fatalf("remediation input = %q, want remediation prompt", firstOrEmpty(rt.inputs[1:]))
+	if len(rt.inputs) < 2 || !strings.Contains(rt.inputs[1], `"kind":"remediation"`) ||
+		!strings.Contains(rt.inputs[1], `"reason":"directive_completed_without_action"`) ||
+		strings.Contains(rt.inputs[1], "I will trigger the workflow now") {
+		t.Fatalf("remediation input = %q, want typed reason without prior assistant prose", firstOrEmpty(rt.inputs[1:]))
 	}
 	if len(bus.events) != 1 || string(bus.events[0].Type()) != "campaign-flow/inst-1/scan.requested" {
 		t.Fatalf("published events = %#v, want one externalized scan.requested event", bus.events)
@@ -853,6 +918,11 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 type taskRetryRuntime struct {
 	startCalls    int
 	continueCalls int
+	frames        []agentframe.Frame
+}
+
+func (r *taskRetryRuntime) observeAgentTestFrame(frame agentframe.Frame) {
+	r.frames = append(r.frames, frame)
 }
 
 func (r *taskRetryRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
@@ -865,7 +935,7 @@ func (r *taskRetryRuntime) StartSession(_ context.Context, agentID, systemPrompt
 	}, nil
 }
 
-func (r *taskRetryRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+func (r *taskRetryRuntime) continueAgentTest(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
 	r.continueCalls++
 	if r.continueCalls == 1 {
 		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
@@ -899,13 +969,13 @@ func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *test
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		"",
+		eventtest.UUID("spec-review-run"),
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 		time.Time{},
 	)
 
-	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
+	if _, err := agent.OnEvent(agentManagedTestContext(t, agent), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)
 	}
 	if rt.continueCalls != 2 {
@@ -913,6 +983,12 @@ func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *test
 	}
 	if rt.startCalls != 2 {
 		t.Fatalf("start calls = %d, want 2 after reset", rt.startCalls)
+	}
+	if len(rt.frames) != 2 || rt.frames[0].Turn.Kind != agentframe.TurnInitial || rt.frames[1].Turn.Kind != agentframe.TurnInitial {
+		t.Fatalf("reset execution frames = %#v, want two initial occurrences", rt.frames)
+	}
+	if rt.frames[0].FrameID == rt.frames[1].FrameID || rt.frames[0].Turn.ParentFrameID != "" || rt.frames[1].Turn.ParentFrameID != "" {
+		t.Fatalf("reset frame identities = first %q second %q", rt.frames[0].FrameID, rt.frames[1].FrameID)
 	}
 }
 
@@ -926,7 +1002,7 @@ func (r *runIDCaptureRuntime) StartSession(ctx context.Context, agentID, systemP
 	return &llm.Session{ID: "sess-" + agentID, AgentID: agentID}, nil
 }
 
-func (r *runIDCaptureRuntime) ContinueSession(ctx context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+func (r *runIDCaptureRuntime) continueAgentTest(ctx context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
 	r.continueRunIDs = append(r.continueRunIDs, runtimecorrelation.RunIDFromContext(ctx))
 	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
 }
@@ -945,6 +1021,7 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 		nil,
 	)
 
+	runID := eventtest.UUID("run-123")
 	evt := eventtest.RunCreatingRootIngress(
 		"evt-1",
 		"scoring/scoring.requested",
@@ -952,20 +1029,20 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 		"",
 		[]byte(`{"entity_id":"ent-1"}`),
 		0,
-		"run-123",
+		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 		time.Time{},
 	)
 
-	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
+	if _, err := agent.OnEvent(agentManagedTestContext(t, agent), evt); err != nil {
 		t.Fatalf("OnEvent: %v", err)
 	}
-	if len(rt.startRunIDs) != 1 || rt.startRunIDs[0] != "run-123" {
-		t.Fatalf("start session run_ids = %v, want [run-123]", rt.startRunIDs)
+	if len(rt.startRunIDs) != 1 || rt.startRunIDs[0] != runID {
+		t.Fatalf("start session run_ids = %v, want [%s]", rt.startRunIDs, runID)
 	}
-	if len(rt.continueRunIDs) != 1 || rt.continueRunIDs[0] != "run-123" {
-		t.Fatalf("continue session run_ids = %v, want [run-123]", rt.continueRunIDs)
+	if len(rt.continueRunIDs) != 1 || rt.continueRunIDs[0] != runID {
+		t.Fatalf("continue session run_ids = %v, want [%s]", rt.continueRunIDs, runID)
 	}
 }
 

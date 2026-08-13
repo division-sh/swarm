@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -17,19 +18,22 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_CapturesProviderInitVisibleTools(t *testing.T) {
+func TestStartupProbeConsumesSessionContractWithoutExecutionFrame(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
+	capturePath := filepath.Join(tempDir, "startup-input")
+	t.Setenv("STARTUP_INPUT_CAPTURE", capturePath)
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
 	script := `#!/bin/sh
 set -eu
 session_id=""
 tools_arg=""
 allowed_arg=""
+system_prompt_arg=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --session-id)
@@ -43,6 +47,10 @@ while [ "$#" -gt 0 ]; do
     --allowedTools)
       shift
       allowed_arg="${1:-}"
+      ;;
+    --system-prompt)
+      shift
+      system_prompt_arg="${1:-}"
       ;;
     --disallowedTools)
       printf '%s\n' 'unexpected --disallowedTools' >&2
@@ -63,7 +71,11 @@ if [ "$allowed_arg" != "Edit,ExitPlanMode,Read,Write" ]; then
   printf '%s\n' "unexpected --allowedTools: $allowed_arg" >&2
   exit 1
 fi
-cat >/dev/null
+if [ "$system_prompt_arg" != "system prompt" ]; then
+  printf '%s\n' "unexpected --system-prompt: $system_prompt_arg" >&2
+  exit 1
+fi
+cat >"$STARTUP_INPUT_CAPTURE"
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-1","tools":["Read","Write","Edit"]}'
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
@@ -118,6 +130,13 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 	got := resp.CapabilitySurface.EffectiveNames()
 	if len(got) != 2 || got[0] != "read_file" || got[1] != "write_file" {
 		t.Fatalf("effective startup tools = %#v, want [read_file write_file]", got)
+	}
+	input, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatalf("read startup input: %v", err)
+	}
+	if string(input) != "Startup validation probe. Do not call any tools. Reply with the exact text ok." || strings.Contains(string(input), agentframe.Version) || strings.Contains(string(input), `"kind":"initial"`) {
+		t.Fatalf("startup input acquired managed execution-frame semantics: %q", input)
 	}
 }
 

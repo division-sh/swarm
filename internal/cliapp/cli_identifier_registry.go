@@ -227,6 +227,10 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 // This is the living public-input ledger. A row describes input semantics, not
 // whether the command happens to validate the value locally today.
 var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
+	{Command: "swarm agent frame", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm agent frame", Selector: "flag:bundle-hash", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm agent frame", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm agent frame", Selector: "flag:flow", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "authored canonical flow path"},
 	{Command: "swarm agent view", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeResolverBounded},
 	{Command: "swarm agent view", Selector: "flag:flow-instance", Family: cliIdentifierFamilyFlowInstance, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm agent diagnose", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeResolverBounded},

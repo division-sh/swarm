@@ -545,7 +545,7 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 	if err != nil {
 		t.Fatalf("LLMBackendProfile: %v", err)
 	}
-	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, llm.NoopRuntime{})
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, llm.NewNoopRuntime(llm.ClaudeCLIProviderContract()))
 	if err != nil {
 		t.Fatalf("NewAgentRuntimeSet: %v", err)
 	}
@@ -553,8 +553,8 @@ func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksSt
 		testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), toolgateway.Binding{},
 		runtimes, nil, nil, manager, ManagedProviderPreflightAuthority{},
 	)
-	if err == nil || !strings.Contains(err.Error(), "managed provider startup probe is required for agent campaign-coordinator") {
-		t.Fatalf("ValidateManagedProviderPreflight error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "declares startup visible tool probe but does not implement it") {
+		t.Fatalf("ValidateManagedProviderPreflight error = %v, want typed provider-contract rejection", err)
 	}
 }
 

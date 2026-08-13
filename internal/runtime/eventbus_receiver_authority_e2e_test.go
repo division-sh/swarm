@@ -196,7 +196,11 @@ func (*closedReceiverManagedLLM) PersistConversationSnapshot(context.Context, *l
 	return nil
 }
 
-func (r *closedReceiverManagedLLM) ContinueSession(ctx context.Context, session *llm.Session, message llm.Message) (*llm.Response, error) {
+func (r *closedReceiverManagedLLM) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
 	if session == nil {
 		return nil, fmt.Errorf("receiver authority proof requires a session")
 	}
@@ -241,7 +245,7 @@ func (r *closedReceiverManagedLLM) ContinueSession(ctx context.Context, session 
 		r.calls = map[string]int{}
 	}
 	r.calls[session.AgentID]++
-	call := r.calls[session.AgentID]
+	callCount := r.calls[session.AgentID]
 	r.mu.Unlock()
 	session.Messages = append(session.Messages, message)
 	session.TurnCount++
@@ -249,12 +253,20 @@ func (r *closedReceiverManagedLLM) ContinueSession(ctx context.Context, session 
 		Message:           llm.Message{Role: "assistant"},
 		CapabilitySurface: &observed,
 	}
-	if session.AgentID == "upstream-agent" && call == 1 {
+	if session.AgentID == "upstream-agent" && callCount == 1 {
 		response.ToolCalls = []llm.ToolCall{{
 			ID: uuid.NewString(), Name: runtimetools.EmitToolName("task.completed"), Arguments: map[string]any{},
 		}}
 	}
 	return response, nil
+}
+
+func (r *closedReceiverManagedLLM) ContinueForkChatSession(ctx context.Context, session *llm.Session, call llm.ForkChatCall) (*llm.Response, error) {
+	message, err := call.ProviderMessage(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 
 func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, rootEventID string) {

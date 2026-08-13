@@ -68,6 +68,8 @@ type AgentConversationHandlerOptions struct {
 	Usage             AgentUsageReadStore
 }
 
+type AgentFrameInspectionHandlerOptions = AgentFrameHandlerOptions
+
 type EntityHandlerOptions struct {
 	Entities EntityReadStore
 }

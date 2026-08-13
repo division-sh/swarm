@@ -168,7 +168,23 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 	return s, nil
 }
 
-func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *OpenAICompatibleRuntime) ContinueManagedSession(ctx context.Context, s *Session, call ManagedCall) (*Response, error) {
+	message, err := validateManagedCall(ctx, s, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, s, message)
+}
+
+func (r *OpenAICompatibleRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
+	message, err := validateForkChatCall(ctx, s, call)
+	if err != nil {
+		return nil, err
+	}
+	return r.continueSession(ctx, s, message)
+}
+
+func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -530,32 +546,20 @@ func toOpenAICompatibleMessages(m Message) []openAICompatibleMessage {
 }
 
 func openAICompatibleToolResultMessages(content string) []openAICompatibleMessage {
-	if strings.TrimSpace(content) == "" {
-		return nil
-	}
-	var entries []map[string]any
-	if err := json.Unmarshal([]byte(content), &entries); err != nil {
-		return nil
-	}
-	msgs := make([]openAICompatibleMessage, 0, len(entries))
-	for _, entry := range entries {
-		id, _ := entry["tool_call_id"].(string)
-		id = strings.TrimSpace(id)
-		raw, err := json.Marshal(entry)
-		if err != nil {
-			continue
-		}
-		if id == "" {
+	results := providerToolResults(content)
+	msgs := make([]openAICompatibleMessage, 0, len(results))
+	for _, result := range results {
+		if result.CallID == "" {
 			msgs = append(msgs, openAICompatibleMessage{
 				Role:    "user",
-				Content: "Tool result:\n" + string(raw),
+				Content: "Tool result:\n" + result.Payload,
 			})
 			continue
 		}
 		msgs = append(msgs, openAICompatibleMessage{
 			Role:       "tool",
-			ToolCallID: id,
-			Content:    string(raw),
+			ToolCallID: result.CallID,
+			Content:    result.Payload,
 		})
 	}
 	return msgs

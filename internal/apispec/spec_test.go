@@ -18,11 +18,12 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 63 {
-		t.Fatalf("method count = %d, want 63", report.MethodCount)
+	if report.MethodCount != 64 {
+		t.Fatalf("method count = %d, want 64", report.MethodCount)
 	}
-	if report.SchemaCount != 146 {
-		t.Fatalf("schema count = %d, want 146", report.SchemaCount)
+<<<<<<< HEAD
+	if report.SchemaCount != 165 {
+		t.Fatalf("schema count = %d, want 165", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 48 {
 		t.Fatalf("error code count = %d, want 48", report.ErrorCodeCount)
@@ -38,6 +39,9 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	}
 	if _, ok := api.MethodCatalog["runtime.nuke"]; !ok {
 		t.Fatal("runtime.nuke missing from method catalog")
+	}
+	if _, ok := api.MethodCatalog["agent.frame"]; !ok {
+		t.Fatal("agent.frame missing from method catalog")
 	}
 	if _, ok := api.MethodCatalog["description"]; ok {
 		t.Fatal("method_catalog.description must not be a generated method")
@@ -94,11 +98,12 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 63 {
-		t.Fatalf("generated OpenRPC methods = %d, want 63", len(doc.Methods))
+	if len(doc.Methods) != 64 {
+		t.Fatalf("generated OpenRPC methods = %d, want 64", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 146 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 146", len(doc.Components.Schemas))
+<<<<<<< HEAD
+	if len(doc.Components.Schemas) != 165 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 165", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 48 {
 		t.Fatalf("generated OpenRPC errors = %d, want 48", len(doc.Components.Errors))
@@ -117,6 +122,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := methods["event.replay"]; !ok {
 		t.Fatal("generated OpenRPC missing event.replay")
+	}
+	if _, ok := methods["agent.frame"]; !ok {
+		t.Fatal("generated OpenRPC missing agent.frame")
 	}
 	if _, ok := methods["agent.replay"]; !ok {
 		t.Fatal("generated OpenRPC missing agent.replay")

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -161,10 +162,25 @@ func TestRuntimeFactoryRejectsContractProfileMismatch(t *testing.T) {
 }
 
 func TestProviderContractRejectsRuntimeWithoutContract(t *testing.T) {
-	_, err := RequireProviderContract("api", NoopRuntime{})
+	_, err := RequireProviderContract("api", runtimeWithoutProviderContract{})
 	if err == nil || !strings.Contains(err.Error(), "does not expose provider contract") {
 		t.Fatalf("RequireProviderContract error = %v, want missing contract", err)
 	}
+}
+
+func TestNoopRuntimeRequiresExplicitProviderContract(t *testing.T) {
+	if _, err := RequireProviderContract("api", NoopRuntime{}); err == nil || !strings.Contains(err.Error(), "runtime mode is required") {
+		t.Fatalf("zero-value NoopRuntime error = %v, want explicit provider contract requirement", err)
+	}
+	if _, err := RequireProviderContract("api", NewNoopRuntime(AnthropicAPIProviderContract())); err != nil {
+		t.Fatalf("explicit NoopRuntime provider contract: %v", err)
+	}
+}
+
+type runtimeWithoutProviderContract struct{}
+
+func (runtimeWithoutProviderContract) StartSession(context.Context, string, string, []ToolDefinition) (*Session, error) {
+	return &Session{}, nil
 }
 
 func TestProviderContractRejectsIncompleteContract(t *testing.T) {

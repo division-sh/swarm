@@ -504,21 +504,20 @@ func standingMemoryRequestContains(request standingMemoryProviderRequest, marker
 }
 
 func standingMemoryLatestEventPayload(messages []standingMemoryProviderMessage) (map[string]any, error) {
-	const prefix = "- payload: "
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role != "user" {
 			continue
 		}
-		start := strings.Index(messages[i].Content, prefix)
-		if start < 0 {
+		var input struct {
+			Event struct {
+				Payload json.RawMessage `json:"payload"`
+			} `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(messages[i].Content), &input); err != nil || len(input.Event.Payload) == 0 {
 			continue
 		}
-		raw := messages[i].Content[start+len(prefix):]
-		if end := strings.IndexByte(raw, '\n'); end >= 0 {
-			raw = raw[:end]
-		}
 		var payload map[string]any
-		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder := json.NewDecoder(strings.NewReader(string(input.Event.Payload)))
 		decoder.UseNumber()
 		if err := decoder.Decode(&payload); err != nil {
 			return nil, err

@@ -575,14 +575,10 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 	}
 }
 
-type workflowTimerStartupLLM struct{}
+type workflowTimerStartupLLM struct{ llm.NoopRuntime }
 
-func (workflowTimerStartupLLM) StartSession(context.Context, string, string, []llm.ToolDefinition) (*llm.Session, error) {
-	return &llm.Session{}, nil
-}
-
-func (workflowTimerStartupLLM) ContinueSession(context.Context, *llm.Session, llm.Message) (*llm.Response, error) {
-	return &llm.Response{}, nil
+func (workflowTimerStartupLLM) ProviderContract() llm.ProviderContract {
+	return llm.AnthropicAPIProviderContract()
 }
 
 func workflowTimerStartupRecoveryBundle() *runtimecontracts.WorkflowContractBundle {

@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -268,7 +267,7 @@ func newStandingRuntimeContextRuntime(
 		WorkflowModule: module, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
 		ProcessWorkOwner: process, ProviderTriggerCatalog: catalog,
 		Credentials: credentials, ProviderCredentials: credentials,
-		DisablePersistentStartupRecovery: true, LLMRuntime: runtimellm.NoopRuntime{},
+		DisablePersistentStartupRecovery: true, LLMRuntime: servedNoopLLMRuntime{},
 	})
 	rt, err := runtimepkg.NewRuntime(context.Background(), deps)
 	if err != nil {

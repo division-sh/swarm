@@ -83,6 +83,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type servedNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+
+func (servedNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
+}
+
 const serveRuntimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func servedRuntimeRootIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
@@ -2340,7 +2346,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		opts.RequireBundleMatch = false
 		opts.NoRequireBundleMatch = true
 		opts.Verbose = true
-		opts.TestLLMRuntime = runtimellm.NoopRuntime{}
+		opts.TestLLMRuntime = servedNoopLLMRuntime{}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
@@ -6918,7 +6924,7 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
 		Verbose:              true,
 		NoRequireBundleMatch: true,
-		TestLLMRuntime:       runtimellm.NoopRuntime{},
+		TestLLMRuntime:       servedNoopLLMRuntime{},
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -6952,7 +6958,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
 		Verbose:              true,
 		NoRequireBundleMatch: true,
-		TestLLMRuntime:       runtimellm.NoopRuntime{},
+		TestLLMRuntime:       servedNoopLLMRuntime{},
 		Output:               &out,
 	})
 	if code == 0 {
@@ -7414,7 +7420,7 @@ func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
 		RequireBundleMatch: false,
 		Verbose:            true,
 		Output:             &out,
-		TestLLMRuntime:     runtimellm.NoopRuntime{},
+		TestLLMRuntime:     servedNoopLLMRuntime{},
 	})
 	if code == 0 {
 		t.Fatalf("Run code = 0, want startup failure\noutput:\n%s", out.String())
@@ -7462,7 +7468,7 @@ func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *te
 		SelfCheck:               true,
 		RequireBundleMatch:      false,
 		Verbose:                 false,
-		TestLLMRuntime:          runtimellm.NoopRuntime{},
+		TestLLMRuntime:          servedNoopLLMRuntime{},
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 	serve.waitForReadyLine()

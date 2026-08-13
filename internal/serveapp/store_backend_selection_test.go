@@ -487,14 +487,10 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	}
 }
 
-type storeBackendSelectionNoopLLMRuntime struct{}
+type storeBackendSelectionNoopLLMRuntime struct{ runtimellm.NoopRuntime }
 
-func (storeBackendSelectionNoopLLMRuntime) StartSession(context.Context, string, string, []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
-	return &runtimellm.Session{}, nil
-}
-
-func (storeBackendSelectionNoopLLMRuntime) ContinueSession(context.Context, *runtimellm.Session, runtimellm.Message) (*runtimellm.Response, error) {
-	return &runtimellm.Response{}, nil
+func (storeBackendSelectionNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.AnthropicAPIProviderContract()
 }
 
 func loadStoreBackendSelectionWorkflowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {

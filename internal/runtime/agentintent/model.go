@@ -509,6 +509,23 @@ func (p ProviderPrompt) Text() (string, error) {
 	return p.text, nil
 }
 
+func (p ProviderPrompt) Validate(intent Resolved, criteria []string) error {
+	if err := intent.Validate(); err != nil {
+		return err
+	}
+	if _, err := p.Text(); err != nil {
+		return err
+	}
+	canonicalCriteria := normalizeCriteria(criteria)
+	if !slices.Equal(criteria, canonicalCriteria) {
+		return fmt.Errorf("provider prompt criteria references are not canonical")
+	}
+	if p.intentIdentity != intent.Identity || !slices.Equal(p.criteria, canonicalCriteria) {
+		return fmt.Errorf("provider prompt does not match resolved intent and criteria")
+	}
+	return nil
+}
+
 func (r Resolved) Empty() bool {
 	return r.Kind == "" && r.Coordinate == "" && r.Provenance == "" && r.Content == "" && r.ContentHash == "" && r.Identity == ""
 }

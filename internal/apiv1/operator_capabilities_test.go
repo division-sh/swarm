@@ -26,6 +26,7 @@ type testOperatorCapabilities struct {
 	AgentDeliveryLifecycle    AgentDeliveryLifecycleReadStore
 	AgentUsage                AgentUsageReadStore
 	BundleCatalog             BundleCatalogReadStore
+	AgentFrameEffective       AgentFrameEffectiveResolver
 	BundleDelete              BundleDeleteExecutor
 	ConversationForks         ConversationForkReadStore
 	ConversationForkLifecycle ConversationForkLifecycleStore
@@ -105,6 +106,7 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 		OperatorEntityHandlers(EntityHandlerOptions{Entities: c.Entities}),
 		OperatorAgentConversationHandlers(AgentConversationHandlerOptions{Agents: agents, Conversations: conversations, DeliveryLifecycle: c.AgentDeliveryLifecycle, Usage: c.AgentUsage}),
 		OperatorBundleCatalogHandlers(BundleCatalogHandlerOptions{Catalog: c.BundleCatalog}),
+		OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: c.BundleCatalog, Effective: c.AgentFrameEffective}),
 		testOperatorBundleRegisterHandlers(c),
 		OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency}),
 		OperatorConversationForkHandlers(ConversationForkHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Reads: c.ConversationForks, Lifecycle: c.ConversationForkLifecycle, Chat: c.ForkChatExecutor, Idempotency: c.Idempotency}),

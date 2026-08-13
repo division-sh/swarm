@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -247,6 +248,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"agent.delivery_diagnostics",
 		"agent.delivery_lifecycle",
 		"agent.diagnose",
+		"agent.frame",
 		"agent.get",
 		"agent.list",
 		"agent.usage",
@@ -283,6 +285,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"agent.delivery_lifecycle":   {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "deliveries"}},
 		"agent.diagnose":             {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent_id", "status", "queue", "runtime_state", "active", "last_tool_outcome"}},
 		"agent.get":                  {Params: map[string]any{"agent_id": "agent-1"}, ResultKeys: []string{"agent"}},
+		"agent.frame":                {Params: map[string]any{"scope": "static", "agent_id": "researcher", "bundle_hash": readOnlyProbeBundleHash, "flow": "research/inst-1"}, ResultKeys: []string{"version", "scope", "selector", "session_contract", "turn_context"}},
 		"agent.list":                 {Params: map[string]any{}, ResultKeys: []string{"agents"}},
 		"agent.usage":                {Params: map[string]any{"agent_id": "agent-1", "since": "2026-05-21T09:00:00Z", "until": "2026-05-21T10:00:00Z"}, ResultKeys: []string{"agent_id", "window", "usage", "breakdown"}},
 		"bundle.agents":              {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
@@ -314,6 +317,24 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 
 func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 	return []readOnlyHTTPRuntimeErrorProbe{
+		{
+			Method: "agent.frame",
+			Params: map[string]any{"scope": "static", "agent_id": "missing", "bundle_hash": readOnlyProbeBundleHash, "flow": "research/inst-1"},
+			Code:   AgentNotFoundCode,
+			Options: func(t *testing.T) testOperatorCapabilities {
+				return readOnlyRuntimeProbeOptions(t)
+			},
+		},
+		{
+			Method: "agent.frame",
+			Params: map[string]any{"scope": "static", "agent_id": "researcher", "bundle_hash": readOnlyProbeMissingBundleHash, "flow": "research/inst-1"},
+			Code:   BundleNotFoundCode,
+			Options: func(t *testing.T) testOperatorCapabilities {
+				opts := readOnlyRuntimeProbeOptions(t)
+				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
+				return opts
+			},
+		},
 		{
 			Method: "agent.delivery_diagnostics",
 			Params: map[string]any{"agent_id": "missing"},
@@ -490,6 +511,18 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 	t.Helper()
 	catalogIntent := apiTestResolvedIntent(t, "researcher", "Research the requested market signal.")
+	catalogDerivedPrompt, err := runtimeagentintent.IntentOnlyPrompt(catalogIntent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogProviderPrompt, err := runtimeagentintent.AssembleProviderPrompt(catalogIntent, nil, catalogDerivedPrompt, runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogProviderPromptText, err := catalogProviderPrompt.Text()
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run-1"
 	eventID := "evt-1"
@@ -655,6 +688,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 						IntentContentHash: catalogIntent.ContentHash,
 						IntentIdentity:    catalogIntent.Identity,
 						IntentContent:     catalogIntent.Content,
+						ProviderPrompt:    catalogProviderPromptText,
 						Subscriptions:     []string{"scan.requested"},
 						Tools:             []string{"web_search"},
 					}},

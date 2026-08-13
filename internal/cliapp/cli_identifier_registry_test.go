@@ -994,6 +994,7 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm new", "flag:output"):                            true,
 	cliIdentifierRegistryKey("swarm test", "flag:derive"):                           true,
 	cliIdentifierRegistryKey("swarm test", "flag:input"):                            true,
+	cliIdentifierRegistryKey("swarm agent frame", "flag:scope"):                     true,
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:cursor"):               true,
 	cliIdentifierRegistryKey("swarm agent deliveries", "flag:delivery-status"):      true,
 	cliIdentifierRegistryKey("swarm agent diagnose", "flag:queue-cursor"):           true,

@@ -74,6 +74,8 @@ type AgentDefinition struct {
 	IntentContentHash string   `json:"intent_content_hash"`
 	IntentIdentity    string   `json:"intent_identity"`
 	IntentContent     string   `json:"intent_content"`
+	Criteria          []string `json:"criteria,omitempty"`
+	ProviderPrompt    string   `json:"-"`
 	Subscriptions     []string `json:"subscriptions,omitempty"`
 	Tools             []string `json:"tools,omitempty"`
 }

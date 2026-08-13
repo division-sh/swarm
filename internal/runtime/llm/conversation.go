@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -14,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -35,11 +38,6 @@ const (
 	maxToolResultPreviewRunes       = 1200
 )
 
-type ToolResult struct {
-	Name    string
-	Payload string
-}
-
 type ToolExecutor interface {
 	Execute(ctx context.Context, name string, input any) (any, error)
 }
@@ -59,6 +57,13 @@ type executedToolCall struct {
 	Terminal bool
 }
 
+type conversationKind uint8
+
+const (
+	conversationManaged conversationKind = iota + 1
+	conversationForkChat
+)
+
 type Conversation struct {
 	AgentID      string
 	TaskID       string
@@ -73,9 +78,39 @@ type Conversation struct {
 	runtime       Runtime
 	toolExecutor  CapabilityAwareToolExecutor
 	maxToolRounds int
+	kind          conversationKind
+	seed          *agentframe.SessionSeed
+	causalEvent   *events.Event
+	lastFrameID   string
 }
 
-func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, memory agentmemory.Plan, maxTurns int, runtime Runtime) *Conversation {
+func NewManagedConversation(seed agentframe.SessionSeed, taskID string, tools []ToolDefinition, memory agentmemory.Plan, maxTurns int, runtime Runtime) (*Conversation, error) {
+	if err := seed.Validate(); err != nil {
+		return nil, fmt.Errorf("managed conversation session contract: %w", err)
+	}
+	if _, ok := runtime.(ManagedSessionRuntime); !ok {
+		return nil, fmt.Errorf("runtime %T does not implement the typed managed-call boundary", runtime)
+	}
+	systemPrompt, err := seed.ProviderPrompt.Text()
+	if err != nil {
+		return nil, err
+	}
+	conversation := newConversation(seed.AgentIdentity.AgentID(), taskID, systemPrompt, tools, memory, maxTurns, runtime)
+	conversation.kind = conversationManaged
+	conversation.seed = &seed
+	return conversation, nil
+}
+
+func NewForkChatConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, memory agentmemory.Plan, maxTurns int, runtime Runtime) (*Conversation, error) {
+	if _, ok := runtime.(ForkChatSessionRuntime); !ok {
+		return nil, fmt.Errorf("runtime %T does not implement the typed fork-chat boundary", runtime)
+	}
+	conversation := newConversation(agentID, taskID, systemPrompt, tools, memory, maxTurns, runtime)
+	conversation.kind = conversationForkChat
+	return conversation, nil
+}
+
+func newConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, memory agentmemory.Plan, maxTurns int, runtime Runtime) *Conversation {
 	if maxTurns <= 0 {
 		maxTurns = 25
 	}
@@ -102,26 +137,41 @@ func (c *Conversation) SetMaxToolRounds(n int) {
 	c.maxToolRounds = n
 }
 
-func (c *Conversation) Step(ctx context.Context, input string) (*Response, error) {
-	return c.StepWithRole(ctx, "user", input)
+func (c *Conversation) LastFrameID() string {
+	if c == nil {
+		return ""
+	}
+	return c.lastFrameID
 }
 
-func (c *Conversation) StepWithRole(ctx context.Context, role, input string) (*Response, error) {
-	msg := Message{Role: strings.TrimSpace(role), Content: input}
-	if msg.Role == "" {
-		msg.Role = "user"
+func (c *Conversation) RunManaged(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {
+	if c == nil || c.kind != conversationManaged || c.seed == nil {
+		return nil, errors.New("managed conversation is not configured")
 	}
-	return c.stepWithMessage(ctx, msg)
+	if draft.Kind == agentframe.TurnToolContinuation {
+		return nil, errors.New("tool continuations are owned by the managed conversation loop")
+	}
+	causalEvent := draft.Event
+	c.causalEvent = &causalEvent
+	return c.stepManaged(ctx, draft)
 }
 
-func (c *Conversation) stepWithMessage(ctx context.Context, msg Message) (*Response, error) {
-	if c.runtime == nil {
-		return nil, errors.New("runtime not set")
+func (c *Conversation) RunForkChat(ctx context.Context, input string) (*Response, error) {
+	if c == nil || c.kind != conversationForkChat {
+		return nil, errors.New("fork-chat conversation is not configured")
 	}
+	msg := Message{Role: "user", Content: strings.TrimSpace(input)}
+	if msg.Content == "" {
+		return nil, errors.New("fork-chat input is required")
+	}
+	return c.stepForkChat(ctx, msg)
+}
+
+func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {
 	if err := c.ensureSession(ctx); err != nil {
 		return nil, err
 	}
-	resp, err := c.continueOnce(ctx, msg)
+	resp, err := c.continueManagedOnce(ctx, draft)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +180,20 @@ func (c *Conversation) stepWithMessage(ctx context.Context, msg Message) (*Respo
 		return resp, nil
 	}
 
+	return c.resolveToolCalls(ctx, resp)
+}
+
+func (c *Conversation) stepForkChat(ctx context.Context, msg Message) (*Response, error) {
+	if err := c.ensureSession(ctx); err != nil {
+		return nil, err
+	}
+	resp, err := c.continueForkChatOnce(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
+		return resp, nil
+	}
 	return c.resolveToolCalls(ctx, resp)
 }
 
@@ -145,7 +209,7 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	return nil
 }
 
-func (c *Conversation) continueOnce(ctx context.Context, msg Message) (*Response, error) {
+func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe.TurnDraft) (*Response, error) {
 	if c.TurnCount >= c.MaxTurns {
 		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
 			"budget_kind": "agent_turns",
@@ -154,25 +218,69 @@ func (c *Conversation) continueOnce(ctx context.Context, msg Message) (*Response
 		})
 	}
 	turnCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("provider_turn:%d", c.TurnCount+1))
-	if managedAgentExecutionContext(turnCtx) {
-		var authority managedcapabilities.Authority
-		var err error
-		turnCtx, authority, err = withProviderTurnAuthority(turnCtx, c.Session)
-		if err != nil {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_authority_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
-		}
-		_ = authority
-		definitions, capabilities, err := c.plannedToolInputs(turnCtx)
-		if err != nil {
-			return nil, err
-		}
-		surface, err := managedCapabilityPlanForTurn(turnCtx, c.runtime, c.Session, definitions, capabilities)
-		if err != nil {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_plan_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
-		}
-		turnCtx = managedcapabilities.WithContext(turnCtx, surface)
+	if !managedAgentExecutionContext(turnCtx) {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_authority_missing", "llm-conversation", "prepare_turn", nil)
 	}
-	resp, err := c.runtime.ContinueSession(turnCtx, c.Session, msg)
+	var err error
+	turnCtx, _, err = withProviderTurnAuthority(turnCtx, c.Session)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_authority_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
+	}
+	definitions, capabilities, err := c.plannedToolInputs(turnCtx)
+	if err != nil {
+		return nil, err
+	}
+	surface, err := managedCapabilityPlanForTurn(turnCtx, c.runtime, c.Session, definitions, capabilities)
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_capability_plan_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
+	}
+	turnCtx = managedcapabilities.WithContext(turnCtx, surface)
+	bundleSource, ok := runtimecorrelation.BundleSourceFactFromContext(turnCtx)
+	if !ok || bundleSource.Validate() != nil {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_execution_bundle_source_missing", "llm-conversation", "prepare_turn", nil)
+	}
+	bundleHash, source := bundleSource.StorageValues()
+	frame, err := agentframe.Complete(*c.seed, draft, agentframe.Completion{BundleHash: bundleHash, BundleSource: source, Surface: surface})
+	if err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_invalid", "llm-conversation", "prepare_turn", map[string]any{"validation_error": err.Error()}, err)
+	}
+	call, err := newManagedCall(frame)
+	if err != nil {
+		return nil, err
+	}
+	runtime, ok := c.runtime.(ManagedSessionRuntime)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_runtime_boundary_missing", "llm-conversation", "dispatch_turn", nil)
+	}
+	resp, err := runtime.ContinueManagedSession(turnCtx, c.Session, call)
+	if err != nil {
+		return nil, err
+	}
+	msg, err := call.providerMessage()
+	if err != nil {
+		return nil, err
+	}
+	c.Messages = append(c.Messages, msg, resp.Message)
+	c.TurnCount++
+	c.lastFrameID = frame.FrameID
+	return resp, nil
+}
+
+func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*Response, error) {
+	if c.TurnCount >= c.MaxTurns {
+		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
+			"budget_kind": "agent_turns", "actual": c.TurnCount, "limit": c.MaxTurns,
+		})
+	}
+	call, err := NewForkChatCall(msg)
+	if err != nil {
+		return nil, err
+	}
+	runtime, ok := c.runtime.(ForkChatSessionRuntime)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "fork_chat_runtime_boundary_missing", "llm-conversation", "dispatch_turn", nil)
+	}
+	resp, err := runtime.ContinueForkChatSession(ctx, c.Session, call)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +342,18 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			return &terminal, nil
 		}
 		toolMsg := Message{Role: "tool", Content: toolPayload}
-		next, err := c.continueOnce(ctx, toolMsg)
+		var next *Response
+		if c.kind == conversationManaged {
+			if c.causalEvent == nil {
+				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "continue_tool_round", nil)
+			}
+			next, err = c.continueManagedOnce(ctx, agentframe.TurnDraft{
+				Kind: agentframe.TurnToolContinuation, Event: *c.causalEvent, ParentFrameID: c.lastFrameID,
+				InputRole: "tool", InputContent: toolPayload,
+			})
+		} else {
+			next, err = c.continueForkChatOnce(ctx, toolMsg)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -670,27 +789,10 @@ func (c *Conversation) InjectAsyncToolResult(ctx context.Context, toolName strin
 	return c.appendMessage(ctx, Message{Role: "tool", Content: strings.TrimSpace(string(b))})
 }
 
-func (c *Conversation) AppendResult(toolResult ToolResult) {
-	content := fmt.Sprintf("Tool %s result:\n%s", toolResult.Name, toolResult.Payload)
-	c.Messages = append(c.Messages, Message{Role: "tool", Content: content})
-	if c.Session != nil {
-		c.Session.Messages = append(c.Session.Messages, Message{Role: "tool", Content: content})
-	}
-}
-
-func (c *Conversation) AppendFeedback(feedback string) {
-	feedback = strings.TrimSpace(feedback)
-	if feedback == "" {
-		return
-	}
-	c.Messages = append(c.Messages, Message{Role: "system", Content: feedback})
-	if c.Session != nil {
-		c.Session.Messages = append(c.Session.Messages, Message{Role: "system", Content: feedback})
-	}
-}
-
 func (c *Conversation) Reset() {
 	c.Session = nil
 	c.Messages = nil
 	c.TurnCount = 0
+	c.causalEvent = nil
+	c.lastFrameID = ""
 }
