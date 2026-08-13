@@ -2978,7 +2978,8 @@ handler_specification:
         with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
       note_on_static_flows: 'Retired for authored stateful static/default-static multi-row ownership. A static input-pin
         handler MUST NOT use create_entity to materialize arbitrary receiving-flow rows over time. Authors must model the state
-        as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a
+        as one primary entity with contained state, a mode: template flow instance, a singleton flow whose authored usage
+        demands contained coordinator state, or a
         child flow. Historical rows are not silently rewritten by this retirement; actual persisted-row migration is
         separately gated.'
     select_entity:
@@ -10537,6 +10538,7 @@ flow_model:
       primary_entity: Durable state object owned by one normal flow instance.
       contained_state: Typed scalar, list, or map data owned inside the primary entity.
       child_template_flow: Independently routable or lifecycle-owning child/template flow instance.
+      singleton_flow: One durable child flow instance with exactly one primary entity and no template identity.
       singleton_coordinator: Static shared-policy, aggregate-state, or cross-instance-learning owner.
       connect: Parent-owned flow-instance wiring over declared pins and keys.
       interface: Reusable structural contract over pins, payloads, and keys.
@@ -10552,7 +10554,8 @@ flow_model:
       - field = scalar state on the primary entity
       - list/map = contained local state on the primary entity
       - child/template flow instance = independently addressable lifecycle
-      - singleton coordinator = shared policy, aggregate state, or cross-instance learning
+      - singleton flow = one durable instance, including intentionally stateless services
+      - singleton coordinator = singleton flow whose exact contract consumers use typed map/list state
     authoring_decision_rubric:
       status: merge_bearing_authoring_guidance
       rule: >
@@ -10571,7 +10574,7 @@ flow_model:
         use: typed field/list/map on the primary entity
       - id: singleton_coordinator
         when: The flow coordinates, summarizes, or learns across many instances.
-        use: singleton coordinator with real shared state or policy
+        use: singleton flow with real typed map/list state consumed by exact contract rows
       - id: promotion_line
         when: A map/list item starts behaving like a routable recipient.
         use: promote it to a child/template flow instance
@@ -10627,6 +10630,29 @@ flow_model:
         create_flow_instance actions do not reconstruct this routing identity.
         Output key/carries remain interface/type evidence; explicit lifecycle
         actions remain a separately owned operation after target selection.
+    effective_flow_mode_model:
+      status: merge_bearing_contract_behavior
+      implementation_tracker: '#2238'
+      canonical_code_owner: internal/runtime/contracts.ResolveEffectiveFlowMode during LoadWorkflowContractBundle
+      declaration_surface:
+      - package.yaml flows[].mode
+      - flow schema.yaml mode
+      rule: >
+        Flow mode has one admitted effective value. Non-empty package and schema
+        declarations MUST agree for `static`, `template`, and `singleton`.
+        Equal declarations and one-side omission normalize to one effective
+        value before semantic source publication. A contradiction or unsupported
+        value fails contract loading; no downstream consumer may choose between
+        the authored files.
+      consumers:
+      - FlowScope and all template/static/singleton routing classification
+      - ResolveFlowTemplateInstance and ResolveFlowSingleton
+      - standing activation and target declaration resolution
+      - boot verification and authoring/readback
+      non_authoritative_paths:
+      - raw ProjectFlowRef.Mode after contract loading
+      - path-level fallback when the admitted flow schema mode is empty
+      - environment-dependent or consumer-local mode selection
     primary_entity_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1539'
@@ -10636,7 +10662,7 @@ flow_model:
         If exactly one entity type exists for a normal child flow, that entity
         type is the primary entity. More than one entity type is invalid for
         normal flow authoring; authors must split flows, use contained state,
-        template instances, singleton/coordinator contained state, or child
+        template instances, singleton cardinality/coordinator contained state, or child
         flows. If the bundle root declares entity contracts, multiple root
         entity types are invalid under the same resolver.
         `schema.yaml entity` is not a supported selector because it would
@@ -10756,21 +10782,45 @@ flow_model:
           A contained operation does not create a receiver, route descriptor,
           RouteTable row, direct delivery target, or live subscription. Parent
           `connect` remains cross-flow-instance topology only.
+    singleton_cardinality_model:
+      status: merge_bearing_contract_runtime_behavior
+      implementation_tracker: '#2238'
+      declaration_surface: 'mode: singleton'
+      canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingleton
+      rule: >
+        `mode: singleton` declares cardinality and lifecycle only: exactly one
+        durable child flow instance, exactly one primary entity, and no template
+        instance identity. The primary entity may be empty or scalar-only.
+        Typed map/list presence is valid but does not by itself grant coordinator
+        authority. Standing activation consumes this base singleton contract.
+      fail_closed:
+      - 'root schema declares mode: singleton'
+      - 'mode: singleton declares template instance fields'
+      - singleton flow lacks exactly one primary entity
+      - singleton flow uses schema.yaml entity restatement
+      - singleton flow declares multiple entity contracts
+      - singleton flow contained map/list value or item types do not resolve
+      non_authoritative_paths:
+      - typed map/list field presence as coordinator-use evidence
+      - agent conversation/session memory as singleton cardinality or coordinator state
+      - synthetic placeholder fields used only to satisfy verification
     singleton_coordinator_model:
       status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#1549'
-      declaration_surface: 'mode: singleton'
-      canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingletonCoordinator + internal/runtime/bootverify.checkSingletonCoordinatorValidation + internal/runtime/engine.Executor.applyContainedDataOperation
+      refinement_tracker: '#2238'
+      declaration_surface: 'exact typed map/list consumer usage inside a mode: singleton flow; no coordinator flag exists'
+      canonical_code_owner: internal/runtime/bootverify.BuildSingletonCoordinatorDemandProjection + internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingletonCoordinator + internal/runtime/engine.Executor.applyContainedDataOperation
       rule: >
-        Singleton/coordinator flows are explicit `mode: singleton` child flows
-        that own real shared policy, aggregate state, or cross-instance
-        learning for many normal/template instances. Bare `mode: static` is
-        not coordinator authority. A singleton coordinator still has exactly
-        one primary entity and must express coordinator state as typed
-        contained map/list fields on that entity. Agent conversation/session
-        memory, static multi-entity ownership, route-to-contained-item
-        semantics, producer target/broadcast, direct delivery, and route-plan
-        fallbacks are not singleton coordinator authority.
+        Coordinator semantics are a strict refinement of singleton cardinality,
+        derived from exact authored consumers of typed map/list state. Fan-in
+        input rows, contained operations, direct entity writers, agent write
+        authorization, recognized entity expressions, joins, and structured
+        readers such as fan_out.items_from create demand. Map/list declaration
+        shape without an exact consumer creates no demand, no coordinator
+        readback, and no strict-refinement call. When demand exists,
+        ResolveFlowSingletonCoordinator requires resolvable typed map/list state
+        and failures name the exact consuming row. No `coordinator: true` grammar
+        exists.
       lifecycle_policy: >
         Singleton coordinator state is persisted on the coordinator primary
         entity until handlers explicitly archive, roll up, clean up, or promote
@@ -10780,14 +10830,9 @@ flow_model:
         to a child/template flow instance instead of remaining singleton
         contained state.
       fail_closed:
-      - 'root schema declares mode: singleton'
       - 'bare mode: static used as singleton/coordinator proof'
-      - 'mode: singleton declares template instance fields'
-      - singleton flow lacks exactly one primary entity
-      - singleton flow primary entity lacks typed contained map/list state
+      - coordinator demand exists but the singleton primary entity lacks typed contained map/list state
       - singleton flow contained map/list value or item types do not resolve
-      - singleton flow uses schema.yaml entity restatement
-      - singleton flow declares multiple entity contracts
       - agent conversation/session memory is used as coordinator state authority
       - contained map/list items are targeted as route recipients
       - 'producer target, broadcast:true, direct delivery, RouteTable, live subscriptions, handler lookup, delivery rows, or replay rows are used as coordinator authority'
@@ -10799,6 +10844,7 @@ flow_model:
         and do not widen #1549.
       non_authoritative_paths:
       - 'mode: static as implicit coordinator declaration'
+      - map/list declaration presence without an exact consuming row
       - schema.yaml entity as a singleton entity selector
       - template scalar instance/carry/resolution for singleton ownership
       - static multi-entity flow ownership
@@ -10807,7 +10853,7 @@ flow_model:
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     standing_activation_model:
       status: merge_bearing_contract_runtime_behavior
-      implementation_tracker: '#2007'
+      implementation_tracker: '#1951'
       declaration_surface: 'package.yaml flows[].activation: standing plus optional flows[].ingress'
       canonical_owners:
         declaration: internal/runtime/contracts.ProjectFlowRef
@@ -10837,7 +10883,7 @@ flow_model:
                 signing_secret: webhook_signing.telegram
         rules:
         - activation is explicit and is never inferred from ingress
-        - 'activation: standing is valid only for mode: singleton'
+        - 'activation: standing is valid only for the ResolveFlowSingleton base cardinality contract'
         - standing activation without ingress is valid for timer-driven or connect-fed services
         - ingress requires activation: standing and defaults alias to the package flow id
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
@@ -10978,7 +11024,7 @@ flow_model:
           `select_entity`, or `select_or_create_entity`. Static multi-row
           ownership is retired. Authors must model the state as one primary
           entity with contained state, a `mode: template` flow instance, a
-          `mode: singleton` coordinator, or a child flow. Existing historical
+          `mode: singleton` flow with exact contained-state demand, or a child flow. Existing historical
           rows are not silently rewritten; actual persisted-row migration
           requires a separately gated migration.
       select_entity:
@@ -11058,7 +11104,7 @@ flow_model:
           semantic owners. It must expose inferred primary entity, template
           instance declaration/policy, output pin `key`/`carries`, versioned
           routing topology, explicit and implicit key mappings,
-          singleton/coordinator boundaries, typed contained-state operations,
+          singleton cardinality and coordinator-demand boundaries, typed contained-state operations,
           lifecycle stage graphs requested with `--graph`, and retired static
           multi-entity diagnostics without becoming a new semantic owner or
           reimplementing verifier/runtime decisions.
@@ -11812,7 +11858,7 @@ flow_model:
             convergence on exactly one receiver instance for concurrent same-key
             missing deliveries. PR4 makes `resolution.mode: fan-in` runnable
             for `aggregation: stream` / bounded windowed delivery into an
-            explicit singleton/coordinator receiver. The finite barrier slice
+            explicit singleton receiver whose fan-in row demands coordinator semantics. The finite barrier slice
             makes `aggregation: barrier` runnable by lowering pin identity into
             one effective WorkflowJoinPlan and executing through joinruntime,
             never through accumulate. Reply resolution is also
@@ -11969,7 +12015,7 @@ flow_model:
                 `dedup_by` and `singleton`; stream MUST declare `window`, while
                 barrier may omit window only when stage topology proves the join
                 stage non-reentrant. `singleton` is the explicit
-                receiver route path for the singleton/coordinator instance and
+                receiver route path for the singleton instance and creates exact coordinator demand; it
                 MUST be the receiver route or a child of the receiver route; it
                 is never inferred from the sender/source instance. `dedup_by`
                 is required and is exactly one top-level `payload.<field>` for
@@ -11996,7 +12042,7 @@ flow_model:
               - missing or empty dedup_by
               - dedup_by list/tuple/composite beyond one field
               - barrier dedup_by event.id or any non-payload identity
-              - receiver not mode: singleton/coordinator
+              - receiver not mode: singleton or unable to satisfy the fan-in row's coordinator demand
               - missing receiver handler for the input event
               - stream receiver missing accumulate or declaring join
               - barrier receiver missing exactly one matching join or declaring accumulate
@@ -12061,7 +12107,7 @@ flow_model:
           - an agent-only connect route with an unrelated receiver-flow node delivers to the selected agent without synthesizing node authority or a connected-input handler failure
           - route-plan lowering records fan-in stream metadata, required singleton/window/dedup_by, singular target delivery, and no new target kind
           - bootverify rejects fan-in receiver handler redeclaration of accumulate.dedup_by or accumulate.window
-          - EventBus publish/preflight for fan-in stream routes multiple source contributions to the same explicit singleton/coordinator receiver route
+          - EventBus publish/preflight for fan-in stream routes multiple source contributions to the same explicit singleton receiver route after coordinator demand is satisfied
           - executor derives effective fan-in accumulator dedup/window from the matched receiver input pin, with no handler-local redeclaration
           - receiver accumulator kernel enforces pin-declared dedup_by idempotency and partitions arrivals by pin-declared window
           - same committed fan-in stream event replay reuses persisted delivery route/scope and does not re-infer receiver identity from sender/source state
@@ -12467,20 +12513,20 @@ flow_model:
     cross_flow_handoff:
       description: 'When a business object moves from one flow to the next, the transition is an explicit
         handoff via events. The receiving flow is addressed as a supported flow instance through parent connect and
-        instance keys, or the receiving state is modeled as contained state, a singleton coordinator, or a child flow.'
+        instance keys, or the receiving state is modeled as contained state, a singleton flow with usage-demanded coordinator state, or a child flow.'
       pattern:
       - '1. Source flow handler emits a cross-flow event (output pin). Example: scoring emits vertical.shortlisted.'
       - '2. Destination flow handler receives the event through parent-owned connect / instance-key routing or another
         supported route owner.'
-      - '3. Destination updates its primary entity, contained state, singleton coordinator state, or child/template flow
+      - '3. Destination updates its primary entity, contained state, usage-demanded singleton coordinator state, or child/template flow
         instance. Static input-pin handlers do not create or select arbitrary receiving-flow rows.'
       - '4. Data from the source entity is passed via the event payload or create_flow_instance
         config_from bindings. Direct runtime entity reads do not cross flow ownership boundaries.'
       service_request_pattern:
       - '1. Source flow emits a typed request event containing declared business keys, not target entity_id,
         entity_type, or flow_instance.'
-      - '2. Destination declares a supported ownership model: mode: template with scalar instance/carry/resolution, mode: singleton with contained
-        state, one primary entity with contained data, or a child flow.'
+      - '2. Destination declares a supported ownership model: mode: template with scalar instance/carry/resolution, mode: singleton for one durable
+        instance and exact typed coordinator consumers when shared state is used, one primary entity with contained data, or a child flow.'
       - '3. Parent connect / route-plan authority supplies the target flow-instance context; static receiver-side
         create_entity, select_entity, and select_or_create_entity are not repair paths.'
       - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'

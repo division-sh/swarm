@@ -1,0 +1,310 @@
+package bootverify
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+type SingletonCoordinatorDemand struct {
+	FlowID        string
+	SourceFile    string
+	Location      string
+	NodeID        string
+	AgentID       string
+	EventType     string
+	Kind          string
+	Field         string
+	Target        string
+	Operation     string
+	WriteIndex    int
+	HasWriteIndex bool
+}
+
+func (d SingletonCoordinatorDemand) Detail() string {
+	parts := []string{"flow " + defaultFlowLabel(d.FlowID)}
+	if d.NodeID != "" {
+		parts = append(parts, "node "+d.NodeID)
+	}
+	if d.AgentID != "" {
+		parts = append(parts, "agent "+d.AgentID)
+	}
+	if d.EventType != "" {
+		parts = append(parts, "handler "+d.EventType)
+	}
+	if d.Kind != "" {
+		parts = append(parts, d.Kind)
+	}
+	if d.HasWriteIndex {
+		parts = append(parts, fmt.Sprintf("write[%d]", d.WriteIndex))
+	}
+	if d.Operation != "" {
+		parts = append(parts, "op "+d.Operation)
+	}
+	if d.Target != "" {
+		parts = append(parts, "target "+d.Target)
+	} else if d.Field != "" {
+		parts = append(parts, "field entity."+d.Field)
+	}
+	return strings.Join(parts, " ")
+}
+
+type singletonDemandFlow struct {
+	fields map[string]runtimecontracts.SingletonCoordinatorContainedField
+}
+
+// BuildSingletonCoordinatorDemandProjection derives coordinator authority from
+// exact contract consumers. Typed map/list declaration shape alone is inert.
+func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []SingletonCoordinatorDemand {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil
+	}
+	flows := map[string]singletonDemandFlow{}
+	for flowID, schema := range source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" || strings.TrimSpace(schema.Mode) != runtimecontracts.FlowModeSingleton {
+			continue
+		}
+		singleton, err := bundle.ResolveFlowSingleton(flowID)
+		if err != nil {
+			continue
+		}
+		contained, err := runtimecontracts.SingletonContainedFields(singleton.PrimaryEntity)
+		if err != nil {
+			continue
+		}
+		fields := make(map[string]runtimecontracts.SingletonCoordinatorContainedField, len(contained))
+		for _, field := range contained {
+			fields[strings.TrimSpace(field.Name)] = field
+		}
+		flows[flowID] = singletonDemandFlow{fields: fields}
+	}
+	if len(flows) == 0 {
+		return nil
+	}
+
+	demands := make([]SingletonCoordinatorDemand, 0)
+	seen := map[string]struct{}{}
+	add := func(d SingletonCoordinatorDemand, requireTypedField bool) {
+		d.FlowID = strings.TrimSpace(d.FlowID)
+		d.Field = strings.TrimSpace(d.Field)
+		flow, singleton := flows[d.FlowID]
+		if !singleton {
+			return
+		}
+		if requireTypedField {
+			if _, typed := flow.fields[d.Field]; !typed {
+				return
+			}
+		}
+		key := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%t", d.FlowID, d.SourceFile, d.Location, d.NodeID, d.AgentID, d.EventType, d.Kind, d.Field, d.Target, d.WriteIndex, d.HasWriteIndex)
+		if _, duplicate := seen[key]; duplicate {
+			return
+		}
+		seen[key] = struct{}{}
+		demands = append(demands, d)
+	}
+
+	for _, target := range wave1AllEntityWriteTargets(source) {
+		if !target.Entity || wave1SpecialClearTarget(target.Field) {
+			continue
+		}
+		_, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(source, target)
+		if err != nil {
+			continue
+		}
+		sourceRef, _ := source.NodeContractSource(target.NodeID)
+		add(SingletonCoordinatorDemand{
+			FlowID: ownerFlowID, SourceFile: sourceRef.File, Location: target.NodeID,
+			NodeID: target.NodeID, EventType: target.EventType, Kind: target.Kind,
+			Field: rootField, Target: target.Target, WriteIndex: target.WriteIndex, HasWriteIndex: target.HasWriteIndex,
+		}, true)
+	}
+
+	for _, ref := range wave1ContainedStateOperations(source) {
+		contract, ok := entityruntime.ResolveForFlow(source, ref.FlowID)
+		if !ok {
+			continue
+		}
+		target, err := entityruntime.ResolveContainedOperationTarget(contract, ref.Write.Target(), string(ref.Write.Operation), !ref.Write.Key.IsZero(), !ref.Write.Index.IsZero())
+		if err != nil {
+			continue
+		}
+		sourceRef, _ := source.NodeContractSource(ref.NodeID)
+		add(SingletonCoordinatorDemand{
+			FlowID: ref.FlowID, SourceFile: sourceRef.File, Location: ref.NodeID,
+			NodeID: ref.NodeID, EventType: ref.EventType, Kind: "contained_operation." + ref.Kind,
+			Field: target.RootField, Target: ref.Write.Target(), Operation: string(ref.Write.Operation),
+			WriteIndex: ref.WriteIndex, HasWriteIndex: true,
+		}, true)
+	}
+
+	for _, nodeID := range sortedNodeIDs(source) {
+		flowID := nodeFlowID(source, nodeID)
+		sourceRef, _ := source.NodeContractSource(nodeID)
+		for eventType, handler := range source.NodeEventHandlers(nodeID) {
+			for _, expr := range handlerEntityExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+				for _, ref := range singletonDemandEntityRefs(source, flows, flowID, expr.Expression) {
+					add(SingletonCoordinatorDemand{
+						FlowID: ref.OwnerFlowID, SourceFile: sourceRef.File, Location: nodeID,
+						NodeID: nodeID, EventType: eventType, Kind: "entity_read." + expr.Kind,
+						Field: ref.Field, Target: "entity." + ref.Ref,
+					}, true)
+				}
+			}
+			appendStructuredSingletonReads(add, source, flows, flowID, nodeID, eventType, sourceRef.File, handler)
+		}
+	}
+
+	for _, plan := range source.WorkflowGates() {
+		flowID := strings.TrimSpace(plan.FlowID)
+		sourceFile := singletonFlowSchemaFile(bundle, flowID)
+		for key, expression := range plan.Context {
+			expr := expressionReference{Kind: "gate context " + strings.TrimSpace(key), Expression: stageGateExpressionText(expression), Phase: runtimepipeline.WorkflowEntityFieldLifecycleGate}
+			for _, ref := range singletonDemandEntityRefs(source, flows, flowID, expr.Expression) {
+				add(SingletonCoordinatorDemand{FlowID: ref.OwnerFlowID, SourceFile: sourceFile, Location: flowID, Kind: "entity_read." + expr.Kind, Field: ref.Field, Target: "entity." + ref.Ref}, true)
+			}
+		}
+	}
+
+	for _, record := range wave1ScopedAgentRecords(bundle) {
+		for entityType, decl := range record.Entry.EntityWrites {
+			contract, ok := wave1ResolveEntityWriteContract(source, record.Source, entityType)
+			if !ok {
+				continue
+			}
+			appendAgentSingletonWriteDemands(add, flows, contract, record, "create", decl.Create)
+			appendAgentSingletonWriteDemands(add, flows, contract, record, "save", decl.Save)
+		}
+	}
+
+	for flowID, schema := range source.FlowSchemaEntries() {
+		if _, singleton := flows[flowID]; !singleton {
+			continue
+		}
+		for _, pin := range schema.Pins.Inputs.EventPins {
+			if pin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
+				continue
+			}
+			add(SingletonCoordinatorDemand{
+				FlowID: flowID, SourceFile: singletonFlowSchemaFile(bundle, flowID), Location: flowID,
+				Kind: "fan_in_input", Target: pin.PinName() + " (" + pin.EventType() + ")",
+			}, false)
+		}
+	}
+
+	sort.Slice(demands, func(i, j int) bool {
+		left, right := demands[i], demands[j]
+		return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", left.FlowID, left.SourceFile, left.NodeID, left.EventType, left.Kind, left.Target, left.WriteIndex) <
+			fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", right.FlowID, right.SourceFile, right.NodeID, right.EventType, right.Kind, right.Target, right.WriteIndex)
+	})
+	return demands
+}
+
+func appendStructuredSingletonReads(add func(SingletonCoordinatorDemand, bool), source semanticview.Source, flows map[string]singletonDemandFlow, flowID, nodeID, eventType, sourceFile string, handler runtimecontracts.SystemNodeEventHandler) {
+	addPath := func(kind, raw string) {
+		raw = strings.TrimSpace(raw)
+		if !strings.HasPrefix(raw, "entity.") {
+			return
+		}
+		refs := singletonDemandEntityRefs(source, flows, flowID, raw)
+		if len(refs) == 0 {
+			return
+		}
+		for _, resolved := range refs {
+			add(SingletonCoordinatorDemand{FlowID: resolved.OwnerFlowID, SourceFile: sourceFile, Location: nodeID, NodeID: nodeID, EventType: eventType, Kind: "entity_read." + kind, Field: resolved.Field, Target: raw}, true)
+		}
+	}
+	addFanOut := func(kind string, spec *runtimecontracts.FanOutSpec) {
+		if spec != nil {
+			addPath(kind+".items_from", spec.ItemsFrom)
+		}
+	}
+	addQuery := func(kind string, query *runtimecontracts.QuerySpec) {}
+	addQuery = func(kind string, query *runtimecontracts.QuerySpec) {
+		if query == nil {
+			return
+		}
+		addPath(kind+".source", query.Source)
+		addPath(kind+".entities", query.Entities)
+		addPath(kind+".group_by", query.GroupBy)
+		for i := range query.Queries {
+			addQuery(fmt.Sprintf("%s.queries[%d]", kind, i), &query.Queries[i])
+		}
+	}
+	addQuery("query", handler.Query)
+	addFanOut("fan_out", handler.FanOut)
+	if handler.Filter != nil {
+		addPath("filter.source", handler.Filter.Source)
+		addPath("filter.items_from", handler.Filter.ItemsFrom)
+	}
+	if handler.GroupBy != nil {
+		addPath("group_by.items_from", handler.GroupBy.ItemsFrom)
+	}
+	if handler.Reduce != nil {
+		addPath("reduce.source", handler.Reduce.Source)
+		addPath("reduce.items_from", handler.Reduce.ItemsFrom)
+	}
+	if handler.Count != nil {
+		addPath("count.source", handler.Count.Source)
+		addPath("count.items_from", handler.Count.ItemsFrom)
+	}
+	for i := range handler.Rules {
+		addFanOut(fmt.Sprintf("rules[%d].fan_out", i), handler.Rules[i].FanOut)
+	}
+	for i := range handler.OnComplete {
+		addFanOut(fmt.Sprintf("on_complete[%d].fan_out", i), handler.OnComplete[i].FanOut)
+	}
+}
+
+func singletonDemandEntityRefs(source semanticview.Source, flows map[string]singletonDemandFlow, flowID, expression string) []wave1ResolvedExpressionRef {
+	refs := runtimepipeline.WorkflowEntityReferences(expression)
+	out := make([]wave1ResolvedExpressionRef, 0, len(refs))
+	for _, ref := range refs {
+		field := runtimepipeline.WorkflowEntityReferenceField(ref)
+		if flow, ok := flows[strings.TrimSpace(flowID)]; ok {
+			if _, typed := flow.fields[field]; typed {
+				out = append(out, wave1ResolvedExpressionRef{Ref: ref, Field: field, OwnerFlowID: strings.TrimSpace(flowID)})
+				continue
+			}
+		}
+		leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, flowID, ref)
+		if err != nil {
+			continue
+		}
+		out = append(out, wave1ResolvedExpressionRef{Ref: ref, Field: field, OwnerFlowID: ownerFlowID, Leaf: leaf})
+	}
+	return out
+}
+
+func appendAgentSingletonWriteDemands(add func(SingletonCoordinatorDemand, bool), flows map[string]singletonDemandFlow, contract wave1EntityContractView, record wave1ScopedAgentRecord, action string, rule runtimecontracts.AgentEntityWriteRule) {
+	fields := append([]string{}, rule.Fields...)
+	if rule.All {
+		for field := range flows[contract.FlowID].fields {
+			fields = append(fields, field)
+		}
+	}
+	for _, field := range fields {
+		root, _, _ := strings.Cut(strings.TrimSpace(field), ".")
+		add(SingletonCoordinatorDemand{
+			FlowID: contract.FlowID, SourceFile: record.Source.File, Location: record.LogicalID,
+			AgentID: record.LogicalID, Kind: "agent_entity_writes." + action,
+			Field: root, Target: strings.TrimSpace(field),
+		}, true)
+	}
+}
+
+func singletonFlowSchemaFile(bundle *runtimecontracts.WorkflowContractBundle, flowID string) string {
+	for _, view := range bundle.FlowViews() {
+		if strings.TrimSpace(view.Paths.ID) == strings.TrimSpace(flowID) {
+			return strings.TrimSpace(view.Paths.SchemaFile)
+		}
+	}
+	return ""
+}

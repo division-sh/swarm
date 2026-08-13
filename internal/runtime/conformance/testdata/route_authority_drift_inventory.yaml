@@ -70,6 +70,7 @@ search_dimensions:
       - internal/runtime/bus/public_input_admission.go
       - internal/runtime/bus/route_plan.go
       - internal/apispec/platform_spec_composition_routing_test.go
+      - internal/runtime/semantic_ownership_guard_test.go
     canonical_layer: route_plan_authority
     classified_paths_required: true
   - id: import_boundary_pin_alias_route_authority
@@ -1231,6 +1232,16 @@ seam_families:
       ownership classification. Those references guard source admission and
       capability lifetime; they do not produce, infer, or replace route
       authority.
+  - id: singleton_semantic_ownership_source_guard
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/semantic_ownership_guard_test.go
+    search_dimensions: [connect_route_plan]
+    notes: >
+      The source boundary guard names the canonical lowered-connect owner only
+      to prevent singleton validation from acquiring route authority. It does
+      not produce, infer, consume, or replace a route plan.
 guardrail_proposals:
   - id: drift_inventory_search_dimension_guard
     implementation_state: implemented_in_this_pr

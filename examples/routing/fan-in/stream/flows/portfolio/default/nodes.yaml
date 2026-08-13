@@ -9,5 +9,9 @@ portfolio-collector:
         from: payload
       data_accumulation:
         writes:
+          - op: set
+            target: entity.reports
+            key: {ref: payload.operating_id}
+            value: {ref: payload}
           - source_field: revenue
             target_field: last_revenue

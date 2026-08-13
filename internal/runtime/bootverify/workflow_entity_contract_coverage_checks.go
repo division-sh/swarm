@@ -13,14 +13,16 @@ import (
 )
 
 type wave1WriteTarget struct {
-	FlowID    string
-	NodeID    string
-	EventType string
-	Kind      string
-	Target    string
-	Field     string
-	Nested    bool
-	Entity    bool
+	FlowID        string
+	NodeID        string
+	EventType     string
+	Kind          string
+	Target        string
+	Field         string
+	Nested        bool
+	Entity        bool
+	WriteIndex    int
+	HasWriteIndex bool
 }
 
 type wave1ScopedAgentRecord struct {
@@ -473,6 +475,7 @@ func wave1ScopedAgentRecords(bundle *runtimecontracts.WorkflowContractBundle) []
 				Source: runtimecontracts.ContractItemSource{
 					PackageKey: strings.TrimSpace(view.Paths.Key),
 					Layer:      "project",
+					File:       strings.TrimSpace(view.Paths.ProjectAgentsFile),
 				},
 			})
 		}
@@ -494,6 +497,7 @@ func wave1ScopedAgentRecords(bundle *runtimecontracts.WorkflowContractBundle) []
 					PackageKey: strings.TrimSpace(view.Paths.PackageKey),
 					FlowID:     strings.TrimSpace(view.Paths.ID),
 					Layer:      "flow",
+					File:       strings.TrimSpace(view.Paths.AgentsFile),
 				},
 			})
 		}
@@ -587,19 +591,22 @@ func wave1AllEntityWriteTargets(source semanticview.Source) []wave1WriteTarget {
 
 func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []wave1WriteTarget {
 	out := make([]wave1WriteTarget, 0)
-	add := func(kind, target string) {
+	addIndexed := func(kind, target string, writeIndex int, hasWriteIndex bool) {
 		write := wave1ParseWriteTarget(flowID, nodeID, eventType, kind, target)
 		if strings.TrimSpace(write.Target) == "" {
 			return
 		}
+		write.WriteIndex = writeIndex
+		write.HasWriteIndex = hasWriteIndex
 		out = append(out, write)
 	}
+	add := func(kind, target string) { addIndexed(kind, target, 0, false) }
 	addRuleTargets := func(scope string, rule runtimecontracts.HandlerRuleEntry) {
-		for _, write := range rule.DataAccumulation.Writes {
+		for writeIndex, write := range rule.DataAccumulation.Writes {
 			if write.IsContainedOperation() {
 				continue
 			}
-			add(scope+".data_accumulation", write.Target())
+			addIndexed(scope+".data_accumulation", write.Target(), writeIndex, true)
 		}
 		if rule.Compute != nil {
 			add(scope+".compute", rule.Compute.StoreAs)
@@ -617,11 +624,11 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 	}
 
 	addQueryTargets("handler", handler.Query)
-	for _, write := range handler.DataAccumulation.Writes {
+	for writeIndex, write := range handler.DataAccumulation.Writes {
 		if write.IsContainedOperation() {
 			continue
 		}
-		add("handler.data_accumulation", write.Target())
+		addIndexed("handler.data_accumulation", write.Target(), writeIndex, true)
 	}
 	if handler.Compute != nil {
 		add("handler.compute", handler.Compute.StoreAs)

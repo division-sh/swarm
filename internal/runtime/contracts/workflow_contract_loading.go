@@ -102,9 +102,11 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 			if err := loadYAMLFile(flow.SchemaFile, &schema); err != nil {
 				return nil, err
 			}
-			if schema.Mode == "" {
-				schema.Mode = strings.TrimSpace(flow.Mode)
+			effectiveMode, err := ResolveEffectiveFlowMode(flow.ID, flow.Mode, schema.Mode)
+			if err != nil {
+				return nil, err
 			}
+			schema.Mode = effectiveMode
 			bundle.FlowSchemas[flow.ID] = schema
 			var flowTypes TypeCatalogDocument
 			if err := loadOptionalYAMLMap(flow.TypesFile, &flowTypes); err != nil {

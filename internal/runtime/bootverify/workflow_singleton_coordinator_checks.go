@@ -30,12 +30,25 @@ func checkSingletonCoordinatorValidation(c *checkerContext) []Finding {
 		if flowID == "" || strings.TrimSpace(schema.Mode) != runtimecontracts.FlowModeSingleton {
 			continue
 		}
-		if _, err := bundle.ResolveFlowSingletonCoordinator(flowID); err != nil {
+		if _, err := bundle.ResolveFlowSingleton(flowID); err != nil {
 			findings = append(findings, Finding{
 				CheckID:  "singleton_coordinator_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s singleton coordinator invalid: %v", flowID, err),
+				Message:  fmt.Sprintf("flow %s singleton cardinality invalid: %v", flowID, err),
 				Location: flowID,
+			})
+		}
+	}
+	for _, demand := range BuildSingletonCoordinatorDemandProjection(c.source) {
+		if demand.Kind == "fan_in_input" || strings.HasPrefix(demand.Kind, "contained_operation.") {
+			continue
+		}
+		if _, err := bundle.ResolveFlowSingletonCoordinator(demand.FlowID); err != nil {
+			findings = append(findings, Finding{
+				CheckID:  "singleton_coordinator_validation",
+				Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("%s requires singleton coordinator state: %v", demand.Detail(), err),
+				Location: firstNonEmptyString(demand.Location, demand.FlowID),
 			})
 		}
 	}

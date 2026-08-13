@@ -57,6 +57,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		"primary_entity",
 		"contained_state",
 		"child_template_flow",
+		"singleton_flow",
 		"singleton_coordinator",
 		"connect",
 		"interface",
@@ -76,7 +77,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	}{
 		{"template_flow_instance", "child/template flow instance", "independent states"},
 		{"contained_state", "typed field/list/map on the primary entity", "just data owned"},
-		{"singleton_coordinator", "singleton coordinator with real shared state or policy", "learns across many instances"},
+		{"singleton_coordinator", "singleton flow with real typed map/list state consumed by exact contract rows", "learns across many instances"},
 		{"promotion_line", "promote it to a child/template flow instance", "routable recipient"},
 	} {
 		decision := mustSequenceMappingByScalarField(t, mustMappingValue(t, rubric, "decisions"), "id", tc.id)
@@ -91,7 +92,8 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		"field = scalar state on the primary entity",
 		"list/map = contained local state on the primary entity",
 		"child/template flow instance = independently addressable lifecycle",
-		"singleton coordinator = shared policy, aggregate state, or cross-instance learning",
+		"singleton flow = one durable instance, including intentionally stateless services",
+		"singleton coordinator = singleton flow whose exact contract consumers use typed map/list state",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, normal, "identity_ladder"), want) {
 			t.Fatalf("flow_instance_authoring.normal_model.identity_ladder missing %q", want)
@@ -155,21 +157,37 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, contained, "rule"), "MUST NOT be addressed through")
 	assertScalarContains(t, mustMappingValue(t, contained, "rule"), "promoted to a child/template")
 
+	effectiveMode := mustMappingValue(t, authoring, "effective_flow_mode_model")
+	assertScalarValue(t, mustMappingValue(t, effectiveMode, "implementation_tracker"), "#2238")
+	assertScalarContains(t, mustMappingValue(t, effectiveMode, "canonical_code_owner"), "ResolveEffectiveFlowMode")
+	assertScalarContains(t, mustMappingValue(t, effectiveMode, "rule"), "MUST agree")
+	assertScalarContains(t, mustMappingValue(t, effectiveMode, "rule"), "before semantic source publication")
+	if !sequenceContainsScalar(mustMappingValue(t, effectiveMode, "non_authoritative_paths"), "raw ProjectFlowRef.Mode after contract loading") {
+		t.Fatal("effective_flow_mode_model must retire raw package mode as behavioral authority")
+	}
+
+	cardinality := mustMappingValue(t, authoring, "singleton_cardinality_model")
+	assertScalarValue(t, mustMappingValue(t, cardinality, "implementation_tracker"), "#2238")
+	assertScalarContains(t, mustMappingValue(t, cardinality, "canonical_code_owner"), "ResolveFlowSingleton")
+	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "cardinality and lifecycle only")
+	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "empty or scalar-only")
+	assertScalarContains(t, mustMappingValue(t, cardinality, "rule"), "does not by itself grant coordinator")
+
 	coordinator := mustMappingValue(t, authoring, "singleton_coordinator_model")
 	assertScalarValue(t, mustMappingValue(t, coordinator, "status"), "merge_bearing_contract_runtime_behavior")
 	assertScalarValue(t, mustMappingValue(t, coordinator, "implementation_tracker"), "#1549")
-	assertScalarValue(t, mustMappingValue(t, coordinator, "declaration_surface"), "mode: singleton")
+	assertScalarValue(t, mustMappingValue(t, coordinator, "refinement_tracker"), "#2238")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "declaration_surface"), "exact typed map/list consumer usage")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "BuildSingletonCoordinatorDemandProjection")
 	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "ResolveFlowSingletonCoordinator")
-	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "checkSingletonCoordinatorValidation")
 	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "applyContainedDataOperation")
-	assertScalarContains(t, mustMappingValue(t, coordinator, "rule"), "shared policy, aggregate state, or cross-instance learning")
-	assertScalarContains(t, mustMappingValue(t, coordinator, "rule"), "Bare `mode: static` is")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "rule"), "derived from exact authored consumers")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "rule"), "Map/list declaration shape without an exact consumer")
 	assertScalarContains(t, mustMappingValue(t, coordinator, "lifecycle_policy"), "archive, roll up, clean up, or promote")
 	assertScalarContains(t, mustMappingValue(t, coordinator, "promotion_rule"), "#1553")
 	for _, want := range []string{
 		"bare mode: static used as singleton/coordinator proof",
-		"mode: singleton declares template instance fields",
-		"singleton flow primary entity lacks typed contained map/list state",
+		"coordinator demand exists but the singleton primary entity lacks typed contained map/list state",
 		"singleton flow contained map/list value or item types do not resolve",
 		"agent conversation/session memory is used as coordinator state authority",
 		"contained map/list items are targeted as route recipients",

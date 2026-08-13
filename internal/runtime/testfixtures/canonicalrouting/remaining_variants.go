@@ -582,7 +582,7 @@ pins:
   outputs: {events: []}
 `,
 		"flows/telegram-ingress/types.yaml": "{}\n", "flows/telegram-ingress/events.yaml": "{}\n", "flows/telegram-ingress/nodes.yaml": "{}\n", "flows/telegram-ingress/tools.yaml": "{}\n", "flows/telegram-ingress/policy.yaml": "{}\n", "flows/telegram-ingress/agents.yaml": "{}\n",
-		"flows/telegram-ingress/entities.yaml": "telegram_service:\n  service_id:\n    type: text\n    initial: standing\n  active_chats:\n    type: map[text]json\n    initial: {}\n",
+		"flows/telegram-ingress/entities.yaml": "telegram_service:\n  service_id:\n    type: text\n    initial: standing\n",
 		"flows/telegram-chat/schema.yaml": `name: telegram-chat
 mode: template
 instance: conversation_reference
@@ -680,17 +680,10 @@ pins:
 `,
 		"flows/memory-singleton/prompts/memory-bot.md": "Remember each singleton ping and answer with observed.\n",
 		"flows/memory-singleton/types.yaml":            "{}\n",
-		"flows/memory-singleton/entities.yaml": `memory_state:
-  last_ping:
-    type: text
-    initial: ""
-  pings:
-    type: map[text]json
-    initial: {}
-`,
-		"flows/memory-singleton/nodes.yaml":  "{}\n",
-		"flows/memory-singleton/tools.yaml":  "{}\n",
-		"flows/memory-singleton/policy.yaml": "{}\n",
+		"flows/memory-singleton/entities.yaml":         "memory_state: {}\n",
+		"flows/memory-singleton/nodes.yaml":            "{}\n",
+		"flows/memory-singleton/tools.yaml":            "{}\n",
+		"flows/memory-singleton/policy.yaml":           "{}\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)

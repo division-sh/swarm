@@ -307,6 +307,84 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 	}
 }
 
+func TestResolveEffectiveFlowMode(t *testing.T) {
+	modes := []string{FlowModeStatic, FlowModeTemplate, FlowModeSingleton}
+	for _, mode := range modes {
+		for _, tc := range []struct {
+			name        string
+			packageMode string
+			schemaMode  string
+		}{
+			{name: "equal", packageMode: mode, schemaMode: mode},
+			{name: "package only", packageMode: mode},
+			{name: "schema only", schemaMode: mode},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				got, err := ResolveEffectiveFlowMode("orders", tc.packageMode, tc.schemaMode)
+				if err != nil {
+					t.Fatalf("ResolveEffectiveFlowMode: %v", err)
+				}
+				if got != mode {
+					t.Fatalf("mode = %q, want %q", got, mode)
+				}
+			})
+		}
+	}
+	for _, packageMode := range modes {
+		for _, schemaMode := range modes {
+			if packageMode == schemaMode {
+				continue
+			}
+			t.Run(packageMode+"_contradicts_"+schemaMode, func(t *testing.T) {
+				_, err := ResolveEffectiveFlowMode("orders", packageMode, schemaMode)
+				if err == nil || !strings.Contains(err.Error(), "package.yaml mode") || !strings.Contains(err.Error(), "schema.yaml mode") {
+					t.Fatalf("ResolveEffectiveFlowMode error = %v, want exact package/schema contradiction", err)
+				}
+			})
+		}
+	}
+}
+
+func TestLoadWorkflowContractBundleRejectsModeContradictionBeforePublication(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+	writeFixtureFile(t, root+"/package.yaml", `
+name: contradictory-mode
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - {id: service, flow: service, mode: singleton}
+`)
+	writeFixtureFile(t, root+"/schema.yaml", "name: contradictory-mode\n")
+	writeFixtureFile(t, root+"/flows/service/schema.yaml", "name: service\nmode: template\n")
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), `package.yaml mode "singleton" contradicts schema.yaml mode "template"`) {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want pre-publication mode contradiction", err)
+	}
+}
+
+func TestWorkflowContractBundleResolveFlowSingleton_AllowsEmptyAndScalarOnlyPrimaryEntity(t *testing.T) {
+	for _, fields := range []map[string]EntityFieldDecl{
+		{},
+		{"status": {Type: "text"}},
+		{"unused": {Type: "map[text]text"}},
+	} {
+		bundle := &WorkflowContractBundle{
+			FlowSchemas: map[string]FlowSchemaDocument{"service": {Mode: FlowModeSingleton}},
+			flowEntities: map[string]EntityContractsDocument{
+				"service": {"service_state": {Fields: fields}},
+			},
+		}
+		resolved, err := bundle.ResolveFlowSingleton("service")
+		if err != nil {
+			t.Fatalf("ResolveFlowSingleton(%#v): %v", fields, err)
+		}
+		if resolved.FlowID != "service" || resolved.PrimaryEntity.EntityType != "service_state" {
+			t.Fatalf("ResolveFlowSingleton = %#v", resolved)
+		}
+	}
+}
+
 func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDeclarations(t *testing.T) {
 	instanceField := mustTemplateInstanceField(t, "vertical_id")
 	tests := []struct {
