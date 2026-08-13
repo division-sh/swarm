@@ -6,15 +6,13 @@ package contracts
 //
 // This is a DISPLAY classification only: the CLI uses it to hide bookkeeping
 // below the fold in default human output (shown under --verbose and always in
-// --json). It does NOT reserve or reject these names at contract admission; a
-// workflow-declared field remains content, full stop. The fail-visible design
-// exists precisely so a forgotten platform key SHOWS UP in default output and
-// is caught by eyes rather than names becoming reserved.
+// --json). It does not reserve or reject names at contract admission.
 //
-// Ownership test (recorded so every future ambiguous key inherits a rule
-// rather than precedent-by-vibes): if runtime machinery writes the key into
-// the entity field surface as platform bookkeeping, it is BOOKKEEPING; if the
-// key names a workflow-declared field, it is CONTENT.
+// entity.get currently combines authored fields and platform bookkeeping in
+// one map, so this key-only classifier cannot distinguish an authored collision
+// from a platform value. Such collisions remain available under --verbose and
+// --json but are hidden from the default Fields section. Issue #2242 owns the
+// API-side separation and removal of this temporary classifier.
 //
 // Current platform injection sites:
 //   - activation, bundle_hash, package_key:       internal/runtime/standing_targets.go
