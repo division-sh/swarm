@@ -371,6 +371,7 @@ typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness
 typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness.go	ReadinessOwner	field:startupCurrent	func(context.Context, string) (bool, error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness.go	registrationStateCurrent	param:credentialsCurrent	func(context.Context, map[string]string) (bool, error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/readiness.go	registrationStateCurrent	param:effectCurrent	func(context.Context, github.com/division-sh/swarm/internal/runtime/effects.Authority) (bool, error)
+typed-process-local	callback-type	typed	internal/runtime/publicingress/registration.go	(*github.com/division-sh/swarm/internal/runtime/publicingress.ProviderRegistrationController).PrepareStartupHandoff	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/publicingress/registration.go	RegistrationControllerOptions	field:Now	func() time.Time
 typed-process-local	callback-type	typed	internal/runtime/publicingress/registration.go	RegistrationControllerOptions	field:StartupAuthority	func() (github.com/division-sh/swarm/internal/runtime/startupownership.Authority, error)
 typed-process-local	callback-type	typed	internal/runtime/pythonmodule/artifact_cache.go	package	value:artifactCacheBaseDir	func() (string, error)
