@@ -952,15 +952,15 @@ contract_formats:
           negative_proof: TestEventDeliveryProjectionCannotPersist
         store.event_record.exact_persistence:
           owner: internal/store/internal/backend/eventrecord Record and backend-private adapters
-          rule: The immutable durable record contains and writes every admitted event-owned fact exactly, with no adapter defaults, inference, classification, or repair.
-          negative_proof: TestEventRecordExactPersistenceParity
+          rule: The immutable durable record contains and writes every admitted event-owned fact exactly, with no adapter defaults, inference, classification, or repair. payload_bytes is the sole authoritative payload fact and preserves the caller-owned admitted bytes; payload is an atomically written derived JSON query projection and never becomes identity, hydration, retry, recovery, replay, or fork evidence.
+          negative_proof: TestEventRecordPayloadByteIdentityParity
         store.event_record.exact_duplicate_identity:
           owner: internal/store event record comparator
-          rule: Every durable field participates in duplicate identity; only an exact record is idempotent and every differing field is an identity conflict.
-          negative_proof: TestEventRecordEveryFieldDuplicateParity
+          rule: Every durable field participates in duplicate identity; payload_bytes is compared byte-for-byte, only an exact record is idempotent, and semantically equal JSON with different whitespace, key order, or numeric lexemes is an identity conflict.
+          negative_proof: TestEventRecordPayloadByteIdentityParity
         store.event_record.canonical_readback:
           owner: internal/store/internal/backend/eventrecord decoder and backend-private bounded hydrators
-          rule: Every complete executable, recoverable, or replayable readback hydrates stable event IDs through one decoder and fails on missing, duplicate, ambiguous-lineage, corrupt, or cancelled input.
+          rule: Every complete executable, recoverable, or replayable readback hydrates stable event IDs through one decoder from payload_bytes, never from the derived payload projection, and fails on missing, duplicate, ambiguous-lineage, corrupt, or cancelled input.
           negative_proof: TestEventRecordBatchHydrationContractParity
         store.event_record.named_operation_atomicity:
           owner: internal/store closed event commit operations
@@ -976,8 +976,8 @@ contract_formats:
           negative_proof: TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity
         store.event_record.selected_backend_parity:
           owner: PostgreSQL and SQLite selected-store event adapters and operations
-          rule: Both selected stores enforce the same construction, DDL, exact-write, duplicate, rollback, bounded-hydration, and canonical-readback contract.
-          negative_proof: TestFreshEventDDLRejectsMalformedStructuralFactsParity
+          rule: Both selected stores enforce the same construction, DDL, exact-write, byte-exact payload duplicate identity, rollback, bounded-hydration, and canonical-readback contract through PostgreSQL BYTEA and translated SQLite BLOB storage.
+          negative_proof: TestEventRecordPayloadByteIdentityParity
       terminal_run_admission:
         owner: internal/runtime/runlifecycle plus private selected-store lifecycle adapters and the selected-store event mutation boundary
         rule: >
@@ -12766,7 +12766,9 @@ platform_tables:
         runtime recovery, admin commands). source_route, target_route, and target_set are the canonical pin-routing
         identities; legacy entity_id and flow_instance are receiver-context projections. idempotency_key for external
         dedup. source_event_id for causal chain tracing. run_id links every event to its execution context for observability
-        and fork/replay. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
+        and fork/replay. payload_bytes is the authoritative exact admitted payload used by identity, hydration,
+        retry, recovery, replay, and fork. payload is an atomically derived JSON query projection only and cannot
+        become execution or duplicate authority. execution_mode is the causal live/mock fact copied from execution authority; downstream cards and readbacks never reconstruct it from provider or backend names.'
       ddl: |
         CREATE TABLE events (
             insertion_sequence          BIGSERIAL PRIMARY KEY,
@@ -12779,6 +12781,7 @@ platform_tables:
             flow_instance               TEXT CHECK (flow_instance IS NULL OR flow_instance = TRIM(flow_instance)),
             scope                       TEXT NOT NULL CHECK (scope IN ('entity', 'flow', 'global')),
             payload                     JSONB NOT NULL,
+            payload_bytes               BYTEA NOT NULL,
             execution_mode              TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             chain_depth                 INTEGER NOT NULL CHECK (chain_depth >= 0),
             produced_by                 TEXT NOT NULL CHECK (produced_by = TRIM(produced_by) AND NULLIF(produced_by, '') IS NOT NULL),
@@ -12889,7 +12892,9 @@ platform_tables:
       description: >-
         Append-only, closed-registry projection of the twelve source fact families consumed by supported
         PostgreSQL fork planning. This table is not a general temporal database and has no trigger,
-        migration, compatibility, or arbitrary-history API.
+        migration, compatibility, or arbitrary-history API. The events family stores payload_base64 derived
+        from events.payload_bytes so historical revision hydration reconstructs the exact admitted payload
+        bytes; the derived events.payload JSON projection is not revision or replay evidence.
       ddl: |
         CREATE TABLE run_fork_fact_revisions (
             run_id    UUID NOT NULL,

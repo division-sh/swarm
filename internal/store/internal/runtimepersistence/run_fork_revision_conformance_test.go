@@ -1,8 +1,10 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -47,6 +49,62 @@ func TestRunForkRevisionRegistryIsClosed(t *testing.T) {
 	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("run-fork revision registry = %q, want exact 12-family registry %q", got, want)
+	}
+}
+
+func TestRunForkRevisionCapturePreservesExactEventPayloadBytes(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	payload := []byte("{\n  \"numeric\": 1.0, \"ordered\": [2, 1]\n}")
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	event := semanticEventRecordFixture(
+		eventID, runID, "revision.payload_bytes", eventtest.Producer(events.EventProducerPlatform, "revision-test"),
+		payload, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+	revision, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyEvents)
+	if err != nil {
+		t.Fatalf("capture revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit revision: %v", err)
+	}
+
+	var fact []byte
+	if err := db.QueryRowContext(ctx, `
+		SELECT fact
+		FROM run_fork_fact_revisions
+		WHERE run_id = $1::uuid AND revision = $2 AND family = 'events' AND fact_key = $3 AND present
+	`, runID, revision, eventID).Scan(&fact); err != nil {
+		t.Fatalf("load revision fact: %v", err)
+	}
+	var projection map[string]json.RawMessage
+	if err := json.Unmarshal(fact, &projection); err != nil {
+		t.Fatalf("decode revision fact: %v", err)
+	}
+	if _, exists := projection["payload"]; exists {
+		t.Fatal("revision fact retained normalized payload as a second authority")
+	}
+	var encoded string
+	if err := json.Unmarshal(projection["payload_base64"], &encoded); err != nil {
+		t.Fatalf("decode payload_base64: %v", err)
+	}
+	restored, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode revision payload bytes: %v", err)
+	}
+	if !bytes.Equal(restored, payload) {
+		t.Fatalf("revision payload = %q, want %q", restored, payload)
 	}
 }
 

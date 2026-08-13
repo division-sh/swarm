@@ -61,7 +61,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestJSON)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestJSON), requestJSON); err != nil {
 		t.Fatal(err)
 	}
 	resultPayload, _ := json.Marshal(map[string]any{
@@ -175,7 +175,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(payload)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(payload), payload); err != nil {
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -253,7 +253,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestPayload)); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestPayload), requestPayload); err != nil {
 		t.Fatal(err)
 	}
 	failureEnvelope, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(

@@ -1,8 +1,7 @@
 package events
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/base64"
 	"fmt"
 	"strings"
 )
@@ -291,12 +290,6 @@ func IntegrityProjection(event Event) (any, error) {
 	if err := ValidateEventContract(event); err != nil {
 		return nil, err
 	}
-	var payload any
-	decoder := json.NewDecoder(bytes.NewReader(event.Payload()))
-	decoder.UseNumber()
-	if err := decoder.Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode event payload for integrity: %w", err)
-	}
 	type routeProjection struct {
 		FlowID       string `json:"flow_id,omitempty"`
 		FlowInstance string `json:"flow_instance,omitempty"`
@@ -320,7 +313,7 @@ func IntegrityProjection(event Event) (any, error) {
 		ProducerType  EventProducerType   `json:"producer_type"`
 		ProducerID    string              `json:"producer_id"`
 		TaskID        string              `json:"task_id"`
-		Payload       any                 `json:"payload"`
+		PayloadBase64 string              `json:"payload_base64"`
 		ChainDepth    int                 `json:"chain_depth"`
 		RunID         string              `json:"run_id"`
 		ParentEventID string              `json:"parent_event_id"`
@@ -348,7 +341,7 @@ func IntegrityProjection(event Event) (any, error) {
 		} `json:"selected_fork,omitempty"`
 	}{
 		Class: event.AdmissionClass(), ID: event.ID(), Type: event.Type(), ProducerType: event.ProducerType(),
-		ProducerID: event.SourceAgent(), TaskID: event.TaskID(), Payload: payload, ChainDepth: event.ChainDepth(),
+		ProducerID: event.SourceAgent(), TaskID: event.TaskID(), PayloadBase64: base64.StdEncoding.EncodeToString(event.Payload()), ChainDepth: event.ChainDepth(),
 		RunID: event.RunID(), ParentEventID: event.ParentEventID(), ExecutionMode: string(event.ExecutionMode()),
 	}
 	if !event.CreatedAt().IsZero() {

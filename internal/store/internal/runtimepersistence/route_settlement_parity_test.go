@@ -1,10 +1,12 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +30,9 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			payload := json.RawMessage("{\n  \"directive\": \"continue\", \"attempt\": 1.0\n}")
 			event := eventtest.DiagnosticDirect(
-				uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", json.RawMessage(`{"directive":"continue"}`),
+				uuid.NewString(), events.EventTypePlatformAgentDirective, "runtime", "", payload,
 				0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
 			)
 			admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
@@ -44,8 +47,24 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 				switch selected := store.(type) {
 				case *PostgresStore:
 					_, err = selected.eventPostgresOwner.CommitDirectiveEventTx(txctx, tx, story, admitted)
+					if err == nil {
+						var restored events.AdmittedEvent
+						var found bool
+						restored, found, err = selected.eventPostgresOwner.LoadDirectiveEventTx(txctx, tx, event.ID())
+						if err == nil && (!found || !bytes.Equal(restored.Event().Payload(), payload)) {
+							return fmt.Errorf("postgres directive payload = %q found=%v, want %q", restored.Event().Payload(), found, payload)
+						}
+					}
 				case *SQLiteRuntimeStore:
 					_, err = selected.eventSQLiteOwner.CommitDirectiveEventTx(txctx, tx, story, admitted)
+					if err == nil {
+						var restored events.AdmittedEvent
+						var found bool
+						restored, found, err = selected.eventSQLiteOwner.LoadDirectiveEventTx(txctx, tx, event.ID())
+						if err == nil && (!found || !bytes.Equal(restored.Event().Payload(), payload)) {
+							return fmt.Errorf("sqlite directive payload = %q found=%v, want %q", restored.Event().Payload(), found, payload)
+						}
+					}
 				}
 				return err
 			}

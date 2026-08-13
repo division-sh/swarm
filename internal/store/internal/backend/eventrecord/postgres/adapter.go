@@ -73,18 +73,18 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 	}
 	result, err := exec.ExecContext(ctx, `
 		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload,
+			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 			route_settlement, operator_reference_event_id
 		) VALUES (
-			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb,
-			$10, $11, $12, $13, NULLIF($14,'')::uuid, $15,
-			$16, NULLIF($17,''), $18::jsonb, $19::jsonb, $20::jsonb,
-			$21::jsonb, NULLIF($22,'')::uuid
+			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
+			$11, $12, $13, $14, NULLIF($15,'')::uuid, $16,
+			$17, NULLIF($18,''), $19::jsonb, $20::jsonb, $21::jsonb,
+			$22::jsonb, NULLIF($23,'')::uuid
 		) ON CONFLICT (event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.ExecutionMode,
+		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
 		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID)
@@ -116,7 +116,7 @@ const selectRecord = `
 	SELECT
 		e.event_class, e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name,
 		COALESCE(e.task_id, ''), COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''),
-		e.scope, e.payload, e.execution_mode, e.chain_depth, e.produced_by, e.produced_by_type,
+		e.scope, e.payload_bytes, e.execution_mode, e.chain_depth, e.produced_by, e.produced_by_type,
 		COALESCE(e.source_event_id::text, ''), e.created_at, e.routing_source_kind,
 		COALESCE(e.routing_source_authority, ''), e.source_route, e.target_route, e.target_set, e.route_settlement,
 		COALESCE(e.operator_reference_event_id::text, ''),

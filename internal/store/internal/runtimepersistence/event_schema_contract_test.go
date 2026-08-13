@@ -298,28 +298,32 @@ func rejectUnsafeEventRow(t *testing.T, ctx context.Context, fixture authorActiv
 }
 
 func unsafeEventInsert(row unsafeEventRow) (string, string, []any) {
+	payloadBytes := row.payload
+	if value, ok := row.payload.(string); ok {
+		payloadBytes = []byte(value)
+	}
 	args := []any{
-		row.class, row.eventID, row.runID, row.eventName, row.taskID, row.entityID, row.flowInstance, row.scope, row.payload,
+		row.class, row.eventID, row.runID, row.eventName, row.taskID, row.entityID, row.flowInstance, row.scope, row.payload, payloadBytes,
 		row.executionMode, row.chainDepth, row.producedBy, row.producedByType, row.sourceEventID, row.createdAt,
 		row.routingSourceKind, row.routingSourceAuthority, row.sourceRoute, row.targetRoute, row.targetSet, row.operatorReferenceEventID,
 		unsafeEventRouteSettlement(row),
 	}
 	return `
 		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload,
+			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 				operator_reference_event_id, route_settlement
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, `
 		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload,
+			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 				operator_reference_event_id, route_settlement
 			) VALUES (
-				$1, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9::jsonb, $10, $11, $12, $13,
-				$14::uuid, $15, $16, $17, $18::jsonb, $19::jsonb, $20::jsonb, $21::uuid, $22::jsonb
+				$1, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7, $8, $9::jsonb, $10::bytea, $11, $12, $13, $14,
+				$15::uuid, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb, $22::uuid, $23::jsonb
 			)
 		`, args
 }

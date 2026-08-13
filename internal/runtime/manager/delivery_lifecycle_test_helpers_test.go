@@ -53,6 +53,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			flow_instance TEXT,
 			scope TEXT NOT NULL,
 			payload BLOB NOT NULL,
+			payload_bytes BLOB NOT NULL,
 			execution_mode TEXT NOT NULL,
 			chain_depth INTEGER NOT NULL,
 			produced_by TEXT NOT NULL,

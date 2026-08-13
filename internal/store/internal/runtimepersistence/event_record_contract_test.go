@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -34,6 +35,10 @@ type eventRecordContractStore interface {
 
 type eventDeliveryRouteReadbackStore interface {
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
+}
+
+type preparedPublishEventReadbackStore interface {
+	LoadPreparedPublishEvent(context.Context, string) (runtimebus.PreparedPublishEvent, bool, error)
 }
 
 func TestEventRecordExactPersistenceParity(t *testing.T) {
@@ -111,6 +116,32 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			}
 			assertExactEventRecord(t, ctx, fixture, selected)
 			assertExactEventRecord(t, ctx, fixture, root)
+		})
+	}
+}
+
+func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			store := fixture.store.(eventRecordContractStore)
+			ctx := testAuthorActivityContext()
+			payload := []byte("{\n  \"numeric\": 1.0, \"first\": true\n}")
+			event := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), "outbox.payload_bytes", "gateway", "", payload, 0,
+				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC),
+			)
+			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
+				t.Fatalf("commit event: %v", err)
+			}
+
+			prepared, found, err := fixture.store.(preparedPublishEventReadbackStore).LoadPreparedPublishEvent(ctx, event.ID())
+			if err != nil || !found {
+				t.Fatalf("LoadPreparedPublishEvent = found:%v err:%v", found, err)
+			}
+			if got := prepared.Event.Event().Payload(); !bytes.Equal(got, payload) {
+				t.Fatalf("prepared payload = %q, want %q", got, payload)
+			}
 		})
 	}
 }
@@ -334,6 +365,54 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 	}
 }
 
+func TestEventRecordPayloadByteIdentityParity(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name               string
+				original, conflict []byte
+			}{
+				{name: "whitespace", original: []byte(`{"value":1}`), conflict: []byte(`{ "value": 1 }`)},
+				{name: "key_order", original: []byte(`{"a":1,"b":2}`), conflict: []byte(`{"b":2,"a":1}`)},
+				{name: "numeric_lexeme", original: []byte(`{"value":1}`), conflict: []byte(`{"value":1.0}`)},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					fixture := backend.open(t)
+					store := fixture.store.(semanticEventFixtureStore)
+					ctx := testAuthorActivityContext()
+					now := time.Date(2026, 8, 13, 18, 0, 0, 0, time.UTC)
+					event := eventtest.RunCreatingRootIngress(
+						uuid.NewString(), "payload.bytes", "gateway", "", tc.original, 0,
+						uuid.NewString(), "", events.EventEnvelope{}, now,
+					)
+					outcome, err := commitSemanticEventFixtureOutcome(ctx, store, event, nil, "direct")
+					if err != nil || outcome != runtimebus.EventAppendInserted {
+						t.Fatalf("initial commit: outcome=%v err=%v", outcome, err)
+					}
+					record, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
+					if err != nil || !found {
+						t.Fatalf("load exact record: found=%v err=%v", found, err)
+					}
+					if !bytes.Equal(record.Payload, tc.original) {
+						t.Fatalf("payload bytes = %q, want %q", record.Payload, tc.original)
+					}
+					outcome, err = commitSemanticEventFixtureOutcome(ctx, store, event, nil, "direct")
+					if err != nil || outcome != runtimebus.EventAppendExactDuplicate {
+						t.Fatalf("exact duplicate: outcome=%v err=%v", outcome, err)
+					}
+					conflict := eventtest.RunCreatingRootIngress(
+						event.ID(), event.Type(), event.SourceAgent(), event.TaskID(), tc.conflict, event.ChainDepth(),
+						event.RunID(), "", event.NormalizedEnvelope(), event.CreatedAt(),
+					)
+					if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {
+						t.Fatalf("byte-distinct semantic duplicate error = %v, want identity conflict", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -354,19 +433,22 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			runID := uuid.NewString()
 			createdAt := time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC)
 			ids := make([]string, batchSize*2+3)
+			payloads := make(map[string][]byte, len(ids))
 			for index := range ids {
 				ids[index] = uuid.NewString()
 				eventAt := createdAt.Add(time.Duration(index) * time.Microsecond)
+				payload := []byte(fmt.Sprintf("{\n  \"index\" : %d.0\n}", index))
+				payloads[ids[index]] = payload
 				var event events.Event
 				if index == 0 {
 					event = eventtest.RunCreatingRootIngress(
 						ids[index], "batch.contract", "gateway", fmt.Sprintf("task-%d", index),
-						[]byte(fmt.Sprintf(`{"index":%d}`, index)), 0, runID, "", events.EventEnvelope{}, eventAt,
+						payload, 0, runID, "", events.EventEnvelope{}, eventAt,
 					)
 				} else {
 					event = eventtest.ExistingRunRootIngress(
 						ids[index], "batch.contract", "gateway", fmt.Sprintf("task-%d", index),
-						[]byte(fmt.Sprintf(`{"index":%d}`, index)), 0, runID, events.EventEnvelope{}, eventAt,
+						payload, 0, runID, events.EventEnvelope{}, eventAt,
 					)
 				}
 				if err := commitSemanticEventFixture(ctx, store, event); err != nil {
@@ -398,6 +480,9 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 					for index := range requested {
 						if records[index].EventID != requested[index] {
 							t.Fatalf("record %d = %s, want %s", index, records[index].EventID, requested[index])
+						}
+						if !bytes.Equal(records[index].Payload, payloads[requested[index]]) {
+							t.Fatalf("record %s payload = %q, want %q", requested[index], records[index].Payload, payloads[requested[index]])
 						}
 					}
 				})

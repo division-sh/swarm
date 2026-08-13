@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -298,7 +299,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				), "mock")
 				original := eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
-					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
+					json.RawMessage("{\n  \"topic\": \"medicine\", \"score\": 1.0, \"task_id\": \"payload-owned-task\"\n}"), 4, runID, parentID, envelope, createdAt,
 				), "mock")
 				originalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity, Target: events.MustExistingEntityTarget(deliveryTarget)}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
@@ -771,18 +772,11 @@ func countOperatorReplayEvents(t *testing.T, ctx context.Context, db *sql.DB) in
 
 func assertOperatorReplaySnapshot(t *testing.T, got, want events.Event) {
 	t.Helper()
-	var gotPayload, wantPayload any
-	if err := json.Unmarshal(got.Payload(), &gotPayload); err != nil {
-		t.Fatalf("decode replay payload: %v", err)
-	}
-	if err := json.Unmarshal(want.Payload(), &wantPayload); err != nil {
-		t.Fatalf("decode expected replay payload: %v", err)
-	}
 	if got.ID() != want.ID() || got.Type() != want.Type() || !got.Producer().Equal(want.Producer()) ||
 		got.TaskID() != want.TaskID() || got.ChainDepth() != want.ChainDepth() || got.RunID() != want.RunID() ||
 		got.ParentEventID() != want.ParentEventID() || got.ExecutionMode() != want.ExecutionMode() ||
 		!got.CreatedAt().Truncate(time.Microsecond).Equal(want.CreatedAt().Truncate(time.Microsecond)) ||
-		!reflect.DeepEqual(gotPayload, wantPayload) || !reflect.DeepEqual(got.Envelope(), want.Envelope()) {
+		!bytes.Equal(got.Payload(), want.Payload()) || !reflect.DeepEqual(got.Envelope(), want.Envelope()) {
 		t.Fatalf("complete operator replay snapshot changed\n got: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v\nwant: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s at=%s payload=%s envelope=%#v",
 			got.ID(), got.Type(), got.ProducerType(), got.SourceAgent(), got.TaskID(), got.ChainDepth(), got.RunID(), got.ParentEventID(), got.ExecutionMode(), got.CreatedAt(), got.Payload(), got.Envelope(),
 			want.ID(), want.Type(), want.ProducerType(), want.SourceAgent(), want.TaskID(), want.ChainDepth(), want.RunID(), want.ParentEventID(), want.ExecutionMode(), want.CreatedAt(), want.Payload(), want.Envelope())

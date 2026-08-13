@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -281,9 +282,9 @@ type deadLetterAuthorActivitySource struct {
 }
 
 func loadDeadLetterAuthorActivitySource(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) (deadLetterAuthorActivitySource, error) {
-	query := `SELECT COALESCE(CAST(e.run_id AS TEXT), ''), COALESCE(CAST(e.entity_id AS TEXT), ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''), e.event_name, e.payload, e.chain_depth FROM events e LEFT JOIN runs r ON r.run_id = e.run_id WHERE e.event_id = ?`
+	query := `SELECT COALESCE(CAST(e.run_id AS TEXT), ''), COALESCE(CAST(e.entity_id AS TEXT), ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''), e.event_name, e.payload_bytes, e.chain_depth FROM events e LEFT JOIN runs r ON r.run_id = e.run_id WHERE e.event_id = ?`
 	if postgres {
-		query = `SELECT COALESCE(e.run_id::text, ''), COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''), e.event_name, e.payload::text, e.chain_depth FROM events e LEFT JOIN runs r ON r.run_id = e.run_id WHERE e.event_id = $1::uuid`
+		query = `SELECT COALESCE(e.run_id::text, ''), COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(r.bundle_hash, ''), e.event_name, e.payload_bytes, e.chain_depth FROM events e LEFT JOIN runs r ON r.run_id = e.run_id WHERE e.event_id = $1::uuid`
 	}
 	var source deadLetterAuthorActivitySource
 	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(eventID)).Scan(&source.RunID, &source.EntityID, &source.FlowID, &source.BundleHash, &source.EventType, &source.Payload, &source.ChainDepth); err != nil {
@@ -306,7 +307,7 @@ func validateDeadLetterSource(rec runtimedeadletters.Record, source deadLetterAu
 	if rec.EntityID != strings.TrimSpace(source.EntityID) {
 		conflicts = append(conflicts, "entity_id")
 	}
-	if !canonicalJSONEqual(rec.OriginalPayload, source.Payload) {
+	if !bytes.Equal(rec.OriginalPayload, source.Payload) {
 		conflicts = append(conflicts, "original_payload")
 	}
 	if rec.ChainDepth != source.ChainDepth {

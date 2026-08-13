@@ -80,14 +80,14 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 	}
 	result, err := exec.ExecContext(ctx, `
 		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload,
+			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
 			route_settlement, operator_reference_event_id
-		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''))
+		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''))
 		ON CONFLICT(event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.ExecutionMode,
+		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
 		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID)
@@ -104,7 +104,7 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 const selectRecord = `
 	SELECT
 		e.event_class, e.event_id, COALESCE(e.run_id, ''), e.event_name, COALESCE(e.task_id, ''),
-		COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), e.scope, e.payload, e.execution_mode,
+		COALESCE(e.entity_id, ''), COALESCE(e.flow_instance, ''), e.scope, e.payload_bytes, e.execution_mode,
 		e.chain_depth, e.produced_by, e.produced_by_type, COALESCE(e.source_event_id, ''), e.created_at,
 		e.routing_source_kind, COALESCE(e.routing_source_authority, ''), e.source_route, e.target_route,
 		e.target_set, e.route_settlement, COALESCE(e.operator_reference_event_id, ''),

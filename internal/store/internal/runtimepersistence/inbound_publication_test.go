@@ -570,10 +570,10 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 				`UPDATE inbound_publication_events SET pack_id = '' WHERE publication_id = $1::uuid AND ordinal = 1`,
 				`UPDATE inbound_publication_events SET pack_id = '' WHERE publication_id = ? AND ordinal = 1`, request.PublicationID)
 		}},
-		{name: "evidence payload mismatch", mutate: func(t *testing.T, request runtimeinbound.Request) {
+		{name: "evidence payload byte mismatch", mutate: func(t *testing.T, request runtimeinbound.Request) {
 			execInboundPublicationProofSQL(t, db, sqlite,
-				`UPDATE events SET payload = '{}'::jsonb WHERE event_id = $1::uuid`,
-				`UPDATE events SET payload = '{}' WHERE event_id = ?`, request.MarkerEventID)
+				`UPDATE events SET payload_bytes = convert_to(' ' || convert_from(payload_bytes, 'UTF8'), 'UTF8') WHERE event_id = (SELECT event_id FROM inbound_publication_events WHERE publication_id = $1::uuid AND ordinal = 1)`,
+				`UPDATE events SET payload_bytes = CAST(' ' || CAST(payload_bytes AS TEXT) AS BLOB) WHERE event_id = (SELECT event_id FROM inbound_publication_events WHERE publication_id = ? AND ordinal = 1)`, request.PublicationID)
 		}},
 		{name: "replay scope missing", mutate: func(t *testing.T, request runtimeinbound.Request) {
 			rawID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
