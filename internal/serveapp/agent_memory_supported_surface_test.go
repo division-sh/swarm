@@ -239,11 +239,11 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	recorder.waitForCount(t, 5)
 	waitForStandingMemoryCompletion(t, backend, storeLocation, 3)
+	before := loadStandingMemorySessions(t, backend, storeLocation)
+	requireStandingMemorySessionShape(t, before)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
-	before := loadStandingMemorySessions(t, backend, storeLocation)
-	requireStandingMemorySessionShape(t, before)
 
 	if prepareRestart != nil {
 		prepareRestart()
