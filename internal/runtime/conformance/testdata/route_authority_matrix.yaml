@@ -58,6 +58,9 @@ rows:
       - {kind: pr, pr: 1348}
       - {kind: go_test, name: TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly}
       - {kind: go_test, name: TestRouteTableRootInputFlowNodeResolvesRootInputRoute}
+      - {kind: go_test, name: TestAPIEventPublicationRouteIntentProducerIsClosedTypedRole}
+      - {kind: go_test, name: TestDeliveryPlanner_LiveCarrierDoesNotAuthorizeNoTargetScopedRoutedNode}
+      - {kind: go_test, name: TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforePersistence}
     notes: >
       Closed #1343 owns the runtime model row. Consumers must cite RoutePlan or
       persisted event_deliveries, not reconstruct recipient authority locally.

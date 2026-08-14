@@ -1152,6 +1152,35 @@ func TestDeliveryPlanner_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsClosed(
 	}
 }
 
+func TestDeliveryPlanner_LiveCarrierDoesNotAuthorizeNoTargetScopedRoutedNode(t *testing.T) {
+	planner := newDeliveryPlannerWithHandlers(t,
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient("child-intake"), Path: "child",
+					MatchPattern: "child/child.start",
+					routeSource:  subscriberRouteSourceSubscription,
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "child-intake", PersistAsDelivery: false}}
+			},
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
+				return nil
+			},
+		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "child-owner", FlowInstance: "child", EntityID: "ent-child-owner",
+		}),
+	)
+
+	if _, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-child"), time.Time{})); err == nil || !strings.Contains(err.Error(), "without exact same-instance, explicit-target, or compiled-connect authority") {
+		t.Fatalf("Plan error = %v, want live carrier to remain non-authoritative", err)
+	}
+}
+
 func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *testing.T) {
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
