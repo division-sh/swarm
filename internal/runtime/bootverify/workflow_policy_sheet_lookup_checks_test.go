@@ -52,6 +52,17 @@ func TestPolicySheetLookupValueRowsRejectsDeadBinding(t *testing.T) {
 	}
 }
 
+func TestPolicySheetLookupValueRowsRejectsOwnLookupKeyAsConsumer(t *testing.T) {
+	handler := bootverifyLookupHandler(true, false)
+	handler.Rules[0].Compute.Lookup.On = []string{"computed.template_path"}
+	handler.Rules[0].Compute.Lookup.OnPaths = []paths.Path{paths.Parse("computed.template_path")}
+
+	findings := bootverifyLookupFindings(handler)
+	if !bootverifyLookupFindingContains(findings, "is not consumed") {
+		t.Fatalf("lookup findings = %#v, want own lookup key excluded from downstream consumers", findings)
+	}
+}
+
 func TestPolicySheetLookupValueRowsTypeChecksPayloadKeys(t *testing.T) {
 	handler := bootverifyLookupHandler(true, true)
 	handler.Rules[0].Compute.Lookup.Entries[0].Key[1] = runtimecontracts.ComputeLookupLiteral{

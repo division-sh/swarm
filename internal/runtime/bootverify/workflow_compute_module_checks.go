@@ -117,7 +117,7 @@ func validateComputeModuleValueRow(ctx context.Context, source semanticview.Sour
 			}
 		}
 	}
-	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, storeAs) {
+	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, ref.RuleIndex, storeAs) {
 		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", storeAs)))
 	}
 	return findings

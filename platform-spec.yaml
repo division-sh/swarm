@@ -10815,7 +10815,8 @@ flow_model:
         derived from exact authored consumers of typed map/list state. Fan-in
         input rows, contained operations, direct entity writers, agent write
         authorization, recognized entity expressions, joins, and structured
-        readers such as fan_out.items_from create demand. Every effective join
+        readers, including accumulate.from/window/dedup_by and
+        fan_out.items_from, create demand. Every effective join
         creates intrinsic coordinator demand even when its membership paths are
         payload-backed. Executable readers are projected by one explicit closed
         handler/rule field census shared by demand, entity-reader coverage, and

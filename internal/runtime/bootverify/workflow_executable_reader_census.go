@@ -72,6 +72,7 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Accumulate": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		if handler.Accumulate != nil {
 			appendExecutableReader(out, "accumulate.from", handler.Accumulate.From, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
+			appendExecutableReader(out, "accumulate.window", handler.Accumulate.Window, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
 			appendExecutableReader(out, "accumulate.dedup_by", handler.Accumulate.DedupBy, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
 		}
 	},
@@ -284,7 +285,14 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 		}
 		before := len(*out)
 		for _, field := range sortedExecutableReaderFields(handlerRuleEntryExecutableReaderCensus) {
+			fieldBefore := len(*out)
 			handlerRuleEntryExecutableReaderCensus[field](out, ctx, prefix, rule)
+			for index := fieldBefore; index < len(*out); index++ {
+				(*out)[index].RuleCollection = kind
+				(*out)[index].RuleField = field
+				(*out)[index].RuleIndex = i
+				(*out)[index].HasRuleIndex = true
+			}
 		}
 		if strings.Contains(kind, "on_complete") {
 			for index := before; index < len(*out); index++ {
