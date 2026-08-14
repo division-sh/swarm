@@ -384,7 +384,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 						Locks:              pg,
 						ContainerInventory: emptyBundleDeleteContainerInventory{},
 						Containers:         noopBundleDeleteContainers{},
-						RuntimeQuiescer:    runtimeContexts,
+						RuntimeQuiescer:    testBundleRuntimeQuiescer{manager: runtimeContexts},
 						Now:                func() time.Time { return time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC) },
 					},
 				}),
@@ -499,4 +499,15 @@ func (noopBundleDeleteContainers) Apply(_ context.Context, req destructivereset.
 		AppliedAt:     req.RequestedAt,
 		Selected:      req.Result.Plan.EntityContainers,
 	}, nil
+}
+
+type testBundleRuntimeQuiescer struct {
+	manager *swruntime.RuntimeContextManager
+}
+
+func (q testBundleRuntimeQuiescer) QuiesceBundleRuntime(ctx context.Context, bundleHash string) (bundledelete.RuntimeQuiescence, error) {
+	if _, err := q.manager.BeginBundleRuntimeQuiescence(ctx, bundleHash); err != nil {
+		return nil, err
+	}
+	return noopBundleRuntimeQuiescence{}, nil
 }

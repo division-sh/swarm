@@ -118,6 +118,7 @@ type ProcessCapability interface {
 	RestoreSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	RemoveBundleSource(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	ApplyBundleDeleteFinalMutation(context.Context, runtimebundledelete.FinalMutationRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimebundledelete.FinalMutationResult, error)
+	ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error)
 	ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error)
 	ApplyDestructiveResetTopology(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	Release(context.Context) error
@@ -274,6 +275,22 @@ func (p *processCapability) ApplyBundleDeleteFinalMutation(ctx context.Context, 
 		return runtimebundledelete.FinalMutationResult{}, err
 	}
 	result, err := p.session.ApplyBundleDeleteFinalMutation(ctx, req, topology)
+	if err != nil {
+		p.retireOnPossessionFailure(err)
+	}
+	return result, err
+}
+
+func (p *processCapability) ReplayBundleDeleteResult(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
+	if p == nil {
+		return runtimebundledelete.Result{}, errors.New("process startup/topology capability is missing")
+	}
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	if err := p.proveCurrent(ctx); err != nil {
+		return runtimebundledelete.Result{}, err
+	}
+	result, err := p.session.ReplayBundleDeleteResult(ctx, req)
 	if err != nil {
 		p.retireOnPossessionFailure(err)
 	}

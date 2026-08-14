@@ -1591,6 +1591,16 @@ func (m *RuntimeContextManager) ValidateReplacement(existingHash string, context
 	return m.validateReplacementLocked(strings.TrimSpace(existingHash), contextDef)
 }
 
+// BeginBundleRuntimeQuiescence withdraws one exact loaded context while
+// retaining the predecessor definition and runtime needed for restoration if
+// the caller's durable operation does not commit.
+func (m *RuntimeContextManager) BeginBundleRuntimeQuiescence(ctx context.Context, bundleHash string) (BundleContext, error) {
+	if m == nil {
+		return BundleContext{}, errors.New("runtime context manager is required")
+	}
+	return m.beginBundleHashReplacement(ctx, strings.TrimSpace(bundleHash), BundleContext{}, true)
+}
+
 // BeginBundleHashReplacement atomically withdraws the predecessor context
 // after validating the candidate. The caller must publish either a started
 // candidate or a freshly restored predecessor before the context is loaded
@@ -1603,14 +1613,31 @@ func (m *RuntimeContextManager) BeginBundleHashReplacement(ctx context.Context, 
 	if err != nil {
 		return BundleContext{}, err
 	}
-	existingHash = strings.TrimSpace(existingHash)
+	return m.beginBundleHashReplacement(ctx, strings.TrimSpace(existingHash), contextDef, false)
+}
+
+func (m *RuntimeContextManager) beginBundleHashReplacement(ctx context.Context, existingHash string, contextDef BundleContext, retainRuntime bool) (BundleContext, error) {
 	m.mu.Lock()
+	if retainRuntime {
+		entry := m.contexts[existingHash]
+		if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
+			m.mu.Unlock()
+			return BundleContext{}, fmt.Errorf("loaded runtime context %s is required for quiescence", existingHash)
+		}
+		contextDef = *entry.context
+		contextDef.Runtime = entry.runtime
+		contextDef.WorkOwner = entry.workOwner
+	}
 	if err := m.validateReplacementLocked(existingHash, contextDef); err != nil {
 		m.mu.Unlock()
 		return BundleContext{}, err
 	}
 	entry := m.contexts[existingHash]
 	predecessor := *entry.context
+	if retainRuntime {
+		predecessor.Runtime = entry.runtime
+		predecessor.WorkOwner = entry.workOwner
+	}
 	standing := make([]standingOccurrenceTransition, 0, len(entry.standing))
 	for _, occurrence := range entry.standing {
 		if err := occurrence.Fence(); err != nil {
@@ -2603,14 +2630,6 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 		entry.shutdownComplete = true
 	}
 	return result
-}
-
-func (m *RuntimeContextManager) QuiesceBundleRuntime(_ context.Context, bundleHash string) error {
-	result := m.DeactivateBundleHash(bundleHash, RuntimeContextCauseUnloaded)
-	if result.ShutdownErr != nil {
-		return fmt.Errorf("shutdown runtime context for bundle %s: %w", strings.TrimSpace(bundleHash), result.ShutdownErr)
-	}
-	return nil
 }
 
 func (m *RuntimeContextManager) QuiesceAllRuntimeContexts(_ context.Context) error {

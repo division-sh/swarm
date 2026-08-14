@@ -23,7 +23,7 @@ type Coordinator struct {
 }
 
 type RuntimeQuiescer interface {
-	QuiesceBundleRuntime(context.Context, string) error
+	QuiesceBundleRuntime(context.Context, string) (RuntimeQuiescence, error)
 }
 
 func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, retErr error) {
@@ -69,18 +69,13 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 			if !ok {
 				return Result{}, err
 			}
-			final, replayErr := replayer.ReplayBundleDeleteFinalMutation(ctx, FinalMutationRequest{
+			replayed, replayErr := replayer.ReplayBundleDeleteFinalMutation(ctx, FinalMutationRequest{
 				OperationID: req.OperationID, OperationName: c.operationName(),
 				RequestHash: req.RequestHash, ReplayKeyHash: req.ReplayKeyHash,
 				BundleHash: req.BundleHash, RequestedAt: req.RequestedAt,
 			})
 			if replayErr == nil {
-				return Result{
-					OK: true, Status: "completed", OperationName: c.operationName(),
-					BundleHash: req.BundleHash, Force: req.Force, Deleted: final.Deleted,
-					Plan:          Plan{BundleHash: req.BundleHash, PlannedAt: req.RequestedAt},
-					FinalMutation: final,
-				}, nil
+				return replayed, nil
 			}
 			return Result{}, replayErr
 		}
@@ -135,9 +130,19 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 	if c.RuntimeQuiescer == nil {
 		return Result{}, fmt.Errorf("bundle delete runtime quiescer is required")
 	}
-	if err := c.RuntimeQuiescer.QuiesceBundleRuntime(ctx, req.BundleHash); err != nil {
+	quiescence, err := c.RuntimeQuiescer.QuiesceBundleRuntime(ctx, req.BundleHash)
+	if err != nil {
 		return Result{}, err
 	}
+	if quiescence == nil {
+		return Result{}, errors.New("bundle delete runtime quiescence is missing")
+	}
+	quiescenceCommitted := false
+	defer func() {
+		if !quiescenceCommitted {
+			retErr = errors.Join(retErr, quiescence.Restore(context.WithoutCancel(ctx)))
+		}
+	}()
 
 	targets, err := ActiveRunTargets(result.Plan)
 	if err != nil {
@@ -183,7 +188,14 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 		ReplayKeyHash: req.ReplayKeyHash,
 		BundleHash:    req.BundleHash,
 		RequestedAt:   req.RequestedAt,
+		Completion:    result,
 	})
+	if final.Deleted {
+		result.FinalMutation = final
+		result.Deleted = true
+		quiescence.Commit()
+		quiescenceCommitted = true
+	}
 	if err != nil {
 		if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
 			return Result{}, cancellationErr
@@ -195,7 +207,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 	return result, nil
 }
 
-func (c *Coordinator) executeNonForce(ctx context.Context, req Request, result Result) (Result, error) {
+func (c *Coordinator) executeNonForce(ctx context.Context, req Request, result Result) (out Result, retErr error) {
 	if len(result.Plan.ActiveRuns) > 0 {
 		return Result{}, &ActiveRunsRemainError{
 			BundleHash: req.BundleHash,
@@ -209,9 +221,19 @@ func (c *Coordinator) executeNonForce(ctx context.Context, req Request, result R
 	if c.RuntimeQuiescer == nil {
 		return Result{}, fmt.Errorf("bundle delete runtime quiescer is required")
 	}
-	if err := c.RuntimeQuiescer.QuiesceBundleRuntime(ctx, req.BundleHash); err != nil {
+	quiescence, err := c.RuntimeQuiescer.QuiesceBundleRuntime(ctx, req.BundleHash)
+	if err != nil {
 		return Result{}, err
 	}
+	if quiescence == nil {
+		return Result{}, errors.New("bundle delete runtime quiescence is missing")
+	}
+	quiescenceCommitted := false
+	defer func() {
+		if !quiescenceCommitted {
+			retErr = errors.Join(retErr, quiescence.Restore(context.WithoutCancel(ctx)))
+		}
+	}()
 	final, err := c.Finalizer.ApplyBundleDeleteFinalMutation(ctx, FinalMutationRequest{
 		OperationID:   req.OperationID,
 		OperationName: c.operationName(),
@@ -219,9 +241,16 @@ func (c *Coordinator) executeNonForce(ctx context.Context, req Request, result R
 		ReplayKeyHash: req.ReplayKeyHash,
 		BundleHash:    req.BundleHash,
 		RequestedAt:   req.RequestedAt,
+		Completion:    result,
 	})
+	if final.Deleted {
+		result.FinalMutation = final
+		result.Deleted = true
+		quiescence.Commit()
+		quiescenceCommitted = true
+	}
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
 	result.FinalMutation = final
 	result.Deleted = final.Deleted

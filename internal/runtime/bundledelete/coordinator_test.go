@@ -3,6 +3,7 @@ package bundledelete
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ func TestCoordinatorExecutesForceDeleteOwnerChain(t *testing.T) {
 	if !result.OK || result.Status != "completed" || !result.Deleted || result.ActiveRunsStopped != 1 || result.DeliveriesCancelled != 1 || result.ContainersStopped != 1 {
 		t.Fatalf("result = %#v", result)
 	}
-	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers", "final"}; !stringSlicesEqual(got, want) {
+	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers", "final", "commit"}; !stringSlicesEqual(got, want) {
 		t.Fatalf("calls = %#v, want %#v", got, want)
 	}
 	if owner.cleanupRequest.Targets[0].ReasonCode != preservationcleanup.BundleForceDeletedReason {
@@ -82,8 +83,109 @@ func TestCoordinatorPhaseFailureStopsBeforeFinalMutation(t *testing.T) {
 	if result.OK || result.Status != "partial_failure" || !result.PartialFailure || result.Deleted {
 		t.Fatalf("partial result = %#v", result)
 	}
-	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers"}; !stringSlicesEqual(got, want) {
+	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers", "restore"}; !stringSlicesEqual(got, want) {
 		t.Fatalf("partial calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestCoordinatorRestoresQuiescedRuntimeForEveryPreCommitForceFailure(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name      string
+		configure func(*fakeOwners)
+	}{
+		{name: "preservation cleanup", configure: func(o *fakeOwners) { o.cleanupErr = errors.New("cleanup failed") }},
+		{name: "container cleanup", configure: func(o *fakeOwners) { o.containerErr = errors.New("containers failed") }},
+		{name: "container result", configure: func(o *fakeOwners) { o.containerFailed = true }},
+		{name: "final mutation", configure: func(o *fakeOwners) { o.finalErr = errors.New("final mutation failed") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner := newFakeOwners("00000000-0000-0000-0000-000000000101")
+			tt.configure(owner)
+			result, err := owner.coordinator(now).Execute(context.Background(), Request{
+				OperationID: testOperationID, ActorTokenID: "token", RequestHash: "hash",
+				BundleHash: testBundleHash, Force: true, RequestedAt: now,
+			})
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if !result.PartialFailure || result.Deleted {
+				t.Fatalf("result = %#v, want uncommitted partial failure", result)
+			}
+			if len(owner.calls) == 0 || owner.calls[len(owner.calls)-1] != "restore" {
+				t.Fatalf("calls = %#v, want terminal runtime restoration", owner.calls)
+			}
+		})
+	}
+}
+
+func TestCoordinatorCommitsQuiescenceWhenFinalMutationCommittedBeforePostCommitFailure(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	owner := newFakeOwners("00000000-0000-0000-0000-000000000101")
+	owner.finalErr = errors.New("survivor refresh failed")
+	owner.finalCommitted = true
+	result, err := owner.coordinator(now).Execute(context.Background(), Request{
+		OperationID: testOperationID, ActorTokenID: "token", RequestHash: "hash",
+		BundleHash: testBundleHash, Force: true, RequestedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !result.PartialFailure || !result.Deleted || !result.FinalMutation.Deleted {
+		t.Fatalf("result = %#v, want committed partial failure", result)
+	}
+	if got := owner.calls[len(owner.calls)-1]; got != "commit" {
+		t.Fatalf("terminal quiescence call = %q, want commit; calls=%#v", got, owner.calls)
+	}
+}
+
+func TestCoordinatorNonForceRestoresBeforeCommitAndCommitsAfterDurableDelete(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name           string
+		finalCommitted bool
+		wantTerminal   string
+		wantDeleted    bool
+	}{
+		{name: "pre-commit failure restores", wantTerminal: "restore"},
+		{name: "post-commit failure remains terminal", finalCommitted: true, wantTerminal: "commit", wantDeleted: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner := newFakeOwners("")
+			owner.activeRuns = false
+			owner.finalErr = errors.New("final mutation failed")
+			owner.finalCommitted = tt.finalCommitted
+			result, err := owner.coordinator(now).Execute(context.Background(), Request{
+				OperationID: testOperationID, ActorTokenID: "token", RequestHash: "hash",
+				BundleHash: testBundleHash, RequestedAt: now,
+			})
+			if err == nil || !strings.Contains(err.Error(), "final mutation failed") {
+				t.Fatalf("Execute error = %v, want final mutation failure", err)
+			}
+			if result.Deleted != tt.wantDeleted {
+				t.Fatalf("result.Deleted = %v, want %v", result.Deleted, tt.wantDeleted)
+			}
+			if got := owner.calls[len(owner.calls)-1]; got != tt.wantTerminal {
+				t.Fatalf("terminal quiescence call = %q, want %q; calls=%#v", got, tt.wantTerminal, owner.calls)
+			}
+		})
+	}
+}
+
+func TestCoordinatorReturnsRuntimeRestorationFailure(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	owner := newFakeOwners("")
+	owner.activeRuns = false
+	owner.finalErr = errors.New("final mutation failed")
+	owner.restoreErr = errors.New("runtime restoration failed")
+	_, err := owner.coordinator(now).Execute(context.Background(), Request{
+		OperationID: testOperationID, ActorTokenID: "token", RequestHash: "hash",
+		BundleHash: testBundleHash, RequestedAt: now,
+	})
+	if err == nil || !strings.Contains(err.Error(), "final mutation failed") || !strings.Contains(err.Error(), "runtime restoration failed") {
+		t.Fatalf("Execute error = %v, want joined final mutation and restoration failures", err)
 	}
 }
 
@@ -133,7 +235,7 @@ func TestCoordinatorNonForceQuiescesBeforeFinalMutation(t *testing.T) {
 	if !result.OK || !result.Deleted {
 		t.Fatalf("non-force result = %#v, want completed deletion", result)
 	}
-	if got, want := owner.calls, []string{"lock", "plan", "quiesce", "final"}; !stringSlicesEqual(got, want) {
+	if got, want := owner.calls, []string{"lock", "plan", "quiesce", "final", "commit"}; !stringSlicesEqual(got, want) {
 		t.Fatalf("calls = %#v, want %#v", got, want)
 	}
 	if owner.finalRequest.OperationID != testOperationID {
@@ -158,9 +260,14 @@ func TestCoordinatorReplaysCommittedFinalMutationWhenBundleIsAbsentFromPlanning(
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	owner := newFakeOwners("")
 	owner.planErr = ErrBundleNotFound
-	owner.replayResult = FinalMutationResult{
-		OperationName: DefaultOperationName, BundleHash: testBundleHash,
-		AppliedAt: now.Add(-time.Minute), BundleRowsDeleted: 1, Deleted: true,
+	owner.replayResult = Result{
+		OK: true, Status: "completed", OperationName: DefaultOperationName,
+		BundleHash: testBundleHash, Deleted: true,
+		Plan: Plan{BundleHash: testBundleHash, PlannedAt: now.Add(-2 * time.Minute)},
+		FinalMutation: FinalMutationResult{
+			OperationName: DefaultOperationName, BundleHash: testBundleHash,
+			AppliedAt: now.Add(-time.Minute), BundleRowsDeleted: 1, Deleted: true,
+		},
 	}
 	result, err := owner.coordinator(now).Execute(context.Background(), Request{
 		OperationID: testOperationID, ActorTokenID: "token", RequestHash: "hash",
@@ -169,10 +276,10 @@ func TestCoordinatorReplaysCommittedFinalMutationWhenBundleIsAbsentFromPlanning(
 	if err != nil {
 		t.Fatalf("Execute replay: %v", err)
 	}
-	if !result.OK || !result.Deleted || result.FinalMutation.OperationName != owner.replayResult.OperationName ||
-		result.FinalMutation.BundleHash != owner.replayResult.BundleHash ||
-		!result.FinalMutation.AppliedAt.Equal(owner.replayResult.AppliedAt) ||
-		result.FinalMutation.BundleRowsDeleted != owner.replayResult.BundleRowsDeleted {
+	if !result.OK || !result.Deleted || result.FinalMutation.OperationName != owner.replayResult.FinalMutation.OperationName ||
+		result.FinalMutation.BundleHash != owner.replayResult.FinalMutation.BundleHash ||
+		!result.FinalMutation.AppliedAt.Equal(owner.replayResult.FinalMutation.AppliedAt) ||
+		result.FinalMutation.BundleRowsDeleted != owner.replayResult.FinalMutation.BundleRowsDeleted {
 		t.Fatalf("replay result = %#v, want stored final mutation %#v", result, owner.replayResult)
 	}
 	if got, want := owner.calls, []string{"lock", "plan", "replay"}; !stringSlicesEqual(got, want) {
@@ -256,12 +363,17 @@ type fakeOwners struct {
 	cleanupRequest  preservationcleanup.Request
 	finalRequest    FinalMutationRequest
 	containerFailed bool
+	containerErr    error
+	cleanupErr      error
+	finalErr        error
+	finalCommitted  bool
+	restoreErr      error
 	inventoryErr    error
 	quiesceErr      error
 	lockReleaseErr  error
 	activeRuns      bool
 	planErr         error
-	replayResult    FinalMutationResult
+	replayResult    Result
 	replayErr       error
 }
 
@@ -282,9 +394,12 @@ func (o *fakeOwners) coordinator(now time.Time) *Coordinator {
 	}
 }
 
-func (o *fakeOwners) QuiesceBundleRuntime(_ context.Context, _ string) error {
+func (o *fakeOwners) QuiesceBundleRuntime(_ context.Context, _ string) (RuntimeQuiescence, error) {
 	o.calls = append(o.calls, "quiesce")
-	return o.quiesceErr
+	if o.quiesceErr != nil {
+		return nil, o.quiesceErr
+	}
+	return fakeRuntimeQuiescence{owner: o}, nil
 }
 
 func (o *fakeOwners) AcquireBundleDelete(context.Context) (LockLease, bool, error) {
@@ -339,13 +454,14 @@ func (o *fakeOwners) ManagedResetContainerInventory(_ context.Context) ([]destru
 func (o *fakeOwners) ApplyBundleForceDeletePreservationCleanup(_ context.Context, req preservationcleanup.Request) (preservationcleanup.Result, error) {
 	o.calls = append(o.calls, "cleanup")
 	o.cleanupRequest = req
-	return preservationcleanup.Result{
+	result := preservationcleanup.Result{
 		OperationName: req.OperationName,
 		AppliedAt:     req.RequestedAt,
 		ControlledBy:  req.ControlledBy,
 		Runs:          []preservationcleanup.RunResult{{RunID: o.runID, Status: preservationcleanup.RunStatusCancelled}},
 		Deliveries:    []preservationcleanup.DeliveryResult{{DeliveryID: "delivery-1", RunID: o.runID, Status: preservationcleanup.DeliveryOutcomeDeadLetter}},
-	}, nil
+	}
+	return result, o.cleanupErr
 }
 
 func (o *fakeOwners) Apply(_ context.Context, req destructivereset.ContainerResetRequest) (destructivereset.ContainerResetResult, error) {
@@ -364,26 +480,41 @@ func (o *fakeOwners) Apply(_ context.Context, req destructivereset.ContainerRese
 		return result, nil
 	}
 	result.Stopped = req.Result.Plan.EntityContainers
-	return result, nil
+	return result, o.containerErr
 }
 
 func (o *fakeOwners) ApplyBundleDeleteFinalMutation(_ context.Context, req FinalMutationRequest) (FinalMutationResult, error) {
 	o.calls = append(o.calls, "final")
 	o.finalRequest = req
-	return FinalMutationResult{
-		OperationName:     req.OperationName,
-		BundleHash:        req.BundleHash,
-		AppliedAt:         req.RequestedAt,
-		RunsMarkedDeleted: 1,
-		BundleRowsDeleted: 1,
-		Deleted:           true,
-	}, nil
+	committed := o.finalErr == nil || o.finalCommitted
+	result := FinalMutationResult{
+		OperationName: req.OperationName,
+		BundleHash:    req.BundleHash,
+		AppliedAt:     req.RequestedAt,
+		Deleted:       committed,
+	}
+	if committed {
+		result.RunsMarkedDeleted = 1
+		result.BundleRowsDeleted = 1
+	}
+	return result, o.finalErr
 }
 
-func (o *fakeOwners) ReplayBundleDeleteFinalMutation(_ context.Context, req FinalMutationRequest) (FinalMutationResult, error) {
+func (o *fakeOwners) ReplayBundleDeleteFinalMutation(_ context.Context, req FinalMutationRequest) (Result, error) {
 	o.calls = append(o.calls, "replay")
 	o.finalRequest = req
 	return o.replayResult, o.replayErr
+}
+
+type fakeRuntimeQuiescence struct{ owner *fakeOwners }
+
+func (q fakeRuntimeQuiescence) Restore(context.Context) error {
+	q.owner.calls = append(q.owner.calls, "restore")
+	return q.owner.restoreErr
+}
+
+func (q fakeRuntimeQuiescence) Commit() {
+	q.owner.calls = append(q.owner.calls, "commit")
 }
 
 type fakeLease struct{ err error }

@@ -574,6 +574,7 @@ type pendingRuntimeReplacement struct {
 	runtime                *runtime.Runtime
 	admission              *processAdmissionCandidate
 	freeze                 *startupHandoffFreeze
+	retainCurrentProject   bool
 }
 
 type runtimeProjectSnapshot struct {
@@ -967,16 +968,18 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 			s.mu.Unlock()
 			return errors.New("pending runtime replacement changed before publication")
 		}
-		s.currentRoot = strings.TrimSpace(pending.root)
-		s.currentSource = pending.source
-		s.currentBundle = pending.bundle
-		s.currentRT = pending.runtime
-		s.currentBundleSourceFact = pending.fact
-		s.currentBundleIdentity = pending.identity
-		if pending.admission != nil {
-			s.providerTriggers = pending.admission.catalog
-			s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
-			s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+		if !pending.retainCurrentProject {
+			s.currentRoot = strings.TrimSpace(pending.root)
+			s.currentSource = pending.source
+			s.currentBundle = pending.bundle
+			s.currentRT = pending.runtime
+			s.currentBundleSourceFact = pending.fact
+			s.currentBundleIdentity = pending.identity
+			if pending.admission != nil {
+				s.providerTriggers = pending.admission.catalog
+				s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
+				s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+			}
 		}
 		pending.reconcilePublicIngress = s.onRuntimePublished
 		pending.phase = runtimeReplacementPublished
@@ -1587,6 +1590,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessorWithRollback(ctx co
 	s.mu.RLock()
 	predecessorRoot := s.currentRoot
 	predecessorBundle := s.currentBundle
+	publishProject := s.currentRT == predecessor
 	s.mu.RUnlock()
 	clone := s.cloneRuntime
 	if clone == nil {
@@ -1645,7 +1649,7 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessorWithRollback(ctx co
 		publication: publication,
 		root:        predecessorRoot, source: predecessorContext.Source, bundle: predecessorBundle,
 		fact: predecessorContext.BundleSourceFact, identity: predecessorContext.BundleIdentity, runtime: restored,
-		freeze: freeze,
+		freeze: freeze, retainCurrentProject: !publishProject,
 	}
 	s.mu.Lock()
 	if s.pendingReplacement != nil {

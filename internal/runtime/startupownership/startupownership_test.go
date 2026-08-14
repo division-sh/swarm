@@ -80,6 +80,10 @@ func (*retainedSessionProbe) ApplyBundleDeleteFinalMutation(context.Context, run
 	return runtimebundledelete.FinalMutationResult{}, errors.New("not implemented")
 }
 
+func (*retainedSessionProbe) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
+	return runtimebundledelete.Result{}, errors.New("not implemented")
+}
+
 func (*retainedSessionProbe) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	return runtimedestructivereset.CleanupResult{}, errors.New("not implemented")
 }

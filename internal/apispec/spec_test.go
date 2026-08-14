@@ -439,9 +439,20 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		t.Fatal("post_delete_new_work_admission must bind mutation-log persistence")
 	}
 	assertScalarContains(t, mustMappingValue(t, postDeleteAdmission, "rule"), "event.publish, run.start, runtime-log, and mutation-log attempts fail closed")
+	runtimeDeactivation := mustMappingValue(t, phaseFive, "runtime_context_deactivation")
+	assertScalarValue(t, mustMappingValue(t, runtimeDeactivation, "status"), "implemented_with_recoverable_precommit_quiescence_and_terminal_commit_evidence")
+	assertScalarContains(t, mustMappingValue(t, runtimeDeactivation, "canonical_owner"), "bundleDeleteRuntimeQuiescer")
+	runtimeDeactivationRule := mustMappingValue(t, runtimeDeactivation, "rule")
+	assertScalarContains(t, runtimeDeactivationRule, "typed recoverable ownership token")
+	assertScalarContains(t, runtimeDeactivationRule, "failure before durable final-mutation commit MUST restore")
+	assertScalarContains(t, runtimeDeactivationRule, "committed final mutation is terminal evidence")
+	assertScalarContains(t, runtimeDeactivationRule, "exact stored plan, cleanup, container, count, and final-mutation facts without synthesis")
 	invalid := mustMappingValue(t, phaseFive, "invalid_implementations")
 	if !sequenceContainsScalar(invalid, "deleting the bundles row before marking eligible runs deleted") {
 		t.Fatal("phase_5_atomicity must reject delete-before-update implementations")
+	}
+	if !sequenceContainsScalar(invalid, "leaving a quiesced loaded context unavailable after a pre-commit delete failure") {
+		t.Fatal("phase_5_atomicity must reject unavailable pre-commit failure contexts")
 	}
 
 	apiRunFork := mustMappingValue(t, apiSurface, "run_fork")

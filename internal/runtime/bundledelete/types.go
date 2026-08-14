@@ -134,6 +134,7 @@ type FinalMutationRequest struct {
 	ReplayKeyHash string
 	BundleHash    string
 	RequestedAt   time.Time
+	Completion    Result
 }
 
 type FinalMutationResult struct {
@@ -163,7 +164,12 @@ type Finalizer interface {
 // FinalMutationReplayer is implemented by the process topology owner that can
 // prove and complete an already-committed bundle/source-set operation.
 type FinalMutationReplayer interface {
-	ReplayBundleDeleteFinalMutation(context.Context, FinalMutationRequest) (FinalMutationResult, error)
+	ReplayBundleDeleteFinalMutation(context.Context, FinalMutationRequest) (Result, error)
+}
+
+type RuntimeQuiescence interface {
+	Restore(context.Context) error
+	Commit()
 }
 
 type LockManager interface {
@@ -180,6 +186,45 @@ type ManagedContainerInventoryReader interface {
 
 type ManagedContainerStopper interface {
 	Apply(context.Context, destructivereset.ContainerResetRequest) (destructivereset.ContainerResetResult, error)
+}
+
+func CompleteFinalMutation(req FinalMutationRequest, final FinalMutationResult) (Result, error) {
+	completion := req.Completion
+	if !completion.OK || completion.Status != "completed" || completion.DryRun || completion.PartialFailure || completion.Deleted {
+		return Result{}, errors.New("bundle delete final mutation requires an incomplete successful coordinator result")
+	}
+	if strings.TrimSpace(completion.OperationName) != strings.TrimSpace(req.OperationName) ||
+		strings.TrimSpace(completion.BundleHash) != strings.TrimSpace(req.BundleHash) ||
+		strings.TrimSpace(completion.Plan.BundleHash) != strings.TrimSpace(req.BundleHash) {
+		return Result{}, errors.New("bundle delete final mutation coordinator identity does not match the request")
+	}
+	if completion.FinalMutation.Deleted || completion.FinalMutation.BundleRowsDeleted != 0 ||
+		completion.FinalMutation.RunsMarkedDeleted != 0 || len(completion.FinalMutation.TransactionOrderProof) != 0 {
+		return Result{}, errors.New("bundle delete final mutation coordinator result is already finalized")
+	}
+	if !final.Deleted || final.BundleRowsDeleted < 1 ||
+		strings.TrimSpace(final.OperationName) != strings.TrimSpace(req.OperationName) ||
+		strings.TrimSpace(final.BundleHash) != strings.TrimSpace(req.BundleHash) {
+		return Result{}, errors.New("bundle delete final mutation result is not committed")
+	}
+	completion.Deleted = true
+	completion.FinalMutation = final
+	return completion, nil
+}
+
+func ValidateReplayedResult(req FinalMutationRequest, result Result) error {
+	if !result.OK || result.Status != "completed" || result.DryRun || result.PartialFailure || !result.Deleted {
+		return errors.New("bundle delete replay result is not a completed deletion")
+	}
+	if strings.TrimSpace(result.OperationName) != strings.TrimSpace(req.OperationName) ||
+		strings.TrimSpace(result.BundleHash) != strings.TrimSpace(req.BundleHash) ||
+		strings.TrimSpace(result.Plan.BundleHash) != strings.TrimSpace(req.BundleHash) ||
+		strings.TrimSpace(result.FinalMutation.OperationName) != strings.TrimSpace(req.OperationName) ||
+		strings.TrimSpace(result.FinalMutation.BundleHash) != strings.TrimSpace(req.BundleHash) ||
+		!result.FinalMutation.Deleted || result.FinalMutation.BundleRowsDeleted < 1 {
+		return errors.New("bundle delete replay result conflicts with the requested deletion")
+	}
+	return nil
 }
 
 func NormalizeRequest(req Request, now time.Time) (Request, error) {
