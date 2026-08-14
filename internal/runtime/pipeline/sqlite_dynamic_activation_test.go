@@ -45,15 +45,14 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      parentPath,
 		StorageRef:      parentPath,
+		EntityID:        parentEntityID,
+		EntityType:      "parent",
 		WorkflowName:    "root",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
-		Metadata: map[string]any{
-			"entity_id": parentEntityID, "entity_type": "parent",
-			"flow_path": parentPath, "instance_id": parentPath,
-		},
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		Fields:          map[string]any{},
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	})); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
@@ -62,7 +61,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	if err != nil {
 		t.Fatalf("load parent workflow state: %v", err)
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != parentPath {
+	if got := strings.TrimSpace(state.Control.FlowPath); got != parentPath {
 		t.Fatalf("parent workflow state flow_path = %q, want %s", got, parentPath)
 	}
 
@@ -134,22 +133,21 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
 		InstanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
 			err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID:      strings.TrimSpace(req.Instance.InstanceID),
-				StorageRef:      strings.TrimSpace(req.Instance.InstancePath),
-				WorkflowName:    strings.TrimSpace(req.Instance.TemplateID),
-				WorkflowVersion: "v-test",
-				CurrentState:    "pending",
-				Config:          cloneStringAnyMap(req.Config),
-				Metadata: map[string]any{
-					"component_id":         req.Config["component_id"],
-					"instance_kind":        "dynamic_flow",
-					"last_source_event":    strings.TrimSpace(req.TriggerEvent.ID()),
-					"parent_entity_id":     strings.TrimSpace(req.Instance.ParentEntityID),
-					"parent_flow_id":       strings.TrimSpace(req.Instance.ParentRoute.FlowID),
-					"parent_flow_instance": strings.TrimSpace(req.Instance.ParentRoute.FlowInstance),
-				},
-				CreatedAt: time.Now().UTC(),
-				UpdatedAt: time.Now().UTC(),
+				InstanceID:         strings.TrimSpace(req.Instance.InstanceID),
+				StorageRef:         strings.TrimSpace(req.Instance.InstancePath),
+				EntityID:           strings.TrimSpace(req.Instance.EntityID),
+				InstanceKind:       "dynamic_flow",
+				ParentFlowID:       strings.TrimSpace(req.Instance.ParentRoute.FlowID),
+				ParentFlowInstance: strings.TrimSpace(req.Instance.ParentRoute.FlowInstance),
+				ParentEntityID:     strings.TrimSpace(req.Instance.ParentEntityID),
+				WorkflowName:       strings.TrimSpace(req.Instance.TemplateID),
+				WorkflowVersion:    "v-test",
+				CurrentState:       "pending",
+				Config:             cloneStringAnyMap(req.Config),
+				Fields:             map[string]any{"component_id": req.Config["component_id"]},
+				Bookkeeping:        map[string]any{"last_source_event": strings.TrimSpace(req.TriggerEvent.ID())},
+				CreatedAt:          time.Now().UTC(),
+				UpdatedAt:          time.Now().UTC(),
 			}))
 			if err != nil {
 				return fmt.Errorf("activate %s entity %s: %w", req.Instance.InstancePath, req.Instance.EntityID, err)

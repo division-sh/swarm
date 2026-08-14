@@ -321,6 +321,7 @@ func TestEntityViewJSONIsDataComplete(t *testing.T) {
 		`"created_at":"2026-05-20T01:00:00Z"`,
 		`"updated_at":"2026-05-20T01:05:00Z"`,
 		`"fields":{"score":7}`,
+		`"bookkeeping":{}`,
 		`"gates":{"ready":true}`,
 		`"accumulated":{"accumulator":{"count":2},"notes":["a",{"text":"probe"}],"score":3}`,
 	} {
@@ -760,9 +761,9 @@ func TestEntityViewVerboseShowsBookkeepingAndAbsoluteTimestamps(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		result := validEntityFullResult("entity-1")
-		fields := result["fields"].(map[string]any)
-		fields["bundle_hash"] = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-		fields["activation"] = "standing"
+		bookkeeping := result["bookkeeping"].(map[string]any)
+		bookkeeping["bundle_hash"] = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		bookkeeping["activation"] = "standing"
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
 	defer server.Close()
@@ -784,7 +785,10 @@ func TestEntityViewVerboseShowsBookkeepingAndAbsoluteTimestamps(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("default code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, absent := range []string{"Bookkeeping", "bundle_hash", "activation", "2026-05-20T01:05:00Z"} {
+	if !strings.Contains(stdout.String(), "Bookkeeping  2 facts (--verbose to expand)") {
+		t.Fatalf("default stdout missing bookkeeping presence summary:\n%s", stdout.String())
+	}
+	for _, absent := range []string{"bundle_hash", "activation", "2026-05-20T01:05:00Z"} {
 		if strings.Contains(stdout.String(), absent) {
 			t.Fatalf("default stdout should not contain %q:\n%s", absent, stdout.String())
 		}
@@ -807,9 +811,9 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 			"long":                strings.Repeat("x", 300),
 			"broken":              "line one\nline two\tand a control \x01 byte",
 			"unicode_separators":  "a\u2028b\u2029c\u0085d",
-			"fan_out_count":       3,
 			"label\nwith_newline": "value",
 		}
+		result["bookkeeping"] = map[string]any{"fan_out_count": 3}
 		result["gates"] = map[string]any{}
 		result["accumulated"] = map[string]any{}
 		writeJSONRPCResult(t, w, captured.ID, result)
@@ -1078,9 +1082,10 @@ func validEntitySummary(entityID string) map[string]any {
 
 func validEntityFullResult(entityID string) map[string]any {
 	return map[string]any{
-		"entity": validEntitySummary(entityID),
-		"fields": map[string]any{"score": 7},
-		"gates":  map[string]any{"ready": true},
+		"entity":      validEntitySummary(entityID),
+		"fields":      map[string]any{"score": 7},
+		"bookkeeping": map[string]any{},
+		"gates":       map[string]any{"ready": true},
 		"accumulated": map[string]any{
 			"score":       3,
 			"accumulator": map[string]any{"count": 2},

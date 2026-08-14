@@ -220,10 +220,9 @@ func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx co
 	}
 	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, buckets)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "validation", WorkflowVersion: "1.0.0",
-		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
-			"entity_id": entityID, "flow_path": path, "instance_id": runtimeflowidentity.LogicalInstanceID(path),
-		},
+		InstanceID: runtimeflowidentity.LogicalInstanceID(path), StorageRef: path, EntityID: entityID,
+		WorkflowName: "validation", WorkflowVersion: "1.0.0",
+		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 		StateBuckets: carrier.PersistedStateBuckets(),
 	})); err != nil {
 		t.Fatal(err)
@@ -242,7 +241,7 @@ func loopActivityStartRecord(ctx context.Context, activation loopruntime.Activat
 func advanceLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, flowInstance, operation string) {
 	t.Helper()
 	if err := store.mutateE(ctx, testWorkflowInstanceRoute(flowInstance), func(instance *WorkflowInstance) error {
-		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+		carrier, err := workflowInstanceStateCarrier(*instance)
 		if err != nil {
 			return err
 		}

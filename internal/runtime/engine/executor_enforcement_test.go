@@ -42,7 +42,7 @@ func (r *persistentStateRepo) LoadState(context.Context, StateAddress) (StateSna
 		EntityID:     r.snapshot.EntityID,
 		CurrentState: r.snapshot.CurrentState,
 		StateCarrier: NewStateCarrier(
-			r.snapshot.StateCarrier.Metadata,
+			r.snapshot.StateCarrier.Fields,
 			r.snapshot.StateCarrier.Gates,
 			r.snapshot.StateCarrier.StateBuckets,
 		),
@@ -64,8 +64,8 @@ func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress,
 	if next := mutation.NextState; next != "" {
 		r.snapshot.CurrentState = next
 	}
-	if mutation.StateCarrier.Metadata != nil {
-		r.snapshot.StateCarrier.Metadata = cloneStringAnyMap(mutation.StateCarrier.Metadata)
+	if mutation.StateCarrier.Fields != nil {
+		r.snapshot.StateCarrier.Fields = cloneStringAnyMap(mutation.StateCarrier.Fields)
 	}
 	if mutation.StateCarrier.StateBuckets != nil {
 		r.snapshot.StateCarrier.StateBuckets = cloneStateBucketSet(mutation.StateCarrier.StateBuckets)
@@ -319,9 +319,9 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LoadState = %v, ok=%v", err, ok)
 	}
-	got, ok := state.StateCarrier.Metadata["composite"].(float64)
+	got, ok := state.StateCarrier.Fields["composite"].(float64)
 	if !ok {
-		t.Fatalf("composite type = %T, want float64", state.StateCarrier.Metadata["composite"])
+		t.Fatalf("composite type = %T, want float64", state.StateCarrier.Fields["composite"])
 	}
 	if got != 0 {
 		t.Fatalf("composite = %v, want 0 for empty accumulator compute", got)
@@ -391,7 +391,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	if got := duplicateResult.ExecutedSteps[len(duplicateResult.ExecutedSteps)-1]; got != StepAccumulate {
 		t.Fatalf("duplicate final executed step = %s, want %s", got, StepAccumulate)
 	}
-	if got := repo.snapshot.StateCarrier.Metadata["marker"]; got != "first" {
+	if got := repo.snapshot.StateCarrier.Fields["marker"]; got != "first" {
 		t.Fatalf("marker after duplicate = %#v, want first arrival value", got)
 	}
 	acc, ok := loadAccumulator(repo.snapshot, "node-1", events.EventType("task.completed"))

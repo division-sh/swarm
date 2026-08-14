@@ -9,6 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -31,10 +32,11 @@ type WorkflowAction struct {
 }
 
 type WorkflowState struct {
-	EntityID string          `json:"entity_id,omitempty"`
-	Stage    WorkflowStateID `json:"stage"`
-	Status   string          `json:"status,omitempty"`
-	Metadata map[string]any  `json:"metadata,omitempty"`
+	EntityID string                     `json:"entity_id,omitempty"`
+	Stage    WorkflowStateID            `json:"stage"`
+	Status   string                     `json:"status,omitempty"`
+	Metadata map[string]any             `json:"metadata,omitempty"`
+	Control  runtimeengine.StateControl `json:"-"`
 }
 
 const workflowStateBucketEntityProjection = "entity_projection"
@@ -255,14 +257,14 @@ func workflowDeleteStateBucket(instance *WorkflowInstance, key string) {
 	delete(instance.StateBuckets, strings.TrimSpace(key))
 }
 
-func workflowMutableMetadata(instance *WorkflowInstance) map[string]any {
+func workflowMutableFields(instance *WorkflowInstance) map[string]any {
 	if instance == nil {
 		return map[string]any{}
 	}
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
+	if instance.Fields == nil {
+		instance.Fields = map[string]any{}
 	}
-	return instance.Metadata
+	return instance.Fields
 }
 
 func truthyMetadataFlag(v any) bool {
@@ -290,8 +292,8 @@ func parseWorkflowTime(v any) time.Time {
 	return parsed.UTC()
 }
 
-func workflowMetadataSnapshot(instance WorkflowInstance) map[string]any {
-	return cloneStringAnyMap(instance.Metadata)
+func workflowFieldsSnapshot(instance WorkflowInstance) map[string]any {
+	return cloneStringAnyMap(instance.Fields)
 }
 
 func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, error) {

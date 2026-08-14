@@ -10,7 +10,7 @@ import (
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 )
 
-const workflowInitialMaterializationProjectionVersion = 1
+const workflowInitialMaterializationProjectionVersion = 2
 
 // workflowInitialMaterializationProjection is immutable creation identity.
 // Mutable workflow progress is deliberately absent from replay comparison.

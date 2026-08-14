@@ -55,7 +55,7 @@ func TestWorkflowInitialMaterializationRejectsUnownedLifecycleEmissions(t *testi
 	instance := WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 		WorkflowVersion: "1.0.0", CurrentState: "pending",
-		Metadata: map[string]any{"instance_id": "inst-1", "flow_path": "review/inst-1"},
+		Fields: map[string]any{},
 	}
 	if _, err := store.MaterializeInitialEntry(ctx, instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
 		t.Fatal("initial materialization accepted lifecycle emissions outside its atomic commit")
@@ -136,6 +136,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.setup(t)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
 			owner := &workflowInitialMaterializationTestOwner{}
 			store.lifecycleOwner = owner
 			occurredAt := time.Date(2026, time.July, 26, 12, 0, 0, 987654321, time.UTC)
@@ -152,11 +153,9 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				StateBuckets: map[string]any{
 					"totals": map[string]any{"accepted": 1},
 				},
-				Metadata: map[string]any{
-					"instance_id": "inst-1",
-					"flow_path":   "review/inst-1",
-					"priority":    2,
-					"routing":     map[string]any{"shards": []any{1, 4}},
+				Fields: map[string]any{
+					"priority": 2,
+					"routing":  map[string]any{"shards": []any{1, 4}},
 				},
 			}
 
@@ -174,6 +173,13 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if !found {
 				t.Fatal("persisted initial materialization not found")
 			}
+			rejectVersionOne := `UPDATE workflow_instance_initial_materializations SET projection_version = 1 WHERE run_id = ? AND instance_id = ?`
+			if !store.isSQLite() {
+				rejectVersionOne = `UPDATE workflow_instance_initial_materializations SET projection_version = 1 WHERE run_id = $1::uuid AND instance_id = $2`
+			}
+			if _, err := store.testDB().ExecContext(ctx, rejectVersionOne, runID, instance.StorageRef); err == nil {
+				t.Fatal("fresh selected-store schema accepted retired initial materialization projection version 1")
+			}
 			wantPersistedAt := occurredAt.UTC().Truncate(time.Microsecond)
 			if !persisted.EnteredStageAt.Equal(wantPersistedAt) || !persisted.CreatedAt.Equal(wantPersistedAt) {
 				t.Fatalf("persisted timestamps = entered %s created %s, want %s", persisted.EnteredStageAt, persisted.CreatedAt, wantPersistedAt)
@@ -181,9 +187,9 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			progressed := persisted
 			progressed.CurrentState = "active"
 			progressed.EnteredStageAt = occurredAt.Add(time.Minute)
-			progressed.Metadata = cloneStringAnyMap(persisted.Metadata)
-			progressed.Metadata["priority"] = 9
-			progressed.Metadata["gates"] = map[string]any{"approved": true}
+			progressed.Fields = cloneStringAnyMap(persisted.Fields)
+			progressed.Fields["priority"] = 9
+			progressed.Gates = map[string]bool{"approved": true}
 			progressed.StateBuckets = map[string]any{"totals": map[string]any{"accepted": 4}}
 			progressed.TransitionHistory = append(progressed.TransitionHistory, WorkflowTransitionRecord{
 				TransitionID:   "activate",
@@ -209,7 +215,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if err != nil || !found {
 				t.Fatalf("load progressed workflow after replay: found=%v err=%v", found, err)
 			}
-			if afterReplay.CurrentState != "active" || asInt(afterReplay.Metadata["priority"]) != 9 {
+			if afterReplay.CurrentState != "active" || asInt(afterReplay.Fields["priority"]) != 9 {
 				t.Fatalf("creation replay rewrote progressed workflow: %#v", afterReplay)
 			}
 
@@ -221,7 +227,6 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				t.Fatalf("conflicting replay failure = %#v, want conflicting duplicate", failure)
 			}
 
-			runID := runtimecorrelation.RunIDFromContext(ctx)
 			deleteEntityQuery := `DELETE FROM entity_state WHERE run_id = ? AND flow_instance = ?`
 			if !store.isSQLite() {
 				deleteEntityQuery = `DELETE FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2`
@@ -271,10 +276,7 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 			WorkflowVersion: "1.0.0",
 			CurrentState:    "pending",
 			Config:          map[string]any{"attempt_limit": 3},
-			Metadata: map[string]any{
-				"instance_id": "inst-1",
-				"flow_path":   storageRef,
-			},
+			Fields:          map[string]any{},
 		}
 	}
 
@@ -453,10 +455,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			instance := WorkflowInstance{
 				InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 				WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",
-				Config: map[string]any{"name": "alpha"},
-				Metadata: map[string]any{
-					"entity_id": plan.Identity.EntityID, "instance_id": "inst-1", "flow_path": "review/inst-1",
-				},
+				Config:   map[string]any{"name": "alpha"},
+				EntityID: plan.Identity.EntityID,
+				Fields:   map[string]any{},
 			}
 
 			result, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
@@ -566,11 +567,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			noAutoInstance := instance
 			noAutoInstance.InstanceID = noAutoPlan.Identity.InstanceID
 			noAutoInstance.StorageRef = noAutoPlan.Identity.InstancePath
+			noAutoInstance.EntityID = noAutoPlan.Identity.EntityID
 			noAutoInstance.RuntimeReadiness = &noAutoPlan
-			noAutoInstance.Metadata = map[string]any{
-				"entity_id": noAutoPlan.Identity.EntityID, "instance_id": noAutoPlan.Identity.InstanceID,
-				"flow_path": noAutoPlan.Identity.InstancePath,
-			}
+			noAutoInstance.Fields = map[string]any{}
 			if result, err := store.MaterializeInitialEntry(ctx, noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("no-auto materialization: result=%d err=%v", result, err)
 			}
@@ -805,15 +804,12 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 			_, err := store.MaterializeInitialEntry(ctx, WorkflowInstance{
 				InstanceID:      req.Instance.InstanceID,
 				StorageRef:      req.Instance.InstancePath,
+				EntityID:        req.Instance.EntityID,
+				ParentEntityID:  req.Instance.ParentEntityID,
 				WorkflowName:    req.Instance.TemplateID,
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "awaiting_review",
-				Metadata: map[string]any{
-					"entity_id":        req.Instance.EntityID,
-					"instance_id":      req.Instance.InstanceID,
-					"flow_path":        req.Instance.InstancePath,
-					"parent_entity_id": req.Instance.ParentEntityID,
-				},
+				Fields:          map[string]any{},
 			}, req.OccurredAt)
 			return err
 		},
@@ -1302,9 +1298,9 @@ func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T
 
 		State: WorkflowState{
 			EntityID: "ent-child",
-			Metadata: map[string]any{
-				"flow_path":        "child/inst-1",
-				"parent_entity_id": "ent-parent",
+			Control: runtimeengine.StateControl{
+				FlowPath:       "child/inst-1",
+				ParentEntityID: "ent-parent",
 			},
 		},
 	}
@@ -1369,8 +1365,8 @@ pins:
 
 		State: WorkflowState{
 			EntityID: "ent-child",
-			Metadata: map[string]any{
-				"parent_entity_id": "ent-root",
+			Control: runtimeengine.StateControl{
+				ParentEntityID: "ent-root",
 			},
 		},
 	}
@@ -1529,15 +1525,12 @@ states: [initializing, ready]
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      "operating/inst-1",
+		EntityID:        entityID,
 		WorkflowName:    "operating",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "initializing",
-		Metadata: map[string]any{
-			"entity_id":   entityID,
-			"flow_path":   "operating/inst-1",
-			"instance_id": "inst-1",
-		},
-		StateBuckets: map[string]any{},
+		Fields:          map[string]any{},
+		StateBuckets:    map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

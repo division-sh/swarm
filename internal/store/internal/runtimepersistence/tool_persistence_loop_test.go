@@ -19,7 +19,7 @@ func TestToolEntityReadbackProjectsLoopsWithoutReservedState(t *testing.T) {
 	accumulated := operatorLoopAccumulatedJSON(t, uuid.NewString(), uuid.NewString(), now)
 	rows, err := db.Query(`
 		SELECT 'entity-1', 'run-1', 'review/primary', 'mvp_spec', 'Primary', 'collecting',
-		       '{}', '{}', ?, 1, ?, ?, ?
+		       '{}', '{}', '{}', ?, 1, ?, ?, ?
 	`, accumulated, now, now, now)
 	if err != nil {
 		t.Fatal(err)

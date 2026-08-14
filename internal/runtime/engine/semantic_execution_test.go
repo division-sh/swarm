@@ -33,7 +33,7 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		if entityID == "" {
 			entityID = eventtest.UUID("engine-semantic-producer")
 		}
-		flowInstance := strings.Trim(strings.TrimSpace(asString(req.State.StateCarrier.Metadata["flow_path"])), "/")
+		flowInstance := strings.Trim(strings.TrimSpace(asString(req.State.StateCarrier.Fields["flow_path"])), "/")
 		if flowID == "" {
 			source, err := events.NewRootRoutingSource(entityID)
 			if err != nil {

@@ -233,10 +233,6 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			strings.TrimSpace(schema.AutoEmitOnCreate.Event),
 		)
 	}
-	metadata := cloneFlowConfig(req.Metadata)
-	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, strings.TrimSpace(instance.ParentEntityID)) {
-		metadata[key] = value
-	}
 	occurredAt := req.OccurredAt.UTC()
 	if !req.TriggerEvent.CreatedAt().IsZero() {
 		occurredAt = req.TriggerEvent.CreatedAt().UTC()
@@ -254,16 +250,23 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: runtimepipeline.WorkflowInstance{
-			InstanceID:       instanceID,
-			StorageRef:       flowPath,
-			WorkflowName:     templateID,
-			WorkflowVersion:  strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
-			RuntimeReadiness: &readinessPlan,
-			CurrentState:     initialState,
-			Config:           cloneFlowConfig(req.Config),
-			Metadata:         metadata,
-			EnteredStageAt:   occurredAt,
-			CreatedAt:        occurredAt,
+			InstanceID:         instanceID,
+			StorageRef:         flowPath,
+			EntityID:           flowEntityID,
+			EntityType:         strings.TrimSpace(schema.Entity),
+			InstanceKind:       strings.TrimSpace(schema.Mode),
+			ParentFlowID:       strings.TrimSpace(instance.ParentRoute.FlowID),
+			ParentFlowInstance: strings.Trim(instance.ParentRoute.FlowInstance, "/"),
+			ParentEntityID:     strings.TrimSpace(instance.ParentEntityID),
+			WorkflowName:       templateID,
+			WorkflowVersion:    strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+			RuntimeReadiness:   &readinessPlan,
+			CurrentState:       initialState,
+			Config:             cloneFlowConfig(req.Config),
+			Fields:             cloneFlowConfig(req.Fields),
+			Bookkeeping:        cloneFlowConfig(req.Bookkeeping),
+			EnteredStageAt:     occurredAt,
+			CreatedAt:          occurredAt,
 		},
 		Identity:                      instance,
 		Readiness:                     readinessPlan,
@@ -421,26 +424,6 @@ func (am *AgentManager) logFlowInstanceActivationSideEffectFailure(req runtimepi
 		},
 		Failure: failureEnvelope(err, "flow_activation", strings.TrimSpace(operation)),
 	})
-}
-
-func flowInstanceActivationMetadata(instance runtimeflowidentity.Instance, flowEntityID, instanceID, flowPath, parentEntityID string) map[string]any {
-	metadata := map[string]any{
-		"entity_id":        strings.TrimSpace(flowEntityID),
-		"instance_id":      strings.TrimSpace(instanceID),
-		"flow_path":        strings.Trim(strings.TrimSpace(flowPath), "/"),
-		"parent_entity_id": strings.TrimSpace(parentEntityID),
-	}
-	parentRoute := instance.ParentRoute.Normalized()
-	if strings.TrimSpace(parentRoute.FlowID) != "" {
-		metadata["parent_flow_id"] = strings.TrimSpace(parentRoute.FlowID)
-	}
-	if strings.TrimSpace(parentRoute.FlowInstance) != "" {
-		metadata["parent_flow_instance"] = strings.Trim(strings.TrimSpace(parentRoute.FlowInstance), "/")
-	}
-	if strings.TrimSpace(parentRoute.EntityID) != "" {
-		metadata["parent_entity_id"] = strings.TrimSpace(parentRoute.EntityID)
-	}
-	return metadata
 }
 
 var dynamicFlowCreationEventNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.dynamic-flow.creation-event.v1"))

@@ -632,6 +632,57 @@ func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.
 	}
 }
 
+func TestEntityFullBookkeepingSchemaPublishesIndependentPlatformFacts(t *testing.T) {
+	api := loadRepoAPISpec(t)
+	entityFull, ok := api.Components.Schemas["EntityFull"].(map[string]any)
+	if !ok {
+		t.Fatalf("EntityFull schema = %#v, want object", api.Components.Schemas["EntityFull"])
+	}
+	properties, ok := entityFull["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("EntityFull.properties = %#v, want object", entityFull["properties"])
+	}
+	bookkeeping, ok := properties["bookkeeping"].(map[string]any)
+	if !ok || bookkeeping["type"] != "object" || bookkeeping["additionalProperties"] != true {
+		t.Fatalf("EntityFull.bookkeeping = %#v, want open object schema", properties["bookkeeping"])
+	}
+	required, ok := entityFull["required"].([]any)
+	if !ok {
+		t.Fatalf("EntityFull.required = %#v, want list", entityFull["required"])
+	}
+	found := false
+	for _, item := range required {
+		if item == "bookkeeping" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("EntityFull.required = %#v, want bookkeeping", required)
+	}
+
+	generated, err := GenerateOpenRPC(api)
+	if err != nil {
+		t.Fatalf("GenerateOpenRPC() error = %v", err)
+	}
+	var doc OpenRPCDocument
+	if err := json.Unmarshal(generated, &doc); err != nil {
+		t.Fatalf("unmarshal generated openrpc: %v", err)
+	}
+	generatedEntityFull, ok := doc.Components.Schemas["EntityFull"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated EntityFull schema = %#v, want object", doc.Components.Schemas["EntityFull"])
+	}
+	generatedProperties, ok := generatedEntityFull["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("generated EntityFull.properties = %#v, want object", generatedEntityFull["properties"])
+	}
+	generatedBookkeeping, ok := generatedProperties["bookkeeping"].(map[string]any)
+	if !ok || generatedBookkeeping["type"] != "object" || generatedBookkeeping["additionalProperties"] != true {
+		t.Fatalf("generated EntityFull.bookkeeping = %#v, want open object schema", generatedProperties["bookkeeping"])
+	}
+}
+
 func TestValidateRejectsMissingExamplesPolicy(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	api.ExamplesPolicy = ExamplesPolicy{}

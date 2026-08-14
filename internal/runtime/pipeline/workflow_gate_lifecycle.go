@@ -93,9 +93,6 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, ro
 		contextSnapshot[name] = value
 	}
 	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if runID == "" {
-		runID = asString(instance.Metadata["run_id"])
-	}
 	snapshot, err := decisioncard.FreezeSnapshot(plan.Decision, plan.Title, contextSnapshot, frozenOutcomes)
 	if err != nil {
 		return decisioncard.Card{}, err
@@ -200,11 +197,11 @@ func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, route 
 		policy = workflowTimerPolicy(source, flowID)
 	}
 	return workflowexpr.EvalValueExpression(raw, workflowexpr.ValueContext{
-		Entity: instance.Metadata,
+		Entity: instance.Fields,
 		PlatformEntity: map[string]any{
 			"entity_id": entityID.String(), "flow_instance": route.InstancePath, "current_state": instance.CurrentState,
 		},
 		Policy:   policy,
-		Computed: payloadMap(instance.Metadata["computed"]),
+		Computed: payloadMap(instance.Fields["computed"]),
 	})
 }

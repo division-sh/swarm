@@ -1212,7 +1212,7 @@ func loadDecisionCardGateActivation(t *testing.T, db *sql.DB, postgres bool, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, accumulator)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, accumulator)
 	if err != nil {
 		t.Fatal(err)
 	}

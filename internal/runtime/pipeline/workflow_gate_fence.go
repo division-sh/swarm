@@ -6,7 +6,6 @@ import (
 	"time"
 
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 )
 
@@ -49,7 +48,7 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 	if !found {
 		return &WorkflowInstanceLookupMiss{RequestedKey: anchor.Route.InstancePath}
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return err
 	}

@@ -1716,20 +1716,14 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      "mutation-flow",
 		StorageRef:      "mutation-flow",
+		EntityID:        entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "done",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Metadata: map[string]any{
-			"entity_id":   entityID,
-			"flow_path":   "mutation-flow",
-			"instance_id": "mutation-flow",
-			"status":      "closed",
-			"gates": map[string]any{
-				"g_done": true,
-			},
-		},
+		Fields:          map[string]any{"status": "closed"},
+		Gates:           map[string]bool{"g_done": true},
 		StateBuckets: map[string]any{
 			"evidence": map[string]any{"score": 2},
 			"notes":    map[string]any{"count": 1},
@@ -1800,17 +1794,12 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, writer_type, writer_id, handler_step
+			run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, handler_step
 		) VALUES (
-			$1::uuid, $2::uuid, 'gates.', 'null'::jsonb, 'true'::jsonb, 'platform', 'test', 'seed'
+			$1::uuid, $2::uuid, 'gate', '', 'null'::jsonb, 'true'::jsonb, 'platform', 'test', 'seed'
 		)
-	`, runID, entityID); err != nil {
-		t.Fatalf("seed malformed mutation: %v", err)
-	}
-
-	err := trackedMutationStateMatchesEntityState(db, runID, entityID)
-	if err == nil || !strings.Contains(err.Error(), "gates mutation key is required") {
-		t.Fatalf("trackedMutationStateMatchesEntityState error = %v, want malformed gates failure", err)
+	`, runID, entityID); err == nil {
+		t.Fatal("malformed gate mutation with an empty path was accepted")
 	}
 }
 
@@ -1829,8 +1818,8 @@ func requireCanonicalRuntimeLogSurface(t *testing.T, ctx context.Context, pg *st
 
 func requireMutationSurface(t *testing.T, db *sql.DB) {
 	t.Helper()
-	requireTableColumns(t, testAuthorActivityContext(context.Background()), db, "entity_state", "entity_id", "current_state", "fields", "gates", "accumulator")
-	requireTableColumns(t, testAuthorActivityContext(context.Background()), db, "entity_mutations", "entity_id", "field", "old_value", "new_value", "writer_type", "writer_id", "handler_step", "created_at")
+	requireTableColumns(t, testAuthorActivityContext(context.Background()), db, "entity_state", "entity_id", "current_state", "fields", "bookkeeping", "gates", "accumulator")
+	requireTableColumns(t, testAuthorActivityContext(context.Background()), db, "entity_mutations", "entity_id", "domain", "path", "old_value", "new_value", "writer_type", "writer_id", "handler_step", "created_at")
 }
 
 func requireTableColumns(t *testing.T, ctx context.Context, db *sql.DB, tableName string, columns ...string) {
@@ -1934,6 +1923,7 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) 
 	var (
 		currentState string
 		fieldsRaw    []byte
+		bookRaw      []byte
 		gatesRaw     []byte
 		accRaw       []byte
 	)
@@ -1941,23 +1931,28 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) 
 		SELECT
 			COALESCE(current_state, ''),
 			COALESCE(fields, '{}'::jsonb),
+			COALESCE(bookkeeping, '{}'::jsonb),
 			COALESCE(gates, '{}'::jsonb),
 			COALESCE(accumulator, '{}'::jsonb)
 			FROM entity_state
 			WHERE run_id = $1::uuid AND entity_id = $2::uuid
-		`, runID, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw); err != nil {
+		`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookRaw, &gatesRaw, &accRaw); err != nil {
 		return fmt.Errorf("load entity_state projection: %w", err)
 	}
 
 	want := runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState),
 		Fields:       map[string]any{},
+		Bookkeeping:  map[string]any{},
 		Gates:        map[string]any{},
 		Accumulator:  map[string]any{},
 	}
 	var err error
 	if want.Fields, err = decodeJSONMapErr(fieldsRaw); err != nil {
 		return fmt.Errorf("decode entity_state fields: %w", err)
+	}
+	if want.Bookkeeping, err = decodeJSONMapErr(bookRaw); err != nil {
+		return fmt.Errorf("decode entity_state bookkeeping: %w", err)
 	}
 	if want.Gates, err = decodeJSONMapErr(gatesRaw); err != nil {
 		return fmt.Errorf("decode entity_state gates: %w", err)
@@ -1968,7 +1963,7 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) 
 	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
 
 	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
-		SELECT field, new_value
+		SELECT domain, path, new_value
 			FROM entity_mutations
 			WHERE run_id = $1::uuid AND entity_id = $2::uuid
 			ORDER BY created_at ASC, mutation_id ASC
@@ -1982,10 +1977,11 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) 
 	for rows.Next() {
 		rowCount++
 		var (
-			field    string
+			domain   string
+			path     string
 			newValue []byte
 		)
-		if err := rows.Scan(&field, &newValue); err != nil {
+		if err := rows.Scan(&domain, &path, &newValue); err != nil {
 			return fmt.Errorf("scan mutation: %w", err)
 		}
 		value, err := decodeJSONValueErr(newValue)
@@ -1993,7 +1989,8 @@ func trackedMutationStateMatchesEntityState(db *sql.DB, runID, entityID string) 
 			return fmt.Errorf("decode mutation value: %w", err)
 		}
 		records = append(records, runtimemutationlog.ProjectionMutation{
-			Field:    strings.TrimSpace(field),
+			Domain:   runtimemutationlog.Domain(strings.TrimSpace(domain)),
+			Path:     strings.TrimSpace(path),
 			NewValue: value,
 		})
 	}

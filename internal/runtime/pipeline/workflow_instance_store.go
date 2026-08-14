@@ -41,6 +41,15 @@ func (s *workflowInstanceStore) ReadTimerObligations(ctx context.Context, scope 
 type WorkflowInstance struct {
 	InstanceID         string
 	StorageRef         string
+	EntityID           string
+	EntityType         string
+	Slug               string
+	Name               string
+	InstanceKind       string
+	TemplateVersion    string
+	ParentFlowID       string
+	ParentFlowInstance string
+	ParentEntityID     string
 	WorkflowName       string
 	WorkflowVersion    string
 	RuntimeReadiness   *DynamicFlowRuntimeReadinessPlan
@@ -52,7 +61,9 @@ type WorkflowInstance struct {
 	EnteredStageAt     time.Time
 	TransitionHistory  []WorkflowTransitionRecord
 	StateBuckets       map[string]any
-	Metadata           map[string]any
+	Fields             map[string]any
+	Bookkeeping        map[string]any
+	Gates              map[string]bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	InitialFieldValues map[string]any
@@ -81,6 +92,7 @@ type WorkflowInstancePersistenceRecord struct {
 	EnteredStageAt  time.Time
 	Gates           json.RawMessage
 	Fields          json.RawMessage
+	Bookkeeping     json.RawMessage
 	Accumulator     json.RawMessage
 	Config          json.RawMessage
 	FlowInstance    string
@@ -104,6 +116,7 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 	}
 	projection, err := decodeWorkflowInstancePersistedProjection(
 		record.Fields,
+		record.Bookkeeping,
 		record.Gates,
 		record.Accumulator,
 		record.Config,
@@ -118,22 +131,42 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 	if err != nil {
 		return WorkflowInstance{}, err
 	}
+	if got := strings.TrimSpace(projection.Control.InstanceID); got != route.InstanceID {
+		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: persisted instance_id %q disagrees with exact route instance_id %q", route.InstancePath, got, route.InstanceID)
+	}
+	if got := strings.Trim(strings.TrimSpace(projection.Control.StorageRef), "/"); got != route.InstancePath {
+		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: persisted storage_ref %q disagrees with exact route", route.InstancePath, got)
+	}
+	if got := strings.Trim(strings.TrimSpace(projection.Control.FlowPath), "/"); got != route.InstancePath {
+		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: persisted flow_path %q disagrees with exact route", route.InstancePath, got)
+	}
 	item := WorkflowInstance{
-		StorageRef:        route.InstancePath,
-		InstanceID:        route.InstanceID,
-		WorkflowName:      strings.TrimSpace(record.WorkflowName),
-		WorkflowVersion:   strings.TrimSpace(record.WorkflowVersion),
-		Status:            strings.TrimSpace(record.Status),
-		TerminatedAt:      record.TerminatedAt.UTC(),
-		CurrentState:      strings.TrimSpace(record.CurrentState),
-		Revision:          record.Revision,
-		EnteredStageAt:    record.EnteredStageAt.UTC(),
-		StateBuckets:      projection.Accumulator,
-		Config:            projection.Config,
-		Metadata:          projection.Metadata(),
-		TransitionHistory: append([]WorkflowTransitionRecord(nil), projection.Control.TransitionHistory...),
-		CreatedAt:         record.CreatedAt.UTC(),
-		UpdatedAt:         record.UpdatedAt.UTC(),
+		StorageRef:         route.InstancePath,
+		InstanceID:         route.InstanceID,
+		EntityID:           strings.TrimSpace(record.EntityID),
+		EntityType:         strings.TrimSpace(projection.Control.EntityType),
+		Slug:               strings.TrimSpace(projection.Control.Slug),
+		Name:               strings.TrimSpace(projection.Control.Name),
+		InstanceKind:       strings.TrimSpace(projection.Control.InstanceKind),
+		TemplateVersion:    strings.TrimSpace(projection.Control.TemplateVersion),
+		ParentFlowID:       strings.TrimSpace(projection.Control.ParentFlowID),
+		ParentFlowInstance: strings.TrimSpace(projection.Control.ParentFlowInstance),
+		ParentEntityID:     strings.TrimSpace(projection.Control.ParentEntityID),
+		WorkflowName:       strings.TrimSpace(record.WorkflowName),
+		WorkflowVersion:    strings.TrimSpace(record.WorkflowVersion),
+		Status:             strings.TrimSpace(record.Status),
+		TerminatedAt:       record.TerminatedAt.UTC(),
+		CurrentState:       strings.TrimSpace(record.CurrentState),
+		Revision:           record.Revision,
+		EnteredStageAt:     record.EnteredStageAt.UTC(),
+		StateBuckets:       projection.Accumulator,
+		Config:             projection.Config,
+		Fields:             projection.Fields,
+		Bookkeeping:        projection.Bookkeeping,
+		Gates:              projection.Gates,
+		TransitionHistory:  append([]WorkflowTransitionRecord(nil), projection.Control.TransitionHistory...),
+		CreatedAt:          record.CreatedAt.UTC(),
+		UpdatedAt:          record.UpdatedAt.UTC(),
 	}
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, item); err != nil {
 		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: %w", route.InstancePath, err)
@@ -141,8 +174,11 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 	if item.StateBuckets == nil {
 		item.StateBuckets = map[string]any{}
 	}
-	if item.Metadata == nil {
-		item.Metadata = map[string]any{}
+	if item.Fields == nil {
+		item.Fields = map[string]any{}
+	}
+	if item.Bookkeeping == nil {
+		item.Bookkeeping = map[string]any{}
 	}
 	return item, nil
 }
@@ -176,6 +212,7 @@ type WorkflowTransitionRecord struct {
 
 type workflowInstancePersistedProjection struct {
 	Fields      map[string]any                   `json:"fields"`
+	Bookkeeping map[string]any                   `json:"bookkeeping"`
 	Gates       map[string]bool                  `json:"gates"`
 	Accumulator map[string]any                   `json:"accumulator"`
 	Config      map[string]any                   `json:"config"`
@@ -192,7 +229,6 @@ type workflowInstancePersistedControl struct {
 	FlowPath           string                     `json:"flow_path"`
 	InstanceKind       string                     `json:"instance_kind"`
 	TemplateVersion    string                     `json:"template_version"`
-	LastSourceEvent    string                     `json:"last_source_event"`
 	Status             string                     `json:"status"`
 	ParentFlowID       string                     `json:"parent_flow_id"`
 	ParentFlowInstance string                     `json:"parent_flow_instance"`
@@ -568,8 +604,11 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	if instance.CreatedAt.IsZero() {
 		instance.CreatedAt = instance.EnteredStageAt.UTC()
 	}
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
+	if instance.Fields == nil {
+		instance.Fields = map[string]any{}
+	}
+	if instance.Bookkeeping == nil {
+		instance.Bookkeeping = map[string]any{}
 	}
 	instance.StorageRef = strings.TrimSpace(instance.StorageRef)
 	identity, err := workflowInstancePersistedIdentity(nil, instance)
@@ -582,25 +621,12 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	if strings.TrimSpace(identity.RowID()) == "" {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(identity.StorageRef)}
 	}
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
-	}
 	instance.StorageRef = identity.StorageRef
 	instance.InstanceID = identity.InstanceID
-	instance.Metadata["storage_ref"] = identity.StorageRef
-	instance.Metadata["instance_id"] = identity.InstanceID
-	instance.Metadata["entity_id"] = identity.EntityID
-	if identity.HasStoredPath && identity.InstancePath != "" {
-		instance.Metadata["flow_path"] = identity.InstancePath
-	} else {
-		delete(instance.Metadata, "flow_path")
-	}
-	if identity.ParentRoute.FlowID != "" {
-		instance.Metadata["parent_flow_id"] = identity.ParentRoute.FlowID
-	}
-	if identity.ParentRoute.FlowInstance != "" {
-		instance.Metadata["parent_flow_instance"] = identity.ParentRoute.FlowInstance
-	}
+	instance.EntityID = identity.EntityID
+	instance.ParentEntityID = identity.ParentEntityID
+	instance.ParentFlowID = identity.ParentRoute.FlowID
+	instance.ParentFlowInstance = identity.ParentRoute.FlowInstance
 	return instance, identity, true, nil
 }
 
@@ -726,10 +752,14 @@ func WorkflowInstanceFieldSelectorPath(field string) []string {
 }
 
 func decodeWorkflowInstancePersistedProjection(
-	fieldsRaw, gatesRaw, accRaw, configRaw []byte,
+	fieldsRaw, bookkeepingRaw, gatesRaw, accRaw, configRaw []byte,
 	control workflowInstancePersistedControl,
 ) (workflowInstancePersistedProjection, error) {
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
+	}
+	bookkeeping, err := decodeWorkflowInstanceJSONMap("entity_state.bookkeeping", bookkeepingRaw)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
@@ -750,6 +780,7 @@ func decodeWorkflowInstancePersistedProjection(
 	}
 	return workflowInstancePersistedProjection{
 		Fields:      fields,
+		Bookkeeping: bookkeeping,
 		Gates:       gates,
 		Accumulator: accumulator,
 		Config:      config,
@@ -758,12 +789,6 @@ func decodeWorkflowInstancePersistedProjection(
 }
 
 func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, storageRef string) (workflowInstancePersistedProjection, error) {
-	metadata := cloneStringAnyMap(instance.Metadata)
-	gates, err := workflowInstanceMetadataGates(metadata)
-	if err != nil {
-		return workflowInstancePersistedProjection{}, err
-	}
-	delete(metadata, "gates")
 	persistedIdentity, err := workflowInstancePersistedIdentity(nil, instance)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
@@ -774,89 +799,32 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	control := workflowInstancePersistedControl{
 		StorageRef:         strings.TrimSpace(persistedIdentity.StorageRef),
 		EntityID:           strings.TrimSpace(persistedIdentity.EntityID),
-		Slug:               strings.TrimSpace(asString(instance.Metadata["slug"])),
-		Name:               strings.TrimSpace(asString(instance.Metadata["name"])),
-		EntityType:         strings.TrimSpace(asString(instance.Metadata["entity_type"])),
+		Slug:               strings.TrimSpace(instance.Slug),
+		Name:               strings.TrimSpace(instance.Name),
+		EntityType:         strings.TrimSpace(instance.EntityType),
 		InstanceID:         strings.TrimSpace(persistedIdentity.InstanceID),
-		InstanceKind:       strings.TrimSpace(asString(instance.Metadata["instance_kind"])),
-		TemplateVersion:    strings.TrimSpace(asString(instance.Metadata["template_version"])),
-		LastSourceEvent:    strings.TrimSpace(asString(instance.Metadata["last_source_event"])),
+		InstanceKind:       strings.TrimSpace(instance.InstanceKind),
+		TemplateVersion:    strings.TrimSpace(instance.TemplateVersion),
 		Status:             strings.TrimSpace(asString(instance.Config["status"])),
 		ParentFlowID:       strings.TrimSpace(persistedIdentity.ParentRoute.FlowID),
 		ParentFlowInstance: strings.Trim(strings.TrimSpace(persistedIdentity.ParentRoute.FlowInstance), "/"),
-		ParentEntityID:     strings.TrimSpace(asString(instance.Metadata["parent_entity_id"])),
+		ParentEntityID:     strings.TrimSpace(instance.ParentEntityID),
 		TransitionHistory:  append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
 	}
 	if persistedIdentity.HasStoredPath {
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
-	for _, key := range []string{
-		"slug", "name", "entity_type", "entity_id", "parent_flow_id", "parent_flow_instance", "parent_entity_id",
-		"instance_id", "storage_ref", "flow_path", "instance_kind",
-		"template_version", "workflow_version", "transition_history",
-	} {
-		delete(metadata, key)
-	}
 	if control.EntityType == "" {
 		control.EntityType = "default"
 	}
 	return workflowInstancePersistedProjection{
-		Fields:      metadata,
-		Gates:       gates,
+		Fields:      cloneStringAnyMap(instance.Fields),
+		Bookkeeping: cloneStringAnyMap(instance.Bookkeeping),
+		Gates:       cloneWorkflowGates(instance.Gates),
 		Accumulator: cloneStringAnyMap(instance.StateBuckets),
 		Config:      cloneStringAnyMap(instance.Config),
 		Control:     control,
 	}, nil
-}
-
-func (p workflowInstancePersistedProjection) Metadata() map[string]any {
-	metadata := cloneStringAnyMap(p.Fields)
-	if len(p.Gates) > 0 {
-		metadata["gates"] = p.GatesAny()
-	}
-	if strings.TrimSpace(p.Control.Slug) != "" {
-		metadata["slug"] = strings.TrimSpace(p.Control.Slug)
-	}
-	if strings.TrimSpace(p.Control.Name) != "" {
-		metadata["name"] = strings.TrimSpace(p.Control.Name)
-	}
-	if strings.TrimSpace(p.Control.EntityType) != "" {
-		metadata["entity_type"] = strings.TrimSpace(p.Control.EntityType)
-	}
-	if strings.TrimSpace(p.Control.EntityID) != "" {
-		metadata["entity_id"] = strings.TrimSpace(p.Control.EntityID)
-	}
-	if strings.TrimSpace(p.Control.StorageRef) != "" {
-		metadata["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)
-	}
-	if strings.TrimSpace(p.Control.InstanceID) != "" {
-		metadata["instance_id"] = strings.TrimSpace(p.Control.InstanceID)
-	}
-	if strings.TrimSpace(p.Control.FlowPath) != "" {
-		metadata["flow_path"] = strings.TrimSpace(p.Control.FlowPath)
-	}
-	if strings.TrimSpace(p.Control.InstanceKind) != "" {
-		metadata["instance_kind"] = strings.TrimSpace(p.Control.InstanceKind)
-	}
-	if strings.TrimSpace(p.Control.TemplateVersion) != "" {
-		metadata["template_version"] = strings.TrimSpace(p.Control.TemplateVersion)
-	}
-	if strings.TrimSpace(p.Control.LastSourceEvent) != "" {
-		metadata["last_source_event"] = strings.TrimSpace(p.Control.LastSourceEvent)
-	}
-	if strings.TrimSpace(p.Control.ParentFlowID) != "" {
-		metadata["parent_flow_id"] = strings.TrimSpace(p.Control.ParentFlowID)
-	}
-	if strings.TrimSpace(p.Control.ParentFlowInstance) != "" {
-		metadata["parent_flow_instance"] = strings.Trim(strings.TrimSpace(p.Control.ParentFlowInstance), "/")
-	}
-	if strings.TrimSpace(p.Control.ParentEntityID) != "" {
-		metadata["parent_entity_id"] = strings.TrimSpace(p.Control.ParentEntityID)
-	}
-	if len(p.Control.TransitionHistory) > 0 {
-		metadata["transition_history"] = append([]WorkflowTransitionRecord{}, p.Control.TransitionHistory...)
-	}
-	return metadata
 }
 
 func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion string) map[string]any {
@@ -875,9 +843,6 @@ func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion strin
 	}
 	if strings.TrimSpace(p.Control.TemplateVersion) != "" {
 		config["template_version"] = strings.TrimSpace(p.Control.TemplateVersion)
-	}
-	if strings.TrimSpace(p.Control.LastSourceEvent) != "" {
-		config["last_source_event"] = strings.TrimSpace(p.Control.LastSourceEvent)
 	}
 	if strings.TrimSpace(p.Control.Status) != "" {
 		config["status"] = strings.TrimSpace(p.Control.Status)
@@ -899,6 +864,14 @@ func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion strin
 
 func (p workflowInstancePersistedProjection) GatesAny() map[string]any {
 	return workflowBoolGatesAsMap(p.Gates)
+}
+
+func cloneWorkflowGates(in map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func decodeWorkflowInstanceJSONMap(label string, raw []byte) (map[string]any, error) {
@@ -929,21 +902,6 @@ func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]boo
 	return out, nil
 }
 
-func workflowInstanceMetadataGates(metadata map[string]any) (map[string]bool, error) {
-	if metadata == nil {
-		return map[string]bool{}, nil
-	}
-	raw, ok := metadata["gates"]
-	if !ok || raw == nil {
-		return map[string]bool{}, nil
-	}
-	encoded, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("workflow instance metadata.gates must be JSON-serializable: %w", err)
-	}
-	return decodeWorkflowInstanceJSONBoolMap("workflow instance metadata.gates", encoded)
-}
-
 func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePersistedControl) (map[string]any, workflowInstancePersistedControl, error) {
 	config, err := decodeWorkflowInstanceJSONMap("flow_instances.config", raw)
 	if err != nil {
@@ -969,10 +927,6 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 		return nil, workflowInstancePersistedControl{}, err
 	}
 	templateVersion, err := workflowInstanceOptionalString(config, "template_version")
-	if err != nil {
-		return nil, workflowInstancePersistedControl{}, err
-	}
-	lastSourceEvent, err := workflowInstanceOptionalString(config, "last_source_event")
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
 	}
@@ -1002,7 +956,6 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	delete(config, "flow_path")
 	delete(config, "instance_kind")
 	delete(config, "template_version")
-	delete(config, "last_source_event")
 	delete(config, "parent_flow_id")
 	delete(config, "parent_flow_instance")
 	delete(config, "parent_entity_id")
@@ -1017,7 +970,6 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	}
 	control.InstanceKind = strings.TrimSpace(instanceKind)
 	control.TemplateVersion = strings.TrimSpace(templateVersion)
-	control.LastSourceEvent = strings.TrimSpace(lastSourceEvent)
 	control.Status = strings.TrimSpace(status)
 	control.ParentFlowID = strings.TrimSpace(parentFlowID)
 	control.ParentFlowInstance = strings.Trim(strings.TrimSpace(parentFlowInstance), "/")

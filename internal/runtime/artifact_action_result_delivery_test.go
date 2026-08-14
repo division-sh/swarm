@@ -297,24 +297,22 @@ const artifactActionResultEntityID = "22222222-2222-4222-8222-222222222222"
 func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	enteredAt := time.Now().UTC()
 	fields := map[string]any{
-		"entity_id":        artifactActionResultEntityID,
 		"repo_id":          "11111111-1111-1111-1111-111111111111",
 		"namespace":        "tenant-alpha",
 		"partition_key":    "project-42",
 		"display_slug":     "Demo Artifact",
 		"source_record_id": "record-123",
-		"flow_path":        "repo-scaffold/inst-1",
-		"instance_id":      "inst-1",
 	}
 	return runtimepipeline.WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      "repo-scaffold/inst-1",
+		EntityID:        artifactActionResultEntityID,
 		WorkflowName:    "repo-scaffold",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Metadata:        fields,
+		Fields:          fields,
 	}
 }
 
@@ -322,8 +320,6 @@ func artifactActionResultStaticWorkflowInstance() runtimepipeline.WorkflowInstan
 	instance := artifactActionResultWorkflowInstance()
 	instance.InstanceID = "repo-scaffold"
 	instance.StorageRef = "repo-scaffold"
-	instance.Metadata["flow_path"] = "repo-scaffold"
-	instance.Metadata["instance_id"] = "repo-scaffold"
 	return instance
 }
 

@@ -732,11 +732,9 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"analyzer-flow/inst-1": {
-				Metadata: map[string]any{
-					"parent_flow_id":       parentRoute.FlowID,
-					"parent_flow_instance": parentRoute.FlowInstance,
-					"parent_entity_id":     parentRoute.EntityID,
-				},
+				ParentFlowID:       parentRoute.FlowID,
+				ParentFlowInstance: parentRoute.FlowInstance,
+				ParentEntityID:     parentRoute.EntityID,
 			},
 		}},
 	})
@@ -823,10 +821,8 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
 			"analyzer-flow/inst-1": {
-				Metadata: map[string]any{
-					"parent_flow_id":   "root",
-					"parent_entity_id": "11111111-1111-1111-1111-111111111111",
-				},
+				ParentFlowID:   "root",
+				ParentEntityID: "11111111-1111-1111-1111-111111111111",
 			},
 		}},
 	})
@@ -1248,9 +1244,9 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
-			"producer/inst-1": {Metadata: map[string]any{
-				"parent_flow_id": parentRoute.FlowID, "parent_flow_instance": parentRoute.FlowInstance, "parent_entity_id": parentRoute.EntityID,
-			}},
+			"producer/inst-1": {
+				ParentFlowID: parentRoute.FlowID, ParentFlowInstance: parentRoute.FlowInstance, ParentEntityID: parentRoute.EntityID,
+			},
 		}},
 	})
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
@@ -1293,15 +1289,12 @@ func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadat
 	}{
 		{name: "missing", rows: map[string]runtimepipeline.WorkflowInstance{}},
 		{name: "incomplete", rows: map[string]runtimepipeline.WorkflowInstance{
-			"producer/inst-1": {Metadata: map[string]any{
-				"parent_flow_id":       "root",
-				"parent_flow_instance": "root/inst-1",
-			}},
+			"producer/inst-1": {ParentFlowID: "root", ParentFlowInstance: "root/inst-1"},
 		}},
 		{name: "complete_but_unselected", rows: map[string]runtimepipeline.WorkflowInstance{
-			"producer/inst-1": {Metadata: map[string]any{
-				"parent_flow_id": "root", "parent_flow_instance": "root/inst-1", "parent_entity_id": eventtest.UUID("unselected-root"),
-			}},
+			"producer/inst-1": {
+				ParentFlowID: "root", ParentFlowInstance: "root/inst-1", ParentEntityID: eventtest.UUID("unselected-root"),
+			},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

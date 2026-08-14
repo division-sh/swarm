@@ -3102,7 +3102,7 @@
     },
     {
       "name": "entity.get",
-      "description": "Read one entity in full, including fields, gates, and accumulator state.",
+      "description": "Read one entity in full, including independent authored fields, platform bookkeeping, gates, and accumulator state.",
       "params": [
         {
           "name": "entity_id",
@@ -10519,6 +10519,10 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "bookkeeping": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "current_state": {
             "type": "string"
           },
@@ -11459,6 +11463,11 @@
             "description": "Accumulator state. Map of accumulator key → JSON value; values may be scalars, objects, or arrays depending on accumulate, data_accumulation, compute, or projection writers.",
             "type": "object"
           },
+          "bookkeeping": {
+            "additionalProperties": true,
+            "description": "Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.",
+            "type": "object"
+          },
           "entity": {
             "$ref": "#/components/schemas/EntitySummary"
           },
@@ -11485,6 +11494,7 @@
         "required": [
           "entity",
           "fields",
+          "bookkeeping",
           "gates",
           "accumulated"
         ],

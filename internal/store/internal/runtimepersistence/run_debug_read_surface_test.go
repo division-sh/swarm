@@ -16,6 +16,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -195,11 +196,11 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', $4::jsonb, $5::jsonb, $3::uuid, 'platform', 'runner', 'step-a', $6),
-			($7::uuid, $8::uuid, 'current_state', $10::jsonb, $11::jsonb, $9::uuid, 'platform', 'runner', 'step-b', $12)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', $4::jsonb, $5::jsonb, $3::uuid, 'platform', 'runner', 'step-a', $6),
+			($7::uuid, $8::uuid, 'lifecycle_state', '', $10::jsonb, $11::jsonb, $9::uuid, 'platform', 'runner', 'step-b', $12)
 	`, targetRunID, targetEntityID, targetEventID, `"queued"`, `"running"`, now.Add(2*time.Minute), otherRunID, otherEntityID, otherEventID, `"queued"`, `"failed"`, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
@@ -241,8 +242,15 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if len(report.Mutations) != 1 {
 		t.Fatalf("Mutations len = %d, want 1", len(report.Mutations))
 	}
-	if got := report.Mutations[0]; got.EntityID != targetEntityID || got.Field != "current_state" || got.WriterType != "platform" || got.WriterID != "runner" {
+	if got := report.Mutations[0]; got.EntityID != targetEntityID || got.Domain != string(runtimemutationlog.DomainLifecycleState) || got.Path != "" || got.WriterType != "platform" || got.WriterID != "runner" {
 		t.Fatalf("Mutations[0] = %#v", got)
+	}
+	mutationJSON, err := json.Marshal(report.Mutations[0])
+	if err != nil {
+		t.Fatalf("marshal run-debug mutation: %v", err)
+	}
+	if strings.Contains(string(mutationJSON), `"field"`) {
+		t.Fatalf("run-debug mutation retained legacy field alias: %s", mutationJSON)
 	}
 	if len(report.DeadLetters) != 1 {
 		t.Fatalf("DeadLetters len = %d, want 1", len(report.DeadLetters))

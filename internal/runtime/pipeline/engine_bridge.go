@@ -190,7 +190,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		stateRoute, err := canonicalHandlerRoute(
 			source,
 			flowID,
-			firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()),
+			firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance()),
 			triggerCtx.Event,
 		)
 		if err != nil {
@@ -247,7 +247,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	statePath := firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance())
+	statePath := firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance())
 	if exactDelivery {
 		statePath = stampedOwner.Route().FlowInstance
 	}
@@ -291,8 +291,8 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	if handler.CreateEntity && result.StateMutation.StateCarrier.Metadata == nil {
-		result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(stateSnapshot.StateCarrier.Metadata)
+	if handler.CreateEntity && result.StateMutation.StateCarrier.Fields == nil {
+		result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(stateSnapshot.StateCarrier.Fields)
 	}
 	previewMetadata := previewMetadataAfterExecution(stateSnapshot, result.StateMutation)
 	initialValuesMaterialized := map[string]any(nil)
@@ -408,7 +408,8 @@ func resolveHandlerEntityIDForFlow(
 			state.EntityID = entityID
 			state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
 			state.Status = ""
-			state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
+			state.Metadata = workflowCreateEntityFields(source, flowID)
+			state.Control = workflowStateControlFromIdentity(instance)
 		}
 		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
 		resolved, err := events.ResolveEnvelope(evt, envelope)
@@ -425,7 +426,7 @@ func resolveHandlerEntityIDForFlow(
 	if handlerExecutionEntityRequirement(source, flowID, handler).materializes() {
 		statePath := ""
 		if state != nil {
-			statePath = asString(state.Metadata["flow_path"])
+			statePath = state.Control.FlowPath
 		}
 		route, routeErr := canonicalHandlerRoute(source, flowID, statePath, evt)
 		if routeErr != nil {
@@ -467,41 +468,34 @@ func canonicalHandlerInstanceID(flowID string, evt events.Event) string {
 	return flowID
 }
 
-func workflowCreateEntityMetadata(source semanticview.Source, flowID string, instance FlowInstanceIdentity) map[string]any {
-	metadata := workflowEntitySchemaInitialValues(source, flowID)
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-	if contract, ok := workflowEntityContract(source, flowID); ok {
-		if entityType := strings.TrimSpace(contract.EntityType); entityType != "" {
-			metadata["entity_type"] = entityType
-		}
-	}
-	if instance.InstancePath != "" {
-		metadata["flow_path"] = instance.InstancePath
-		metadata["storage_ref"] = instance.InstancePath
-	}
-	if instance.InstanceID != "" {
-		metadata["instance_id"] = instance.InstanceID
-	}
-	if instance.ParentEntityID != "" {
-		metadata["parent_entity_id"] = instance.ParentEntityID
-	}
-	if len(metadata) == 0 {
+func workflowCreateEntityFields(source semanticview.Source, flowID string) map[string]any {
+	fields := workflowEntitySchemaInitialValues(source, flowID)
+	if len(fields) == 0 {
 		return nil
 	}
-	return metadata
+	return fields
+}
+
+func workflowStateControlFromIdentity(instance FlowInstanceIdentity) runtimeengine.StateControl {
+	return runtimeengine.StateControl{
+		FlowPath: instance.InstancePath, StorageRef: instance.InstancePath, InstanceID: instance.InstanceID,
+		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance,
+		ParentEntityID: instance.ParentEntityID,
+	}
 }
 
 func previewMetadataAfterExecution(snapshot runtimeengine.StateSnapshot, mutation runtimeengine.StateMutation) map[string]any {
 	carrier := snapshot.StateCarrier
-	if mutation.StateCarrier.Metadata != nil {
-		carrier.Metadata = cloneStringAnyMap(mutation.StateCarrier.Metadata)
+	if mutation.StateCarrier.Fields != nil {
+		carrier.Fields = cloneStringAnyMap(mutation.StateCarrier.Fields)
+	}
+	if mutation.StateCarrier.Bookkeeping != nil {
+		carrier.Bookkeeping = cloneStringAnyMap(mutation.StateCarrier.Bookkeeping)
 	}
 	if len(mutation.StateCarrier.Gates) > 0 {
 		carrier.Gates = workflowCloneBoolMap(mutation.StateCarrier.Gates)
 	}
-	return carrier.PersistedMetadata()
+	return carrier.PersistedFields()
 }
 
 func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *handlerExecutionOutcome {
@@ -600,10 +594,10 @@ func terminalStateFlowCandidates(source semanticview.Source, flowID string, stat
 }
 
 func flowIDForWorkflowState(source semanticview.Source, state WorkflowState) string {
-	if source == nil || len(state.Metadata) == 0 {
+	if source == nil {
 		return ""
 	}
-	flowPath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
+	flowPath := strings.Trim(strings.TrimSpace(state.Control.FlowPath), "/")
 	if flowPath == "" {
 		return ""
 	}

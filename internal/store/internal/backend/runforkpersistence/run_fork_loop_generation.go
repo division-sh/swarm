@@ -28,7 +28,7 @@ func forkAttemptGenerationState(raw map[string]any, forkRunID, entityID string) 
 			structured[key] = value
 		}
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, structured)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, structured)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func forkGateActivationState(raw map[string]any, forkRunID, flowInstance, entity
 			structured[key] = value
 		}
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, structured)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, structured)
 	if err != nil {
 		return nil, nil, err
 	}

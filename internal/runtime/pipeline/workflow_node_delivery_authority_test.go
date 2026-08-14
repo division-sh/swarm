@@ -289,6 +289,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			seedPipelineEventRecordForDialect(t, ctx, workflowStore.testDB(), dialect, evt)
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
+				EntityID:       entityID,
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
@@ -457,10 +458,11 @@ func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
+		EntityID:        entityID,
 		WorkflowName:    "delivery-authority",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed delivery authority workflow instance: %v", err)
 	}

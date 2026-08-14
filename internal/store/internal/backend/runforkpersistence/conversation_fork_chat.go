@@ -712,7 +712,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 		return []runtimerunfork.ConversationForkEntitySnapshot{}, nil
 	}
 	rows, err := owner.query(ctx, tx, `
-		SELECT CAST(entity_id AS TEXT), field, new_value, created_at
+		SELECT CAST(entity_id AS TEXT), domain, path, new_value, created_at
 		FROM entity_mutations
 		WHERE run_id = ?
 		  AND created_at <= ?
@@ -731,15 +731,15 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 	entityOrder := []string{}
 	seen := map[string]struct{}{}
 	for rows.Next() {
-		var entityID, field string
+		var entityID, domain, path string
 		var raw []byte
 		var createdAt conversationForkTimeValue
-		if err := rows.Scan(&entityID, &field, &raw, &createdAt); err != nil {
+		if err := rows.Scan(&entityID, &domain, &path, &raw, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan conversation fork entity mutation: %w", err)
 		}
 		var value any
 		if err := json.Unmarshal(raw, &value); err != nil {
-			return nil, fmt.Errorf("decode conversation fork entity mutation %s/%s: %w", entityID, field, err)
+			return nil, fmt.Errorf("decode conversation fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
 		}
 		entityID = strings.TrimSpace(entityID)
 		if _, ok := seen[entityID]; !ok {
@@ -747,7 +747,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 			entityOrder = append(entityOrder, entityID)
 		}
 		grouped[entityID] = append(grouped[entityID], timedProjectionMutation{
-			ProjectionMutation: mutationlog.ProjectionMutation{Field: field, NewValue: value},
+			ProjectionMutation: mutationlog.ProjectionMutation{Domain: mutationlog.Domain(domain), Path: path, NewValue: value},
 			CreatedAt:          createdAt.Time,
 		})
 	}
@@ -762,7 +762,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 		var enteredStateAt *time.Time
 		for _, mutation := range mutations {
 			projectionMutations = append(projectionMutations, mutation.ProjectionMutation)
-			if strings.TrimSpace(mutation.Field) == "current_state" {
+			if mutation.Domain == mutationlog.DomainLifecycleState {
 				tm := mutation.CreatedAt
 				enteredStateAt = &tm
 			}
@@ -776,6 +776,7 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 			CurrentState:   projection.CurrentState,
 			EnteredStateAt: enteredStateAt,
 			Fields:         projection.Fields,
+			Bookkeeping:    projection.Bookkeeping,
 			Gates:          projection.Gates,
 			Accumulator:    projection.Accumulator,
 		})

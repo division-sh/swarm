@@ -24,39 +24,60 @@ import (
 const DefaultMaxChainDepth = 50
 
 type StateCarrier struct {
-	Metadata     map[string]any
+	Fields       map[string]any
+	Bookkeeping  map[string]any
+	Control      StateControl
 	Gates        map[string]bool
 	StateBuckets map[string]map[string]any
 }
 
-func NewStateCarrier(metadata map[string]any, gates map[string]bool, stateBuckets map[string]map[string]any) StateCarrier {
+type StateControl struct {
+	FlowPath           string
+	InstanceID         string
+	StorageRef         string
+	EntityType         string
+	InstanceKind       string
+	TemplateVersion    string
+	ParentFlowID       string
+	ParentFlowInstance string
+	ParentEntityID     string
+}
+
+func NewStateCarrier(fields map[string]any, gates map[string]bool, stateBuckets map[string]map[string]any) StateCarrier {
 	return StateCarrier{
-		Metadata:     cloneStringAnyMap(metadata),
+		Fields:       cloneStringAnyMap(fields),
+		Bookkeeping:  map[string]any{},
 		Gates:        mapsClone(gates),
 		StateBuckets: cloneStateBucketSet(stateBuckets),
 	}
 }
 
-func StateCarrierFromPersisted(metadata map[string]any, stateBuckets map[string]any) (StateCarrier, error) {
-	fields := cloneStringAnyMap(metadata)
-	gates, err := stateCarrierGatesFromMetadata(fields)
-	if err != nil {
-		return StateCarrier{}, err
-	}
-	delete(fields, "gates")
+func NewStateCarrierWithOwners(fields, bookkeeping map[string]any, control StateControl, gates map[string]bool, stateBuckets map[string]map[string]any) StateCarrier {
+	carrier := NewStateCarrier(fields, gates, stateBuckets)
+	carrier.Bookkeeping = cloneStringAnyMap(bookkeeping)
+	carrier.Control = control
+	return carrier
+}
+
+func StateCarrierFromPersisted(fields, bookkeeping map[string]any, gates map[string]bool, stateBuckets map[string]any) (StateCarrier, error) {
 	buckets, err := stateBucketSetFromRaw(stateBuckets)
 	if err != nil {
 		return StateCarrier{}, err
 	}
 	return StateCarrier{
-		Metadata:     fields,
-		Gates:        gates,
+		Fields:       cloneStringAnyMap(fields),
+		Bookkeeping:  cloneStringAnyMap(bookkeeping),
+		Gates:        mapsClone(gates),
 		StateBuckets: buckets,
 	}, nil
 }
 
-func (c StateCarrier) MetadataBucket() values.Bucket {
-	return values.Wrap(c.Metadata)
+func (c StateCarrier) FieldsBucket() values.Bucket {
+	return values.Wrap(c.Fields)
+}
+
+func (c StateCarrier) BookkeepingBucket() values.Bucket {
+	return values.Wrap(c.Bookkeeping)
 }
 
 func (c StateCarrier) GatesBucket() values.Bucket {
@@ -68,7 +89,7 @@ func (c StateCarrier) StateBucketsBucket() values.Bucket {
 }
 
 func (c StateCarrier) EntityContext(entityID identity.EntityID, currentState, workflowName, workflowVersion string) map[string]any {
-	out := cloneStringAnyMap(c.Metadata)
+	out := cloneStringAnyMap(c.Fields)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -76,18 +97,12 @@ func (c StateCarrier) EntityContext(entityID identity.EntityID, currentState, wo
 	return out
 }
 
-func (c StateCarrier) PersistedMetadata() map[string]any {
-	out := cloneStringAnyMap(c.Metadata)
-	if out == nil {
-		out = map[string]any{}
-	}
-	delete(out, "subject_id")
-	if len(c.Gates) == 0 {
-		delete(out, "gates")
-		return out
-	}
-	out["gates"] = boolMapToAnyMap(c.Gates)
-	return out
+func (c StateCarrier) PersistedFields() map[string]any {
+	return cloneStringAnyMap(c.Fields)
+}
+
+func (c StateCarrier) PersistedBookkeeping() map[string]any {
+	return cloneStringAnyMap(c.Bookkeeping)
 }
 
 func (c StateCarrier) PersistedStateBuckets() map[string]any {
@@ -112,18 +127,25 @@ func (c *StateCarrier) EnsureGatesMap() map[string]bool {
 	return c.Gates
 }
 
-func (c *StateCarrier) SetMetadata(key string, value any) {
-	if c.Metadata == nil {
-		c.Metadata = map[string]any{}
+func (c *StateCarrier) SetField(key string, value any) {
+	if c.Fields == nil {
+		c.Fields = map[string]any{}
 	}
-	values.Wrap(c.Metadata).Set(key, value)
+	values.Wrap(c.Fields).Set(key, value)
 }
 
-func (c *StateCarrier) EnsureMetadataMap(key string) values.Bucket {
-	if c.Metadata == nil {
-		c.Metadata = map[string]any{}
+func (c *StateCarrier) EnsureFieldMap(key string) values.Bucket {
+	if c.Fields == nil {
+		c.Fields = map[string]any{}
 	}
-	return values.Wrap(c.Metadata).EnsureMap(key)
+	return values.Wrap(c.Fields).EnsureMap(key)
+}
+
+func (c *StateCarrier) SetBookkeeping(key string, value any) {
+	if c.Bookkeeping == nil {
+		c.Bookkeeping = map[string]any{}
+	}
+	values.Wrap(c.Bookkeeping).Set(key, value)
 }
 
 func (c *StateCarrier) EnsureStateBucket(name string) values.Bucket {
@@ -161,8 +183,8 @@ type StateSnapshot struct {
 	StateCarrier
 }
 
-func (s StateSnapshot) MetadataBucket() values.Bucket {
-	return s.StateCarrier.MetadataBucket()
+func (s StateSnapshot) FieldsBucket() values.Bucket {
+	return s.StateCarrier.FieldsBucket()
 }
 
 func (s StateSnapshot) GatesBucket() values.Bucket {
@@ -189,12 +211,16 @@ func (s *StateSnapshot) EnsureGatesMap() map[string]bool {
 	return s.StateCarrier.EnsureGatesMap()
 }
 
-func (s *StateSnapshot) SetMetadata(key string, value any) {
-	s.StateCarrier.SetMetadata(key, value)
+func (s *StateSnapshot) SetField(key string, value any) {
+	s.StateCarrier.SetField(key, value)
 }
 
-func (s *StateSnapshot) EnsureMetadataMap(key string) values.Bucket {
-	return s.StateCarrier.EnsureMetadataMap(key)
+func (s *StateSnapshot) EnsureFieldMap(key string) values.Bucket {
+	return s.StateCarrier.EnsureFieldMap(key)
+}
+
+func (s *StateSnapshot) SetBookkeeping(key string, value any) {
+	s.StateCarrier.SetBookkeeping(key, value)
 }
 
 func (s *StateSnapshot) EnsureStateBucket(name string) values.Bucket {
@@ -404,8 +430,8 @@ type StateMutation struct {
 	InitialFieldValues map[string]any
 }
 
-func (m StateMutation) MetadataBucket() values.Bucket {
-	return m.StateCarrier.MetadataBucket()
+func (m StateMutation) FieldsBucket() values.Bucket {
+	return m.StateCarrier.FieldsBucket()
 }
 
 func (m StateMutation) GatesBucket() values.Bucket {
@@ -416,12 +442,16 @@ func (m StateMutation) StateBucketsBucket() values.Bucket {
 	return m.StateCarrier.StateBucketsBucket()
 }
 
-func (m *StateMutation) SetMetadata(key string, value any) {
-	m.StateCarrier.SetMetadata(key, value)
+func (m *StateMutation) SetField(key string, value any) {
+	m.StateCarrier.SetField(key, value)
 }
 
-func (m *StateMutation) EnsureMetadataMap(key string) values.Bucket {
-	return m.StateCarrier.EnsureMetadataMap(key)
+func (m *StateMutation) EnsureFieldMap(key string) values.Bucket {
+	return m.StateCarrier.EnsureFieldMap(key)
+}
+
+func (m *StateMutation) SetBookkeeping(key string, value any) {
+	m.StateCarrier.SetBookkeeping(key, value)
 }
 
 func (m *StateMutation) SetGateValue(name string, value bool) {

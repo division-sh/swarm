@@ -47,20 +47,14 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 
 func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, route runtimeflowidentity.Route, _ string, setGate string, clearAll bool) error {
 	return pc.workflowStore.mutate(ctx, route, func(instance *WorkflowInstance) {
-		metadata := cloneStringAnyMap(instance.Metadata)
-		gates := payloadMap(metadata["gates"])
+		gates := cloneWorkflowGates(instance.Gates)
 		if clearAll {
 			clear(gates)
 		}
 		if setGate = strings.TrimSpace(setGate); setGate != "" {
 			gates[setGate] = true
 		}
-		if len(gates) == 0 {
-			delete(metadata, "gates")
-		} else {
-			metadata["gates"] = gates
-		}
-		instance.Metadata = metadata
+		instance.Gates = gates
 	})
 }
 

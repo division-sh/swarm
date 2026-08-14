@@ -268,7 +268,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 			if err != nil {
 				t.Fatalf("load materialized singleton receiver: %v", err)
 			}
-			if !found || strings.TrimSpace(fmt.Sprint(instance.Metadata["entity_id"])) != wantRoute.EntityID {
+			if !found || strings.TrimSpace(instance.EntityID) != wantRoute.EntityID {
 				t.Fatalf("materialized singleton receiver = found:%t instance:%#v, want entity %s", found, instance, wantRoute.EntityID)
 			}
 			view, err := backend.LoadOperatorEvent(ctx, eventID)
@@ -764,18 +764,14 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline 
 	if _, err := pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      "portfolio",
 		StorageRef:      "portfolio",
+		EntityID:        entityID,
+		InstanceKind:    "singleton",
 		WorkflowName:    "portfolio",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "collecting",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Metadata: map[string]any{
-			"entity_id":     entityID,
-			"portfolio_id":  "portfolio",
-			"flow_path":     "portfolio",
-			"instance_id":   "portfolio",
-			"instance_kind": "singleton",
-		},
+		Fields:          map[string]any{"portfolio_id": "portfolio"},
 	}, enteredAt); err != nil {
 		t.Fatalf("seed portfolio singleton identity shell: %v", err)
 	}
@@ -908,7 +904,7 @@ func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runt
 
 func loadFanInBarrierActivation(t *testing.T, instance runtimepipeline.WorkflowInstance, periodID string) joinruntime.Activation {
 	t.Helper()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 	if err != nil {
 		t.Fatalf("load portfolio state carrier: %v", err)
 	}

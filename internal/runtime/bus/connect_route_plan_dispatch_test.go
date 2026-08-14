@@ -835,7 +835,7 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 		EntityID:      req.Instance.EntityID,
 		FlowInstance:  req.Instance.InstancePath,
 		FlowTemplate:  req.Instance.TemplateID,
-		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
+		AddressFields: connectRoutePlanActivationAddressFields(req.Fields),
 	})
 	if s.failAfterDescriptorWithoutRoute != nil {
 		return s.failAfterDescriptorWithoutRoute
@@ -888,7 +888,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 		EntityID:      req.Instance.EntityID,
 		FlowInstance:  req.Instance.InstancePath,
 		FlowTemplate:  req.Instance.TemplateID,
-		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
+		AddressFields: connectRoutePlanActivationAddressFields(req.Fields),
 	})
 	bus := s.bus
 	s.mu.Unlock()
@@ -913,11 +913,11 @@ func (s *connectRoutePlanConcurrentLifecycleStore) FlowInstanceDescriptors() []A
 	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
 }
 
-func connectRoutePlanActivationAddressFields(metadata map[string]any) map[string]string {
+func connectRoutePlanActivationAddressFields(fields map[string]any) map[string]string {
 	out := map[string]string{}
-	for key, raw := range metadata {
+	for key, raw := range fields {
 		key = strings.TrimSpace(key)
-		if key == "" || key == "entity_type" || key == "instance_kind" || key == "last_source_event" {
+		if key == "" {
 			continue
 		}
 		value := strings.TrimSpace(fmt.Sprint(raw))
@@ -930,13 +930,11 @@ func connectRoutePlanActivationAddressFields(metadata map[string]any) map[string
 
 func connectRoutePlanActivationVariables(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
 	out := map[string]string{}
-	for _, values := range []map[string]any{req.Config, req.Metadata} {
-		for key, raw := range values {
-			key = strings.TrimSpace(key)
-			value := strings.TrimSpace(fmt.Sprint(raw))
-			if key != "" && value != "" {
-				out[key] = value
-			}
+	for key, raw := range req.Config {
+		key = strings.TrimSpace(key)
+		value := strings.TrimSpace(fmt.Sprint(raw))
+		if key != "" && value != "" {
+			out[key] = value
 		}
 	}
 	return out
@@ -2266,11 +2264,17 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		t.Fatalf("activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
-	if activation.Config["vertical_id"] != "v-1" || activation.Metadata["vertical_id"] != "v-1" {
-		t.Fatalf("activation config/metadata = %#v/%#v, want vertical_id v-1", activation.Config, activation.Metadata)
+	if activation.Config["vertical_id"] != "v-1" || activation.Fields["vertical_id"] != "v-1" {
+		t.Fatalf("activation config/fields = %#v/%#v, want vertical_id v-1", activation.Config, activation.Fields)
 	}
-	if activation.Metadata["entity_type"] != "deployment" || activation.Metadata["instance_kind"] != "template" || activation.Metadata["last_source_event"] != evt.ID() {
-		t.Fatalf("activation metadata = %#v, want entity_type/instance_kind/last_source_event proof", activation.Metadata)
+	if _, exists := activation.Fields["entity_type"]; exists {
+		t.Fatalf("activation fields retain typed entity_type: %#v", activation.Fields)
+	}
+	if _, exists := activation.Fields["instance_kind"]; exists {
+		t.Fatalf("activation fields retain typed instance_kind: %#v", activation.Fields)
+	}
+	if activation.Bookkeeping["last_source_event"] != evt.ID() {
+		t.Fatalf("activation bookkeeping = %#v, want last_source_event proof", activation.Bookkeeping)
 	}
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-" + activation.Instance.InstanceID), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
@@ -2511,17 +2515,17 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 		t.Fatalf("activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
-	minted, _ := activation.Metadata["validation_case_id"].(string)
+	minted, _ := activation.Fields["validation_case_id"].(string)
 	if _, err := uuid.Parse(minted); err != nil {
 		t.Fatalf("minted validation_case_id = %q, want uuid: %v", minted, err)
 	}
 	if minted == eventID {
 		t.Fatalf("minted validation_case_id = source event id %q, want deterministic uuid mint distinct from event_id mint", minted)
 	}
-	if activation.Config["validation_case_id"] != minted || activation.Metadata["validation_case_id"] != minted {
-		t.Fatalf("activation config/metadata = %#v/%#v, want carried validation_case_id %q", activation.Config, activation.Metadata, minted)
+	if activation.Config["validation_case_id"] != minted || activation.Fields["validation_case_id"] != minted {
+		t.Fatalf("activation config/fields = %#v/%#v, want carried validation_case_id %q", activation.Config, activation.Fields, minted)
 	}
-	if got := activation.Metadata["last_source_event"]; got != eventID {
+	if got := activation.Bookkeeping["last_source_event"]; got != eventID {
 		t.Fatalf("last_source_event = %v, want %q", got, eventID)
 	}
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
@@ -2634,8 +2638,8 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 		t.Fatalf("activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
-	if activation.Metadata["validation_case_id"] != eventID || activation.Config["validation_case_id"] != eventID {
-		t.Fatalf("activation config/metadata = %#v/%#v, want event_id-minted validation_case_id %q", activation.Config, activation.Metadata, eventID)
+	if activation.Fields["validation_case_id"] != eventID || activation.Config["validation_case_id"] != eventID {
+		t.Fatalf("activation config/fields = %#v/%#v, want event_id-minted validation_case_id %q", activation.Config, activation.Fields, eventID)
 	}
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "validator",
@@ -2729,7 +2733,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 			}
 		}
 	}
-	for label, facts := range map[string]map[string]any{"config": request.Config, "metadata": request.Metadata} {
+	for label, facts := range map[string]map[string]any{"config": request.Config, "fields": request.Fields, "bookkeeping": request.Bookkeeping} {
 		for key := range facts {
 			normalized := strings.ToLower(key)
 			if strings.Contains(normalized, "on_missing") || strings.Contains(normalized, "on_conflict") || strings.Contains(normalized, "policy") {
@@ -3129,8 +3133,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if _, ok := activation.Config["template_instance_on_conflict"]; ok {
 		t.Fatalf("activation config retains on_conflict policy fact: %#v", activation.Config)
 	}
-	if activation.Config["account_id"] != "acct-2" || activation.Metadata["account_id"] != "acct-2" {
-		t.Fatalf("activation config/metadata = %#v/%#v, want carried account_id acct-2", activation.Config, activation.Metadata)
+	if activation.Config["account_id"] != "acct-2" || activation.Fields["account_id"] != "acct-2" {
+		t.Fatalf("activation config/fields = %#v/%#v, want carried account_id acct-2", activation.Config, activation.Fields)
 	}
 	createdWant := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node-" + activation.Instance.InstanceID), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "account",
@@ -3648,8 +3652,8 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 		t.Fatalf("activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
-	if activation.Config["vertical_id"] != "v-1" || activation.Metadata["vertical_id"] != "v-1" {
-		t.Fatalf("renamed activation config/metadata = %#v/%#v, want receiver vertical_id from adapter source_vertical_id", activation.Config, activation.Metadata)
+	if activation.Config["vertical_id"] != "v-1" || activation.Fields["vertical_id"] != "v-1" {
+		t.Fatalf("renamed activation config/fields = %#v/%#v, want receiver vertical_id from adapter source_vertical_id", activation.Config, activation.Fields)
 	}
 	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-" + activation.Instance.InstanceID), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",

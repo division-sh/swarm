@@ -7,5 +7,3 @@ expect:
   entities:
     - type: default
       current_state: scanning
-      fields:
-        fan_out_count: 0

@@ -57,9 +57,10 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 			NextCursor: "next",
 		},
 		getResult: operatorread.OperatorEntityFull{
-			Entity: operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
-			Fields: map[string]any{"priority": "high"},
-			Gates:  map[string]bool{"approved": true},
+			Entity:      operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
+			Fields:      map[string]any{"priority": "high", "activation": "manual"},
+			Bookkeeping: map[string]any{"activation": "standing"},
+			Gates:       map[string]bool{"approved": true},
 			Accumulated: map[string]any{
 				"score":       float64(3),
 				"accumulator": map[string]any{"count": float64(2)},
@@ -94,6 +95,9 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	getResult := asMap(t, get.Result)
 	if fields := asMap(t, getResult["fields"]); fields["priority"] != "high" {
 		t.Fatalf("entity.get result = %#v", get.Result)
+	}
+	if fields, bookkeeping := asMap(t, getResult["fields"]), asMap(t, getResult["bookkeeping"]); fields["activation"] != "manual" || bookkeeping["activation"] != "standing" {
+		t.Fatalf("entity.get field/bookkeeping collision = %#v/%#v", fields, bookkeeping)
 	}
 	accumulated := asMap(t, getResult["accumulated"])
 	if accumulated["score"] != float64(3) {

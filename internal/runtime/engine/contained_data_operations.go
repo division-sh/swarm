@@ -57,13 +57,13 @@ func (e *Executor) applyContainedDataOperation(frame *executionFrame, current Ba
 		}
 	}
 
-	if frame.state.State.StateCarrier.Metadata == nil {
-		frame.state.State.StateCarrier.Metadata = map[string]any{}
+	if frame.state.State.StateCarrier.Fields == nil {
+		frame.state.State.StateCarrier.Fields = map[string]any{}
 	}
-	if err := applyContainedOperationToMetadata(frame.state.State.StateCarrier.Metadata, target, op, key, hasIndex, index, value); err != nil {
+	if err := applyContainedOperationToMetadata(frame.state.State.StateCarrier.Fields, target, op, key, hasIndex, index, value); err != nil {
 		return err
 	}
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	return nil
 }
 

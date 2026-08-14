@@ -126,6 +126,7 @@ const postgresWorkflowInstanceSelect = `
 		es.entered_state_at,
 		es.gates,
 		es.fields,
+		es.bookkeeping,
 		es.accumulator,
 		fi.config,
 		es.flow_instance,
@@ -157,6 +158,7 @@ func scanPostgresWorkflowInstance(row workflowInstanceScanner) (runtimepipeline.
 		&record.EnteredStageAt,
 		&record.Gates,
 		&record.Fields,
+		&record.Bookkeeping,
 		&record.Accumulator,
 		&record.Config,
 		&record.FlowInstance,
@@ -279,7 +281,7 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowInstances(ctx context.Context,
 		}
 		matches := true
 		for _, selector := range selectors {
-			value, ok := runtimepipeline.WorkflowMetadataValue(item.Metadata, selector.Field)
+			value, ok := runtimepipeline.WorkflowMetadataValue(item.Fields, selector.Field)
 			if !ok || !runtimepipeline.WorkflowJSONValuesEqual(value, selector.Value) {
 				matches = false
 				break
@@ -304,6 +306,7 @@ const sqliteWorkflowInstanceSelect = `
 		es.entered_state_at,
 		es.gates,
 		es.fields,
+		es.bookkeeping,
 		es.accumulator,
 		fi.config,
 		es.flow_instance,
@@ -322,7 +325,7 @@ func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInst
 		var record runtimepipeline.WorkflowInstancePersistenceRecord
 		var workflowVersion, slug, name sql.NullString
 		var terminatedAt, enteredAt, createdAt, updatedAt any
-		var gates, fields, accumulator, config any
+		var gates, fields, bookkeeping, accumulator, config any
 		if err := rows.Scan(
 			&record.EntityID,
 			&record.WorkflowName,
@@ -334,6 +337,7 @@ func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInst
 			&enteredAt,
 			&gates,
 			&fields,
+			&bookkeeping,
 			&accumulator,
 			&config,
 			&record.FlowInstance,
@@ -351,7 +355,7 @@ func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInst
 		for _, item := range []struct {
 			raw    any
 			target *json.RawMessage
-		}{{gates, &record.Gates}, {fields, &record.Fields}, {accumulator, &record.Accumulator}, {config, &record.Config}} {
+		}{{gates, &record.Gates}, {fields, &record.Fields}, {bookkeeping, &record.Bookkeeping}, {accumulator, &record.Accumulator}, {config, &record.Config}} {
 			raw, target := item.raw, item.target
 			switch value := raw.(type) {
 			case string:

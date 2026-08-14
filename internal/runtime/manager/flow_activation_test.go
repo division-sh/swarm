@@ -812,7 +812,7 @@ func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.
 	if !ok {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("active flow instance not found for route recovery: %s", route.InstancePath)
 	}
-	entityID := identity.NormalizeEntityID(fmt.Sprint(instance.Metadata["entity_id"]))
+	entityID := identity.NormalizeEntityID(instance.EntityID)
 	if entityID.IsZero() {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow instance route recovery entity identity is missing")
 	}
@@ -3395,8 +3395,8 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	if got.StorageRef != "review/inst-1" {
 		t.Fatalf("storage_ref = %q, want review/inst-1", got.StorageRef)
 	}
-	if got.Metadata["entity_id"] != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
-		t.Fatalf("metadata entity_id = %#v, want %q", got.Metadata["entity_id"], runtimepipeline.FlowInstanceEntityID("review/inst-1"))
+	if got.EntityID != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
+		t.Fatalf("entity_id = %#v, want %q", got.EntityID, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
 	if got.Config["name"] != "alpha" {
 		t.Fatalf("config name = %#v, want alpha", got.Config["name"])
@@ -3418,20 +3418,21 @@ func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
 		FlowInstance: "operating/root",
 		EntityID:     "parent-ent",
 	}
+	req.Instance.ParentEntityID = "parent-ent"
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(instances.creates) != 1 {
 		t.Fatalf("creates = %d, want 1", len(instances.creates))
 	}
-	metadata := instances.creates[0].Metadata
-	if got := metadata["parent_flow_id"]; got != "operating" {
+	created := instances.creates[0]
+	if got := created.ParentFlowID; got != "operating" {
 		t.Fatalf("parent_flow_id = %#v, want operating", got)
 	}
-	if got := metadata["parent_flow_instance"]; got != "operating/root" {
+	if got := created.ParentFlowInstance; got != "operating/root" {
 		t.Fatalf("parent_flow_instance = %#v, want operating/root", got)
 	}
-	if got := metadata["parent_entity_id"]; got != "parent-ent" {
+	if got := created.ParentEntityID; got != "parent-ent" {
 		t.Fatalf("parent_entity_id = %#v, want parent-ent", got)
 	}
 }

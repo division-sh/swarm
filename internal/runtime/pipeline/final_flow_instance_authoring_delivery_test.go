@@ -29,15 +29,11 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
+		EntityID:        entityID,
 		WorkflowName:    finalflowinstanceauthoring.TemplateFlowID,
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
-		Metadata: map[string]any{
-			"entity_id":   entityID,
-			"flow_path":   flowInstance,
-			"instance_id": instanceID,
-			"account_id":  "acct-42",
-		},
+		Fields:          map[string]any{"account_id": "acct-42"},
 	})); err != nil {
 		t.Fatalf("seed account_case workflow instance: %v", err)
 	}
@@ -80,8 +76,8 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	if loaded.WorkflowName != finalflowinstanceauthoring.TemplateFlowID || loaded.CurrentState != "reviewed" {
 		t.Fatalf("loaded account_case = storage:%q workflow:%q state:%q, want account_case/reviewed", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
 	}
-	if loaded.Metadata["account_id"] != "acct-42" || loaded.Metadata["score"] != "91" || loaded.Metadata["decision"] != "approved" {
-		t.Fatalf("loaded account_case metadata = %#v, want account_id/score/decision from routed payload", loaded.Metadata)
+	if loaded.Fields["account_id"] != "acct-42" || loaded.Fields["score"] != "91" || loaded.Fields["decision"] != "approved" {
+		t.Fatalf("loaded account_case fields = %#v, want account_id/score/decision from routed payload", loaded.Fields)
 	}
 	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, "delivered")
 }

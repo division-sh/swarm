@@ -52,12 +52,12 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 			res, err := tx.ExecContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, name,
-					current_state, gates, fields, accumulator, revision,
+					current_state, gates, fields, bookkeeping, accumulator, revision,
 					entered_state_at, created_at, updated_at
 				)
 				VALUES (
 					$1::uuid, $2::uuid, $3, $4, NULL,
-					$5, $6::jsonb, $7::jsonb, '{}'::jsonb, 1,
+					$5, $6::jsonb, $7::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
 					$8, $8, $8
 				)
 				ON CONFLICT (run_id, entity_id) DO NOTHING
@@ -125,10 +125,10 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 			res, err := tx.ExecContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, name,
-					current_state, gates, fields, accumulator, revision,
+					current_state, gates, fields, bookkeeping, accumulator, revision,
 					entered_state_at, created_at, updated_at
 				)
-				VALUES (?, ?, ?, ?, NULL, ?, ?, ?, '{}', 1, ?, ?, ?)
+				VALUES (?, ?, ?, ?, NULL, ?, ?, ?, '{}', '{}', 1, ?, ?, ?)
 				ON CONFLICT (run_id, entity_id) DO NOTHING
 			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState,
 				string(gatesJSON), string(fieldsJSON), req.CreatedAt.UTC(), req.CreatedAt.UTC(), req.CreatedAt.UTC())
@@ -241,6 +241,7 @@ type scenarioSetupEntitySnapshot struct {
 	EntityType   string
 	CurrentState string
 	Fields       string
+	Bookkeeping  string
 	Gates        string
 	Accumulator  string
 	Revision     int
@@ -249,10 +250,10 @@ type scenarioSetupEntitySnapshot struct {
 func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
 	var snapshot scenarioSetupEntitySnapshot
 	err := tx.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_type, current_state, fields::text, gates::text, accumulator::text, revision
+		SELECT flow_instance, entity_type, current_state, fields::text, bookkeeping::text, gates::text, accumulator::text, revision
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.CurrentState, &snapshot.Fields, &snapshot.Gates, &snapshot.Accumulator, &snapshot.Revision)
+	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.CurrentState, &snapshot.Fields, &snapshot.Bookkeeping, &snapshot.Gates, &snapshot.Accumulator, &snapshot.Revision)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("postgres scenario setup entity %s insert conflicted but no existing row was visible", entity.Alias)
 	}
@@ -265,10 +266,10 @@ func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx
 func validateExistingSQLiteScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
 	var snapshot scenarioSetupEntitySnapshot
 	err := tx.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_type, current_state, fields, gates, accumulator, revision
+		SELECT flow_instance, entity_type, current_state, fields, bookkeeping, gates, accumulator, revision
 		FROM entity_state
 		WHERE run_id = ? AND entity_id = ?
-	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.CurrentState, &snapshot.Fields, &snapshot.Gates, &snapshot.Accumulator, &snapshot.Revision)
+	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.CurrentState, &snapshot.Fields, &snapshot.Bookkeeping, &snapshot.Gates, &snapshot.Accumulator, &snapshot.Revision)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("sqlite scenario setup entity %s insert conflicted but no existing row was visible", entity.Alias)
 	}
@@ -294,6 +295,9 @@ func validateExistingScenarioSetupEntity(snapshot scenarioSetupEntitySnapshot, e
 	}
 	if !scenarioSetupJSONEqual(snapshot.Fields, fieldsJSON) {
 		mismatches = append(mismatches, "fields")
+	}
+	if !scenarioSetupJSONEqual(snapshot.Bookkeeping, json.RawMessage(`{}`)) {
+		mismatches = append(mismatches, "bookkeeping")
 	}
 	if !scenarioSetupJSONEqual(snapshot.Gates, gatesJSON) {
 		mismatches = append(mismatches, "gates")

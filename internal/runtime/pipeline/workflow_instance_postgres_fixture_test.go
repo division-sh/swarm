@@ -24,6 +24,7 @@ func insertWorkflowCreateEntityInitialValueMutations(
 	adjusted := runtimemutationlog.EntityStateProjection{
 		CurrentState: before.CurrentState,
 		Fields:       cloneStringAnyMap(before.Fields),
+		Bookkeeping:  cloneStringAnyMap(before.Bookkeeping),
 		Gates:        cloneStringAnyMap(before.Gates),
 		Accumulator:  cloneStringAnyMap(before.Accumulator),
 	}
@@ -42,7 +43,8 @@ func insertWorkflowCreateEntityInitialValueMutations(
 		}
 		if err := mutationlogfixture.Insert(ctx, tx, runLifecycle, runtimemutationlog.Record{
 			EntityID:    entityID,
-			Field:       field,
+			Domain:      runtimemutationlog.DomainAuthoredField,
+			Path:        field,
 			OldValue:    oldValueOrNil(oldValue, hadOld),
 			NewValue:    declared,
 			WriterType:  "platform",
@@ -72,22 +74,24 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, en
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
 	var (
-		currentState sql.NullString
-		fieldsRaw    []byte
-		gatesRaw     []byte
-		accRaw       []byte
+		currentState   sql.NullString
+		fieldsRaw      []byte
+		bookkeepingRaw []byte
+		gatesRaw       []byte
+		accRaw         []byte
 	)
 	err := tx.QueryRowContext(ctx, `
 		SELECT
 			current_state,
 			COALESCE(fields, '{}'::jsonb),
+			COALESCE(bookkeeping, '{}'::jsonb),
 			COALESCE(gates, '{}'::jsonb),
 			COALESCE(accumulator, '{}'::jsonb)
 		FROM entity_state
 		WHERE run_id = $1::uuid
 		  AND entity_id = $2::uuid
 		FOR UPDATE
-	`, runID, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw)
+	`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accRaw)
 	if err == sql.ErrNoRows {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
@@ -95,6 +99,10 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, en
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	bookkeeping, err := decodeWorkflowInstanceJSONMap("entity_state.bookkeeping", bookkeepingRaw)
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
@@ -109,6 +117,7 @@ func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, en
 	return runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState.String),
 		Fields:       fields,
+		Bookkeeping:  bookkeeping,
 		Gates:        workflowBoolGatesAsMap(gates),
 		Accumulator:  accumulator,
 	}, nil

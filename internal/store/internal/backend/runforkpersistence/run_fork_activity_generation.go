@@ -184,7 +184,7 @@ func loadRunForkEntityGenerations(ctx context.Context, tx *sql.Tx, forkRunID, en
 			structured[key] = value
 		}
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, structured)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, structured)
 	if err != nil {
 		return nil, err
 	}

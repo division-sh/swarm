@@ -144,10 +144,11 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      runID,
 		StorageRef:      runID,
+		EntityID:        entityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
+		Fields:          map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -232,10 +233,11 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
+		EntityID:        entityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
+		Fields:          map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -355,7 +357,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
+		Fields:          map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -421,7 +423,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "idle",
-		Metadata:        map[string]any{"entity_id": rootEntityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
+		Fields:          map[string]any{"entity_id": rootEntityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
 	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
@@ -431,7 +433,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"entity_id":        childEntityID,
 			"flow_path":        "child/inst-1",
 			"parent_entity_id": rootEntityID,
@@ -445,7 +447,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		WorkflowName:    "grandchild",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "finished",
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"entity_id":        grandchildEntityID,
 			"flow_path":        "child/grandchild/inst-1",
 			"parent_entity_id": childEntityID,
@@ -533,7 +535,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"entity_id":        childRowID,
 			"flow_path":        childFlowPath,
 			"parent_entity_id": rootEntityID,
@@ -627,7 +629,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"entity_id":        childRowID,
 			"flow_path":        childFlowPath,
 			"parent_entity_id": rootEntityID,

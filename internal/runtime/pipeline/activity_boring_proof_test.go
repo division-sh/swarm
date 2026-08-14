@@ -832,16 +832,13 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	if err := fixture.pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "research/" + entityID,
+		EntityID:        entityID,
 		WorkflowName:    "research",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
 		EnteredStageAt:  evt.CreatedAt(),
 		CreatedAt:       evt.CreatedAt(),
-		Metadata: map[string]any{
-			"entity_id":   entityID,
-			"flow_path":   "research/" + entityID,
-			"instance_id": entityID,
-		},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed activity boring workflow instance: %v", err)
 	}

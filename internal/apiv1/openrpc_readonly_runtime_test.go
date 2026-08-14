@@ -294,7 +294,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"conversation.list":          {Params: map[string]any{}, ResultKeys: []string{"conversations"}},
 		"conversation.list_turns":    {Params: map[string]any{"session_id": "sess-1"}, ResultKeys: []string{"conversation", "turns"}},
 		"entity.aggregate":           {Params: map[string]any{}, ResultKeys: []string{"counts"}},
-		"entity.get":                 {Params: map[string]any{"entity_id": "entity-1"}, ResultKeys: []string{"entity", "fields", "gates", "accumulated"}},
+		"entity.get":                 {Params: map[string]any{"entity_id": "entity-1"}, ResultKeys: []string{"entity", "fields", "bookkeeping", "gates", "accumulated"}},
 		"entity.list":                {Params: map[string]any{}, ResultKeys: []string{"entities"}},
 		"event.get":                  {Params: map[string]any{"event_id": "evt-1"}, ResultKeys: []string{"event_id", "event_name", "payload", "deliveries", "dead_letters"}},
 		"event.list":                 {Params: map[string]any{"filter": map[string]any{"run_id": "run-1"}}, ResultKeys: []string{"events"}},
@@ -605,9 +605,10 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 				UpdatedAt:    now,
 			}}},
 			getResult: operatorread.OperatorEntityFull{
-				Entity: operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
-				Fields: map[string]any{"priority": "high"},
-				Gates:  map[string]bool{"approved": true},
+				Entity:      operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
+				Fields:      map[string]any{"priority": "high", "activation": "manual"},
+				Bookkeeping: map[string]any{"activation": "standing"},
+				Gates:       map[string]bool{"approved": true},
 				Accumulated: map[string]any{
 					"score":       float64(3),
 					"accumulator": map[string]any{"count": float64(2)},

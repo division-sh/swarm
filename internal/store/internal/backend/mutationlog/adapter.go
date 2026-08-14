@@ -29,11 +29,15 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 		return runtimemutationlog.ErrInvalidMutationLogWriter("author activity owner is required")
 	}
 	entityID := strings.TrimSpace(rec.EntityID)
-	field := strings.TrimSpace(rec.Field)
+	domain := rec.Domain
+	path := strings.TrimSpace(rec.Path)
 	writerType := strings.TrimSpace(rec.WriterType)
 	writerID := strings.TrimSpace(rec.WriterID)
-	if entityID == "" || field == "" || writerType == "" || writerID == "" {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
+	if entityID == "" || writerType == "" || writerID == "" {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, writer_type, and writer_id are required")
+	}
+	if err := runtimemutationlog.ValidateDomainPath(domain, path); err != nil {
+		return err
 	}
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
@@ -71,14 +75,14 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 	occurredAt := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			mutation_id, run_id, entity_id, field, old_value, new_value,
+			mutation_id, run_id, entity_id, domain, path, old_value, new_value,
 			caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6::jsonb,
-			NULLIF($7, '')::uuid, $8, $9, NULLIF($10, ''), $11
+			$1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7::jsonb,
+			NULLIF($8, '')::uuid, $9, $10, NULLIF($11, ''), $12
 		)
-	`, mutationID, runID, entityID, field, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
+	`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
 		return err
 	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)

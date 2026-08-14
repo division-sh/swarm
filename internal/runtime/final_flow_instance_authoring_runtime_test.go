@@ -52,6 +52,18 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager not initialized")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return errors.New("agent manager not initialized")
+			}
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -153,10 +165,10 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	if loaded.StorageRef != flowInstance || loaded.WorkflowName != finalflowinstanceauthoring.TemplateFlowID || loaded.CurrentState != "reviewed" {
 		t.Fatalf("loaded account_case instance = storage:%q workflow:%q state:%q, want %s/%s/reviewed", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState, flowInstance, finalflowinstanceauthoring.TemplateFlowID)
 	}
-	if loaded.Metadata[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" ||
-		loaded.Metadata["score"] != "91" ||
-		loaded.Metadata["decision"] != "approved" {
-		t.Fatalf("loaded account_case metadata = %#v, want account_id/score/decision from selected routed payload", loaded.Metadata)
+	if loaded.Fields[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" ||
+		loaded.Fields["score"] != "91" ||
+		loaded.Fields["decision"] != "approved" {
+		t.Fatalf("loaded account_case fields = %#v, want account_id/score/decision from selected routed payload", loaded.Fields)
 	}
 }
 

@@ -17,7 +17,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -120,8 +119,8 @@ func TestStageGateOwnerRequiresAuthoritativeWorkflowInstance(t *testing.T) {
 	entityID := uuid.NewString()
 	instancePath := "telegram-ingress/standing-one"
 	instance := WorkflowInstance{
-		InstanceID: "standing-one", StorageRef: instancePath, WorkflowName: "telegram-ingress",
-		Metadata: map[string]any{"flow_path": instancePath, "instance_id": "standing-one", "entity_id": entityID},
+		InstanceID: "standing-one", StorageRef: instancePath, EntityID: entityID, WorkflowName: "telegram-ingress",
+		Fields: map[string]any{"flow_path": "authored-collision", "instance_id": "authored-collision", "entity_id": "authored-collision"},
 	}
 	anchor := decisioncard.StageGateAnchor{
 		Route:  runtimeflowidentity.StoredRoute("telegram-ingress", "standing-one", instancePath),
@@ -370,9 +369,9 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: uuid.NewString(), StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1",
+				InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1",
 				CurrentState: "drafting", EnteredStageAt: now,
-				Metadata: map[string]any{"entity_id": entityID, "run_id": runtimeRunID(ctx)},
+				Fields: map[string]any{"entity_id": entityID, "run_id": runtimeRunID(ctx)},
 			})
 			if err := workflowStore.upsert(ctx, instance); err != nil {
 				t.Fatal(err)
@@ -395,7 +394,7 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 			}
-			carrier, err := runtimeengine.StateCarrierFromPersisted(loaded.Metadata, loaded.StateBuckets)
+			carrier, err := workflowInstanceStateCarrier(loaded)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -417,8 +416,8 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: uuid.NewString(), StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1",
-				CurrentState: "drafting", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "run_id": runtimeRunID(ctx)},
+				InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1",
+				CurrentState: "drafting", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runtimeRunID(ctx)},
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -437,7 +436,7 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 			}
-			carrier, err := runtimeengine.StateCarrierFromPersisted(loaded.Metadata, loaded.StateBuckets)
+			carrier, err := workflowInstanceStateCarrier(loaded)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -466,8 +465,8 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: "human-readable-instance", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1",
-				CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
+				InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1",
+				CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID},
 			})); err != nil {
 				t.Fatal(err)
 			}
@@ -558,7 +557,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
-				if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
+				if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
 					t.Fatal(err)
 				}
 				cards := &gateLifecycleCardStore{}
@@ -590,7 +589,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			ensurePipelineTestRun(t, workflowStore, runID)
 			now := time.Date(2026, time.July, 12, 12, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
@@ -632,7 +631,7 @@ func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "standing-readable-id", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "activation": "standing"}})); err != nil {
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "run_id": runID, "activation": "standing"}})); err != nil {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
@@ -656,7 +655,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "display-instance-id", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "awaiting_review", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
@@ -689,7 +688,7 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			runID := runtimeRunID(ctx)
 			ensurePipelineTestRun(t, workflowStore, runID)
 			entityID := uuid.NewString()
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "child/review-1", StorageRef: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "gate-test", StorageRef: "gate-test", EntityID: entityID, WorkflowName: "gate-test", WorkflowVersion: "1", CurrentState: "drafting", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"entity_id": entityID, "run_id": runID}})); err != nil {
 				t.Fatal(err)
 			}
 			cards := &gateLifecycleCardStore{}
@@ -739,7 +738,7 @@ func assertGateLifecycleState(t *testing.T, store *workflowInstanceStore, ctx co
 	if err != nil || !ok {
 		t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(loaded.Metadata, loaded.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(loaded)
 	if err != nil {
 		t.Fatal(err)
 	}

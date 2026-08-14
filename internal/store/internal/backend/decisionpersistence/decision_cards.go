@@ -1152,7 +1152,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 			rows.Close()
 			return fmt.Errorf("decode run gate activations for entity %s: %w", entityID, err)
 		}
-		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, accumulator)
+		carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, accumulator)
 		if err != nil {
 			rows.Close()
 			return err

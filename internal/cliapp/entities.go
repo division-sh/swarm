@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/spf13/cobra"
 )
@@ -82,6 +81,7 @@ type entitySummary struct {
 type entityFull struct {
 	Entity      entitySummary                  `json:"entity"`
 	Fields      map[string]any                 `json:"fields"`
+	Bookkeeping map[string]any                 `json:"bookkeeping"`
 	Gates       map[string]bool                `json:"gates"`
 	Accumulated map[string]any                 `json:"accumulated"`
 	Loops       []loopruntime.PublicActivation `json:"loops,omitempty"`
@@ -451,6 +451,9 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Fields == nil {
 		return fmt.Errorf("malformed %s: fields is required", prefix)
 	}
+	if result.Bookkeeping == nil {
+		return fmt.Errorf("malformed %s: bookkeeping is required", prefix)
+	}
 	if result.Gates == nil {
 		return fmt.Errorf("malformed %s: gates is required", prefix)
 	}
@@ -579,12 +582,12 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	)
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Entity " + entity.EntityID, Rows: header})
 
-	writeEntityFieldSection(out, "Fields", result.Fields, entityContentField, true)
+	writeEntityFieldSection(out, "Fields", result.Fields, nil, true)
 	writeEntityGatesSection(out, result.Gates)
 	writeEntityAccumulatedSection(out, result.Accumulated, opts.verbose)
+	writeEntityBookkeepingSection(out, result.Bookkeeping, opts.verbose)
 	if opts.verbose {
 		writeEntityLoopSection(out, result.Loops)
-		writeEntityFieldSection(out, "Bookkeeping", result.Fields, entityBookkeepingField, false)
 	}
 }
 
@@ -603,20 +606,6 @@ func entityTimestampText(now time.Time, raw string, verbose bool) string {
 // discipline. Exact identifiers and semantic keys use the full-value sanitizer.
 func entityOneLine(value string) string {
 	return cliRenderOneLineValue(value)
-}
-
-// entityContentField is a temporary display classifier for entity.get's
-// undifferentiated fields map. A workflow-authored field whose name collides
-// with a platform bookkeeping key is hidden from default output, but remains
-// available under --verbose and --json. Issue #2242 tracks moving ownership to
-// the API projection so this name-based limitation and classifier can be
-// removed.
-func entityContentField(key string) bool {
-	return !runtimecontracts.IsEntityFieldBookkeepingKey(key)
-}
-
-func entityBookkeepingField(key string) bool {
-	return runtimecontracts.IsEntityFieldBookkeepingKey(key)
 }
 
 func writeEntityFieldSection(out io.Writer, title string, fields map[string]any, include func(string) bool, stateEmpty bool) {
@@ -707,6 +696,18 @@ func writeEntityAccumulatedSection(out io.Writer, accumulated map[string]any, ve
 		return
 	}
 	writeCLITitle(out, fmt.Sprintf("Accumulated  %d keys (--verbose to expand)", len(accumulated)))
+}
+
+func writeEntityBookkeepingSection(out io.Writer, bookkeeping map[string]any, verbose bool) {
+	if verbose {
+		writeEntityFieldSection(out, "Bookkeeping", bookkeeping, nil, true)
+		return
+	}
+	if len(bookkeeping) == 0 {
+		writeCLITitle(out, "Bookkeeping  none")
+		return
+	}
+	writeCLITitle(out, fmt.Sprintf("Bookkeeping  %d facts (--verbose to expand)", len(bookkeeping)))
 }
 
 // writeEntityLoopSection renders bounded-loop activations as data under

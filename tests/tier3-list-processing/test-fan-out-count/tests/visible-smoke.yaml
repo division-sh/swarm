@@ -12,5 +12,3 @@ expect:
   entities:
     - type: default
       current_state: processing
-      fields:
-        fan_out_count: 3

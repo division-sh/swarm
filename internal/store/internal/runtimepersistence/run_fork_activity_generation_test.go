@@ -55,9 +55,9 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	handlerLoops, _ := json.Marshal(buckets[loopruntime.BucketKey])
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event,
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event,
 			writer_type, writer_id, handler_step, created_at
-		) VALUES ($1::uuid, $2::uuid, 'accumulator.handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
+		) VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
@@ -170,8 +170,8 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
-		VALUES ($1::uuid, $2::uuid, 'accumulator.handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
+		INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
+		VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
@@ -248,8 +248,8 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
-		VALUES ($1::uuid, $2::uuid, 'accumulator.handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
+		INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
+		VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}

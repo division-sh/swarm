@@ -500,6 +500,7 @@ func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, ru
 			COALESCE(es.slug, ''),
 			COALESCE(es.name, ''),
 			COALESCE(es.fields, '{}'::jsonb),
+			COALESCE(es.bookkeeping, '{}'::jsonb),
 			COALESCE(es.gates, '{}'::jsonb),
 			COALESCE(es.accumulator, '{}'::jsonb)
 		FROM entity_state es
@@ -507,11 +508,12 @@ func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, ru
 		  AND es.run_id = $2::uuid
 	`, entityID, runID)
 	var (
-		out     operatorread.OperatorEntityFull
-		fields  []byte
-		gates   []byte
-		accum   []byte
-		summary = &out.Entity
+		out         operatorread.OperatorEntityFull
+		fields      []byte
+		bookkeeping []byte
+		gates       []byte
+		accum       []byte
+		summary     = &out.Entity
 	)
 	if err := row.Scan(
 		&summary.EntityID,
@@ -525,6 +527,7 @@ func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, ru
 		&summary.Slug,
 		&summary.Name,
 		&fields,
+		&bookkeeping,
 		&gates,
 		&accum,
 	); err == sql.ErrNoRows {
@@ -535,6 +538,10 @@ func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, ru
 	decodedFields, err := decodeStoreJSONMap(fields)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity fields: %w", err)
+	}
+	decodedBookkeeping, err := decodeStoreJSONMap(bookkeeping)
+	if err != nil {
+		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity bookkeeping: %w", err)
 	}
 	decodedGates, err := decodeStoreJSONBoolMap(gates)
 	if err != nil {
@@ -549,6 +556,7 @@ func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, ru
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity loops: %w", err)
 	}
 	out.Fields = decodedFields
+	out.Bookkeeping = decodedBookkeeping
 	out.Gates = decodedGates
 	out.Accumulated = loopruntime.PublicStateBuckets(decodedAccumulated)
 	out.Loops = loops
@@ -569,6 +577,7 @@ func (s *EntitySQLite) loadSQLiteOperatorEntityRow(ctx context.Context, entityID
 			COALESCE(es.slug, ''),
 			COALESCE(es.name, ''),
 			COALESCE(es.fields, '{}'),
+			COALESCE(es.bookkeeping, '{}'),
 			COALESCE(es.gates, '{}'),
 			COALESCE(es.accumulator, '{}')
 		FROM entity_state es
@@ -576,13 +585,14 @@ func (s *EntitySQLite) loadSQLiteOperatorEntityRow(ctx context.Context, entityID
 		  AND es.run_id = ?
 	`, entityID, runID)
 	var (
-		out     operatorread.OperatorEntityFull
-		fields  any
-		gates   any
-		accum   any
-		summary = &out.Entity
+		out         operatorread.OperatorEntityFull
+		fields      any
+		bookkeeping any
+		gates       any
+		accum       any
+		summary     = &out.Entity
 	)
-	item, err := scanSQLiteOperatorEntitySummaryWithTail(row, &fields, &gates, &accum)
+	item, err := scanSQLiteOperatorEntitySummaryWithTail(row, &fields, &bookkeeping, &gates, &accum)
 	if err == sql.ErrNoRows {
 		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
 	}
@@ -593,6 +603,10 @@ func (s *EntitySQLite) loadSQLiteOperatorEntityRow(ctx context.Context, entityID
 	decodedFields, err := decodeStoreJSONMap([]byte(sqliteJSONRawMessage(fields)))
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity fields: %w", err)
+	}
+	decodedBookkeeping, err := decodeStoreJSONMap([]byte(sqliteJSONRawMessage(bookkeeping)))
+	if err != nil {
+		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity bookkeeping: %w", err)
 	}
 	decodedGates, err := decodeStoreJSONBoolMap([]byte(sqliteJSONRawMessage(gates)))
 	if err != nil {
@@ -607,6 +621,7 @@ func (s *EntitySQLite) loadSQLiteOperatorEntityRow(ctx context.Context, entityID
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity loops: %w", err)
 	}
 	out.Fields = decodedFields
+	out.Bookkeeping = decodedBookkeeping
 	out.Gates = decodedGates
 	out.Accumulated = loopruntime.PublicStateBuckets(decodedAccumulated)
 	out.Loops = loops

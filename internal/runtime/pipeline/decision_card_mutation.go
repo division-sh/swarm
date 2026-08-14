@@ -419,7 +419,7 @@ func (pc *PipelineCoordinator) prepareDecisionCardGateCommit(
 	if !found {
 		return nil, fmt.Errorf("decision card workflow instance is missing")
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return nil, err
 	}

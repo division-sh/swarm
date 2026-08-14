@@ -344,7 +344,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	entityID, evt = resolvedEntityID, resolvedEvent
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	statePath := firstNonEmptyString(asString(selectedState.Metadata["flow_path"]), evt.FlowInstance())
+	statePath := firstNonEmptyString(selectedState.Control.FlowPath, evt.FlowInstance())
 	if exactDelivery {
 		statePath = stampedOwner.Route().FlowInstance
 	}
@@ -532,21 +532,19 @@ func prepareHandlerMaterializationState(source semanticview.Source, flowID strin
 	if !route.Valid() {
 		return fmt.Errorf("materializing handler requires an exact workflow instance route")
 	}
-	state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
+	state.Metadata = workflowMaterializeEntityFields(source, flowID, state.Metadata)
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}
-	exactFacts := map[string]string{
-		"flow_path":   route.InstancePath,
-		"instance_id": route.InstanceID,
-		"entity_id":   strings.TrimSpace(entityID),
+	if existing := strings.Trim(strings.TrimSpace(state.Control.FlowPath), "/"); existing != "" && existing != route.InstancePath {
+		return fmt.Errorf("materializing handler flow_path %q disagrees with exact value %q", existing, route.InstancePath)
 	}
-	for key, value := range exactFacts {
-		if existing := strings.TrimSpace(asString(state.Metadata[key])); existing != "" && existing != value {
-			return fmt.Errorf("materializing handler %s %q disagrees with exact value %q", key, existing, value)
-		}
-		state.Metadata[key] = value
+	if existing := strings.TrimSpace(state.Control.InstanceID); existing != "" && existing != route.InstanceID {
+		return fmt.Errorf("materializing handler instance_id %q disagrees with exact value %q", existing, route.InstanceID)
 	}
+	state.Control.FlowPath = route.InstancePath
+	state.Control.StorageRef = route.InstancePath
+	state.Control.InstanceID = route.InstanceID
 	state.EntityID = strings.TrimSpace(entityID)
 	if strings.TrimSpace(string(state.Stage)) == "" {
 		state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
@@ -581,24 +579,9 @@ func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID stri
 			map[string]map[string]any{},
 		),
 	}
-	if handler.CreateEntity {
-		snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
-		carrier, err := runtimeengine.StateCarrierFromPersisted(cloneStringAnyMap(state.Metadata), nil)
-		if err != nil {
-			return runtimeengine.StateSnapshot{}, fmt.Errorf("workflow state metadata.gates: %w", err)
-		}
-		snapshot.StateCarrier.Metadata = carrier.Metadata
-		snapshot.StateCarrier.Gates = carrier.Gates
-		return snapshot, nil
-	}
+	snapshot.StateCarrier.Control = state.Control
 	snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
-	snapshot.StateCarrier.Metadata = cloneStringAnyMap(state.Metadata)
-	carrier, err := runtimeengine.StateCarrierFromPersisted(snapshot.StateCarrier.Metadata, nil)
-	if err != nil {
-		return runtimeengine.StateSnapshot{}, fmt.Errorf("workflow state metadata.gates: %w", err)
-	}
-	snapshot.StateCarrier.Metadata = carrier.Metadata
-	snapshot.StateCarrier.Gates = carrier.Gates
+	snapshot.StateCarrier.Fields = cloneStringAnyMap(state.Metadata)
 	return snapshot, nil
 }
 

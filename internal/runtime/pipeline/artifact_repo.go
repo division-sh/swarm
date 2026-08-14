@@ -97,15 +97,15 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_provenance_invalid", "resolve_input"))
 	}
-	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Metadata[spec.Output.LastSourceEventID])); previous == sourceEventID && artifactRepoOutputsComplete(execCtx.Request.State.StateCarrier.Metadata, spec) {
+	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Fields[spec.Output.LastSourceEventID])); previous == sourceEventID && artifactRepoOutputsComplete(execCtx.Request.State.StateCarrier.Fields, spec) {
 		return runtimeengine.ActionExecution{}, nil
 	}
 	files, treeHash, err := prepareArtifactRepoFiles(execCtx.Base, spec)
 	if err != nil {
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid", "validate_input"))
 	}
-	if previousRequest := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Metadata[spec.Output.LastRequestID])); previousRequest == requestID {
-		if currentManifest, ok := execCtx.Request.State.StateCarrier.Metadata[spec.Output.FileManifest].(map[string]any); ok {
+	if previousRequest := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Fields[spec.Output.LastRequestID])); previousRequest == requestID {
+		if currentManifest, ok := execCtx.Request.State.StateCarrier.Fields[spec.Output.FileManifest].(map[string]any); ok {
 			if previousTree := strings.TrimSpace(asString(currentManifest["tree_hash"])); previousTree != "" && previousTree != treeHash {
 				return fail(runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "artifact_repo_request_conflict", "artifact-repo", "admit_request", map[string]any{"request_id": requestID}))
 			}
@@ -1003,7 +1003,7 @@ func commitTime(when time.Time) time.Time {
 }
 
 func artifactRepoResultState(execCtx runtimeengine.ExecutionContext, fields map[string]any) *runtimeengine.StateMutation {
-	metadata := cloneStringAnyMap(execCtx.Request.State.StateCarrier.Metadata)
+	metadata := cloneStringAnyMap(execCtx.Request.State.StateCarrier.Fields)
 	if metadata == nil {
 		metadata = map[string]any{}
 	}

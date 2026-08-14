@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,17 +41,20 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	}
 }
 
-func TestHandlerExecutionStateSnapshotRejectsMalformedPersistedGateShape(t *testing.T) {
-	_, err := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{}, "ent-1", WorkflowState{
+func TestHandlerExecutionStateSnapshotKeepsAuthoredGatesFieldSeparate(t *testing.T) {
+	snapshot, err := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{}, "ent-1", WorkflowState{
 		EntityID: "ent-1",
 		Stage:    WorkflowStateID("queued"),
-		Metadata: map[string]any{"gates": "invalid"},
+		Metadata: map[string]any{"gates": "authored"},
 	}, "default", "v-test")
-	if err == nil {
-		t.Fatal("expected malformed persisted gates to fail closed")
+	if err != nil {
+		t.Fatalf("handlerExecutionStateSnapshot: %v", err)
 	}
-	if !strings.Contains(err.Error(), "metadata.gates") {
-		t.Fatalf("error = %v, want metadata.gates context", err)
+	if got := snapshot.Fields["gates"]; got != "authored" {
+		t.Fatalf("authored gates field = %#v, want authored", got)
+	}
+	if len(snapshot.Gates) != 0 {
+		t.Fatalf("typed gates = %#v, want empty", snapshot.Gates)
 	}
 }
 

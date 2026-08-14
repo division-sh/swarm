@@ -446,30 +446,31 @@ func testWorkflowStoreRunContext(t *testing.T, store *workflowInstanceStore) con
 
 func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
 	occurredAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
-	instance.Metadata = cloneStringAnyMap(instance.Metadata)
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
+	instance.Fields = cloneStringAnyMap(instance.Fields)
+	if instance.Fields == nil {
+		instance.Fields = map[string]any{}
 	}
-	if strings.TrimSpace(asString(instance.Metadata["entity_id"])) == "" {
-		for _, candidate := range []string{instance.InstanceID, instance.StorageRef} {
-			if parsed, err := uuid.Parse(strings.TrimSpace(candidate)); err == nil {
-				instance.Metadata["entity_id"] = parsed.String()
-				break
-			}
-		}
+	instance.Bookkeeping = cloneStringAnyMap(instance.Bookkeeping)
+	if instance.Bookkeeping == nil {
+		instance.Bookkeeping = map[string]any{}
 	}
+	instance.Gates = cloneWorkflowGates(instance.Gates)
 	storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
-	if _, declared := instance.Metadata["flow_path"]; !declared && strings.Contains(storageRef, "/") {
-		instance.Metadata["flow_path"] = storageRef
-		instance.Metadata["instance_id"] = runtimeflowidentity.LogicalInstanceID(storageRef)
-	} else if !declared {
+	if storageRef != "" {
+		instance.InstanceID = runtimeflowidentity.LogicalInstanceID(storageRef)
+	} else {
 		canonicalRoute := strings.Trim(strings.TrimSpace(instance.WorkflowName), "/")
 		if canonicalRoute != "" {
 			instance.StorageRef = canonicalRoute
 			instance.InstanceID = runtimeflowidentity.LogicalInstanceID(canonicalRoute)
-			instance.Metadata["flow_path"] = canonicalRoute
-			instance.Metadata["instance_id"] = instance.InstanceID
+			storageRef = canonicalRoute
 		}
+	}
+	if strings.TrimSpace(instance.EntityID) == "" && storageRef != "" {
+		instance.EntityID = FlowInstanceEntityID(storageRef)
+	}
+	if strings.TrimSpace(instance.EntityType) == "" {
+		instance.EntityType = "default"
 	}
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = occurredAt

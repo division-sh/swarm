@@ -64,21 +64,11 @@ func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(
 	if strings.TrimSpace(req.InitialState) == "" {
 		req.InitialState = "pending"
 	}
-	metadata := make(map[string]any, len(req.Metadata)+6)
-	for key, value := range req.Metadata {
-		metadata[key] = value
+	fields := make(map[string]any, len(req.Fields))
+	for key, value := range req.Fields {
+		fields[key] = value
 	}
-	metadata["entity_id"] = req.Instance.EntityID
-	metadata["instance_id"] = req.Instance.InstanceID
-	metadata["flow_path"] = req.Instance.InstancePath
-	metadata["parent_entity_id"] = req.Instance.ParentEntityID
 	parentRoute := req.Instance.ParentRoute.Normalized()
-	if parentRoute.FlowID != "" {
-		metadata["parent_flow_id"] = parentRoute.FlowID
-	}
-	if parentRoute.FlowInstance != "" {
-		metadata["parent_flow_instance"] = parentRoute.FlowInstance
-	}
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance, RunID: req.TriggerEvent.RunID(),
@@ -86,9 +76,10 @@ func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(
 		WorkflowVersion: req.ContractBundle.WorkflowVersion(), ExecutionMode: "live",
 	}
 	instance := runtimepipeline.WorkflowInstance{
-		InstanceID: req.Instance.InstanceID, StorageRef: req.Instance.InstancePath,
+		InstanceID: req.Instance.InstanceID, StorageRef: req.Instance.InstancePath, EntityID: req.Instance.EntityID,
+		ParentFlowID: parentRoute.FlowID, ParentFlowInstance: parentRoute.FlowInstance, ParentEntityID: req.Instance.ParentEntityID,
 		WorkflowName: req.Instance.TemplateID, WorkflowVersion: req.ContractBundle.WorkflowVersion(),
-		CurrentState: req.InitialState, Config: req.Config, Metadata: metadata,
+		CurrentState: req.InitialState, Config: req.Config, Fields: fields, Bookkeeping: req.Bookkeeping,
 		EnteredStageAt: req.OccurredAt, CreatedAt: req.OccurredAt, RuntimeReadiness: &readiness,
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{

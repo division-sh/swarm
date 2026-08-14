@@ -3248,41 +3248,29 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		{
 			InstanceID:      eventBusTestRunID,
 			StorageRef:      eventBusTestRunID,
+			EntityID:        rootEntityID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
-			Metadata: map[string]any{
-				"entity_id":   rootEntityID,
-				"flow_path":   eventBusTestRunID,
-				"instance_id": eventBusTestRunID,
-			},
 		},
 		{
-			InstanceID:      childEntityID,
-			StorageRef:      "child",
-			WorkflowName:    "child",
-			WorkflowVersion: bundle.WorkflowVersion(),
-			CurrentState:    "delegated",
-			Metadata: map[string]any{
-				"entity_id":            childEntityID,
-				"flow_path":            "child",
-				"instance_id":          "child",
-				"parent_flow_id":       bundle.WorkflowName(),
-				"parent_flow_instance": eventBusTestRunID,
-				"parent_entity_id":     rootEntityID,
-			},
+			InstanceID:         "child",
+			StorageRef:         "child",
+			EntityID:           childEntityID,
+			ParentFlowID:       bundle.WorkflowName(),
+			ParentFlowInstance: eventBusTestRunID,
+			ParentEntityID:     rootEntityID,
+			WorkflowName:       "child",
+			WorkflowVersion:    bundle.WorkflowVersion(),
+			CurrentState:       "delegated",
 		},
 		{
-			InstanceID:      grandchildEntityID,
+			InstanceID:      "grandchild",
 			StorageRef:      "child/grandchild",
+			EntityID:        grandchildEntityID,
 			WorkflowName:    "grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "finished",
-			Metadata: map[string]any{
-				"entity_id":   grandchildEntityID,
-				"flow_path":   "child/grandchild",
-				"instance_id": "grandchild",
-			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
@@ -3466,26 +3454,18 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		{
 			InstanceID:      eventBusTestRunID,
 			StorageRef:      eventBusTestRunID,
+			EntityID:        rootEntityID,
 			WorkflowName:    "mixed-route",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
-			Metadata: map[string]any{
-				"entity_id":   rootEntityID,
-				"flow_path":   eventBusTestRunID,
-				"instance_id": eventBusTestRunID,
-			},
 		},
 		{
-			InstanceID:      childEntityID,
+			InstanceID:      "child",
 			StorageRef:      "child",
+			EntityID:        childEntityID,
 			WorkflowName:    "child",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
-			Metadata: map[string]any{
-				"entity_id":   childEntityID,
-				"flow_path":   "child",
-				"instance_id": "child",
-			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
@@ -3745,44 +3725,32 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		{
 			InstanceID:      eventBusTestRunID,
 			StorageRef:      eventBusTestRunID,
+			EntityID:        rootEntityID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
-			Metadata: map[string]any{
-				"entity_id":   rootEntityID,
-				"flow_path":   eventBusTestRunID,
-				"instance_id": eventBusTestRunID,
-			},
 		},
 		{
-			InstanceID:      runtimeflowidentity.EntityID("child"),
-			StorageRef:      "child",
-			WorkflowName:    "child",
-			WorkflowVersion: bundle.WorkflowVersion(),
-			CurrentState:    "waiting",
-			Metadata: map[string]any{
-				"entity_id":            runtimeflowidentity.EntityID("child"),
-				"flow_path":            "child",
-				"instance_id":          "child",
-				"parent_flow_id":       bundle.WorkflowName(),
-				"parent_flow_instance": eventBusTestRunID,
-				"parent_entity_id":     rootEntityID,
-			},
+			InstanceID:         "child",
+			StorageRef:         "child",
+			EntityID:           runtimeflowidentity.EntityID("child"),
+			ParentFlowID:       bundle.WorkflowName(),
+			ParentFlowInstance: eventBusTestRunID,
+			ParentEntityID:     rootEntityID,
+			WorkflowName:       "child",
+			WorkflowVersion:    bundle.WorkflowVersion(),
+			CurrentState:       "waiting",
 		},
 		{
-			InstanceID:      runtimeflowidentity.EntityID("child/grandchild"),
-			StorageRef:      "child/grandchild",
-			WorkflowName:    "grandchild",
-			WorkflowVersion: bundle.WorkflowVersion(),
-			CurrentState:    "ready",
-			Metadata: map[string]any{
-				"entity_id":            runtimeflowidentity.EntityID("child/grandchild"),
-				"flow_path":            "child/grandchild",
-				"instance_id":          "grandchild",
-				"parent_flow_id":       "child",
-				"parent_flow_instance": "child",
-				"parent_entity_id":     runtimeflowidentity.EntityID("child"),
-			},
+			InstanceID:         "grandchild",
+			StorageRef:         "child/grandchild",
+			EntityID:           runtimeflowidentity.EntityID("child/grandchild"),
+			ParentFlowID:       "child",
+			ParentFlowInstance: "child",
+			ParentEntityID:     runtimeflowidentity.EntityID("child"),
+			WorkflowName:       "grandchild",
+			WorkflowVersion:    bundle.WorkflowVersion(),
+			CurrentState:       "ready",
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), instance, instance.CreatedAt); err != nil {
@@ -4071,14 +4039,10 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 	rootFixture := exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
 		InstanceID:      eventBusTestRunID,
 		StorageRef:      eventBusTestRunID,
+		EntityID:        rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
-		Metadata: map[string]any{
-			"entity_id":   rootEntityID,
-			"flow_path":   eventBusTestRunID,
-			"instance_id": eventBusTestRunID,
-		},
 	}})[0]
 	if _, err := workflowStore.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), rootFixture, rootFixture.CreatedAt); err != nil {
 		t.Fatalf("seed root instance: %v", err)
@@ -4171,7 +4135,7 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 				}
 			}
 		}
-		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root metadata=%#v events=%v", got, root.Metadata, dump)
+		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root fields=%#v events=%v", got, root.Fields, dump)
 	}
 }
 

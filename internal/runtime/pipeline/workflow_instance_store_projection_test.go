@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -22,15 +21,25 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	parentID := uuid.NewString()
 	parentFlowID := "operating"
 	parentFlowInstance := "operating/root"
+	entityID := uuid.NewString()
 	now := time.Now().UTC().Round(time.Microsecond)
 
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "inst-1",
-		StorageRef:      storageRef,
-		WorkflowName:    "projection-flow",
-		WorkflowVersion: "1.0.0",
-		CurrentState:    "active",
-		EnteredStageAt:  now,
+		InstanceID:         "inst-1",
+		StorageRef:         storageRef,
+		EntityID:           entityID,
+		EntityType:         "workflow_subject",
+		Slug:               "projection",
+		Name:               "Projection Flow",
+		InstanceKind:       "materialized",
+		TemplateVersion:    "v1",
+		ParentFlowID:       parentFlowID,
+		ParentFlowInstance: parentFlowInstance,
+		ParentEntityID:     parentID,
+		WorkflowName:       "projection-flow",
+		WorkflowVersion:    "1.0.0",
+		CurrentState:       "active",
+		EnteredStageAt:     now,
 		Config: map[string]any{
 			"custom_threshold": float64(3),
 		},
@@ -48,24 +57,9 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 				},
 			},
 		},
-		Metadata: map[string]any{
-			"business_brief":       map[string]any{"title": "hello"},
-			"status":               "open",
-			"slug":                 "projection",
-			"name":                 "Projection Flow",
-			"entity_type":          "workflow_subject",
-			"instance_id":          "inst-1",
-			"flow_path":            storageRef,
-			"instance_kind":        "materialized",
-			"template_version":     "v1",
-			"last_source_event":    "review.started",
-			"parent_flow_id":       parentFlowID,
-			"parent_flow_instance": parentFlowInstance,
-			"parent_entity_id":     parentID,
-			"gates": map[string]any{
-				"g_ready": true,
-			},
-		},
+		Fields:      map[string]any{"business_brief": map[string]any{"title": "hello"}, "status": "open"},
+		Bookkeeping: map[string]any{"last_source_event": "review.started"},
+		Gates:       map[string]bool{"g_ready": true},
 	})
 
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
@@ -88,29 +82,26 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if got := strings.TrimSpace(asString(loaded.Config["custom_threshold"])); got != "3" {
 		t.Fatalf("Config custom_threshold = %#v, want 3", loaded.Config["custom_threshold"])
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["status"])); got != "open" {
-		t.Fatalf("Metadata status = %#v, want open", loaded.Metadata["status"])
+	if got := strings.TrimSpace(asString(loaded.Fields["status"])); got != "open" {
+		t.Fatalf("Fields status = %#v, want open", loaded.Fields["status"])
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "review/inst-1" {
-		t.Fatalf("Metadata flow_path = %#v, want review/inst-1", loaded.Metadata["flow_path"])
+	if got := strings.TrimSpace(loaded.StorageRef); got != "review/inst-1" {
+		t.Fatalf("StorageRef = %q, want review/inst-1", got)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["parent_flow_id"])); got != parentFlowID {
-		t.Fatalf("Metadata parent_flow_id = %#v, want %q", loaded.Metadata["parent_flow_id"], parentFlowID)
+	if got := strings.TrimSpace(loaded.ParentFlowID); got != parentFlowID {
+		t.Fatalf("ParentFlowID = %q, want %q", got, parentFlowID)
 	}
-	if got := strings.Trim(strings.TrimSpace(asString(loaded.Metadata["parent_flow_instance"])), "/"); got != parentFlowInstance {
-		t.Fatalf("Metadata parent_flow_instance = %#v, want %q", loaded.Metadata["parent_flow_instance"], parentFlowInstance)
+	if got := strings.Trim(strings.TrimSpace(loaded.ParentFlowInstance), "/"); got != parentFlowInstance {
+		t.Fatalf("ParentFlowInstance = %q, want %q", got, parentFlowInstance)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["parent_entity_id"])); got != parentID {
-		t.Fatalf("Metadata parent_entity_id = %#v, want %q", loaded.Metadata["parent_entity_id"], parentID)
+	if got := strings.TrimSpace(loaded.ParentEntityID); got != parentID {
+		t.Fatalf("ParentEntityID = %q, want %q", got, parentID)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["storage_ref"])); got != "review/inst-1" {
-		t.Fatalf("Metadata storage_ref = %#v, want review/inst-1", loaded.Metadata["storage_ref"])
+	if _, exists := loaded.Fields["subject_id"]; exists {
+		t.Fatalf("Fields subject_id = %#v, want absent", loaded.Fields["subject_id"])
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["subject_id"])); got != "" {
-		t.Fatalf("Metadata subject_id = %#v, want empty", loaded.Metadata["subject_id"])
-	}
-	if gates := workflowStateGatesAsBools(loaded.Metadata); !gates["g_ready"] {
-		t.Fatalf("Metadata gates = %#v, want g_ready=true", loaded.Metadata["gates"])
+	if !loaded.Gates["g_ready"] {
+		t.Fatalf("Gates = %#v, want g_ready=true", loaded.Gates)
 	}
 	if len(loaded.TransitionHistory) != 1 || loaded.TransitionHistory[0].TransitionID != "tr-1" {
 		t.Fatalf("TransitionHistory = %#v, want tr-1", loaded.TransitionHistory)
@@ -139,8 +130,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if identity.InstanceID != "inst-1" {
 		t.Fatalf("identity.InstanceID = %q, want inst-1", identity.InstanceID)
 	}
-	if identity.EntityID != runtimeflowidentity.EntityID("review/inst-1") {
-		t.Fatalf("identity.EntityID = %q, want canonical id for review/inst-1", identity.EntityID)
+	if identity.EntityID != entityID {
+		t.Fatalf("identity.EntityID = %q, want explicit typed id %q", identity.EntityID, entityID)
 	}
 	if identity.ParentRoute.FlowID != parentFlowID {
 		t.Fatalf("identity.ParentRoute.FlowID = %q, want %q", identity.ParentRoute.FlowID, parentFlowID)
@@ -164,6 +155,10 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
+		EntityID:        entityID,
+		EntityType:      "workflow_subject",
+		Slug:            "projection",
+		Name:            "Projection Flow",
 		WorkflowName:    "projection-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "reviewing",
@@ -171,13 +166,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		Config: map[string]any{
 			"status": "waiting",
 		},
-		Metadata: map[string]any{
-			"status":      "entity-open",
-			"entity_type": "workflow_subject",
-			"slug":        "projection",
-			"name":        "Projection Flow",
-			"entity_id":   entityID,
-		},
+		Fields: map[string]any{"status": "entity-open"},
 		StateBuckets: map[string]any{
 			"score": float64(9),
 		},
@@ -197,8 +186,8 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	if got := loaded.CurrentState; got != "reviewing" {
 		t.Fatalf("CurrentState = %q, want reviewing", got)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["status"])); got != "entity-open" {
-		t.Fatalf("Metadata status = %#v, want entity-open", loaded.Metadata["status"])
+	if got := strings.TrimSpace(asString(loaded.Fields["status"])); got != "entity-open" {
+		t.Fatalf("Fields status = %#v, want entity-open", loaded.Fields["status"])
 	}
 
 	var currentState string
@@ -243,12 +232,8 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		Config: map[string]any{
 			"name": "alpha",
 		},
-		Metadata: map[string]any{
-			"business_brief": "first",
-			"entity_type":    "workflow_subject",
-			"flow_path":      storageRef,
-			"instance_id":    "inst-1",
-		},
+		EntityType: "workflow_subject",
+		Fields:     map[string]any{"business_brief": "first"},
 		StateBuckets: map[string]any{
 			"score": map[string]any{"value": float64(1)},
 		},
@@ -262,12 +247,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	duplicate.Config = map[string]any{
 		"name": "beta",
 	}
-	duplicate.Metadata = map[string]any{
-		"business_brief": "second",
-		"entity_type":    "workflow_subject",
-		"flow_path":      storageRef,
-		"instance_id":    "inst-1",
-	}
+	duplicate.Fields = map[string]any{"business_brief": "second"}
 	duplicate.StateBuckets = map[string]any{
 		"score": map[string]any{"value": float64(99)},
 	}
@@ -290,8 +270,8 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	if got := loaded.Config["name"]; got != "alpha" {
 		t.Fatalf("Config name = %#v, want alpha", got)
 	}
-	if got := loaded.Metadata["business_brief"]; got != "first" {
-		t.Fatalf("Metadata business_brief = %#v, want first", got)
+	if got := loaded.Fields["business_brief"]; got != "first" {
+		t.Fatalf("Fields business_brief = %#v, want first", got)
 	}
 	gotScore, ok := workflowStateBucketObject(loaded, "score")
 	if !ok || gotScore["value"] != float64(1) {
@@ -333,15 +313,14 @@ func TestWorkflowInstanceStoreProjection_StaticRowsPersistCanonicalFlowPathOnRou
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	storageRef := uuid.NewString()
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      storageRef,
-		StorageRef:      storageRef,
+		InstanceID:      "static-flow",
+		StorageRef:      "static-flow",
+		EntityID:        storageRef,
 		WorkflowName:    "static-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"instance_id": storageRef,
-		},
-		StateBuckets: map[string]any{},
+		Fields:          map[string]any{},
+		StateBuckets:    map[string]any{},
 	})
 
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
@@ -355,8 +334,8 @@ func TestWorkflowInstanceStoreProjection_StaticRowsPersistCanonicalFlowPathOnRou
 	if !ok {
 		t.Fatal("expected static workflow instance to persist")
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["flow_path"])); got != "static-flow" {
-		t.Fatalf("Metadata flow_path = %#v, want canonical static route", loaded.Metadata["flow_path"])
+	if got := strings.TrimSpace(loaded.StorageRef); got != "static-flow" {
+		t.Fatalf("StorageRef = %q, want canonical static route", got)
 	}
 	identity, err := workflowInstancePersistedIdentity(nil, loaded)
 	if err != nil {
@@ -409,21 +388,21 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			name:         "control metadata malformed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"projection-flow","transition_history":"bad"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
 			wantContains: "flow_instances.config transition_history must be an array of workflow transition records",
 		},
 		{
 			name:         "instance id disagrees with flow path",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"projection-flow","flow_path":"projection-flow"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"storage-ref"}`,
 			wantContains: "instance_id",
 		},
 		{
 			name:         "slash-only flow path fails closed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"projection-flow","flow_path":"/"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
 			wantContains: "flow_path",
 		},
 	}
@@ -439,19 +418,17 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      "inst-1",
 				StorageRef:      storageRef,
+				EntityID:        entityID,
 				WorkflowName:    "projection-flow",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "queued",
-				Metadata: map[string]any{
-					"instance_id": "inst-1",
-					"entity_id":   entityID,
-				},
-				StateBuckets: map[string]any{},
+				Fields:          map[string]any{},
+				StateBuckets:    map[string]any{},
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
-			mutateID := "projection-flow"
+			mutateID := storageRef
 			if tc.mutateKey == "entity" {
 				mutateID = entityID
 			}
@@ -459,7 +436,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 
-			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("projection-flow"))
+			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef))
 			if tc.wantContains == "" {
 				if err != nil {
 					t.Fatalf("load with slash-only flow_path: %v", err)
@@ -467,8 +444,8 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				if !ok {
 					t.Fatal("expected slash-only flow_path row to load")
 				}
-				if got := strings.TrimSpace(asString(loaded.Metadata["instance_id"])); got != "inst-1" {
-					t.Fatalf("loaded Metadata instance_id = %#v, want inst-1", loaded.Metadata["instance_id"])
+				if got := strings.TrimSpace(loaded.InstanceID); got != "inst-1" {
+					t.Fatalf("loaded InstanceID = %q, want inst-1", got)
 				}
 				return
 			}

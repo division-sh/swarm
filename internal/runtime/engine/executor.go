@@ -600,8 +600,8 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 
 func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) (executionFrame, error) {
 	state := req.State
-	if state.StateCarrier.Metadata == nil {
-		state.StateCarrier.Metadata = map[string]any{}
+	if state.StateCarrier.Fields == nil {
+		state.StateCarrier.Fields = map[string]any{}
 	}
 	if state.StateCarrier.StateBuckets == nil {
 		state.StateCarrier.StateBuckets = map[string]map[string]any{}
@@ -971,12 +971,12 @@ func (e *Executor) stepClearGates(frame *executionFrame) error {
 	}
 	frame.result.ClearGates = normalizeStrings(e.resolveClearGates(frame))
 	frame.result.StateMutation.ClearGates = append([]string{}, frame.result.ClearGates...)
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	for _, gate := range frame.result.ClearGates {
 		frame.state.State.SetGate(gate, false)
 		frame.result.StateMutation.SetGateValue(gate, false)
 	}
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	return nil
 }
 
@@ -1199,16 +1199,16 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 		}
 		frame.state.SetComputed(field, value)
 		frame.result.SetComputed(field, value)
-		frame.state.State.SetMetadata(field, value)
-		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-		frame.result.StateMutation.SetMetadata(field, value)
+		frame.state.State.SetField(field, value)
+		frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+		frame.result.StateMutation.SetField(field, value)
 		return nil
 	}
 	frame.state.SetComputed("computed", value)
 	frame.result.SetComputed("computed", value)
-	frame.state.State.SetMetadata("computed", value)
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-	frame.result.StateMutation.SetMetadata("computed", value)
+	frame.state.State.SetField("computed", value)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	frame.result.StateMutation.SetField("computed", value)
 	return nil
 }
 
@@ -1682,8 +1682,9 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	frame.state.SetFanOut("count", len(items))
 	// fan_out_count is platform-populated runtime bookkeeping, not an authored
 	// entity write target.
-	frame.state.State.SetMetadata("fan_out_count", len(items))
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.state.State.SetBookkeeping("fan_out_count", len(items))
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	frame.result.StateMutation.StateCarrier.Bookkeeping = cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping)
 	limit := effective.MaxItems
 	if len(items) > limit {
 		return false, failures.Wrap(
@@ -1881,10 +1882,10 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 	}
 	frame.result.SetsGate = name
 	frame.result.StateMutation.SetGate = name
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	frame.state.State.SetGate(name, true)
 	frame.result.StateMutation.SetGateValue(name, true)
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	return nil
 }
 
@@ -2350,9 +2351,9 @@ func (e *Executor) mergeActionState(frame *executionFrame, baseline StateSnapsho
 	if e == nil || frame == nil || mutation == nil {
 		return nil
 	}
-	metadata := cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-	for key, value := range mutation.StateCarrier.Metadata {
-		if baselineValue, ok := baseline.StateCarrier.Metadata[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
+	metadata := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	for key, value := range mutation.StateCarrier.Fields {
+		if baselineValue, ok := baseline.StateCarrier.Fields[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
 			metadata[key] = value
 		}
 	}
@@ -2375,10 +2376,10 @@ func (e *Executor) mergeActionState(frame *executionFrame, baseline StateSnapsho
 			buckets[key] = currentBucket
 		}
 	}
-	frame.state.State.StateCarrier.Metadata = metadata
+	frame.state.State.StateCarrier.Fields = metadata
 	frame.state.State.StateCarrier.Gates = gates
 	frame.state.State.StateCarrier.StateBuckets = buckets
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(metadata)
 	frame.result.StateMutation.StateCarrier.Gates = gates
 	frame.result.StateMutation.SetStateBuckets(buckets)
 	return nil
@@ -2401,18 +2402,18 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 					delete(bucket.Raw(), handlerAccumulatorBucketKey)
 				}
 			}
-			delete(frame.state.State.StateCarrier.Metadata, "accumulated_count")
-			delete(frame.state.State.StateCarrier.Metadata, "accumulated_total")
-			delete(frame.state.State.StateCarrier.Metadata, "received_items")
+			delete(frame.state.State.StateCarrier.Fields, "accumulated_count")
+			delete(frame.state.State.StateCarrier.Fields, "accumulated_total")
+			delete(frame.state.State.StateCarrier.Fields, "received_items")
 		case "pending_dedup":
-			delete(frame.state.State.StateCarrier.Metadata, "dedup_key")
+			delete(frame.state.State.StateCarrier.Fields, "dedup_key")
 		default:
 			if err := e.clearStepValue(frame, target); err != nil {
 				return err
 			}
 		}
 	}
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	return nil
 }
@@ -2466,8 +2467,8 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 			}
 		}
 	}
-	if frame.result.StateMutation.StateCarrier.Metadata == nil {
-		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	if frame.result.StateMutation.StateCarrier.Fields == nil {
+		frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	}
 	if frame.result.StateMutation.StateCarrier.StateBuckets == nil {
 		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
@@ -2499,7 +2500,7 @@ func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersis
 			return
 		}
 		prerequisite := EmitPersistenceFieldPrerequisite{Field: field}
-		if expected, ok := lookupParsedPath(frame.state.State.StateCarrier.Metadata, path); ok {
+		if expected, ok := lookupParsedPath(frame.state.State.StateCarrier.Fields, path); ok {
 			prerequisite.Expected = expected
 			prerequisite.HasExpected = true
 		}
@@ -2621,8 +2622,8 @@ func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
 	if out.EnteredStateAt.IsZero() {
 		out.EnteredStateAt = base.EnteredStateAt
 	}
-	if len(out.StateCarrier.Metadata) == 0 {
-		out.StateCarrier.Metadata = cloneStringAnyMap(base.StateCarrier.Metadata)
+	if len(out.StateCarrier.Fields) == 0 {
+		out.StateCarrier.Fields = cloneStringAnyMap(base.StateCarrier.Fields)
 	}
 	if len(out.StateCarrier.Gates) == 0 && len(base.StateCarrier.Gates) > 0 {
 		out.StateCarrier.Gates = mapsClone(base.StateCarrier.Gates)
@@ -2640,7 +2641,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
 	ctx = WithJoin(ctx, frame.state.Join)
 	ctx = WithLoop(ctx, frame.state.Loop)
-	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
+	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Fields))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.FlowID.String())))
@@ -2669,8 +2670,8 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	case paths.RootJoin:
 		return fmt.Errorf("join context is read-only")
 	}
-	if frame.state.State.StateCarrier.Metadata == nil {
-		frame.state.State.StateCarrier.Metadata = map[string]any{}
+	if frame.state.State.StateCarrier.Fields == nil {
+		frame.state.State.StateCarrier.Fields = map[string]any{}
 	}
 	storagePath := parsed
 	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
@@ -2691,8 +2692,8 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	} else if parsed.HasExplicitRoot() {
 		storagePath = paths.Path{Segments: parsed.Segments}
 	}
-	setParsedValuePath(frame.state.State.StateCarrier.Metadata, storagePath, value)
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	setParsedValuePath(frame.state.State.StateCarrier.Fields, storagePath, value)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	return nil
 }
 
@@ -2706,10 +2707,10 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
 			return err
 		} else if entityTarget {
-			executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(resolved.Path, "."))
+			executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
 			return nil
 		}
-		executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(target, "."))
+		executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(target, "."))
 		return nil
 	}
 	switch parsed.Root {
@@ -2727,13 +2728,13 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
 				return err
 			} else {
-				executionDeletePath(frame.state.State.StateCarrier.Metadata, strings.Split(resolved.Path, "."))
+				executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
 			}
 			return nil
 		}
-		executionDeletePath(frame.state.State.StateCarrier.Metadata, parsed.Segments)
+		executionDeletePath(frame.state.State.StateCarrier.Fields, parsed.Segments)
 	default:
-		delete(frame.state.State.StateCarrier.Metadata, target)
+		delete(frame.state.State.StateCarrier.Fields, target)
 	}
 	return nil
 }
@@ -2894,8 +2895,9 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			}
 		}
 	}
-	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type())))
-	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
+	frame.state.State.SetBookkeeping("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type())))
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	frame.result.StateMutation.StateCarrier.Bookkeeping = cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping)
 	frame.result.StateMutation.DataAccumulation = spec
 	return nil
 }
@@ -3197,7 +3199,7 @@ func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, env
 		FlowID:               strings.TrimSpace(frame.req.FlowID.String()),
 		EventType:            strings.TrimSpace(eventType),
 		RoutingSource:        frame.req.ProducerSource,
-		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Metadata),
+		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Fields),
 		CurrentDeliveryOwner: runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 	}
 	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)

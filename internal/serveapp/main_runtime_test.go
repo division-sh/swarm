@@ -2572,7 +2572,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,TRUE,'authored',$11::uuid,'task.done',$12::uuid,true,'live',$13)`,
 				[]any{fixture.Turn2ID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, fixture.SessionID, identity.FlowInstancePath, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
-			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'current_state',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'current_state','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
+			{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'lifecycle_state','',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'authored_field','name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'lifecycle_state','','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
 		}
 	case "sqlite":
 		statements = []struct {
@@ -2606,7 +2606,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			) VALUES (?,?,?,?,?,?,?,?,?,?,1,'authored',?,'task.done',?,true,'live',?)`,
 				[]any{fixture.Turn2ID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, fixture.SessionID, identity.FlowInstancePath, fixture.Event2ID, capabilityIDs[1], fixture.Turn2At}},
 			{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
-			{`INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'current_state',NULL,'"draft"','platform','test',?),(?,?,'name',NULL,'"Before"','platform','test',?),(?,?,'current_state','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
+			{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'lifecycle_state','',NULL,'"draft"','platform','test',?),(?,?,'authored_field','name',NULL,'"Before"','platform','test',?),(?,?,'lifecycle_state','','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
 		}
 	}
 	for _, statement := range statements {
@@ -3397,14 +3397,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store gate activation: %v", err)
 	}
-	instanceMetadata := carrier.PersistedMetadata()
-	instanceMetadata["entity_id"] = entityID
-	instanceMetadata["flow_path"] = "root"
-	instanceMetadata["instance_id"] = "root"
 	materializeCtx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
 	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
-		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
+		InstanceID: "root", StorageRef: "root", EntityID: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
@@ -4605,11 +4601,6 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store %s run.stop gate activation: %v", rt.Backend, err)
 	}
-	instanceMetadata := carrier.PersistedMetadata()
-	instanceMetadata["entity_id"] = entityID
-	instanceMetadata["flow_path"] = "root"
-	instanceMetadata["instance_id"] = "root"
-
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
 	switch rt.Backend {
@@ -4628,8 +4619,8 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
 	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
-		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
+		InstanceID: "root", StorageRef: "root", EntityID: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
 	}
@@ -4713,7 +4704,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 	if err != nil {
 		t.Fatalf("restore %s terminal gate carrier: %v", rt.Backend, err)
 	}
@@ -8015,11 +8006,11 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		}})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, to_jsonb($5::text), $3::uuid, 'platform', $6, 'seed', $4),
-			($1::uuid, $2::uuid, 'name', 'null'::jsonb, to_jsonb($7::text), $3::uuid, 'platform', $6, 'seed', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, to_jsonb($5::text), $3::uuid, 'platform', $6, 'seed', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, to_jsonb($7::text), $3::uuid, 'platform', $6, 'seed', $4)
 	`, runID, entityID, eventID, at, currentState, writerID, entityName); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}

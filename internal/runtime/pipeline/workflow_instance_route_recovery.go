@@ -38,12 +38,18 @@ func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 	if err != nil {
 		return WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("decode flow instance for route recovery %s: %w", route.InstancePath, err)
 	}
-	persistedProjection := workflowInstancePersistedProjection{Config: config, Control: control}
 	instance := WorkflowInstance{
-		StorageRef:   route.InstancePath,
-		WorkflowName: record.WorkflowName,
-		Config:       config,
-		Metadata:     persistedProjection.Metadata(),
+		StorageRef:         route.InstancePath,
+		InstanceID:         control.InstanceID,
+		EntityID:           control.EntityID,
+		EntityType:         control.EntityType,
+		InstanceKind:       control.InstanceKind,
+		TemplateVersion:    control.TemplateVersion,
+		ParentFlowID:       control.ParentFlowID,
+		ParentFlowInstance: control.ParentFlowInstance,
+		ParentEntityID:     control.ParentEntityID,
+		WorkflowName:       record.WorkflowName,
+		Config:             config,
 	}
 	persistedIdentity, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(record.EntityID), instance)
 	if err != nil {

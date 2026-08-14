@@ -1205,7 +1205,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 			},
 		},
 	}
-	req.State.SetMetadata("dimensions_requested", []any{"build_complexity"})
+	req.State.SetField("dimensions_requested", []any{"build_complexity"})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1213,7 +1213,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	if got := shaper.lastReq.State.StateCarrier.Metadata["composite_score"]; got != 80.0 && got != 80 {
+	if got := shaper.lastReq.State.StateCarrier.Fields["composite_score"]; got != 80.0 && got != 80 {
 		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
 	}
 }
@@ -1343,9 +1343,9 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	scores, ok := result.StateMutation.Metadata["scores"].([]any)
+	scores, ok := result.StateMutation.Fields["scores"].([]any)
 	if !ok || len(scores) != 1 {
-		t.Fatalf("projected scores = %#v", result.StateMutation.Metadata["scores"])
+		t.Fatalf("projected scores = %#v", result.StateMutation.Fields["scores"])
 	}
 	score, ok := scores[0].(map[string]any)
 	if !ok {
@@ -1360,9 +1360,9 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	if got := score["dimension"]; got != "market" {
 		t.Fatalf("projected dimension = %#v", got)
 	}
-	summaries, ok := result.StateMutation.Metadata["summary"].([]any)
+	summaries, ok := result.StateMutation.Fields["summary"].([]any)
 	if !ok || len(summaries) != 1 {
-		t.Fatalf("projected summary = %#v", result.StateMutation.Metadata["summary"])
+		t.Fatalf("projected summary = %#v", result.StateMutation.Fields["summary"])
 	}
 	summary, ok := summaries[0].(map[string]any)
 	if !ok {
@@ -1458,10 +1458,10 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 	if got := result.RuleID; got != "matched" {
 		t.Fatalf("RuleID = %q, want matched", got)
 	}
-	if got := result.StateMutation.Metadata["handler_marker"]; got != "top-level" {
+	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
 		t.Fatalf("handler_marker = %#v, want top-level", got)
 	}
-	if got := result.StateMutation.Metadata["rule_marker"]; got != "rule" {
+	if got := result.StateMutation.Fields["rule_marker"]; got != "rule" {
 		t.Fatalf("rule_marker = %#v, want rule", got)
 	}
 	if len(result.EmitIntents) != 1 {
@@ -1508,8 +1508,8 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	if got := strings.TrimSpace(result.RuleID); got != "" {
 		t.Fatalf("RuleID = %q, want empty when rules do not match", got)
 	}
-	if _, ok := result.StateMutation.Metadata["rule_marker"]; ok {
-		t.Fatalf("rule_marker unexpectedly written: %#v", result.StateMutation.Metadata)
+	if _, ok := result.StateMutation.Fields["rule_marker"]; ok {
+		t.Fatalf("rule_marker unexpectedly written: %#v", result.StateMutation.Fields)
 	}
 }
 
@@ -1556,7 +1556,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	if result.Status != OutcomeFannedOut {
 		t.Fatalf("Status = %q, want %q", result.Status, OutcomeFannedOut)
 	}
-	if got := result.StateMutation.Metadata["handler_marker"]; got != "top-level" {
+	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
 		t.Fatalf("handler_marker state mutation = %#v, want top-level", got)
 	}
 	if len(result.EmitIntents) != 1 {
@@ -1611,9 +1611,9 @@ func executeAccumulatorProjectionTestEvent(t *testing.T, exec *Executor, handler
 
 func requireProjectedScore(t *testing.T, result ExecutionResult, field string) map[string]any {
 	t.Helper()
-	scores, ok := result.StateMutation.Metadata[field].([]any)
+	scores, ok := result.StateMutation.Fields[field].([]any)
 	if !ok || len(scores) != 1 {
-		t.Fatalf("projected %s = %#v", field, result.StateMutation.Metadata[field])
+		t.Fatalf("projected %s = %#v", field, result.StateMutation.Fields[field])
 	}
 	score, ok := scores[0].(map[string]any)
 	if !ok {
@@ -1630,8 +1630,8 @@ func requireProjectedScore(t *testing.T, result ExecutionResult, field string) m
 
 func requireNoProjectedScores(t *testing.T, result ExecutionResult) {
 	t.Helper()
-	if _, exists := result.StateMutation.Metadata["scores"]; exists {
-		t.Fatalf("projected scores unexpectedly present: %#v", result.StateMutation.Metadata["scores"])
+	if _, exists := result.StateMutation.Fields["scores"]; exists {
+		t.Fatalf("projected scores unexpectedly present: %#v", result.StateMutation.Fields["scores"])
 	}
 }
 
@@ -1671,9 +1671,9 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef("scoring-node", "scoring/score.dimension_complete")); ok {
 		t.Fatalf("concrete runtime event bucket survived in state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
 	}
-	scores, ok := result.StateMutation.Metadata["scores"].([]any)
+	scores, ok := result.StateMutation.Fields["scores"].([]any)
 	if !ok || len(scores) != 1 {
-		t.Fatalf("projected scores = %#v", result.StateMutation.Metadata["scores"])
+		t.Fatalf("projected scores = %#v", result.StateMutation.Fields["scores"])
 	}
 	score, ok := scores[0].(map[string]any)
 	if !ok {
@@ -2019,7 +2019,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.StateMutation.Metadata["component_count"]; got != 2 {
+	if got := result.StateMutation.Fields["component_count"]; got != 2 {
 		t.Fatalf("component_count = %#v, want 2", got)
 	}
 }
@@ -2203,8 +2203,8 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	if got := string(result.EmitIntents[0].Event.Type()); got != "bundle.rendered" {
 		t.Fatalf("emit event = %q, want bundle.rendered", got)
 	}
-	if _, ok := result.StateMutation.Metadata["rendered_bundle"]; ok {
-		t.Fatalf("module result leaked into state mutation metadata: %#v", result.StateMutation.Metadata)
+	if _, ok := result.StateMutation.Fields["rendered_bundle"]; ok {
+		t.Fatalf("module result leaked into state mutation metadata: %#v", result.StateMutation.Fields)
 	}
 	if got := len(result.ComputeModuleTraces); got != 1 {
 		t.Fatalf("module traces = %d, want 1", got)
@@ -2601,8 +2601,8 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	if got := string(result.EmitIntents[0].Event.Type()); got != "deploy.manifest_invalid" {
 		t.Fatalf("emit event = %q, want deploy.manifest_invalid", got)
 	}
-	if _, ok := result.StateMutation.Metadata["validation"]; ok {
-		t.Fatalf("validation result leaked into state mutation metadata: %#v", result.StateMutation.Metadata)
+	if _, ok := result.StateMutation.Fields["validation"]; ok {
+		t.Fatalf("validation result leaked into state mutation metadata: %#v", result.StateMutation.Fields)
 	}
 }
 
@@ -3032,18 +3032,18 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	filtered, ok := repo.mutation.Metadata["filtered"].([]any)
+	filtered, ok := repo.mutation.Fields["filtered"].([]any)
 	if !ok || len(filtered) != 2 {
-		t.Fatalf("filtered = %#v", repo.mutation.Metadata["filtered"])
+		t.Fatalf("filtered = %#v", repo.mutation.Fields["filtered"])
 	}
-	if got := repo.mutation.Metadata["total"]; got != 120 {
+	if got := repo.mutation.Fields["total"]; got != 120 {
 		t.Fatalf("total = %#v, want 120", got)
 	}
-	if got := repo.mutation.Metadata["active_count"]; got != 1 {
+	if got := repo.mutation.Fields["active_count"]; got != 1 {
 		t.Fatalf("active_count = %#v, want 1", got)
 	}
-	if _, ok := repo.mutation.Metadata["dedup_key"]; ok {
-		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", repo.mutation.Metadata)
+	if _, ok := repo.mutation.Fields["dedup_key"]; ok {
+		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", repo.mutation.Fields)
 	}
 	if nodeBucket, ok := repo.mutation.StateBuckets["node-1"]; ok {
 		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
@@ -3086,9 +3086,9 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	grouped, ok := repo.mutation.Metadata["grouped"].(map[string]any)
+	grouped, ok := repo.mutation.Fields["grouped"].(map[string]any)
 	if !ok {
-		t.Fatalf("grouped = %#v", repo.mutation.Metadata["grouped"])
+		t.Fatalf("grouped = %#v", repo.mutation.Fields["grouped"])
 	}
 	if grouped["queued"] != 2 || grouped["done"] != 1 {
 		t.Fatalf("grouped counts = %#v", grouped)
@@ -3123,9 +3123,9 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	rows, ok := result.StateMutation.Metadata["query_rows"].([]any)
+	rows, ok := result.StateMutation.Fields["query_rows"].([]any)
 	if !ok || len(rows) != 1 {
-		t.Fatalf("query_rows = %#v", result.StateMutation.Metadata["query_rows"])
+		t.Fatalf("query_rows = %#v", result.StateMutation.Fields["query_rows"])
 	}
 	item, _ := rows[0].(map[string]any)
 	if item["score"] != 7.0 {
@@ -3973,10 +3973,10 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.StateMutation.Metadata["final_source"]; got != "handler" {
+	if got := result.StateMutation.Fields["final_source"]; got != "handler" {
 		t.Fatalf("final_source = %#v, want handler", got)
 	}
-	if got := result.StateMutation.Metadata["rule_only"]; got != "applied" {
+	if got := result.StateMutation.Fields["rule_only"]; got != "applied" {
 		t.Fatalf("rule_only = %#v, want applied", got)
 	}
 }
@@ -4027,10 +4027,10 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	if got := strings.TrimSpace(result.RuleID); got != "" {
 		t.Fatalf("rule_id = %q, want empty when branch selection cannot see top-level writes", got)
 	}
-	if _, exists := result.StateMutation.Metadata["rule_selected"]; exists {
-		t.Fatalf("rule_selected unexpectedly present after rules evaluated before top-level writes: %#v", result.StateMutation.Metadata["rule_selected"])
+	if _, exists := result.StateMutation.Fields["rule_selected"]; exists {
+		t.Fatalf("rule_selected unexpectedly present after rules evaluated before top-level writes: %#v", result.StateMutation.Fields["rule_selected"])
 	}
-	if got := result.StateMutation.Metadata["branch_target"]; got != "handler" {
+	if got := result.StateMutation.Fields["branch_target"]; got != "handler" {
 		t.Fatalf("branch_target = %#v, want handler after data_accumulation step", got)
 	}
 }
@@ -4079,7 +4079,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	if got := len(result.EmitIntents); got != 0 {
 		t.Fatalf("emit intents = %d, want 0 when on_complete branch is not selected early", got)
 	}
-	if got := result.StateMutation.Metadata["branch_target"]; got != "handler" {
+	if got := result.StateMutation.Fields["branch_target"]; got != "handler" {
 		t.Fatalf("branch_target = %#v, want handler after data_accumulation step", got)
 	}
 }
@@ -4171,7 +4171,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	if result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
 		t.Fatalf("fan_out results wrong: count=%d intents=%d", result.FanOutCount, len(result.EmitIntents))
 	}
-	if got := result.StateMutation.Metadata["fan_out_count"]; got != 2 {
+	if got := result.StateMutation.Bookkeeping["fan_out_count"]; got != 2 {
 		t.Fatalf("fan_out_count metadata = %#v", got)
 	}
 	if result.ChainDepth != 2 {
@@ -5199,9 +5199,9 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	analysis, ok := result.StateMutation.Metadata["analysis"].(map[string]any)
+	analysis, ok := result.StateMutation.Fields["analysis"].(map[string]any)
 	if !ok {
-		t.Fatalf("analysis = %#v", result.StateMutation.Metadata["analysis"])
+		t.Fatalf("analysis = %#v", result.StateMutation.Fields["analysis"])
 	}
 	if got := analysis["summary"]; got != "ready" {
 		t.Fatalf("analysis.summary = %#v, want ready", got)
@@ -5293,9 +5293,9 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	verticals, ok := result.StateMutation.Metadata["verticals"].(map[string]any)
+	verticals, ok := result.StateMutation.Fields["verticals"].(map[string]any)
 	if !ok {
-		t.Fatalf("verticals = %#v", result.StateMutation.Metadata["verticals"])
+		t.Fatalf("verticals = %#v", result.StateMutation.Fields["verticals"])
 	}
 	if _, exists := verticals["obsolete"]; exists {
 		t.Fatalf("obsolete key survived delete: %#v", verticals)
@@ -5315,8 +5315,8 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 	if !ok || job["id"] != "job-1" || job["title"] != "Build" {
 		t.Fatalf("active job = %#v", jobs[0])
 	}
-	if !reflect.DeepEqual(result.StateMutation.Metadata["tags"], []any{"new", "gold", "vip"}) {
-		t.Fatalf("tags = %#v", result.StateMutation.Metadata["tags"])
+	if !reflect.DeepEqual(result.StateMutation.Fields["tags"], []any{"new", "gold", "vip"}) {
+		t.Fatalf("tags = %#v", result.StateMutation.Fields["tags"])
 	}
 }
 
@@ -5381,9 +5381,9 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	verticals, ok := result.StateMutation.Metadata["verticals"].(map[string]any)
+	verticals, ok := result.StateMutation.Fields["verticals"].(map[string]any)
 	if !ok {
-		t.Fatalf("verticals = %#v", result.StateMutation.Metadata["verticals"])
+		t.Fatalf("verticals = %#v", result.StateMutation.Fields["verticals"])
 	}
 	north, ok := verticals["north"].(map[string]any)
 	if !ok {
@@ -5551,9 +5551,9 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	analysis, ok := result.StateMutation.Metadata["analysis"].(map[string]any)
+	analysis, ok := result.StateMutation.Fields["analysis"].(map[string]any)
 	if !ok {
-		t.Fatalf("analysis = %#v", result.StateMutation.Metadata["analysis"])
+		t.Fatalf("analysis = %#v", result.StateMutation.Fields["analysis"])
 	}
 	if _, exists := analysis["summary"]; exists {
 		t.Fatalf("analysis.summary unexpectedly present: %#v", analysis)
@@ -5596,11 +5596,11 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if _, ok := result.StateMutation.Metadata["dedup_key"]; ok {
-		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", result.StateMutation.Metadata)
+	if _, ok := result.StateMutation.Fields["dedup_key"]; ok {
+		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", result.StateMutation.Fields)
 	}
-	if _, ok := result.StateMutation.Metadata["received_items"]; ok {
-		t.Fatalf("expected received_items to be cleared, metadata=%#v", result.StateMutation.Metadata)
+	if _, ok := result.StateMutation.Fields["received_items"]; ok {
+		t.Fatalf("expected received_items to be cleared, metadata=%#v", result.StateMutation.Fields)
 	}
 	if nodeBucket, ok := result.StateMutation.StateBuckets["node-1"]; ok {
 		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
@@ -5678,7 +5678,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	if result.NextState != "scanning" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	if got := result.StateMutation.Metadata["fan_out_count"]; got != 0 {
+	if got := result.StateMutation.Bookkeeping["fan_out_count"]; got != 0 {
 		t.Fatalf("fan_out_count metadata = %#v", got)
 	}
 }
@@ -5713,7 +5713,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.StateMutation.Metadata["fan_out_count"]; got != 0 {
+	if got := result.StateMutation.Bookkeeping["fan_out_count"]; got != 0 {
 		t.Fatalf("fan_out_count metadata = %#v", got)
 	}
 }
@@ -5833,9 +5833,9 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	grouped, ok := result.StateMutation.Metadata["grouped"].(map[string]any)
+	grouped, ok := result.StateMutation.Fields["grouped"].(map[string]any)
 	if !ok {
-		t.Fatalf("grouped metadata = %#v", result.StateMutation.Metadata["grouped"])
+		t.Fatalf("grouped metadata = %#v", result.StateMutation.Fields["grouped"])
 	}
 	xItems, _ := grouped["x"].([]any)
 	yItems, _ := grouped["y"].([]any)
@@ -5876,9 +5876,9 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	grouped, ok := result.StateMutation.Metadata["grouped"].(map[string]any)
+	grouped, ok := result.StateMutation.Fields["grouped"].(map[string]any)
 	if !ok {
-		t.Fatalf("grouped metadata = %#v", result.StateMutation.Metadata["grouped"])
+		t.Fatalf("grouped metadata = %#v", result.StateMutation.Fields["grouped"])
 	}
 	xItems, _ := grouped["x"].([]any)
 	yItems, _ := grouped["y"].([]any)
@@ -5931,8 +5931,8 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
 		t.Fatalf("typed gate state not cleared: %#v", result.StateMutation.Gates)
 	}
-	if result.StateMutation.Metadata["note"] != "keep" {
-		t.Fatalf("non-gate metadata changed: %#v", result.StateMutation.Metadata)
+	if result.StateMutation.Fields["note"] != "keep" {
+		t.Fatalf("non-gate metadata changed: %#v", result.StateMutation.Fields)
 	}
 }
 
@@ -6230,10 +6230,10 @@ func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 		t.Fatalf("mergeActionState: %v", err)
 	}
 
-	if got := frame.state.State.StateCarrier.Metadata["in_memory_only"]; got != "frame-write" {
+	if got := frame.state.State.StateCarrier.Fields["in_memory_only"]; got != "frame-write" {
 		t.Fatalf("in_memory_only = %#v, want preserved frame-write", got)
 	}
-	if got := frame.state.State.StateCarrier.Metadata["action_output"]; got != "persisted-output" {
+	if got := frame.state.State.StateCarrier.Fields["action_output"]; got != "persisted-output" {
 		t.Fatalf("action_output = %#v, want persisted-output", got)
 	}
 	if got := frame.state.State.StateCarrier.StateBuckets["bucket"]["in_memory_only"]; got != "frame-write" {

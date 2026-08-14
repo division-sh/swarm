@@ -394,9 +394,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
@@ -819,9 +819,9 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
@@ -1084,9 +1084,9 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
 	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch", StorageRef: "launch", WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: "launch", StorageRef: "launch", EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
-		Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
+		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
 	}, at); err != nil {
 		t.Fatal(err)
 	}
@@ -1221,9 +1221,9 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch", StorageRef: "launch", WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: "launch", StorageRef: "launch", EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
-		Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
+		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
 	}, enteredAt); err != nil {
 		t.Fatal(err)
 	}
@@ -1320,9 +1320,9 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch", StorageRef: "launch", WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: "launch", StorageRef: "launch", EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-		Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
+		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
 	}, scenarioAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)
 	}
@@ -1632,7 +1632,7 @@ func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.P
 	if err != nil || !ok {
 		t.Fatalf("Load workflow instance = %#v, %v, %v", instance, ok, err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 	if err != nil {
 		t.Fatalf("StateCarrierFromPersisted: %v", err)
 	}

@@ -111,13 +111,13 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 		}
 		if len(expected.EntityFields) > 0 {
 			for key, wantValue := range expected.EntityFields {
-				if gotValue := got.Metadata[strings.TrimSpace(key)]; fmt.Sprintf("%#v", gotValue) != fmt.Sprintf("%#v", wantValue) {
+				if gotValue := got.Fields[strings.TrimSpace(key)]; fmt.Sprintf("%#v", gotValue) != fmt.Sprintf("%#v", wantValue) {
 					t.Fatalf("causal flow instance %s field %s = %#v, want %#v", flowID, key, gotValue, wantValue)
 				}
 			}
 		}
 		if len(expected.Gates) > 0 {
-			gates := catalogBoolGates(got.Metadata)
+			gates := catalogBoolGates(got.Gates)
 			for key, wantValue := range expected.Gates {
 				key = h.catalogGateKey(flowID, key)
 				if gotValue := gates[strings.TrimSpace(key)]; gotValue != wantValue {
@@ -175,7 +175,6 @@ func assertGates(t testing.TB, h *runtimeHarness, entityID string, want map[stri
 	if !ok {
 		t.Fatalf("workflow instance %s not found for gates assertion", entityID)
 	}
-	raw, _ := instance.Metadata["gates"].(map[string]any)
 	for key, wantValue := range want {
 		flowID := ""
 		if h.bundle != nil {
@@ -185,15 +184,15 @@ func assertGates(t testing.TB, h *runtimeHarness, entityID string, want map[stri
 		if key == "" {
 			continue
 		}
-		gotValue, ok := raw[key]
+		gotValue, ok := instance.Gates[key]
 		if !ok {
 			if !wantValue {
 				continue
 			}
-			t.Fatalf("gate %q missing from metadata.gates; have keys=%v", key, metadataKeys(raw))
+			t.Fatalf("gate %q missing; have keys=%v", key, boolMapKeys(instance.Gates))
 		}
-		if boolFromAny(gotValue) != wantValue {
-			t.Fatalf("gate %q = %v, want %v", key, boolFromAny(gotValue), wantValue)
+		if gotValue != wantValue {
+			t.Fatalf("gate %q = %v, want %v", key, gotValue, wantValue)
 		}
 	}
 }
@@ -218,9 +217,9 @@ func assertEntityFields(t testing.TB, workflow catalogWorkflowPersistence, entit
 		if key == "" {
 			continue
 		}
-		gotValue, ok := instance.Metadata[key]
+		gotValue, ok := instance.Fields[key]
 		if !ok {
-			t.Fatalf("entity field %q missing from metadata; have keys=%v", key, metadataKeys(instance.Metadata))
+			t.Fatalf("entity field %q missing; have keys=%v", key, metadataKeys(instance.Fields))
 		}
 		if strings.TrimSpace(asString(wantValue)) == "computed_value" {
 			continue
@@ -308,7 +307,7 @@ func catalogWorkflowInstanceForEntity(workflow catalogWorkflowPersistence, entit
 	var match runtimepipeline.WorkflowInstance
 	found := false
 	for _, instance := range instances {
-		if strings.TrimSpace(asString(instance.Metadata["entity_id"])) != entityID {
+		if strings.TrimSpace(instance.EntityID) != entityID {
 			continue
 		}
 		if found {
@@ -362,8 +361,8 @@ func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersis
 	matchCausal := func(row runtimepipeline.WorkflowInstance) bool {
 		if len(candidateEntityIDs) > 0 {
 			rowEntityIDs := []string{
-				strings.TrimSpace(asString(row.Metadata["entity_id"])),
-				strings.TrimSpace(asString(row.Metadata["parent_entity_id"])),
+				strings.TrimSpace(row.EntityID),
+				strings.TrimSpace(row.ParentEntityID),
 				strings.TrimSpace(row.InstanceID),
 				runtimepipeline.FlowInstanceEntityID(row.StorageRef),
 			}
@@ -710,19 +709,24 @@ func normalizeCatalogObservedEventName(eventName, flowPrefix string, source sema
 	return eventName
 }
 
-func catalogBoolGates(metadata map[string]any) map[string]bool {
-	raw, _ := metadata["gates"].(map[string]any)
-	out := make(map[string]bool, len(raw))
-	for key, value := range raw {
+func catalogBoolGates(gates map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(gates))
+	for key, value := range gates {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		if b, ok := value.(bool); ok {
-			out[key] = b
-		}
+		out[key] = value
 	}
 	return out
+}
+
+func boolMapKeys(in map[string]bool) []string {
+	keys := make([]string, 0, len(in))
+	for key := range in {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func catalogRootEventExists(source semanticview.Source, eventName string) bool {

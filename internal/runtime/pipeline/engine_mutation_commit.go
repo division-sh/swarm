@@ -39,6 +39,7 @@ type WorkflowEngineStateRecord struct {
 	Slug             string
 	Name             string
 	Fields           json.RawMessage
+	Bookkeeping      json.RawMessage
 	Gates            json.RawMessage
 	Accumulator      json.RawMessage
 	Config           json.RawMessage
@@ -64,7 +65,7 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		return fmt.Errorf("workflow engine state record requires mode and status")
 	}
 	for name, raw := range map[string]json.RawMessage{
-		"fields": r.Fields, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
+		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
 	} {
 		if len(raw) == 0 || !json.Valid(raw) {
 			return fmt.Errorf("workflow engine state record %s must be valid JSON", name)
@@ -220,7 +221,7 @@ func workflowEngineStateRecordEmpty(record WorkflowEngineStateRecord) bool {
 		strings.TrimSpace(record.WorkflowName) == "" && strings.TrimSpace(record.WorkflowVersion) == "" &&
 		strings.TrimSpace(record.Mode) == "" && strings.TrimSpace(record.Status) == "" && strings.TrimSpace(record.CurrentState) == "" &&
 		strings.TrimSpace(record.EntityType) == "" && strings.TrimSpace(record.Slug) == "" && strings.TrimSpace(record.Name) == "" &&
-		len(record.Fields) == 0 && len(record.Gates) == 0 && len(record.Accumulator) == 0 && len(record.Config) == 0 && len(record.InitialFields) == 0 &&
+		len(record.Fields) == 0 && len(record.Bookkeeping) == 0 && len(record.Gates) == 0 && len(record.Accumulator) == 0 && len(record.Config) == 0 && len(record.InitialFields) == 0 &&
 		record.EnteredStageAt.IsZero() && record.CreatedAt.IsZero() && record.UpdatedAt.IsZero() && record.TerminatedAt.IsZero() &&
 		strings.TrimSpace(record.ExpectedState) == "" && record.ExpectedRevision == 0 && !record.Create
 }
@@ -250,6 +251,10 @@ func workflowEngineStateRecord(
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
+	bookkeeping, err := canonicaljson.Bytes(projection.Bookkeeping)
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
 	gates, err := canonicaljson.Bytes(projection.GatesAny())
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
@@ -275,7 +280,7 @@ func workflowEngineStateRecord(
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
-		Fields: fields, Gates: gates, Accumulator: accumulator, Config: config, InitialFields: initialFields,
+		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config, InitialFields: initialFields,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 		UpdatedAt:      canonicalWorkflowInstancePersistedTime(updatedAt),

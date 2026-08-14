@@ -906,10 +906,10 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			poisonInstance := artifactActionResultWorkflowInstance()
 			poisonInstance.InstanceID = "poison"
 			poisonInstance.StorageRef = poisonTarget.FlowInstance
-			poisonInstance.Metadata = map[string]any{
+			poisonInstance.EntityID = poisonEntityID
+			poisonInstance.Fields = map[string]any{
 				"repo_id": "poison-repo", "namespace": "tenant-alpha", "partition_key": "poison",
-				"display_slug": "Poison", "source_record_id": "poison-record", "flow_path": poisonTarget.FlowInstance,
-				"instance_id": "poison", "entity_id": poisonEntityID,
+				"display_slug": "Poison", "source_record_id": "poison-record",
 			}
 			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), poisonInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed poison workflow instance: %v", err)

@@ -85,7 +85,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	} else if !current {
 		return true, false, nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return true, false, err
 	}

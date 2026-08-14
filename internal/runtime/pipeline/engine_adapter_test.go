@@ -18,7 +18,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -129,14 +128,16 @@ func applyMaterializedEngineStateMutationForTest(
 
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata:     map[string]any{"research_context": map[string]any{"summary": "done"}},
+		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
 	}
 	mutation := testEngineStateMutation(map[string]any{
-		"research_context":              map[string]any{"summary": "done"},
+		"research_context": map[string]any{"summary": "done"},
+	}, nil, nil)
+	mutation.StateCarrier.Bookkeeping = map[string]any{
 		"last_data_accumulation_event":  "research.completed",
 		"last_data_accumulation_source": "research.completed",
-	}, nil, nil)
+	}
 	mutation.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{TargetField: "research_context", SourceField: "research_context"},
@@ -149,26 +150,22 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 	if !ok || got["summary"] != "done" {
 		t.Fatalf("entity_projection research_context = %#v", entityProjection["research_context"])
 	}
-	if got := instance.Metadata["last_data_accumulation_event"]; got != "research.completed" {
+	if got := instance.Bookkeeping["last_data_accumulation_event"]; got != "research.completed" {
 		t.Fatalf("last_data_accumulation_event = %#v", got)
 	}
 }
 
 func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{
-			"gates": map[string]any{
-				"g_a": true,
-				"g_b": true,
-			},
-		},
+		Fields: map[string]any{},
+		Gates:  map[string]bool{"g_a": true, "g_b": true},
 	}
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
 	mutation.SetGate = "g_c"
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
-	gates := workflowStateGatesAsBools(instance.Metadata)
+	gates := instance.Gates
 	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
 	if len(gates) != len(want) {
 		t.Fatalf("gates len=%d want %d (%v)", len(gates), len(want), gates)
@@ -190,14 +187,14 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 		},
 	})
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{},
+		Fields: map[string]any{},
 	}
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
 	mutation.SetGate = "g_validated"
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, source, "child")
 
-	gates := workflowStateGatesAsBools(instance.Metadata)
+	gates := instance.Gates
 	if !gates["child/g_validated"] {
 		t.Fatalf("scoped gates = %#v, want child/g_validated=true", gates)
 	}
@@ -248,10 +245,11 @@ child_entity:
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "child/existing",
+		EntityID:        entityID,
 		WorkflowName:    "child",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"entity_id":  entityID,
 			"request_id": "req-existing",
 			"flow_path":  "child/existing",
@@ -276,7 +274,7 @@ child_entity:
 
 func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"flow_path": "child/inst-1",
 		},
 	}
@@ -285,25 +283,26 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
-	if !workflowStateGatesAsBools(instance.Metadata)["g_ready"] {
-		t.Fatalf("gates = %#v, want g_ready=true", instance.Metadata["gates"])
+	if !instance.Gates["g_ready"] {
+		t.Fatalf("gates = %#v, want g_ready=true", instance.Gates)
 	}
 }
 
-func TestApplyEngineStateMutationPreservesRuntimeControlMetadata(t *testing.T) {
+func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{
-			"storage_ref":          "review/inst-1",
-			"instance_id":          "inst-1",
-			"flow_path":            "review/inst-1",
-			"entity_id":            "child-ent",
-			"workflow_version":     "v1",
-			"template_version":     "tv1",
-			"instance_kind":        "materialized",
-			"parent_flow_id":       "operating",
-			"parent_flow_instance": "operating/root",
-			"parent_entity_id":     "parent-ent",
-			"business_status":      "old",
+		StorageRef:         "review/inst-1",
+		InstanceID:         "inst-1",
+		EntityID:           "child-ent",
+		WorkflowVersion:    "v1",
+		TemplateVersion:    "tv1",
+		InstanceKind:       "materialized",
+		ParentFlowID:       "operating",
+		ParentFlowInstance: "operating/root",
+		ParentEntityID:     "parent-ent",
+		Fields: map[string]any{
+			"parent_flow_id":   "authored-old",
+			"parent_entity_id": "authored-parent",
+			"business_status":  "old",
 		},
 	}
 	mutation := testEngineStateMutation(map[string]any{
@@ -315,30 +314,32 @@ func TestApplyEngineStateMutationPreservesRuntimeControlMetadata(t *testing.T) {
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
+	if instance.StorageRef != "review/inst-1" || instance.InstanceID != "inst-1" || instance.EntityID != "child-ent" {
+		t.Fatalf("typed identity = %#v, want original identity", instance)
+	}
+	if instance.ParentFlowID != "operating" || instance.ParentFlowInstance != "operating/root" || instance.ParentEntityID != "parent-ent" {
+		t.Fatalf("typed parent route = %q/%q/%q, want original route", instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID)
+	}
+	if instance.WorkflowVersion != "v1" || instance.TemplateVersion != "tv1" || instance.InstanceKind != "materialized" {
+		t.Fatalf("typed version/kind = %q/%q/%q, want original values", instance.WorkflowVersion, instance.TemplateVersion, instance.InstanceKind)
+	}
 	for key, want := range map[string]any{
-		"storage_ref":          "review/inst-1",
-		"instance_id":          "inst-1",
-		"flow_path":            "review/inst-1",
-		"entity_id":            "child-ent",
-		"workflow_version":     "v1",
-		"template_version":     "tv1",
-		"instance_kind":        "materialized",
-		"parent_flow_id":       "operating",
-		"parent_flow_instance": "operating/root",
-		"parent_entity_id":     "parent-ent",
+		"parent_flow_id":       "wrong",
+		"parent_flow_instance": "wrong/root",
+		"parent_entity_id":     "wrong-parent",
 	} {
-		if got := instance.Metadata[key]; got != want {
-			t.Fatalf("metadata[%s] = %#v, want %#v", key, got, want)
+		if got := instance.Fields[key]; got != want {
+			t.Fatalf("authored field %s = %#v, want %#v", key, got, want)
 		}
 	}
-	if got := instance.Metadata["business_status"]; got != "new" {
+	if got := instance.Fields["business_status"]; got != "new" {
 		t.Fatalf("business_status = %#v, want new", got)
 	}
 }
 
-func TestApplyEngineStateMutationRejectsAuthoredParentRouteInsertion(t *testing.T) {
+func TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"business_status": "old",
 		},
 	}
@@ -351,20 +352,24 @@ func TestApplyEngineStateMutationRejectsAuthoredParentRouteInsertion(t *testing.
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
-	for _, key := range []string{"parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
-		if _, ok := instance.Metadata[key]; ok {
-			t.Fatalf("metadata[%s] = %#v, want absent", key, instance.Metadata[key])
+	for key, want := range map[string]any{
+		"parent_flow_id": "root", "parent_flow_instance": "root/inst-1", "parent_entity_id": "parent-ent",
+	} {
+		if got := instance.Fields[key]; got != want {
+			t.Fatalf("authored field %s = %#v, want %#v", key, got, want)
 		}
 	}
-	if got := instance.Metadata["business_status"]; got != "new" {
-		t.Fatalf("business_status = %#v, want new", got)
+	if instance.ParentFlowID != "" || instance.ParentFlowInstance != "" || instance.ParentEntityID != "" {
+		t.Fatalf("typed parent route = %q/%q/%q, want empty", instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID)
 	}
-	assertMutationParentRoutePinOutputFailure(t, instance.Metadata, runtimepinrouting.FailureTargetRequiredMissing)
 }
 
-func TestApplyEngineStateMutationRejectsAuthoredParentRouteCompletion(t *testing.T) {
+func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{
+		ParentFlowID:       "typed-root",
+		ParentFlowInstance: "typed-root/inst-1",
+		ParentEntityID:     "typed-parent",
+		Fields: map[string]any{
 			"parent_entity_id": "legacy-parent",
 			"business_status":  "old",
 		},
@@ -378,36 +383,20 @@ func TestApplyEngineStateMutationRejectsAuthoredParentRouteCompletion(t *testing
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
-	if _, ok := instance.Metadata["parent_flow_id"]; ok {
-		t.Fatalf("parent_flow_id = %#v, want absent", instance.Metadata["parent_flow_id"])
+	if got := instance.Fields["parent_flow_id"]; got != "root" {
+		t.Fatalf("authored parent_flow_id = %#v, want root", got)
 	}
-	if _, ok := instance.Metadata["parent_flow_instance"]; ok {
-		t.Fatalf("parent_flow_instance = %#v, want absent", instance.Metadata["parent_flow_instance"])
+	if got := instance.Fields["parent_flow_instance"]; got != "root/inst-1" {
+		t.Fatalf("authored parent_flow_instance = %#v, want root/inst-1", got)
 	}
-	if got := instance.Metadata["parent_entity_id"]; got != "legacy-parent" {
-		t.Fatalf("parent_entity_id = %#v, want legacy-parent", got)
+	if got := instance.Fields["parent_entity_id"]; got != "wrong-parent" {
+		t.Fatalf("authored parent_entity_id = %#v, want wrong-parent", got)
 	}
-	if got := instance.Metadata["business_status"]; got != "new" {
+	if got := instance.Fields["business_status"]; got != "new" {
 		t.Fatalf("business_status = %#v, want new", got)
 	}
-	assertMutationParentRoutePinOutputFailure(t, instance.Metadata, runtimepinrouting.FailureParentRouteIncomplete)
-}
-
-func assertMutationParentRoutePinOutputFailure(t *testing.T, metadata map[string]any, want runtimepinrouting.TargetFailure) {
-	t.Helper()
-	route := runtimeflowidentity.ParentRouteFromMetadata(metadata).Normalized()
-	result := runtimepinrouting.Resolve(runtimepinrouting.ResolutionInput{
-		Source:    mutationParentRoutePinOutputSource(),
-		FlowID:    "child",
-		EventType: "child.done",
-		StructuralParent: runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
-			FlowID:       route.FlowID,
-			FlowInstance: route.FlowInstance,
-			EntityID:     route.EntityID,
-		}),
-	}, eventtest.RunCreatingRootIngress("", events.EventType("child.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if result.Failure != want {
-		t.Fatalf("pin output failure = %q, want %q (metadata=%#v)", result.Failure, want, metadata)
+	if instance.ParentFlowID != "typed-root" || instance.ParentFlowInstance != "typed-root/inst-1" || instance.ParentEntityID != "typed-parent" {
+		t.Fatalf("typed parent route = %q/%q/%q, want original", instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID)
 	}
 }
 
@@ -474,7 +463,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 		WorkflowName:    "root",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
-		Metadata:        map[string]any{},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
@@ -529,7 +518,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 		WorkflowName:    "review",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
-		Metadata: map[string]any{
+		Fields: map[string]any{
 			"entity_id":        entityID,
 			"instance_id":      "inst-1",
 			"flow_path":        flowPath,
@@ -579,10 +568,8 @@ func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.
 func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 
-	got := workflowStateGatesForScope(source, "grandchild", map[string]any{
-		"gates": map[string]any{
-			"child/grandchild/g_ready": true,
-		},
+	got := workflowStateGatesForScope(source, "grandchild", map[string]bool{
+		"child/grandchild/g_ready": true,
 	})
 
 	if !got["child/grandchild/g_ready"] {
@@ -595,12 +582,8 @@ func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 
 func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumulation(t *testing.T) {
 	instance := &WorkflowInstance{
-		Metadata: map[string]any{
-			"composite_score": 0,
-			"gates": map[string]any{
-				"g_ready": true,
-			},
-		},
+		Fields:       map[string]any{"composite_score": 0},
+		Gates:        map[string]bool{"g_ready": true},
 		StateBuckets: map[string]any{},
 	}
 	mutation := testEngineStateMutation(map[string]any{
@@ -620,8 +603,8 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
 		t.Fatalf("entity_projection scoring_rubric = %#v", got)
 	}
-	if !workflowStateGatesAsBools(instance.Metadata)["g_ready"] {
-		t.Fatalf("metadata-only mutation dropped existing gates: %#v", instance.Metadata["gates"])
+	if !instance.Gates["g_ready"] {
+		t.Fatalf("field-only mutation dropped existing gates: %#v", instance.Gates)
 	}
 }
 
@@ -631,7 +614,7 @@ func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.
 
 	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
 
-	if got := strings.TrimSpace(asString(instance.Metadata["subject_id"])); got != "" {
+	if got := strings.TrimSpace(asString(instance.Fields["subject_id"])); got != "" {
 		t.Fatalf("metadata subject_id = %q, want removed", got)
 	}
 }
@@ -668,10 +651,11 @@ func TestPipelineEngineMutationOwnerRejectsForeignFlowWrite(t *testing.T) {
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "flow-a",
+		EntityID:        entityID,
 		WorkflowName:    "flow-a",
 		WorkflowVersion: "1.6.0",
 		CurrentState:    "pending",
-		Metadata:        map[string]any{},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("upsert flow-a entity: %v", err)
 	}
@@ -744,7 +728,7 @@ review_entity:
 		t.Fatalf("LoadState: %v", err)
 	}
 	if ok {
-		t.Fatalf("LoadState ok=true for missing entity, loaded metadata=%#v", loaded.Metadata)
+		t.Fatalf("LoadState ok=true for missing entity, loaded fields=%#v", loaded.Fields)
 	}
 }
 
@@ -762,10 +746,11 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID.String(),
 		StorageRef:      "root",
+		EntityID:        entityID.String(),
 		WorkflowName:    "root",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "pending",
-		Metadata:        map[string]any{},
+		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
@@ -790,7 +775,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	if !ok {
 		t.Fatal("expected saved state to load")
 	}
-	if got := loaded.Metadata["score"]; got != 91 && got != 91.0 {
+	if got := loaded.Fields["score"]; got != 91 && got != 91.0 {
 		t.Fatalf("loaded metadata score = %#v, want 91", got)
 	}
 	if !loaded.Gates["ready"] {
@@ -810,6 +795,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 		if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID:      "22222222-2222-2222-2222-222222222222",
 			StorageRef:      "root",
+			EntityID:        "22222222-2222-2222-2222-222222222222",
 			WorkflowName:    "root",
 			WorkflowVersion: "1.0.0",
 			CurrentState:    "pending",
@@ -954,10 +940,11 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      runtimeflowidentity.LogicalInstanceID(tt.flowInstance),
 				StorageRef:      tt.flowInstance,
+				EntityID:        tt.entityID,
 				WorkflowName:    "operating",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "initializing",
-				Metadata: map[string]any{
+				Fields: map[string]any{
 					"entity_id": tt.entityID, "flow_path": tt.flowInstance, "instance_id": runtimeflowidentity.LogicalInstanceID(tt.flowInstance),
 				},
 				StateBuckets: map[string]any{},
@@ -1261,11 +1248,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "working",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1283,20 +1271,20 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if err != nil || !ok {
 		t.Fatalf("load workflow instance ok=%v err=%v", ok, err)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["repo_url"])); got != "swarm-artifact://repos/"+initial["repo_id"].(string) {
+	if got := strings.TrimSpace(asString(instance.Fields["repo_url"])); got != "swarm-artifact://repos/"+initial["repo_id"].(string) {
 		t.Fatalf("repo_url = %q", got)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "committed" {
+	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "committed" {
 		t.Fatalf("artifact entity status = %q, want committed", got)
 	}
 	assertEntityStateField(t, db, entityID, "status", "committed")
-	ref := strings.TrimSpace(asString(instance.Metadata["current_ref"]))
+	ref := strings.TrimSpace(asString(instance.Fields["current_ref"]))
 	if len(ref) != 40 {
 		t.Fatalf("current_ref length = %d ref=%q", len(ref), ref)
 	}
-	manifest, ok := instance.Metadata["file_manifest"].(map[string]any)
+	manifest, ok := instance.Fields["file_manifest"].(map[string]any)
 	if !ok {
-		t.Fatalf("file_manifest = %#v", instance.Metadata["file_manifest"])
+		t.Fatalf("file_manifest = %#v", instance.Fields["file_manifest"])
 	}
 	if got := strings.TrimSpace(asString(manifest["source_event_id"])); got != execCtx.Request.Event.ID() {
 		t.Fatalf("manifest source_event_id = %q", got)
@@ -1328,7 +1316,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	}
 
 	replayCtx := execCtx
-	replayCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(instance.Metadata)
+	replayCtx.Request.State.StateCarrier.Fields = cloneStringAnyMap(instance.Fields)
 	ok, err = pipelineEngineActionRunner{coordinator: pc}.executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx)
 	if !ok || err != nil {
 		t.Fatalf("replay ExecuteAction ok=%v err=%v", ok, err)
@@ -1337,7 +1325,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if err != nil {
 		t.Fatalf("load replayed workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(replayed.Metadata["current_ref"])); got != ref {
+	if got := strings.TrimSpace(asString(replayed.Fields["current_ref"])); got != ref {
 		t.Fatalf("replay current_ref = %q, want %q", got, ref)
 	}
 
@@ -1347,7 +1335,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	if err := os.WriteFile(filepath.Join(repoPath, "notes", "extra.txt"), []byte("should not be committed\n"), 0o644); err != nil {
 		t.Fatalf("write extra file: %v", err)
 	}
-	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, replayed.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\nrank: 3\n")
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, replayed.Fields, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\nrank: 3\n")
 	ok, err = pipelineEngineActionRunner{coordinator: pc}.executeAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
 	if !ok || err != nil {
 		t.Fatalf("next ExecuteAction ok=%v err=%v", ok, err)
@@ -1597,11 +1585,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1616,12 +1605,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassDependencyUnavailable, "artifact_repo_root_unavailable")
-	if _, exists := instance.Metadata["current_ref"]; exists {
-		t.Fatalf("current_ref should not be persisted on invalid artifact root: %#v", instance.Metadata["current_ref"])
+	requireArtifactRepoFailure(t, instance.Fields["failure"], runtimefailures.ClassDependencyUnavailable, "artifact_repo_root_unavailable")
+	if _, exists := instance.Fields["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on invalid artifact root: %#v", instance.Fields["current_ref"])
 	}
 	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 	if got := bus.publishedCount(); got != 0 {
@@ -1670,11 +1659,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      artifactRepoFixtureRoute(initial),
+				EntityID:        entityID,
 				StorageRef:      artifactRepoFixtureRoute(initial),
 				WorkflowName:    "artifact-repo",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "ready",
-				Metadata:        cloneStringAnyMap(initial),
+				Fields:          cloneStringAnyMap(initial),
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -1689,10 +1679,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			if err != nil {
 				t.Fatalf("load workflow instance: %v", err)
 			}
-			if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+			if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "failed" {
 				t.Fatalf("status = %q, want failed", got)
 			}
-			requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassDependencyUnavailable, "artifact_repo_root_unavailable")
+			requireArtifactRepoFailure(t, instance.Fields["failure"], runtimefailures.ClassDependencyUnavailable, "artifact_repo_root_unavailable")
 			assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 			if got := bus.publishedCount(); got != 0 {
 				t.Fatalf("fallback published event count = %d, want 0", got)
@@ -1723,11 +1713,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1769,7 +1760,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	}
 
 	replayCtx := execCtx
-	replayCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(committed.Metadata)
+	replayCtx.Request.State.StateCarrier.Fields = cloneStringAnyMap(committed.Fields)
 	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx); err != nil {
 		t.Fatalf("same-source replay ExecuteAction: %v", err)
 	}
@@ -1779,11 +1770,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("reset workflow instance to simulate DB/git split: %v", err)
 	}
@@ -1823,11 +1815,12 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1864,7 +1857,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
+	if got := strings.TrimSpace(asString(committed.Fields["last_source_event_id"])); got != execCtx.Request.Event.ID() {
 		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
 	}
 }
@@ -1891,11 +1884,12 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1929,15 +1923,15 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(committed.Metadata["status"])); got != "failed" {
+	if got := strings.TrimSpace(asString(committed.Fields["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	requireArtifactRepoFailure(t, committed.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
-	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
+	requireArtifactRepoFailure(t, committed.Fields["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
+	if got := strings.TrimSpace(asString(committed.Fields["last_source_event_id"])); got != execCtx.Request.Event.ID() {
 		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
 	}
-	if _, exists := committed.Metadata["current_ref"]; exists {
-		t.Fatalf("current_ref should not be persisted on failed commit: %#v", committed.Metadata["current_ref"])
+	if _, exists := committed.Fields["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on failed commit: %#v", committed.Fields["current_ref"])
 	}
 }
 
@@ -1963,11 +1957,12 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1995,11 +1990,11 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	if _, exists := rolledBack.Metadata["status"]; exists {
-		t.Fatalf("status should roll back with failed outbox write: %#v", rolledBack.Metadata["status"])
+	if _, exists := rolledBack.Fields["status"]; exists {
+		t.Fatalf("status should roll back with failed outbox write: %#v", rolledBack.Fields["status"])
 	}
-	if _, exists := rolledBack.Metadata["failure"]; exists {
-		t.Fatalf("failure should roll back with failed outbox write: %#v", rolledBack.Metadata["failure"])
+	if _, exists := rolledBack.Fields["failure"]; exists {
+		t.Fatalf("failure should roll back with failed outbox write: %#v", rolledBack.Fields["failure"])
 	}
 }
 
@@ -2024,11 +2019,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2051,10 +2047,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent
 	if result.State == nil {
 		t.Fatal("artifact action did not return projected state")
 	}
-	if got := strings.TrimSpace(asString(result.State.StateCarrier.Metadata["status"])); got != "committed" {
+	if got := strings.TrimSpace(asString(result.State.StateCarrier.Fields["status"])); got != "committed" {
 		t.Fatalf("status = %q, want committed", got)
 	}
-	if _, exists := result.State.StateCarrier.Metadata["current_ref"]; !exists {
+	if _, exists := result.State.StateCarrier.Fields["current_ref"]; !exists {
 		t.Fatal("current_ref was not projected")
 	}
 	if got := bus.publishedCount(); got != 0 {
@@ -2083,11 +2079,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2103,13 +2100,13 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	if _, exists := instance.Metadata["current_ref"]; exists {
-		t.Fatalf("current_ref should not be persisted on invalid success event: %#v", instance.Metadata["current_ref"])
+	if _, exists := instance.Fields["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on invalid success event: %#v", instance.Fields["current_ref"])
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_result_schema_invalid")
+	requireArtifactRepoFailure(t, instance.Fields["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_result_schema_invalid")
 	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("fallback published event count = %d, want 0", got)
@@ -2127,11 +2124,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2147,13 +2145,13 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	if _, exists := instance.Metadata["current_ref"]; exists {
-		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Metadata["current_ref"])
+	if _, exists := instance.Fields["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Fields["current_ref"])
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
+	requireArtifactRepoFailure(t, instance.Fields["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
 	failureEvent := assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 	var payload map[string]any
 	if err := json.Unmarshal(failureEvent.Payload(), &payload); err != nil {
@@ -2189,11 +2187,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2208,13 +2207,13 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
+	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	if _, exists := instance.Metadata["current_ref"]; exists {
-		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Metadata["current_ref"])
+	if _, exists := instance.Fields["current_ref"]; exists {
+		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Fields["current_ref"])
 	}
-	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
+	requireArtifactRepoFailure(t, instance.Fields["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
 	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 }
 
@@ -2228,11 +2227,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2245,7 +2245,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 		t.Fatalf("load workflow instance: %v", err)
 	}
 
-	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Next\n")
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Fields, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Next\n")
 	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
 		t.Fatalf("next ExecuteAction: %v", err)
 	}
@@ -2254,9 +2254,9 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 		t.Fatalf("load workflow instance after next request: %v", err)
 	}
 	// Display labels are cosmetic; request history must remain keyed by repo identity.
-	afterNext.Metadata["display_slug"] = "Renamed Artifact"
+	afterNext.Fields["display_slug"] = "Renamed Artifact"
 
-	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "77777777-7777-7777-7777-777777777777", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
+	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Fields, "77777777-7777-7777-7777-777777777777", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
 	var conflictIntents []runtimeengine.EmitIntent
 	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
 	if !ok || err != nil {
@@ -2276,11 +2276,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2292,9 +2293,9 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	initialRef := strings.TrimSpace(asString(instance.Metadata["current_ref"]))
+	initialRef := strings.TrimSpace(asString(instance.Fields["current_ref"]))
 
-	sameAction, sameCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\n")
+	sameAction, sameCtx := testArtifactRepoActionAndContext(entityID, instance.Fields, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\n")
 	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, sameAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, sameCtx); err != nil {
 		t.Fatalf("same-tree ExecuteAction: %v", err)
 	}
@@ -2302,7 +2303,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	if err != nil {
 		t.Fatalf("load workflow instance after same-tree request: %v", err)
 	}
-	sameRef := strings.TrimSpace(asString(afterSame.Metadata["current_ref"]))
+	sameRef := strings.TrimSpace(asString(afterSame.Fields["current_ref"]))
 	if sameRef == "" || sameRef == initialRef {
 		t.Fatalf("same-tree request current_ref = %q, initial ref = %q; want a durable operation commit", sameRef, initialRef)
 	}
@@ -2318,7 +2319,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 		t.Fatalf("artifactRepoRequestRecord found=%v err=%v, want recorded same-tree request", found, err)
 	}
 
-	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, afterSame.Metadata, "77777777-7777-7777-7777-777777777777", "88888888-8888-8888-8888-888888888888", "name: Next\n")
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, afterSame.Fields, "77777777-7777-7777-7777-777777777777", "88888888-8888-8888-8888-888888888888", "name: Next\n")
 	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
 		t.Fatalf("next ExecuteAction: %v", err)
 	}
@@ -2327,7 +2328,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 		t.Fatalf("load workflow instance after next request: %v", err)
 	}
 
-	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "99999999-9999-9999-9999-999999999999", "66666666-6666-6666-6666-666666666666", "name: Changed\n")
+	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Fields, "99999999-9999-9999-9999-999999999999", "66666666-6666-6666-6666-666666666666", "name: Changed\n")
 	var conflictIntents []runtimeengine.EmitIntent
 	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
 	if !ok || err != nil {
@@ -2349,11 +2350,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2365,14 +2367,15 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
-	ref := strings.TrimSpace(asString(committed.Metadata["current_ref"]))
+	ref := strings.TrimSpace(asString(committed.Fields["current_ref"]))
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("reset workflow instance to simulate DB/git split: %v", err)
 	}
@@ -2386,10 +2389,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	if err != nil {
 		t.Fatalf("load repaired workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(repaired.Metadata["current_ref"])); got != ref {
+	if got := strings.TrimSpace(asString(repaired.Fields["current_ref"])); got != ref {
 		t.Fatalf("repaired current_ref = %q, want %q", got, ref)
 	}
-	if got := strings.TrimSpace(asString(repaired.Metadata["status"])); got != "committed" {
+	if got := strings.TrimSpace(asString(repaired.Fields["status"])); got != "committed" {
 		t.Fatalf("repaired status = %q, want committed", got)
 	}
 }
@@ -2404,11 +2407,12 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	initial := testArtifactRepoEntityFieldsForSource(pc.SemanticSource(), entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      artifactRepoFixtureRoute(initial),
+		EntityID:        entityID,
 		StorageRef:      artifactRepoFixtureRoute(initial),
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
-		Metadata:        cloneStringAnyMap(initial),
+		Fields:          cloneStringAnyMap(initial),
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2422,7 +2426,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 		t.Fatalf("load workflow instance: %v", err)
 	}
 
-	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: unused\n")
+	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Fields, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: unused\n")
 	nextAction.ArtifactRepo.AllowedPaths = append(nextAction.ArtifactRepo.AllowedPaths, "artifacts/extra.txt")
 	nextAction.ArtifactRepo.Files = []runtimecontracts.ArtifactRepoFileSpec{{
 		Path:        runtimecontracts.LiteralExpression("artifacts/extra.txt"),
@@ -2741,10 +2745,8 @@ func TestWorkflowStateGatesForScopeAddsLocalAliasesForChildFlow(t *testing.T) {
 			},
 		},
 	})
-	got := workflowStateGatesForScope(source, "child", map[string]any{
-		"gates": map[string]any{
-			"child/g_validated": true,
-		},
+	got := workflowStateGatesForScope(source, "child", map[string]bool{
+		"child/g_validated": true,
 	})
 	if !got["child/g_validated"] {
 		t.Fatalf("scoped key missing from gates view: %#v", got)

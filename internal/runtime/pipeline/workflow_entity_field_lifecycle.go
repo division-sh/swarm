@@ -105,9 +105,6 @@ func WorkflowEntityFieldsAvailableBeforeEmitFields(handler runtimecontracts.Syst
 	if handler.Compute != nil {
 		addWriter(handler.Compute.StoreAs)
 	}
-	if handler.FanOut != nil {
-		available["fan_out_count"] = struct{}{}
-	}
 	if handler.CreateEntity {
 		for _, write := range handler.DataAccumulation.Writes {
 			addWriter(write.Target())
@@ -183,11 +180,6 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 	if phaseAfter(phase, WorkflowEntityFieldLifecycleCompute) {
 		if handler.Compute != nil {
 			addWriter(handler.Compute.StoreAs)
-		}
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleFanOut) {
-		if handler.FanOut != nil {
-			available["fan_out_count"] = struct{}{}
 		}
 	}
 	if phaseAfter(phase, WorkflowEntityFieldLifecycleRule) {

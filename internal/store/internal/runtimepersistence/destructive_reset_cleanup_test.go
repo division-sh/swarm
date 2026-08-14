@@ -630,8 +630,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("dependent fork run_id = %s, want %s", materialized.ForkRunID, lateRunID)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, field, caused_by_event, writer_type, writer_id)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'status', $4::uuid, 'platform', 'test')
+		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, domain, path, caused_by_event, writer_type, writer_id)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'authored_field', 'status', $4::uuid, 'platform', 'test')
 	`, lateMutationID, lateRunID, entityID, eventID); err != nil {
 		t.Fatalf("seed preserved late mutation: %v", err)
 	}
@@ -1331,7 +1331,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'flow/a', 'active')`, runA, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_mutations (run_id, entity_id, field, writer_type, writer_id) VALUES ($1::uuid, $2::uuid, 'status', 'platform', 'test')`, runA, entityID); err != nil {
+	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_mutations (run_id, entity_id, domain, path, writer_type, writer_id) VALUES ($1::uuid, $2::uuid, 'authored_field', 'status', 'platform', 'test')`, runA, entityID); err != nil {
 		t.Fatalf("seed entity mutation: %v", err)
 	}
 	admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(

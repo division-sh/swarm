@@ -159,10 +159,10 @@ func workflowEntitySchemaFieldDefinitions(raw any) map[string]runtimecontracts.E
 	return out
 }
 
-func workflowMaterializeEntityMetadata(source semanticview.Source, flowID string, metadata map[string]any) map[string]any {
+func workflowMaterializeEntityFields(source semanticview.Source, flowID string, fields map[string]any) map[string]any {
 	contract, ok := workflowEntityContract(source, flowID)
 	if !ok {
-		return cloneStringAnyMap(metadata)
+		return cloneStringAnyMap(fields)
 	}
 	entityFields := map[string]any{}
 	for name := range contract.Entity.Fields {
@@ -170,25 +170,30 @@ func workflowMaterializeEntityMetadata(source semanticview.Source, flowID string
 		if name == "" {
 			continue
 		}
-		if value, exists := metadata[name]; exists {
+		if value, exists := fields[name]; exists {
 			entityFields[name] = cloneWorkflowSchemaValue(value)
 		}
 	}
 	materialized, err := entityruntime.Materialize(contract, entityFields)
 	if err != nil {
-		return cloneStringAnyMap(metadata)
+		return cloneStringAnyMap(fields)
 	}
-	out := cloneStringAnyMap(metadata)
+	out := cloneStringAnyMap(fields)
 	if out == nil {
 		out = map[string]any{}
 	}
 	for key, value := range materialized {
 		out[key] = value
 	}
-	if entityType := strings.TrimSpace(contract.EntityType); entityType != "" {
-		out["entity_type"] = entityType
-	}
 	return out
+}
+
+func workflowEntityType(source semanticview.Source, flowID string) string {
+	contract, ok := workflowEntityContract(source, flowID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(contract.EntityType)
 }
 
 func cloneWorkflowSchemaValue(value any) any {
