@@ -32,7 +32,18 @@ const (
 	postgresDialect
 )
 
-type malformedActivationError struct{ cause error }
+type persistedScheduleFamily uint8
+
+const (
+	persistedScheduleFamilyUnclassified persistedScheduleFamily = iota
+	persistedScheduleFamilyNonJoin
+	persistedScheduleFamilyJoin
+)
+
+type malformedActivationError struct {
+	cause  error
+	family persistedScheduleFamily
+}
 
 func (e *malformedActivationError) Error() string { return e.cause.Error() }
 func (e *malformedActivationError) Unwrap() error { return e.cause }
@@ -41,6 +52,52 @@ func asMalformedActivation(err error) (*malformedActivationError, bool) {
 	var malformed *malformedActivationError
 	ok := errors.As(err, &malformed)
 	return malformed, ok
+}
+
+type malformedActivationDisposition uint8
+
+const (
+	malformedActivationReject malformedActivationDisposition = iota
+	malformedActivationTerminalize
+)
+
+func dispositionForMalformedActivation(malformed *malformedActivationError) malformedActivationDisposition {
+	if malformed != nil && malformed.family == persistedScheduleFamilyNonJoin {
+		return malformedActivationTerminalize
+	}
+	return malformedActivationReject
+}
+
+func classifyPersistedScheduleFamily(eventType string, payloadRaw any) persistedScheduleFamily {
+	switch strings.TrimSpace(eventType) {
+	case "platform.join_timeout", "platform.join_complete":
+		return persistedScheduleFamilyJoin
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(jsonBytes(payloadRaw), &payload); err != nil {
+		return persistedScheduleFamilyUnclassified
+	}
+	rawHandle, present := payload["timer_handle"]
+	if !present {
+		return persistedScheduleFamilyNonJoin
+	}
+	handle, ok := rawHandle.(map[string]any)
+	if !ok {
+		return persistedScheduleFamilyUnclassified
+	}
+	kind, ok := handle["kind"].(string)
+	if !ok {
+		return persistedScheduleFamilyUnclassified
+	}
+	switch timeridentity.TimerHandleKind(strings.TrimSpace(kind)) {
+	case timeridentity.TimerHandleJoinTimeout, timeridentity.TimerHandleJoinComplete:
+		return persistedScheduleFamilyJoin
+	case timeridentity.TimerHandleWorkflowTimer:
+		return persistedScheduleFamilyNonJoin
+	default:
+		return persistedScheduleFamilyUnclassified
+	}
 }
 
 type PostgresOwner struct {
@@ -286,8 +343,8 @@ func (o *PostgresOwner) listActive(ctx context.Context) ([]runtimegenericschedul
 	for _, id := range ids {
 		activation, found, loadErr := o.LoadGenericScheduleActivation(ctx, id)
 		if malformed, ok := asMalformedActivation(loadErr); ok {
-			if isJoinScheduleActivation(activation) {
-				return nil, fmt.Errorf("restore join generic schedule %s: %w", id, malformed)
+			if dispositionForMalformedActivation(malformed) == malformedActivationReject {
+				return nil, fmt.Errorf("restore malformed mandatory or unclassified generic schedule %s: %w", id, malformed)
 			}
 			if err := o.failMalformed(ctx, id, malformed); err != nil {
 				return nil, err
@@ -313,8 +370,8 @@ func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.
 	for _, id := range ids {
 		activation, found, loadErr := o.LoadGenericScheduleActivation(ctx, id)
 		if malformed, ok := asMalformedActivation(loadErr); ok {
-			if isJoinScheduleActivation(activation) {
-				return nil, fmt.Errorf("restore join generic schedule %s: %w", id, malformed)
+			if dispositionForMalformedActivation(malformed) == malformedActivationReject {
+				return nil, fmt.Errorf("restore malformed mandatory or unclassified generic schedule %s: %w", id, malformed)
 			}
 			if err := o.failMalformed(ctx, id, malformed); err != nil {
 				return nil, err
@@ -329,19 +386,6 @@ func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.
 		}
 	}
 	return result, nil
-}
-
-func isJoinScheduleActivation(activation runtimegenericschedule.Activation) bool {
-	switch strings.TrimSpace(activation.Command.EventType) {
-	case "platform.join_timeout", "platform.join_complete":
-		return true
-	}
-	payload, ok := activation.Command.Payload.Interface().(map[string]any)
-	if !ok {
-		return false
-	}
-	_, _, ok = timeridentity.ParseJoinHandle(payload)
-	return ok
 }
 
 func (o *PostgresOwner) failMalformed(ctx context.Context, activationID string, malformed error) error {
@@ -403,6 +447,9 @@ func PrepareOccurrenceTx(ctx context.Context, tx *sql.Tx, postgres bool, wakeup 
 	activation, found, err := loadByIDTx(ctx, tx, dialectFor(postgres), wakeup.ActivationID(), postgres)
 	if err != nil {
 		if malformed, ok := asMalformedActivation(err); ok {
+			if dispositionForMalformedActivation(malformed) == malformedActivationReject {
+				return runtimegenericschedule.PreparedOccurrence{}, fmt.Errorf("prepare malformed mandatory or unclassified generic schedule %s: %w", wakeup.ActivationID(), malformed)
+			}
 			if failErr := failMalformedByIDTx(ctx, tx, postgres, wakeup.ActivationID(), malformed, admittedAt); failErr != nil {
 				return runtimegenericschedule.PreparedOccurrence{}, failErr
 			}
@@ -702,9 +749,10 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 	if err != nil {
 		return runtimegenericschedule.Activation{}, err
 	}
+	family := classifyPersistedScheduleFamily(eventType, payloadRaw)
 	activation.Command.ExecutionMode = executionmode.Mode(executionMode)
 	malformed := func(err error) (runtimegenericschedule.Activation, error) {
-		return activation, &malformedActivationError{cause: err}
+		return activation, &malformedActivationError{cause: err, family: family}
 	}
 	if immutableHash != immutableHashDuplicate {
 		return malformed(errors.New("generic schedule immutable hash projection is inconsistent"))

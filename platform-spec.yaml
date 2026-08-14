@@ -5098,8 +5098,11 @@ engine:
     recovery: >-
       Restart, replay, and fork consume persisted members/window/close/timer facts. They do not re-read mutable entity
       membership, synthesize an arrival-owned activation, or resurrect a closed timeout. Hydration validates every active
-      join schedule before registering any wakeup; malformed same-leaf siblings leave the complete registration set
-      unchanged. Forking remints the complete typed handle for the destination route and rejects partial identity.
+      join schedule before registering any wakeup; malformed persisted rows retaining join-family evidence abort both
+      restoration and occurrence preparation without mutating the row or retiring its mandatory wakeup. Only a proven
+      non-join malformed generic schedule follows generic fail-loud terminalization. Malformed same-leaf siblings leave the
+      complete registration set unchanged. Forking remints the complete typed handle for the destination route and rejects
+      partial identity.
   runtime_store_backend_selection:
     promoted_by: '#1084'
     parent_tracker: '#1066'
@@ -7146,9 +7149,10 @@ engine:
         recurrence is forbidden: each recurring occurrence advances the durable coordinate and registers a new inert
         one-shot wakeup only after commit. Cron is UTC; @every advances from the prior persisted coordinate. Downtime catch-up
         processes every persisted coordinate in order and emits a typed depth warning rather than skipping work. Every
-        terminal preparation, including a concurrently missing row or fail-loud malformed row with no reloadable activation,
-        retires and releases the original exact wakeup. Retirement/release failure retries from that exact wakeup and never
-        reconstructs it from absent state.
+        terminal preparation, including a concurrently missing row or proven non-join fail-loud malformed row with no
+        reloadable activation, retires and releases the original exact wakeup. A malformed row retaining mandatory join-family
+        evidence, or whose family cannot be proven non-join, fails preparation without mutation or wakeup retirement.
+        Retirement/release failure retries from that exact wakeup and never reconstructs it from absent state.
       occurrence: >
         Occurrence event identity is deterministic from activation identity plus persisted due coordinate. The selected
         store stamps occurrence admission once and retries/restarts preserve event identity, admitted_at, and due_at exactly.

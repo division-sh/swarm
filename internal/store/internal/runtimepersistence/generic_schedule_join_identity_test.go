@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,6 +273,215 @@ func writeSelectedStoreScheduleProjection(ctx context.Context, db *sql.DB, store
 	return err
 }
 
+func TestJoinScheduleRestoreRejectsEarlyHydrationFailuresWithoutMutationOnBothStores(t *testing.T) {
+	type earlyFailure struct {
+		name   string
+		mutate func(testing.TB, context.Context, *sql.DB, runtimegenericschedule.Store, runtimegenericschedule.Activation)
+	}
+	failures := []earlyFailure{
+		{
+			name: "semantic_payload_decode",
+			mutate: func(t testing.TB, ctx context.Context, db *sql.DB, store runtimegenericschedule.Store, activation runtimegenericschedule.Activation) {
+				selectedStoreUpdateTimer(t, ctx, db, store,
+					`UPDATE timers SET fire_payload = ? WHERE timer_id = ?`,
+					`UPDATE timers SET fire_payload = $1::jsonb WHERE timer_id = $2::uuid`,
+					`9007199254740992`, activation.ID,
+				)
+			},
+		},
+		{
+			name: "routing_source_decode",
+			mutate: func(t testing.TB, ctx context.Context, db *sql.DB, store runtimegenericschedule.Store, activation runtimegenericschedule.Activation) {
+				routing, err := json.Marshal(activation.Command.RoutingSource)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var hostile map[string]any
+				if err := json.Unmarshal(routing, &hostile); err != nil {
+					t.Fatal(err)
+				}
+				hostile["unexpected"] = true
+				routing, err = json.Marshal(hostile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				selectedStoreUpdateTimer(t, ctx, db, store,
+					`UPDATE timers SET routing_source = ? WHERE timer_id = ?`,
+					`UPDATE timers SET routing_source = $1::jsonb WHERE timer_id = $2::uuid`,
+					string(routing), activation.ID,
+				)
+			},
+		},
+		{
+			name: "due_basis_decode",
+			mutate: func(t testing.TB, ctx context.Context, db *sql.DB, store runtimegenericschedule.Store, activation runtimegenericschedule.Activation) {
+				selectedStoreUpdateTimer(t, ctx, db, store,
+					`UPDATE timers SET due_basis_kind = 'delay', due_basis_absolute = NULL, due_basis_duration = 'not-a-duration' WHERE timer_id = ?`,
+					`UPDATE timers SET due_basis_kind = 'delay', due_basis_absolute = NULL, due_basis_duration = 'not-a-duration' WHERE timer_id = $1::uuid`,
+					activation.ID,
+				)
+			},
+		},
+	}
+
+	for _, storeCase := range selectedScheduleStoreCases() {
+		t.Run(storeCase.name, func(t *testing.T) {
+			store, db, ctx := storeCase.open(t)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-early", Attempt: 2}
+			for _, failure := range failures {
+				t.Run(failure.name, func(t *testing.T) {
+					command := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders/order-1", generation)
+					admitted, err := store.AdmitGenericSchedule(ctx, command)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { selectedStoreDeleteTimer(t, ctx, db, store, admitted.Activation.ID) })
+					failure.mutate(t, ctx, db, store, admitted.Activation)
+					before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID)
+
+					scheduler := &selectedStoreLifecycleScheduler{}
+					planner := &terminalSchedulePlannerProbe{}
+					dispatcher := &terminalScheduleDispatcherProbe{}
+					lifecycle, err := runtimegenericschedule.NewLifecycle(store, scheduler, planner, dispatcher, nil, executionposture.Live)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { stopSelectedStoreScheduleLifecycle(t, lifecycle) })
+					if restored, err := lifecycle.Restore(ctx); err == nil || restored != 0 {
+						t.Fatalf("early malformed restore = restored:%d err:%v", restored, err)
+					}
+					if len(scheduler.registered) != 0 || len(scheduler.retired) != 0 || planner.prepareCalls != 0 || dispatcher.calls != 0 {
+						t.Fatalf("early malformed restore crossed a side-effect boundary: registered=%#v retired=%#v planned=%d dispatched=%d", scheduler.registered, scheduler.retired, planner.prepareCalls, dispatcher.calls)
+					}
+					if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID); before != after {
+						t.Fatalf("early malformed restore mutated timer row\nbefore=%s\nafter=%s", before, after)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestJoinSchedulePostRegistrationPrepareRejectsMalformedRowWithoutMutationOnBothStores(t *testing.T) {
+	for _, storeCase := range selectedScheduleStoreCases() {
+		t.Run(storeCase.name, func(t *testing.T) {
+			store, db, ctx := storeCase.open(t)
+			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-fire", Attempt: 2}
+			command := selectedStoreJoinScheduleCommand(t, runtimecorrelation.RunIDFromContext(ctx), "orders", "orders/order-1", generation)
+			scheduler := &selectedStoreLifecycleScheduler{}
+			planner := &terminalSchedulePlannerProbe{}
+			dispatcher := &terminalScheduleDispatcherProbe{}
+			lifecycle, err := runtimegenericschedule.NewLifecycle(store, scheduler, planner, dispatcher, nil, executionposture.Live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopped := false
+			t.Cleanup(func() {
+				if !stopped {
+					stopSelectedStoreScheduleLifecycle(t, lifecycle)
+				}
+			})
+			admitted, err := lifecycle.Admit(ctx, command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(scheduler.registered) != 1 || scheduler.callback == nil {
+				t.Fatalf("join schedule registration = %#v callback=%v", scheduler.registered, scheduler.callback != nil)
+			}
+			wakeup := scheduler.registered[0]
+			selectedStoreUpdateTimer(t, ctx, db, store,
+				`UPDATE timers SET fire_payload = ? WHERE timer_id = ?`,
+				`UPDATE timers SET fire_payload = $1::jsonb WHERE timer_id = $2::uuid`,
+				`9007199254740992`, admitted.Activation.ID,
+			)
+			before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID)
+
+			if prepared, err := store.PrepareGenericScheduleOccurrence(ctx, wakeup); err == nil || prepared.Outcome != "" {
+				t.Fatalf("prepare malformed registered join = %#v err:%v", prepared, err)
+			}
+			if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID); before != after {
+				t.Fatalf("direct prepare mutated malformed join row\nbefore=%s\nafter=%s", before, after)
+			}
+
+			scheduler.callback(ctx, wakeup)
+			stopSelectedStoreScheduleLifecycle(t, lifecycle)
+			stopped = true
+			if len(scheduler.retired) != 0 || planner.prepareCalls != 0 || dispatcher.calls != 0 {
+				t.Fatalf("malformed join fire crossed a side-effect boundary: retired=%#v planned=%d dispatched=%d", scheduler.retired, planner.prepareCalls, dispatcher.calls)
+			}
+			if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID); before != after {
+				t.Fatalf("lifecycle fire mutated malformed join row\nbefore=%s\nafter=%s", before, after)
+			}
+		})
+	}
+}
+
+func selectedStoreUpdateTimer(t testing.TB, ctx context.Context, db *sql.DB, store runtimegenericschedule.Store, sqliteQuery, postgresQuery string, args ...any) {
+	t.Helper()
+	query := sqliteQuery
+	if _, ok := store.(*PostgresStore); ok {
+		query = postgresQuery
+	}
+	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+		t.Fatalf("mutate selected-store timer: %v", err)
+	}
+}
+
+func selectedStoreDeleteTimer(t testing.TB, ctx context.Context, db *sql.DB, store runtimegenericschedule.Store, activationID string) {
+	t.Helper()
+	selectedStoreUpdateTimer(t, ctx, db, store,
+		`DELETE FROM timers WHERE timer_id = ?`,
+		`DELETE FROM timers WHERE timer_id = $1::uuid`,
+		activationID,
+	)
+}
+
+func selectedStoreFullTimerSnapshotForID(t testing.TB, ctx context.Context, db *sql.DB, store runtimegenericschedule.Store, activationID string) string {
+	t.Helper()
+	query := `SELECT * FROM timers WHERE timer_id = ?`
+	if _, ok := store.(*PostgresStore); ok {
+		query = `SELECT * FROM timers WHERE timer_id = $1::uuid`
+	}
+	rows, err := db.QueryContext(ctx, query, activationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rows.Next() {
+		t.Fatalf("timer %s is missing", activationID)
+	}
+	values := make([]any, len(columns))
+	destinations := make([]any, len(columns))
+	for index := range values {
+		destinations[index] = &values[index]
+	}
+	if err := rows.Scan(destinations...); err != nil {
+		t.Fatal(err)
+	}
+	parts := make([]string, len(columns))
+	for index, value := range values {
+		if raw, ok := value.([]byte); ok {
+			value = string(raw)
+		}
+		parts[index] = fmt.Sprintf("%s=%T:%v", columns[index], value, value)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func stopSelectedStoreScheduleLifecycle(t testing.TB, lifecycle *runtimegenericschedule.Lifecycle) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := lifecycle.Stop(ctx); err != nil {
+		t.Fatalf("stop selected-store generic schedule lifecycle: %v", err)
+	}
+}
+
 func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPartialState(t *testing.T) {
 	for _, storeCase := range selectedScheduleStoreCases() {
 		t.Run(storeCase.name, func(t *testing.T) {
@@ -362,7 +573,7 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 			if _, err := db.ExecContext(ctx, update, args...); err != nil {
 				t.Fatal(err)
 			}
-			before := selectedStoreTimerSnapshotForID(t, ctx, db, store, flowResult.Activation.ID)
+			before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, flowResult.Activation.ID)
 
 			scheduler := &selectedStoreLifecycleScheduler{}
 			lifecycle, err := runtimegenericschedule.NewLifecycle(store, scheduler, &terminalSchedulePlannerProbe{}, &terminalScheduleDispatcherProbe{}, nil, executionposture.Live)
@@ -373,8 +584,8 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 			if restored, err := lifecycle.Restore(ctx); err == nil || restored != 0 || len(scheduler.registered) != 0 {
 				t.Fatalf("event-drift restore = restored:%d registered:%#v err:%v", restored, scheduler.registered, err)
 			}
-			if after := selectedStoreTimerSnapshotForID(t, ctx, db, store, flowResult.Activation.ID); before != after {
-				t.Fatalf("event-drift restore mutated typed join row\nbefore=%#v\nafter=%#v", before, after)
+			if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, flowResult.Activation.ID); before != after {
+				t.Fatalf("event-drift restore mutated typed join row\nbefore=%s\nafter=%s", before, after)
 			}
 		})
 	}
