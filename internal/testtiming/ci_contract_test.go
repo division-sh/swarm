@@ -178,17 +178,22 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 
 	const (
 		runtimePackage            = "github.com/division-sh/swarm/internal/runtime"
+		serveappPackage           = "github.com/division-sh/swarm/internal/serveapp"
 		storePackage              = "github.com/division-sh/swarm/internal/store"
 		runtimePersistencePackage = "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 		testPostgresPackage       = "github.com/division-sh/swarm/internal/testpostgres"
 	)
 	runtimeIsSpecial := false
+	serveappIsSpecial := false
 	storeIsSpecial := false
 	runtimePersistenceIsSpecial := false
 	testPostgresIsSpecial := false
 	for _, pkg := range policy.SpecialPackages {
 		if pkg == runtimePackage {
 			runtimeIsSpecial = true
+		}
+		if pkg == serveappPackage {
+			serveappIsSpecial = true
 		}
 		if pkg == storePackage {
 			storeIsSpecial = true
@@ -203,6 +208,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !runtimeIsSpecial {
 		t.Fatal("internal/runtime must remain isolated from broad package co-scheduling")
 	}
+	if !serveappIsSpecial {
+		t.Fatal("internal/serveapp must remain isolated from broad package co-scheduling")
+	}
 	if !storeIsSpecial {
 		t.Fatal("internal/store must remain isolated from broad package co-scheduling")
 	}
@@ -215,6 +223,10 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	runtimeUnit, ok := policy.Units["runtime-full"]
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
+	}
+	serveappUnit, ok := policy.Units["serveapp-full"]
+	if !ok || !slices.Equal(serveappUnit.Packages, []string{serveappPackage}) || serveappUnit.Run != "" || serveappUnit.CountMode != "count-1" || serveappUnit.BudgetClass != "full" {
+		t.Fatalf("serveapp-full unit = %#v, want one complete uncached serveapp proof", serveappUnit)
 	}
 	storeUnit, ok := policy.Units["store-full"]
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
@@ -236,12 +248,16 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
+		foundServeapp := false
 		foundStore := false
 		foundTestPostgres := false
 		foundStoreRuntime := map[string]bool{}
 		for _, unit := range policy.Profiles[profileName].Units {
 			if unit == "runtime-full" {
 				foundRuntime = true
+			}
+			if unit == "serveapp-full" {
+				foundServeapp = true
 			}
 			if unit == "store-full" {
 				foundStore = true
@@ -257,6 +273,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		if !foundRuntime {
 			t.Errorf("profile %s does not include runtime-full", profileName)
+		}
+		if !foundServeapp {
+			t.Errorf("profile %s does not include serveapp-full", profileName)
 		}
 		if !foundStore {
 			t.Errorf("profile %s does not include store-full", profileName)
