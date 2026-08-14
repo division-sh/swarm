@@ -229,6 +229,73 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	}
 }
 
+func TestEntityViewPreservesExactIdentifiersAndSemanticKeys(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	runID := strings.Repeat("r", 256)
+	rawFlow := "scope/" + strings.Repeat("f", 210) + "\nterminal\tsegment"
+	wantFlow := "scope/" + strings.Repeat("f", 210) + " terminal segment"
+	longKey := func(prefix, discriminator string) string {
+		return strings.Repeat(prefix, 187) + discriminator + strings.Repeat("m", 20) + strings.Repeat("z", 12)
+	}
+	fieldA, fieldB := longKey("f", "a"), longKey("f", "b")
+	gateA, gateB := longKey("g", "a"), longKey("g", "b")
+	accumulatedA, accumulatedB := longKey("a", "a"), longKey("a", "b")
+	loopA, loopB := longKey("l", "a"), longKey("l", "b")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		entity := result["entity"].(map[string]any)
+		entity["run_id"] = runID
+		entity["flow_instance"] = rawFlow
+		result["fields"] = map[string]any{fieldA: "first", fieldB: "second"}
+		result["gates"] = map[string]any{gateA: false, gateB: true}
+		result["accumulated"] = map[string]any{accumulatedA: 1, accumulatedB: 2}
+		result["loops"] = []map[string]any{
+			{"id": loopA, "revision_id": "rev-a", "attempt": 1, "max_attempts": 2, "current_stage": "collecting", "status": "open"},
+			{"id": loopB, "revision_id": "rev-b", "attempt": 2, "max_attempts": 2, "current_stage": "reviewing", "status": "closed"},
+		}
+		writeJSONRPCResult(t, w, request.ID, result)
+	}))
+	defer server.Close()
+
+	render := func(args ...string) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+		if code != 0 {
+			t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("stderr = %q, want empty", stderr.String())
+		}
+		return stdout.String()
+	}
+
+	defaultOutput := render("entity", "view", "entity-1", "--run-id", "run-1")
+	for _, want := range []string{runID, wantFlow, fieldA, fieldB, gateA, gateB} {
+		if !strings.Contains(defaultOutput, want) {
+			t.Fatalf("default entity view missing exact value %q:\n%s", want, defaultOutput)
+		}
+	}
+	if strings.Contains(defaultOutput, "…") || strings.Contains(defaultOutput, "\t") || strings.Contains(defaultOutput, "\nterminal") {
+		t.Fatalf("default entity view abbreviated an exact fact or leaked controls:\n%q", defaultOutput)
+	}
+
+	verboseOutput := render("entity", "view", "entity-1", "--run-id", "run-1", "--verbose")
+	for _, want := range []string{runID, wantFlow, fieldA, fieldB, gateA, gateB, accumulatedA, accumulatedB, loopA, loopB} {
+		if !strings.Contains(verboseOutput, want) {
+			t.Fatalf("verbose entity view missing exact value %q:\n%s", want, verboseOutput)
+		}
+	}
+	if strings.Contains(verboseOutput, "…") || strings.Contains(verboseOutput, "\t") || strings.Contains(verboseOutput, "\nterminal") {
+		t.Fatalf("verbose entity view abbreviated an exact fact or leaked controls:\n%q", verboseOutput)
+	}
+}
+
 func TestEntityViewJSONIsDataComplete(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
@@ -477,6 +544,19 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			},
 			wantCode:   3,
 			wantStderr: "fields is required",
+		},
+		{
+			name: "view blank entity type exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["entity"].(map[string]any)["entity_type"] = " "
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "entity_type is required",
 		},
 		{
 			name: "aggregate unknown rpc exits three",

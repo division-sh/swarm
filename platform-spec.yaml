@@ -25114,7 +25114,7 @@ cli_specification:
       output:
         default_text:
           table: ENTITY_ID / optional RUN (omitted when --run-id scopes the query) / TYPE / STATE / FLOW / UPDATED
-          values: Empty TYPE or STATE values render as `-`; FLOW renders the sanitized but otherwise complete flow-instance identifier; UPDATED is relative to the current time.
+          values: TYPE and STATE are required validated facts; blank values are malformed responses. FLOW renders the sanitized but otherwise complete flow-instance identifier; UPDATED is relative to the current time.
           empty: No entities match the current filters.
           pagination: A non-empty next_cursor renders below the table as `next_cursor=<cursor>`.
         verbose: Uses the default table and appends each row's absolute RFC3339 UPDATED value to its relative timestamp.
@@ -25150,7 +25150,7 @@ cli_specification:
       output:
         default_text:
           heading: Entity <entity-id>
-          identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name and empty type/state render as `-`; timestamps are relative.
+          identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
           sections: Labeled Fields and Gates rows plus an Accumulated presence count; empty sections render explicitly as `none`; every declared false gate remains visible.
           field_projection: Platform bookkeeping fields are omitted from the default Fields section pending the API-owned separation tracked by #2242.
         verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and a separate Bookkeeping section.
