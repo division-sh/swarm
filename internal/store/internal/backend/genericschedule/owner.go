@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -285,6 +286,9 @@ func (o *PostgresOwner) listActive(ctx context.Context) ([]runtimegenericschedul
 	for _, id := range ids {
 		activation, found, loadErr := o.LoadGenericScheduleActivation(ctx, id)
 		if malformed, ok := asMalformedActivation(loadErr); ok {
+			if isJoinScheduleActivation(activation) {
+				return nil, fmt.Errorf("restore join generic schedule %s: %w", id, malformed)
+			}
 			if err := o.failMalformed(ctx, id, malformed); err != nil {
 				return nil, err
 			}
@@ -309,6 +313,9 @@ func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.
 	for _, id := range ids {
 		activation, found, loadErr := o.LoadGenericScheduleActivation(ctx, id)
 		if malformed, ok := asMalformedActivation(loadErr); ok {
+			if isJoinScheduleActivation(activation) {
+				return nil, fmt.Errorf("restore join generic schedule %s: %w", id, malformed)
+			}
 			if err := o.failMalformed(ctx, id, malformed); err != nil {
 				return nil, err
 			}
@@ -322,6 +329,19 @@ func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.
 		}
 	}
 	return result, nil
+}
+
+func isJoinScheduleActivation(activation runtimegenericschedule.Activation) bool {
+	switch strings.TrimSpace(activation.Command.EventType) {
+	case "platform.join_timeout", "platform.join_complete":
+		return true
+	}
+	payload, ok := activation.Command.Payload.Interface().(map[string]any)
+	if !ok {
+		return false
+	}
+	_, _, ok = timeridentity.ParseJoinHandle(payload)
+	return ok
 }
 
 func (o *PostgresOwner) failMalformed(ctx context.Context, activationID string, malformed error) error {

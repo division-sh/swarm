@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -144,6 +143,23 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 	if rawEventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
+	if isJoinLifecycleEvent(evt.Type()) {
+		resolution, ok, err := resolveWorkflowJoinOccurrence(source, evt)
+		if err != nil {
+			return workflowNodeEventHandlerResolution{Failure: err.Error()}
+		}
+		if !ok || resolution.Ref.NodeID() != strings.TrimSpace(nodeID) {
+			return workflowNodeEventHandlerResolution{}
+		}
+		handlerFlowID := resolution.Ref.FlowID()
+		if handlerFlowID == "" {
+			handlerFlowID = semanticview.RootExecutionFlowID(source)
+		}
+		return workflowNodeEventHandlerResolution{
+			Handler: resolution.Handler, HandlerEventKey: resolution.Ref.HandlerEvent(),
+			FlowID: handlerFlowID, Matched: true,
+		}
+	}
 	route, deliveryRouted := workflowNodeDeliveryRoute(ctx)
 	if deliveryRouted && !route.ConnectClaim.Empty() {
 		handlerFlowID, handlerNodeID, handlerEvent, authorized := route.ConnectClaim.NodeHandlerOwner(nodeID)
@@ -246,11 +262,6 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 }
 
 func workflowNodeHandlerEventKeyForExecution(ctx context.Context, source semanticview.Source, nodeID string, evt events.Event) string {
-	if isJoinLifecycleEvent(evt.Type()) {
-		if ref, _, ok := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); ok && ref.NodeID == strings.TrimSpace(nodeID) {
-			return ref.HandlerEvent
-		}
-	}
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, nodeID, evt)
 	if resolved.Matched {
 		return resolved.HandlerEventKey
@@ -637,9 +648,11 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			return false, true, err
 		}
 		if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-			if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == strings.TrimSpace(node.ID) {
+			if resolution, refOK, resolveErr := resolveWorkflowJoinOccurrence(source, evt); resolveErr != nil {
+				return false, true, resolveErr
+			} else if refOK && resolution.Ref.NodeID() == strings.TrimSpace(node.ID) {
 				if node.Policies != nil {
-					policy, ok = workflowNodePolicyForEventType(node.Policies, ref.HandlerEvent)
+					policy, ok = workflowNodePolicyForEventType(node.Policies, resolution.Ref.HandlerEvent())
 				}
 			}
 		}

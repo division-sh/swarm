@@ -192,6 +192,19 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 		return RoutePlan{}, err
 	}
 	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
+	joinRecipient, joinTarget, joinHandler, joinOccurrence, err := runtimepipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(
+		p.recipientPolicy.semanticSource, evt,
+	)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	if joinOccurrence {
+		routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
+			Recipient: joinRecipient, TargetBlueprint: joinTarget, Handler: joinHandler,
+			Producer: routeIntentProducerInternalTargetCarrier, Persist: true,
+		})
+		return projection.resolveRoutePlan(routePlan)
+	}
 	connectPlan, err := p.connectPlanner.Plan(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err

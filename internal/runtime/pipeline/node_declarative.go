@@ -10,7 +10,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -97,8 +96,8 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 	}
 	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), eventType)
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
-			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), ref.HandlerEvent)
+		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.coordinator.SemanticSource(), evt); err == nil && refOK && resolution.Ref.NodeID() == n.NodeID() {
+			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), resolution.Ref.HandlerEvent())
 		}
 	}
 	if !ok {
@@ -154,8 +153,8 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	}
 	policy, ok := n.policies[eventType]
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
-			policy, ok = n.policies[ref.HandlerEvent]
+		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt); err == nil && refOK && resolution.Ref.NodeID() == n.NodeID() {
+			policy, ok = n.policies[resolution.Ref.HandlerEvent()]
 		}
 	}
 	if !ok {
@@ -184,13 +183,14 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, n.source, n.NodeID(), evt)
 	}
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
-			candidate := semanticview.ResolveNodeSubscriptionHandler(n.source, n.NodeID(), ref.HandlerEvent)
-			if candidate.Matched && candidate.Handler.Join != nil && candidate.Handler.Join.EffectiveID() == ref.JoinID {
-				handler = candidate.Handler
-				handlerEventKey = candidate.HandlerEventKey
-				ok = true
-			}
+		resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt)
+		if err != nil {
+			return nil, err
+		}
+		if refOK && resolution.Ref.NodeID() == n.NodeID() {
+			handler = resolution.Handler
+			handlerEventKey = resolution.Ref.HandlerEvent()
+			ok = true
 		}
 	}
 	if !ok {
@@ -299,10 +299,18 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	source := e.coordinator.SemanticSource()
 	entityID := workflowEventEntityID(evt)
 	flowID := workflowNodeFlowID(source, e.nodeID)
+	if handler.Join != nil {
+		if executionFlowID := strings.TrimSpace(pipelineFlowScope(ctx)); executionFlowID != "" {
+			flowID = executionFlowID
+		}
+	}
 	selectedState := WorkflowState{}
 	hasSelectedState := false
 	stampedOwner, exactDelivery := stampedDeliveryTargetOwnership(ctx)
 	if exactDelivery {
+		if targetFlowID := strings.TrimSpace(stampedOwner.Route().FlowID); targetFlowID != "" {
+			flowID = targetFlowID
+		}
 		entityID = stampedOwner.Route().EntityID
 		if err := prepareStampedSelectOrCreateState(source, flowID, handler, evt, stampedOwner, &selectedState); err != nil {
 			return nil, err
@@ -384,6 +392,10 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
+	joinDeclaration, err := workflowJoinDeclarationForExecution(source, evt, flowID, e.nodeID, handlerEventKey, handler)
+	if err != nil {
+		return nil, err
+	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID(entityID),
 		NodeID:          identity.NormalizeNodeID(e.nodeID),
@@ -392,6 +404,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		Event:           evt,
 		ProducerSource:  producerSource,
 		HandlerEventKey: handlerEventKey,
+		JoinDeclaration: joinDeclaration,
 		ChainDepth:      evt.ChainDepth(),
 		Handler:         handler,
 		State:           stateSnapshot,

@@ -220,7 +220,8 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 				t.Fatalf("schedule = %#v", schedule)
 			}
 			handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(genericSchedulePayloadForTest(t, schedule)))
-			if !ok || handle.Kind != tc.wantKind || handle.Join.JoinID != "awaiting" {
+			ref, refOK := handle.JoinRef()
+			if !ok || !refOK || handle.Kind() != tc.wantKind || ref.JoinID() != "awaiting" {
 				t.Fatalf("timer handle = %#v, %v", handle, ok)
 			}
 		})
@@ -440,7 +441,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 				t.Fatalf("awaiting activation = %#v, %v, %v", awaiting, ok, err)
 			}
 			reviewing, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("reviewing", "shared", ""))
-			if err != nil || !ok || reviewing.Status != joinruntime.StatusOpen || reviewing.Stage != "reviewing" {
+			if err != nil || !ok || reviewing.Status != joinruntime.StatusOpen || reviewing.Stage() != "reviewing" {
 				t.Fatalf("reviewing activation = %#v, %v, %v", reviewing, ok, err)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
@@ -474,6 +475,44 @@ func genericSchedulePayloadForTest(t *testing.T, activation runtimegenericschedu
 		t.Fatalf("encode generic schedule payload: %v", err)
 	}
 	return payload
+}
+
+func workflowJoinScheduleEventForTest(t *testing.T, id string, activation runtimegenericschedule.Activation, runID string, envelope events.EventEnvelope, at time.Time) events.Event {
+	t.Helper()
+	return eventtest.RuntimeControlWithRoutingSource(
+		id,
+		events.EventType(activation.Command.EventType),
+		runtimegenericschedule.OccurrenceProducerID(),
+		activation.Command.TaskID,
+		genericSchedulePayloadForTest(t, activation),
+		0,
+		runID,
+		"",
+		envelope,
+		activation.Command.RoutingSource,
+		at,
+	)
+}
+
+func workflowJoinTimerEventForTest(t *testing.T, id, eventType string, handle timeridentity.TimerHandle, runID string, envelope events.EventEnvelope, at time.Time) events.Event {
+	t.Helper()
+	routingSource, err := events.NewFlowOwnedControlRoutingSource(envelope.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return eventtest.RuntimeControlWithRoutingSource(
+		id,
+		events.EventType(eventType),
+		runtimegenericschedule.OccurrenceProducerID(),
+		handle.TaskID(),
+		mustJSON(handle.PayloadMetadata()),
+		0,
+		runID,
+		"",
+		envelope,
+		routingSource,
+		at,
+	)
 }
 
 func workflowJoinStoreCases() []workflowJoinStoreCase {
@@ -531,9 +570,15 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			now := time.Now().UTC()
-			ref := timeridentity.NewJoinRef("orders", "join-node", "item.completed", "awaiting", "awaiting", "")
-			handle := timeridentity.JoinTimeoutHandle(ref)
-			activation, err := joinruntime.NewActivation("awaiting", "awaiting", "join-node", "item.completed", "", []string{"a"}, now, now.Add(time.Hour), handle.TaskID(), joinTimeoutEvent)
+			ref, err := timeridentity.NewJoinRef("orders", "join-node", "item.completed", "awaiting", "awaiting", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle, err := timeridentity.JoinTimeoutHandle(ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activation, err := joinruntime.NewActivation(handle, []string{"a"}, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -546,7 +591,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 			member := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), now)
-			timeout := eventtest.RunCreatingRootIngress("timeout-a", events.EventType(joinTimeoutEvent), "", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), now.Add(time.Hour))
+			timeout := workflowJoinTimerEventForTest(t, "timeout-a", joinTimeoutEvent, handle, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), now.Add(time.Hour))
 			triggerState := mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)
 			type raceResult struct {
 				result contractHandlerExecutionResult
@@ -840,7 +885,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			}
 			schedule := committedSchedules[0]
 			pc = newCoordinator()
-			fire := eventtest.RunCreatingRootIngress("join-zero-fire", events.EventType(schedule.Command.EventType), "", schedule.Command.TaskID, genericSchedulePayloadForTest(t, schedule), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			fire := workflowJoinScheduleEventForTest(t, "join-zero-fire", schedule, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			result, err = pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
 			if err != nil || !result.Handled {
 				t.Fatalf("completion fire = handled:%v err:%v", result.Handled, err)
@@ -937,7 +982,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("exited zero activation = %#v, %v, %v", activation, ok, err)
 			}
 
-			fire := eventtest.RunCreatingRootIngress("join-zero-after-exit", events.EventType(completion.Command.EventType), "", completion.Command.TaskID, genericSchedulePayloadForTest(t, completion), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			fire := workflowJoinScheduleEventForTest(t, "join-zero-after-exit", completion, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			result, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
 			if err != nil || result.Handled {
 				t.Fatalf("late discarded completion fire = handled:%v err:%v, want unhandled", result.Handled, err)

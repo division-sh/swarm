@@ -5,6 +5,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
 // effectiveWorkflowJoins lowers fan-in barrier seam identity into the join
@@ -61,21 +62,51 @@ func WorkflowJoinPlanForHandler(source Source, flowID, nodeID, handlerEvent stri
 	if source == nil {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
-	flowID, nodeID, handlerEvent = canonicalWorkflowJoinFlowID(source, flowID), strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
+	flowID, nodeID, handlerEvent = strings.TrimSpace(flowID), strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
 	for _, plan := range source.WorkflowJoins() {
-		if canonicalWorkflowJoinFlowID(source, plan.FlowID) == flowID && strings.TrimSpace(plan.NodeID) == nodeID && strings.TrimSpace(plan.HandlerEvent) == handlerEvent {
+		if strings.TrimSpace(plan.FlowID) == flowID && strings.TrimSpace(plan.NodeID) == nodeID && strings.TrimSpace(plan.HandlerEvent) == handlerEvent {
 			return plan, true
 		}
 	}
 	return runtimecontracts.WorkflowJoinPlan{}, false
 }
 
-func canonicalWorkflowJoinFlowID(source Source, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" && source != nil {
-		return strings.TrimSpace(source.WorkflowName())
+// WorkflowJoinPlanForExecutionHandler maps one exact authored handler scope to
+// its join declaration. Root declarations retain an explicit empty FlowID even
+// though their handlers execute in the authored root flow scope.
+func WorkflowJoinPlanForExecutionHandler(source Source, executionFlowID, nodeID, handlerEvent string, spec runtimecontracts.JoinSpec) (runtimecontracts.WorkflowJoinPlan, bool) {
+	if source == nil {
+		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
-	return flowID
+	executionFlowID = strings.TrimSpace(executionFlowID)
+	nodeID = strings.TrimSpace(nodeID)
+	handlerEvent = strings.TrimSpace(handlerEvent)
+	if executionFlowID == "" || nodeID == "" || handlerEvent == "" {
+		return runtimecontracts.WorkflowJoinPlan{}, false
+	}
+	if _, _, ok := ResolveFlowNodeDeclaration(source, executionFlowID, nodeID); !ok {
+		return runtimecontracts.WorkflowJoinPlan{}, false
+	}
+	declarationFlowID := executionFlowID
+	if executionFlowID == RootExecutionFlowID(source) {
+		declarationFlowID = ""
+	}
+	plan, ok := WorkflowJoinPlanForHandler(source, declarationFlowID, nodeID, handlerEvent)
+	if !ok || strings.TrimSpace(plan.Spec.Stage) != strings.TrimSpace(spec.Stage) || plan.Spec.EffectiveID() != spec.EffectiveID() {
+		return runtimecontracts.WorkflowJoinPlan{}, false
+	}
+	return plan, true
+}
+
+func WorkflowJoinPlanForRef(source Source, ref timeridentity.JoinRef) (runtimecontracts.WorkflowJoinPlan, bool) {
+	if source == nil || !ref.Valid() {
+		return runtimecontracts.WorkflowJoinPlan{}, false
+	}
+	plan, ok := WorkflowJoinPlanForHandler(source, ref.FlowID(), ref.NodeID(), ref.HandlerEvent())
+	if !ok || strings.TrimSpace(plan.Spec.Stage) != ref.Stage() || plan.Spec.EffectiveID() != ref.JoinID() {
+		return runtimecontracts.WorkflowJoinPlan{}, false
+	}
+	return plan, true
 }
 
 func normalizedJoinDerivationValues(values []string) []string {

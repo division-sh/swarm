@@ -53,7 +53,7 @@ func forkAttemptGenerationState(raw map[string]any, forkRunID, entityID string) 
 		return nil, err
 	}
 	for _, activation := range joins {
-		replacement, ok := replacements[activation.Generation.RevisionID]
+		replacement, ok := replacements[activation.Generation().RevisionID]
 		if !ok {
 			continue
 		}

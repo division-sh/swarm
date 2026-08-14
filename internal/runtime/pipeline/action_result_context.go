@@ -22,7 +22,7 @@ func workflowNodeProducerSource(ctx context.Context, source semanticview.Source,
 		route = delivery.Target.Route()
 		route.EntityID = strings.TrimSpace(entityID)
 	}
-	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, nodeID, route)
+	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, flowID, nodeID, route)
 }
 
 func actionResultFlowPath(source semanticview.Source, flowID string) string {

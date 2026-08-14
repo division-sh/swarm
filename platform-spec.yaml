@@ -5048,9 +5048,13 @@ engine:
       surfaces do not reconstruct join semantics independently.
     persisted_activation:
       identity: >-
-        flow instance + stage + effective join ID + optional window. Node and handler event remain exact internal routing
-        identity for arrival and timer delivery, but may not narrow or replace the verified stage-scoped semantic identity.
+        One immutable typed declaration handle: explicit flow presence (present with the exact authored flow ID, or explicitly
+        absent for a root declaration), node, authored handler event, stage, effective join ID, optional window, and loop
+        generation. The selected execution route is a separate exact fact: root uses the selected run instance and flow-owned
+        declarations use the concrete flow instance. Runtime naming, source-event paths, descriptor rows, and singleton
+        fan-in cannot reconstruct or replace either fact.
       fields:
+      - exact typed declaration handle
       - ordered snapshotted members
       - per-member canonical output value and hash
       - open/closed status and close reason
@@ -5068,6 +5072,11 @@ engine:
     close: >-
       Completion, timeout, and stage exit persist one closed reason. Completion/timeout outcomes and timer cancellation share
       the selected-store transaction; in-memory scheduler registration/cancellation happens only after commit.
+    generation_ownership: >-
+      The declaration handle is the sole generation owner for join activation, schedule task identity, occurrence payload,
+      close, stage-exit cancellation, supersession, settlement, persistence, hydration, and fork reminting. Re-entry into the
+      same stage creates the next exact generation rather than treating the unchanged stage name as an already-armed join.
+      Replacement of one generation is atomic and cannot cancel or mutate a sibling declaration or the next generation.
     schedule_ownership: >-
       A join activation that creates its mandatory completion or timeout schedule must have at least one exact owner before
       the selected mutation can commit: either a durable generic schedule store or a process scheduler. If neither capability
@@ -5078,9 +5087,19 @@ engine:
       handler event, stage, join, window, generation, and timeout/completion kind. Generic schedule admission and restoration
       require the persisted task ID, workflow-runtime owner, fire event, and routing-source flow to agree exactly with that
       handle; durable scope fields or a valid routing-source shape alone never authorize a join timer.
+    occurrence_routing: >-
+      Generic schedule publication preserves the typed declaration handle unchanged. EventBus projects that handle directly
+      to exactly one authored node/handler and one selected execution target before durable delivery admission. The synthetic
+      platform.join_complete and platform.join_timeout names are occurrence kinds, never authored-handler aliases. Root
+      occurrences retain explicit root declaration absence while their durable target is the exact selected run; flow-owned
+      occurrences retain the exact authored flow and concrete instance. Delivery planning, claim, handler execution,
+      settlement, replay, and public readback consume the same projection and fail closed on any contradiction before state
+      mutation.
     recovery: >-
       Restart, replay, and fork consume persisted members/window/close/timer facts. They do not re-read mutable entity
-      membership, synthesize an arrival-owned activation, or resurrect a closed timeout.
+      membership, synthesize an arrival-owned activation, or resurrect a closed timeout. Hydration validates every active
+      join schedule before registering any wakeup; malformed same-leaf siblings leave the complete registration set
+      unchanged. Forking remints the complete typed handle for the destination route and rejects partial identity.
   runtime_store_backend_selection:
     promoted_by: '#1084'
     parent_tracker: '#1066'

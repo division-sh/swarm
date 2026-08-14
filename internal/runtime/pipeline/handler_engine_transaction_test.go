@@ -104,6 +104,7 @@ type recordingPipelineBus struct {
 
 func handlerEngineProjectNodeModule() *previewWorkflowModule {
 	return &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a", ExecutionType: "system_node"},
 		},

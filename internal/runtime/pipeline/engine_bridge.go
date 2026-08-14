@@ -9,7 +9,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -72,33 +71,41 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		nodeID          string
 		handler         runtimecontracts.SystemNodeEventHandler
 		handlerEventKey string
+		handlerFlowID   string
 		matched         bool
 	)
-	for _, owner := range owners {
-		resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, owner, evt)
-		if resolved.Failure != "" {
-			return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(owner), resolved.Failure)
+	if isJoinLifecycleEvent(events.EventType(trigger)) {
+		resolution, ok, err := resolveWorkflowJoinOccurrence(source, evt)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
 		}
-		if !resolved.Matched {
-			continue
-		}
-		if matched {
-			return contractHandlerExecutionResult{}, nil
-		}
-		nodeID = strings.TrimSpace(owner)
-		handler = resolved.Handler
-		handlerEventKey = resolved.HandlerEventKey
-		matched = true
-	}
-	if !matched && isJoinLifecycleEvent(events.EventType(trigger)) {
-		if ref, _, ok := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); ok {
-			joinHandler, ok := findJoinHandlerForRef(source, ref)
-			if ok {
-				nodeID = ref.NodeID
-				handler = joinHandler
-				handlerEventKey = ref.HandlerEvent
-				matched = true
+		if ok {
+			nodeID = resolution.Ref.NodeID()
+			handler = resolution.Handler
+			handlerEventKey = resolution.Ref.HandlerEvent()
+			handlerFlowID = resolution.Ref.FlowID()
+			if handlerFlowID == "" {
+				handlerFlowID = semanticview.RootExecutionFlowID(source)
 			}
+			matched = true
+		}
+	} else {
+		for _, owner := range owners {
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, owner, evt)
+			if resolved.Failure != "" {
+				return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(owner), resolved.Failure)
+			}
+			if !resolved.Matched {
+				continue
+			}
+			if matched {
+				return contractHandlerExecutionResult{}, nil
+			}
+			nodeID = strings.TrimSpace(owner)
+			handler = resolved.Handler
+			handlerEventKey = resolved.HandlerEventKey
+			handlerFlowID = resolved.FlowID
+			matched = true
 		}
 	}
 	if !matched {
@@ -107,27 +114,13 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	if strings.TrimSpace(triggerCtx.HandlerEventKey) == "" {
 		triggerCtx.HandlerEventKey = handlerEventKey
 	}
+	ctx = withPipelineFlowScope(ctx, handlerFlowID)
 	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false, true)
 }
 
 func isJoinLifecycleEvent(eventType events.EventType) bool {
 	eventName := strings.TrimSpace(string(eventType))
 	return eventName == joinTimeoutEvent || eventName == joinCompleteEvent
-}
-
-func findJoinHandlerForRef(source interface {
-	NodeEntries() map[string]runtimecontracts.SystemNodeContract
-	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
-}, ref timeridentity.JoinRef) (runtimecontracts.SystemNodeEventHandler, bool) {
-	ref = ref.Normalize()
-	if source == nil || !ref.Valid() {
-		return runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	if _, ok := source.NodeEntries()[ref.NodeID]; !ok {
-		return runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	handler, ok := source.NodeEventHandlers(ref.NodeID)[ref.HandlerEvent]
-	return handler, ok && handler.Join != nil && handler.Join.EffectiveID() == ref.JoinID && strings.TrimSpace(handler.Join.Stage) == ref.Stage
 }
 
 func (pc *PipelineCoordinator) executeNodeContractHandler(
@@ -143,14 +136,22 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if nodeID == "" {
 		return contractHandlerExecutionResult{}, nil
 	}
-	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
+	source := pc.SemanticSource()
+	flowID := workflowNodeFlowID(source, nodeID)
+	if handler.Join != nil {
+		if executionFlowID := strings.TrimSpace(pipelineFlowScope(ctx)); executionFlowID != "" {
+			flowID = executionFlowID
+		}
+	}
 	entityID := strings.TrimSpace(firstNonEmptyString(
 		triggerCtx.State.EntityID,
 		workflowEventEntityID(triggerCtx.Event),
 	))
-	source := pc.SemanticSource()
 	stampedOwner, exactDelivery := stampedDeliveryTargetOwnership(ctx)
 	if exactDelivery {
+		if targetFlowID := strings.TrimSpace(stampedOwner.Route().FlowID); targetFlowID != "" {
+			flowID = targetFlowID
+		}
 		entityID = stampedOwner.Route().EntityID
 		if err := prepareStampedSelectOrCreateState(source, flowID, handler, triggerCtx.Event, stampedOwner, &triggerCtx.State); err != nil {
 			return contractHandlerExecutionResult{}, err
@@ -263,6 +264,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
+	joinDeclaration, err := workflowJoinDeclarationForExecution(source, triggerCtx.Event, flowID, nodeID, handlerEventKey, handler)
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:               identity.NormalizeEntityID(entityID),
 		NodeID:                 identity.NormalizeNodeID(nodeID),
@@ -271,6 +276,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		Event:                  triggerCtx.Event,
 		ProducerSource:         producerSource,
 		HandlerEventKey:        handlerEventKey,
+		JoinDeclaration:        joinDeclaration,
 		ChainDepth:             triggerCtx.Event.ChainDepth(),
 		Handler:                handler,
 		Preview:                preview,

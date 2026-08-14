@@ -34,10 +34,9 @@ func supersedePriorLoopGenerationArtifacts(instance *WorkflowInstance, previousB
 			return fmt.Errorf("list joins for loop supersession: %w", err)
 		}
 		for _, activation := range joins {
-			if !activation.Generation.Equal(priorGeneration) || !activation.CloseForStageExit() {
+			if !activation.Generation().Equal(priorGeneration) || !activation.CloseForStageExit() {
 				continue
 			}
-			activation.TimerCancelled = true
 			if err := joinruntime.Store(nextCarrier.StateBuckets, activation); err != nil {
 				return fmt.Errorf("supersede join %s: %w", activation.Key(), err)
 			}

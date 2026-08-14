@@ -12,22 +12,30 @@ import (
 
 // AdmitNodeExecutionRoutingSource admits the exact source fact at the node
 // execution boundary. Downstream event producers copy this value unchanged.
-func AdmitNodeExecutionRoutingSource(source semanticview.Source, nodeID string, route events.RouteIdentity) (events.RoutingSource, error) {
+func AdmitNodeExecutionRoutingSource(source semanticview.Source, executionFlowID, nodeID string, route events.RouteIdentity) (events.RoutingSource, error) {
 	if source == nil {
 		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires semantic source")
 	}
-	owner, ok := source.NodeContractSource(strings.TrimSpace(nodeID))
-	if !ok {
-		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared node %q", strings.TrimSpace(nodeID))
+	executionFlowID = strings.TrimSpace(executionFlowID)
+	nodeID = strings.TrimSpace(nodeID)
+	if executionFlowID == "" || nodeID == "" {
+		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires exact flow and node owners")
+	}
+	if _, _, ok := semanticview.ResolveFlowNodeDeclaration(source, executionFlowID, nodeID); !ok {
+		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires node %q in exact flow scope %q", nodeID, executionFlowID)
+	}
+	owner := runtimecontracts.ContractItemSource{Layer: "flow", FlowID: executionFlowID}
+	if executionFlowID == semanticview.RootExecutionFlowID(source) {
+		owner = runtimecontracts.ContractItemSource{Layer: "project"}
 	}
 	route = route.Normalized()
 	if strings.TrimSpace(owner.Layer) == "project" && route.EntityID == "" {
 		if route.FlowID != strings.TrimSpace(source.WorkflowName()) || route.FlowInstance == "" {
-			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", strings.TrimSpace(nodeID))
+			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", nodeID)
 		}
 		return events.NewStaticFlowRoutingSource(route)
 	}
-	return admitDeclaredExecutionRoutingSource(source, "node", strings.TrimSpace(nodeID), owner, route)
+	return admitDeclaredExecutionRoutingSource(source, "node", nodeID, owner, route)
 }
 
 // AdmitAgentExecutionRoutingSource admits the exact source fact from the

@@ -135,6 +135,28 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 	}
 }
 
+func TestRun_JoinValidationRequiresExactDeclarationFlow(t *testing.T) {
+	t.Run("same-leaf sibling cannot replace root", func(t *testing.T) {
+		bundle := joinValidationBundle()
+		bundle.Semantics.Joins[0].FlowID = "orders"
+		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		if !reportContains(report.HardInvalidities(), joinValidationCheckID, "no effective WorkflowJoinPlan") {
+			t.Fatalf("hard invalidities = %#v", report.HardInvalidities())
+		}
+	})
+
+	t.Run("root remains exact beside same-leaf sibling", func(t *testing.T) {
+		bundle := joinValidationBundle()
+		sibling := bundle.Semantics.Joins[0]
+		sibling.FlowID = "orders"
+		bundle.Semantics.Joins = append(bundle.Semantics.Joins, sibling)
+		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		if reportContains(report.HardInvalidities(), joinValidationCheckID, "no effective WorkflowJoinPlan") {
+			t.Fatalf("root declaration was shadowed by sibling: %#v", report.HardInvalidities())
+		}
+	})
+}
+
 func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	bundle := joinValidationBundle()
 	source := semanticview.Wrap(bundle)

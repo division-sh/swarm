@@ -59,6 +59,25 @@ func FlowScopeByID(source Source, flowID string) (FlowScope, bool) {
 	return source.FlowScopeByID(flowID)
 }
 
+// RootExecutionFlowID returns the authored flow scope used to execute root
+// handlers. Durable declaration identities may still represent root as an
+// explicit empty FlowID.
+func RootExecutionFlowID(source Source) string {
+	if source == nil {
+		return ""
+	}
+	bundle, ok := Bundle(source)
+	if ok && bundle != nil && bundle.FlowTree.Root != nil {
+		root := bundle.FlowTree.Root
+		for _, candidate := range []string{root.Paths.ID, root.Paths.Flow, root.Path, root.Schema.Name} {
+			if candidate = strings.Trim(strings.TrimSpace(candidate), "/"); candidate != "" {
+				return candidate
+			}
+		}
+	}
+	return strings.TrimSpace(source.WorkflowName())
+}
+
 func flowModeFromView(view runtimecontracts.FlowContractView) string {
 	if mode := strings.TrimSpace(view.Schema.Mode); mode != "" {
 		return mode

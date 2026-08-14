@@ -1,11 +1,13 @@
 package joinruntime
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
 func TestActivationKeyIsolatesLoopGenerations(t *testing.T) {
@@ -19,7 +21,7 @@ func TestActivationKeyIsolatesLoopGenerations(t *testing.T) {
 
 func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation("line_items", "awaiting", "node", "item.done", "dispatch-1", []string{"a", "b"}, now, now.Add(time.Hour), "task", "platform.join_timeout")
+	activation, err := NewActivation(testJoinHandle(t, "", "line_items", "awaiting", "node", "item.done", "dispatch-1", attemptgeneration.Generation{}), []string{"a", "b"}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +47,7 @@ func TestActivationOrdersResultsByMembershipAndClassifiesDuplicates(t *testing.T
 
 func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := NewActivation("join", "awaiting", "node", "item.done", "", []string{}, now, now.Add(time.Hour), "task", "platform.join_timeout")
+	activation, err := NewActivation(testJoinHandle(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,10 +65,64 @@ func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	}
 }
 
+func TestJoinActivationPersistsTypedDeclarationHandle(t *testing.T) {
+	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	activation, err := NewActivation(testJoinHandle(t, "", "shared", "awaiting", "join-node", "item.completed", "window-1", generation), []string{"a"}, now, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	raw := buckets["join-node"][bucketKey].(map[string]any)[activation.Key()].(map[string]any)
+	for _, retired := range []string{"flow_id", "node_id", "handler_event", "stage", "join_id", "window", "loop_generation", "timer_task_id", "timer_event_type"} {
+		if _, exists := raw[retired]; exists {
+			t.Fatalf("activation persisted retired authority %q: %#v", retired, raw)
+		}
+	}
+	handle, ok := raw["timer_handle"].(map[string]any)
+	join, joinOK := handle["join"].(map[string]any)
+	persistedGeneration, generationOK := join[attemptgeneration.PayloadKey].(map[string]any)
+	if !ok || !joinOK || !generationOK || join["flow_id"] != "" || join["node_id"] != "join-node" || persistedGeneration["revision_id"] != "rev-2" {
+		t.Fatalf("persisted typed handle = %#v", raw["timer_handle"])
+	}
+	loaded, found, err := Load(buckets, "join-node", activation.Key())
+	if err != nil || !found || !loaded.JoinRef().Equal(activation.JoinRef()) || loaded.TimerTaskID() != activation.TimerTaskID() {
+		t.Fatalf("typed activation readback = found:%v activation:%#v err:%v", found, loaded, err)
+	}
+}
+
+func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	for _, retired := range []string{"flow_id", "join_id", "timer_task_id", "loop_generation"} {
+		t.Run(retired, func(t *testing.T) {
+			activation, err := NewActivation(testJoinHandle(t, "", "shared", "awaiting", "join-node", "item.completed", "", attemptgeneration.Generation{}), []string{"a"}, now, now.Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(activation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var row map[string]any
+			if err := json.Unmarshal(raw, &row); err != nil {
+				t.Fatal(err)
+			}
+			row[retired] = "retired-authority"
+			buckets := map[string]map[string]any{"join-node": {bucketKey: map[string]any{activation.Key(): row}}}
+			if loaded, found, err := Load(buckets, "join-node", activation.Key()); err == nil || found {
+				t.Fatalf("retired row loaded as %#v found=%v err=%v", loaded, found, err)
+			}
+		})
+	}
+}
+
 func TestNewActivationRejectsInvalidMembership(t *testing.T) {
 	now := time.Now().UTC()
 	for _, members := range [][]string{{""}, {"a", "a"}} {
-		if _, err := NewActivation("join", "awaiting", "node", "item.done", "", members, now, now.Add(time.Hour), "task", "platform.join_timeout"); err == nil {
+		if _, err := NewActivation(testJoinHandle(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), members, now, now.Add(time.Hour)); err == nil {
 			t.Fatalf("members %#v accepted", members)
 		}
 	}
@@ -82,7 +138,7 @@ func TestActivationKeyIncludesStageIdentity(t *testing.T) {
 
 func TestCompletionSatisfiedUsesOneDefaultAndCustomOwner(t *testing.T) {
 	now := time.Now().UTC()
-	activation, err := NewActivation("join", "awaiting", "node", "item.done", "", []string{}, now, now.Add(time.Hour), "task", "platform.join_timeout")
+	activation, err := NewActivation(testJoinHandle(t, "", "join", "awaiting", "node", "item.done", "", attemptgeneration.Generation{}), []string{}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,4 +156,17 @@ func TestCompletionSatisfiedUsesOneDefaultAndCustomOwner(t *testing.T) {
 	if err != nil || complete || !called {
 		t.Fatalf("custom zero-member completion = complete:%v called:%v err:%v, want false/true/nil", complete, called, err)
 	}
+}
+
+func testJoinHandle(t *testing.T, flowID, joinID, stage, nodeID, handlerEvent, window string, generation attemptgeneration.Generation) timeridentity.TimerHandle {
+	t.Helper()
+	ref, err := timeridentity.NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := timeridentity.JoinTimeoutHandle(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handle
 }

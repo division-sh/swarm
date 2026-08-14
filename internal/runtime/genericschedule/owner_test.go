@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -69,6 +72,111 @@ func TestAdmissionCommandRequiresHashBearingExecutionMode(t *testing.T) {
 	if liveHash == mockHash {
 		t.Fatalf("live and mock commands shared immutable hash %q", liveHash)
 	}
+}
+
+func TestSystemJoinScheduleAdmissionRejectsDeclarationDrift(t *testing.T) {
+	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
+	root := testJoinScheduleCommand(t, "", "", generation)
+	flow := testJoinScheduleCommand(t, "orders", "orders/order-1", generation)
+	scalarPayload, err := canonicaljson.FromGo("hostile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Validate(); err != nil {
+		t.Fatalf("valid root join schedule: %v", err)
+	}
+	if err := flow.Validate(); err != nil {
+		t.Fatalf("valid flow join schedule: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		base   AdmissionCommand
+		mutate func(*AdmissionCommand)
+	}{
+		{name: "event kind", base: root, mutate: func(c *AdmissionCommand) { c.EventType = "platform.join_complete" }},
+		{name: "scalar payload", base: root, mutate: func(c *AdmissionCommand) { c.Payload = scalarPayload }},
+		{name: "schedule key", base: root, mutate: func(c *AdmissionCommand) { c.ScheduleKey += "-hostile" }},
+		{name: "task id", base: root, mutate: func(c *AdmissionCommand) { c.TaskID += "-hostile" }},
+		{name: "owner", base: root, mutate: func(c *AdmissionCommand) { c.OwnerID = "runtime" }},
+		{name: "entity", base: root, mutate: func(c *AdmissionCommand) { c.EntityID = uuid.NewString() }},
+		{name: "root routed as flow", base: root, mutate: func(c *AdmissionCommand) {
+			c.FlowInstance = "orders/order-1"
+			c.RoutingSource, _ = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: "orders", FlowInstance: c.FlowInstance, EntityID: c.EntityID})
+		}},
+		{name: "flow routed as root", base: flow, mutate: func(c *AdmissionCommand) {
+			c.FlowInstance = ""
+			c.RoutingSource, _ = events.NewRootRoutingSource(c.EntityID)
+		}},
+		{name: "wrong flow", base: flow, mutate: func(c *AdmissionCommand) {
+			c.RoutingSource, _ = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: "returns", FlowInstance: c.FlowInstance, EntityID: c.EntityID})
+		}},
+		{name: "wrong flow instance", base: flow, mutate: func(c *AdmissionCommand) {
+			c.FlowInstance = "orders/order-2"
+		}},
+		{name: "missing derived revision", base: root, mutate: func(c *AdmissionCommand) {
+			payload := cloneSchedulePayload(t, c.Payload)
+			delete(payload, generation.RevisionField)
+			c.Payload, _ = canonicaljson.FromGo(payload)
+		}},
+		{name: "contradictory derived revision", base: root, mutate: func(c *AdmissionCommand) {
+			payload := cloneSchedulePayload(t, c.Payload)
+			payload[generation.RevisionField] = "rev-hostile"
+			c.Payload, _ = canonicaljson.FromGo(payload)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := tc.base
+			tc.mutate(&command)
+			if err := command.Validate(); err == nil {
+				t.Fatalf("hostile command validated: %#v", command)
+			}
+		})
+	}
+}
+
+func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generation attemptgeneration.Generation) AdmissionCommand {
+	t.Helper()
+	entityID := uuid.NewString()
+	ref, err := timeridentity.NewJoinRefForGeneration(flowID, "join-node", "item.completed", "awaiting", "shared", "window-1", generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := timeridentity.JoinTimeoutHandle(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := canonicaljson.FromGo(handle.PayloadMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var routing events.RoutingSource
+	if flowID == "" {
+		routing, err = events.NewRootRoutingSource(entityID)
+	} else {
+		routing, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return AdmissionCommand{
+		ScheduleKey: handle.TaskID(), RunID: uuid.NewString(), EntityID: entityID, FlowInstance: flowInstance,
+		OwnerKind: OwnerSystem, OwnerID: "workflow-runtime", EventType: handle.EventType(), Payload: payload,
+		RoutingSource: routing, ExecutionMode: executionmode.Live, Due: AbsoluteDue(time.Now().UTC().Add(time.Hour)), TaskID: handle.TaskID(),
+	}
+}
+
+func cloneSchedulePayload(t *testing.T, value semanticvalue.Value) map[string]any {
+	t.Helper()
+	payload, ok := value.Interface().(map[string]any)
+	if !ok {
+		t.Fatalf("schedule payload = %#v", value.Interface())
+	}
+	cloned := make(map[string]any, len(payload))
+	for key, item := range payload {
+		cloned[key] = item
+	}
+	return cloned
 }
 
 func TestMockOnlyPostureRejectsLiveScheduleBeforePersistence(t *testing.T) {

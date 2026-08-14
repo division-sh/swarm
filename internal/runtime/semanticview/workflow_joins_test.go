@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -37,6 +38,32 @@ func TestFanInBarrierContractDerivesEffectiveJoinPlan(t *testing.T) {
 	rawAfter := requireSingleJoinPlan(t, bundle.WorkflowJoins())
 	if rawAfter.Spec.Members.By != "" || rawAfter.Spec.Window == nil || rawAfter.Spec.Window.By != "" {
 		t.Fatalf("effective lowering mutated authored join: %#v", rawAfter.Spec)
+	}
+}
+
+func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *testing.T) {
+	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
+	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: []runtimecontracts.WorkflowJoinPlan{
+		{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec},
+		{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec},
+	}}}
+	source := semanticview.Wrap(bundle)
+	for _, flowID := range []string{"", "orders"} {
+		ref, err := timeridentity.NewJoinRef(flowID, "join-node", "item.completed", "awaiting", "awaiting", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, ok := semanticview.WorkflowJoinPlanForRef(source, ref)
+		if !ok || plan.FlowID != flowID {
+			t.Fatalf("plan for flow %q = %#v, ok=%v", flowID, plan, ok)
+		}
+	}
+	hostile, err := timeridentity.NewJoinRef("unrelated", "join-node", "item.completed", "awaiting", "awaiting", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan, ok := semanticview.WorkflowJoinPlanForRef(source, hostile); ok {
+		t.Fatalf("unrelated same-leaf declaration resolved: %#v", plan)
 	}
 }
 
