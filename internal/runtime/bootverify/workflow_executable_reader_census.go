@@ -58,11 +58,7 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Logic": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendExecutableReader(out, "logic", handler.Logic, runtimepipeline.WorkflowEntityFieldLifecycleRule)
 	},
-	"Loop": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		if handler.Loop != nil {
-			appendExecutableReader(out, "loop.from", handler.Loop.From, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
-		}
-	},
+	"Loop": noHandlerExecutableReaders,
 	"OnComplete": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendRulesExecutableReaders(out, ctx, "on_complete", handler.OnComplete)
 	},
