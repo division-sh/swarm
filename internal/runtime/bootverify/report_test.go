@@ -5006,6 +5006,26 @@ func TestHandlerEntityFieldWriters_TracksSetsGateAndClearTargets(t *testing.T) {
 	}
 }
 
+func TestNestedQueryRowsDoNotCreateExecutableWriters(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+		StoreAs: "entity.executed_rows",
+		Queries: []runtimecontracts.QuerySpec{{StoreAs: "entity.unexecuted_rows"}},
+	}}
+
+	writers := handlerEntityFieldWriters(handler)
+	if _, ok := writers["executed_rows"]; !ok {
+		t.Fatalf("top-level query writer missing: %#v", writers)
+	}
+	if _, ok := writers["unexecuted_rows"]; ok {
+		t.Fatalf("nested query row created executable writer: %#v", writers)
+	}
+
+	targets := wave1HandlerWriteTargets("flow", "node", "event", handler)
+	if len(targets) != 1 || targets[0].Target != "entity.executed_rows" || targets[0].Kind != "handler.query" {
+		t.Fatalf("query write targets = %#v, want only top-level executed writer", targets)
+	}
+}
+
 func TestRun_RejectsFilterReferenceToSparseFieldEvenWhenSameHandlerComputesFieldLater(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)

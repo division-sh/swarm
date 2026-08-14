@@ -85,6 +85,18 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 				Params: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.verticals")},
 			}},
 		},
+		{
+			name: "nested query row",
+			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+				Queries: []runtimecontracts.QuerySpec{{Source: "entity.verticals"}},
+			}},
+		},
+		{
+			name: "activity approval decision",
+			handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
+				Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "entity.release"},
+			}},
+		},
 	}
 
 	for _, tc := range tests {

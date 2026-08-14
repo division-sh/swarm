@@ -87,6 +87,25 @@ func TestWorkflowEntityFieldsAvailableBeforeEmitFields_IncludesCreateEntityTopLe
 	}
 }
 
+func TestWorkflowEntityFieldLifecycleExcludesNestedQueryWriters(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+		StoreAs: "entity.executed_rows",
+		Queries: []runtimecontracts.QuerySpec{{StoreAs: "entity.unexecuted_rows"}},
+	}}
+
+	for _, available := range []map[string]struct{}{
+		WorkflowEntityFieldsAvailableBeforeEmitFields(handler),
+		workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleGuardEscalation),
+	} {
+		if _, ok := available["executed_rows"]; !ok {
+			t.Fatalf("top-level query writer missing from lifecycle availability: %#v", available)
+		}
+		if _, ok := available["unexecuted_rows"]; ok {
+			t.Fatalf("nested query writer entered lifecycle availability: %#v", available)
+		}
+	}
+}
+
 func TestWorkflowEntityFieldsAvailableBeforeGuardEscalation_UsesGuardTimeVisibility(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Query: &runtimecontracts.QuerySpec{

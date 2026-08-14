@@ -229,9 +229,7 @@ func appendActionExecutableReaders(out *[]expressionReference, kind string, acti
 func appendActivityExecutableReaders(out *[]expressionReference, kind string, activity runtimecontracts.ActivitySpec) {
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
 	appendExpressionValueMapExecutableReaders(out, kind+".input", activity.Input, phase)
-	if activity.Approval != nil {
-		appendExecutableReader(out, kind+".approval.decision", activity.Approval.Decision, phase)
-	}
+	// Approval.Decision is an opaque stable identifier, not an expression.
 }
 
 func appendSelectExecutableReaders(out *[]expressionReference, kind string, spec *runtimecontracts.SelectEntitySpec) {
@@ -370,9 +368,7 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 	}
 	appendExecutableReader(out, kind+".group_by", query.GroupBy, phase)
 	// Select entries are literal object field names, not executable expressions.
-	for i := range query.Queries {
-		appendQueryExecutableReaders(out, fmt.Sprintf("%s.queries[%d]", kind, i), &query.Queries[i])
-	}
+	// Sequence rows in Queries are retained source data that stepQuery does not execute.
 }
 
 func appendFanOutExecutableReaders(out *[]expressionReference, kind string, fanOut *runtimecontracts.FanOutSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {

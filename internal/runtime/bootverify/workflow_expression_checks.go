@@ -436,17 +436,9 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 			addWriter(rule.Compute.StoreAs)
 		}
 	}
-	var addQueryWriters func(query *runtimecontracts.QuerySpec)
-	addQueryWriters = func(query *runtimecontracts.QuerySpec) {
-		if query == nil {
-			return
-		}
-		addWriter(query.StoreAs)
-		for i := range query.Queries {
-			addQueryWriters(&query.Queries[i])
-		}
+	if handler.Query != nil {
+		addWriter(handler.Query.StoreAs)
 	}
-	addQueryWriters(handler.Query)
 	if gateNameLocal(handler.SetsGate) != "" {
 		out["gates"] = struct{}{}
 	}

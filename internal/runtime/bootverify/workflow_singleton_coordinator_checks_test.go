@@ -377,6 +377,19 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         items_from: payload.job
         store_as: metadata.counted`,
 		},
+		{
+			name: "nested query row",
+			operator: `query:
+        - source: entity.verticals
+          store_as: metadata.rows`,
+		},
+		{
+			name: "activity approval decision",
+			operator: `activity:
+        tool: review
+        approval:
+          decision: entity.release`,
+		},
 	}
 
 	for _, tc := range tests {

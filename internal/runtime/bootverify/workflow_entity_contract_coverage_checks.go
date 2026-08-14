@@ -613,18 +613,9 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 			add(scope+".compute", rule.Compute.StoreAs)
 		}
 	}
-	var addQueryTargets func(scope string, query *runtimecontracts.QuerySpec)
-	addQueryTargets = func(scope string, query *runtimecontracts.QuerySpec) {
-		if query == nil {
-			return
-		}
-		add(scope+".query", query.StoreAs)
-		for i := range query.Queries {
-			addQueryTargets(scope+".query", &query.Queries[i])
-		}
+	if handler.Query != nil {
+		add("handler.query", handler.Query.StoreAs)
 	}
-
-	addQueryTargets("handler", handler.Query)
 	for writeIndex, write := range handler.DataAccumulation.Writes {
 		if write.IsContainedOperation() {
 			continue
