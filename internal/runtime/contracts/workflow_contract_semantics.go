@@ -102,6 +102,25 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			semantics.CompositionConnects = append(semantics.CompositionConnects, connect.WithPackageSource(pkg.Key, pkg.Paths.PackageFile))
 		}
 	}
+	for _, record := range bundle.ScopedNodeRecords() {
+		nodeID := strings.TrimSpace(record.LogicalID)
+		flowID := strings.TrimSpace(record.Source.FlowID)
+		for eventType, handler := range record.Entry.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			handler = DefaultSystemNodeHandlerSourceEvent(handler, eventType)
+			if handler.Join == nil {
+				continue
+			}
+			resultType, _ := ResolveEventFieldType(bundle, flowID, eventType, joinOutputField(handler.Join.Output))
+			semantics.Joins = append(semantics.Joins, WorkflowJoinPlan{
+				FlowID:       flowID,
+				NodeID:       nodeID,
+				HandlerEvent: eventType,
+				Spec:         *handler.Join,
+				ResultType:   resultType,
+			})
+		}
+	}
 	for nodeID, node := range bundle.Nodes {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" {
@@ -168,16 +187,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Clear:                handler.Clear,
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
-			if handler.Join != nil {
-				resultType, _ := ResolveEventFieldType(bundle, strings.TrimSpace(source.FlowID), rawEventType, joinOutputField(handler.Join.Output))
-				semantics.Joins = append(semantics.Joins, WorkflowJoinPlan{
-					FlowID:       strings.TrimSpace(source.FlowID),
-					NodeID:       nodeID,
-					HandlerEvent: rawEventType,
-					Spec:         *handler.Join,
-					ResultType:   resultType,
-				})
-			}
 			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
 				semantics.Transitions = append(semantics.Transitions, derivedTransition)
 			}
@@ -676,58 +685,14 @@ func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCon
 	if bundle == nil {
 		return nil
 	}
-	type scopedNodeEntry struct {
-		Key    string
-		NodeID string
-		Node   SystemNodeContract
-		Source ContractItemSource
-	}
-	scopedNodes := make([]scopedNodeEntry, 0, len(bundle.scopedNodes))
-	for scopedKey, node := range bundle.scopedNodes {
-		source := bundle.scopedNodeSources[scopedKey]
-		nodeID := strings.TrimSpace(node.ID)
-		if nodeID == "" {
-			parts := strings.Split(scopedKey, "::")
-			if len(parts) > 0 {
-				nodeID = strings.TrimSpace(parts[len(parts)-1])
-			}
-		}
-		scopedNodes = append(scopedNodes, scopedNodeEntry{
-			Key:    scopedKey,
-			NodeID: nodeID,
-			Node:   node,
-			Source: source,
-		})
-	}
-	if len(scopedNodes) == 0 {
-		for nodeID, node := range bundle.Nodes {
-			scopedNodes = append(scopedNodes, scopedNodeEntry{
-				Key:    nodeID,
-				NodeID: strings.TrimSpace(nodeID),
-				Node:   node,
-				Source: bundle.nodeSources[nodeID],
-			})
-		}
-	}
-	if len(scopedNodes) == 0 && len(bundle.Nodes) > 0 {
-		for nodeID, node := range bundle.Nodes {
-			scopedNodes = append(scopedNodes, scopedNodeEntry{
-				Key:    nodeID,
-				NodeID: strings.TrimSpace(nodeID),
-				Node:   node,
-			})
-		}
-	}
+	scopedNodes := bundle.ScopedNodeRecords()
 	if len(scopedNodes) == 0 {
 		return nil
 	}
 	out := make([]WorkflowTimerContract, 0, 8)
-	sort.Slice(scopedNodes, func(i, j int) bool {
-		return strings.Compare(scopedNodes[i].Key, scopedNodes[j].Key) < 0
-	})
 	for _, item := range scopedNodes {
-		nodeID := strings.TrimSpace(item.NodeID)
-		node := item.Node
+		nodeID := strings.TrimSpace(item.LogicalID)
+		node := item.Entry
 		if len(node.Timers) == 0 {
 			continue
 		}

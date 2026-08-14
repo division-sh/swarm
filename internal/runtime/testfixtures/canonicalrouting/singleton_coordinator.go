@@ -20,6 +20,7 @@ const (
 	SingletonCoordinatorPilotBadListIndex
 	SingletonCoordinatorPilotDemandProjection
 	SingletonCoordinatorPilotStatelessFanIn
+	SingletonCoordinatorPilotStatelessPayloadJoin
 )
 
 // CopySingletonCoordinatorPilot materializes the canonical singleton
@@ -44,10 +45,76 @@ flows:
 	return root
 }
 
+// CopyDuplicateScopedSingletonDemand materializes two singleton flow scopes
+// that intentionally reuse one local node ID. Only flow a consumes contained
+// state, so a flattened-node traversal loses the exact demand.
+func CopyDuplicateScopedSingletonDemand(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	writeSingletonCoordinatorFile(t, root, "package.yaml", `
+name: duplicate-scoped-singleton-demand
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - {id: a, flow: a, mode: singleton}
+  - {id: b, flow: b, mode: singleton}
+`)
+	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: duplicate-scoped-singleton-demand\n")
+	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
+		writeSingletonCoordinatorFile(t, root, name, "{}\n")
+	}
+	for _, flowID := range []string{"a", "b"} {
+		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "schema.yaml"), `
+name: `+flowID+`
+mode: singleton
+pins:
+  inputs:
+    events:
+      - {name: item_received, event: item.received, source: harness}
+  outputs:
+    events: []
+`)
+		for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
+			writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, name), "{}\n")
+		}
+		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "events.yaml"), "item.received:\n  items: '[text]'\n")
+		entities := "state: {}\n"
+		nodes := `
+shared-node:
+  id: shared-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  event_handlers:
+    item.received: {}
+`
+		if flowID == "a" {
+			entities = "state:\n  items:\n    type: '[text]'\n    initial: []\n"
+			nodes = `
+shared-node:
+  id: shared-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  event_handlers:
+    item.received:
+      data_accumulation:
+        writes:
+          - {source_field: items, target_field: items}
+`
+		}
+		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "entities.yaml"), entities)
+		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "nodes.yaml"), nodes)
+	}
+	return root
+}
+
 func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonCoordinatorPilotVariant) {
 	t.Helper()
 	if variant == SingletonCoordinatorPilotStatelessFanIn {
 		writeStatelessFanInSingletonCoordinatorFlow(t, root)
+		return
+	}
+	if variant == SingletonCoordinatorPilotStatelessPayloadJoin {
+		writeStatelessPayloadJoinSingletonCoordinatorFlow(t, root)
 		return
 	}
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/schema.yaml", `
@@ -121,6 +188,55 @@ coordinator-indexer:
 `
 	}
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/nodes.yaml", nodes)
+}
+
+func writeStatelessPayloadJoinSingletonCoordinatorFlow(t testing.TB, root string) {
+	t.Helper()
+	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
+		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", "coordinator", name), "{}\n")
+	}
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/schema.yaml", `
+name: coordinator
+mode: singleton
+initial_state: active
+states: [active, done, failed]
+pins:
+  inputs:
+    events:
+      - {name: job_received, event: job.received, source: harness}
+  outputs:
+    events: []
+`)
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", "coordinator_state: {}\n")
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/events.yaml", `
+job.received:
+  vertical_id: text
+  job: Job
+`)
+	writeSingletonCoordinatorFile(t, root, "flows/coordinator/nodes.yaml", `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      join:
+        stage: active
+        members: {from: payload.job, by: payload.vertical_id}
+        output: payload.job
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
+`)
+}
+
+func singletonCoordinatorTypesYAMLForFixture() string {
+	return `
+types:
+  Job:
+    id: text
+    title: text
+`
 }
 
 func writeStatelessFanInSingletonCoordinatorFlow(t testing.TB, root string) {

@@ -181,6 +181,145 @@ func TestBuildSingletonCoordinatorDemandProjection_UsesExactTypedConsumers(t *te
 	}
 }
 
+func TestBuildSingletonCoordinatorDemandProjection_CoversScopedReadersAndIntrinsicJoins(t *testing.T) {
+	tests := []struct {
+		name       string
+		entities   string
+		nodes      string
+		wantKind   string
+		wantTarget string
+	}{
+		{
+			name: "group_by key",
+			entities: `
+coordinator_state:
+  verticals:
+    type: map[text]VerticalState
+    initial: {}
+`,
+			nodes: `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      group_by:
+        items_from: payload.job
+        key: entity.verticals
+        store_as: metadata.grouped
+`,
+			wantKind:   "entity_read.group_by.key",
+			wantTarget: "entity.verticals",
+		},
+		{
+			name:     "payload backed join",
+			entities: "coordinator_state: {}\n",
+			nodes: `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      join:
+        stage: active
+        members: {from: payload.job, by: payload.vertical_id}
+        output: payload.job
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
+`,
+			wantKind:   "workflow_join",
+			wantTarget: "active",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadSingletonCoordinatorFixtureBundle(t, `
+name: coordinator
+mode: singleton
+initial_state: active
+states: [active, done, failed]
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`, tc.entities, "", tc.nodes)
+			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
+			for _, demand := range demands {
+				if demand.Kind == tc.wantKind && demand.Target == tc.wantTarget && demand.FlowID == "coordinator" && demand.NodeID == "coordinator-node" && demand.SourceFile != "" {
+					return
+				}
+			}
+			t.Fatalf("demands = %#v, want kind %q target %q with exact scoped provenance", demands, tc.wantKind, tc.wantTarget)
+		})
+	}
+}
+
+func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeIDs(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
+	for _, demand := range demands {
+		if demand.FlowID == "a" && demand.NodeID == "shared-node" && demand.Field == "items" && demand.SourceFile != "" {
+			return
+		}
+	}
+	t.Fatalf("duplicate scoped-node demands = %#v, want flow a shared-node items write", demands)
+}
+
+func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
+	const schema = `
+name: coordinator
+mode: singleton
+initial_state: active
+states: [active, done, failed]
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`
+	const nodes = `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      join:
+        stage: active
+        members: {from: payload.job, by: payload.vertical_id}
+        output: payload.job
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
+`
+	tests := []struct {
+		name       string
+		entities   string
+		wantDemand bool
+	}{
+		{name: "stateless", entities: "coordinator_state: {}\n", wantDemand: true},
+		{name: "stateful", entities: "coordinator_state:\n  verticals: map[text]VerticalState\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadSingletonCoordinatorFixtureBundle(t, schema, tc.entities, "", nodes)
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			got := reportContains(report.Errors(), "singleton_coordinator_validation", "workflow_join")
+			if got != tc.wantDemand {
+				t.Fatalf("singleton coordinator errors = %#v, want workflow_join demand failure %t", report.Errors(), tc.wantDemand)
+			}
+		})
+	}
+}
+
 func TestRun_FanInDemandRejectsStatelessSingletonAtInputRow(t *testing.T) {
 	bundle := loadCanonicalSingletonCoordinatorFixtureBundle(t, canonicalrouting.SingletonCoordinatorPilotStatelessFanIn)
 

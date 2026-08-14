@@ -69,6 +69,12 @@ func TestWorkflowSemanticsJoinPlanPreservesDeclaringResultCatalog(t *testing.T) 
 		Nodes: map[string]SystemNodeContract{
 			"join-node": {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},
 		},
+		scopedNodes: map[string]SystemNodeContract{
+			"join-node": {EventHandlers: map[string]SystemNodeEventHandler{"item.completed": {Join: &spec}}},
+		},
+		scopedNodeSources: map[string]ContractItemSource{
+			"join-node": {Layer: "project"},
+		},
 	}
 
 	populateWorkflowSemantics(bundle)

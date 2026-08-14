@@ -10815,9 +10815,14 @@ flow_model:
         derived from exact authored consumers of typed map/list state. Fan-in
         input rows, contained operations, direct entity writers, agent write
         authorization, recognized entity expressions, joins, and structured
-        readers such as fan_out.items_from create demand. Map/list declaration
-        shape without an exact consumer creates no demand, no coordinator
-        readback, and no strict-refinement call. When demand exists,
+        readers such as fan_out.items_from create demand. Every effective join
+        creates intrinsic coordinator demand even when its membership paths are
+        payload-backed. Executable readers are projected by one explicit closed
+        handler/rule field census over scoped node records; node IDs are local to
+        their project/flow declaration scope and flattened aliases are not
+        semantic input. Map/list declaration shape without an exact consumer
+        creates no demand, no coordinator readback, and no strict-refinement
+        call. When demand exists,
         ResolveFlowSingletonCoordinator requires resolvable typed map/list state
         and failures name the exact consuming row. No `coordinator: true` grammar
         exists.

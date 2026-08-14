@@ -79,6 +79,12 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 		"internal/runtime/core/pinrouting/connect_route_plan.go":                   {},
 	}
 	inspectProductionGo(t, func(path string, file *ast.File) {
+		scopedDemandFunctions := map[string]struct{}{
+			"BuildSingletonCoordinatorDemandProjection": {},
+			"wave1AllEntityWriteTargets":                {},
+			"wave1ContainedStateOperations":             {},
+			"wave1EntityReaderCoverageByFlow":           {},
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			switch typed := node.(type) {
 			case *ast.SelectorExpr:
@@ -94,6 +100,26 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 			}
 			return true
 		})
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if _, guarded := scopedDemandFunctions[function.Name.Name]; !guarded {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch calledFunctionName(call.Fun) {
+				case "NodeEntries", "NodeEventHandlers", "NodeContractSource", "sortedNodeIDs", "nodeFlowID":
+					t.Errorf("%s %s reads flattened node aliases; consume ScopedNodeRecords", path, function.Name.Name)
+				}
+				return true
+			})
+		}
 	})
 }
 

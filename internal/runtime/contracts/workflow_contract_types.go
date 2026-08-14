@@ -1362,6 +1362,14 @@ type ContractItemSource struct {
 	Layer      string
 	File       string
 }
+
+// ScopedNodeRecord preserves the exact declaration scope for one authored
+// node. Logical node IDs are only unique within that scope.
+type ScopedNodeRecord struct {
+	LogicalID string
+	Entry     SystemNodeContract
+	Source    ContractItemSource
+}
 type FlowSchemaDocument struct {
 	Name                   string                   `yaml:"name"`
 	Mode                   string                   `yaml:"mode"`

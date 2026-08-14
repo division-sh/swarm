@@ -196,6 +196,57 @@ func (b *WorkflowContractBundle) NodeEntries() map[string]SystemNodeContract {
 	}
 	return cloneSystemNodeContractMap(b.Nodes)
 }
+
+// ScopedNodeRecords returns every authored node with its exact declaration
+// owner. Consumers that interpret executable node semantics must use this
+// projection instead of the lossy global node aliases.
+func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
+	if b == nil {
+		return nil
+	}
+	// Hand-built semantic unit sources have no loaded project/flow views. In
+	// that closed test shape Nodes is the root declaration table itself, not a
+	// flattened alias table. Loaded bundles always take the scoped path below.
+	if len(b.scopedNodes) == 0 && len(b.ProjectViews()) == 0 && len(b.FlowViews()) == 0 {
+		keys := make([]string, 0, len(b.Nodes))
+		for key := range b.Nodes {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out := make([]ScopedNodeRecord, 0, len(keys))
+		for _, key := range keys {
+			source := b.nodeSources[key]
+			if strings.TrimSpace(source.Layer) == "" {
+				source.Layer = "project"
+			}
+			out = append(out, ScopedNodeRecord{LogicalID: strings.TrimSpace(key), Entry: b.Nodes[key], Source: source})
+		}
+		return out
+	}
+	if len(b.scopedNodes) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(b.scopedNodes))
+	for key := range b.scopedNodes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]ScopedNodeRecord, 0, len(keys))
+	for _, key := range keys {
+		entry := b.scopedNodes[key]
+		logicalID := strings.TrimSpace(entry.ID)
+		if logicalID == "" {
+			parts := strings.Split(key, "::")
+			logicalID = strings.TrimSpace(parts[len(parts)-1])
+		}
+		out = append(out, ScopedNodeRecord{
+			LogicalID: logicalID,
+			Entry:     entry,
+			Source:    b.scopedNodeSources[key],
+		})
+	}
+	return out
+}
 func (b *WorkflowContractBundle) NodeEntry(id string) (SystemNodeContract, bool) {
 	id = strings.TrimSpace(id)
 	if b == nil || id == "" {
