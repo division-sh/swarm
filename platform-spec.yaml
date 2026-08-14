@@ -10820,7 +10820,8 @@ flow_model:
         creates intrinsic coordinator demand even when its membership paths are
         payload-backed. Executable readers are projected by one explicit closed
         handler/rule field census shared by demand, entity-reader coverage, and
-        expression-reference validation. Scoped node records preserve exact
+        expression-reference validation. Join derivation and join validation
+        consume the same scoped node records, which preserve exact
         project/flow ownership from the loader or the exported FlowTree,
         including blank-ID package roots; root Nodes are authoritative only when
         no tree exists. Node IDs are local to their declaration scope and
