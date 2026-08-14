@@ -10801,7 +10801,10 @@ flow_model:
         then publishes a fresh predecessor runtime. Preparation failure leaves the candidate head and matching survivor authority
         current; it cannot restore the head first or reopen candidate-authority survivors under a predecessor head. A survivor
         commit failure under the restored predecessor head retains every survivor fenced, immediately adopts that exact pending
-        predecessor transition, and retries it before predecessor publication; the failed transition is never discarded. If bounded recovery cannot safely restore, the context remains unavailable and the process
+        predecessor transition, and retries it before predecessor publication. A repeated failure retains one supervisor-owned
+        rollback finalizer carrying the predecessor restoration and startup-handoff freeze; reload, replacement, and close must
+        complete that finalizer before enumerating runtime contexts or releasing the selected store. The failed transition and
+        rollback continuation are never discarded. If bounded recovery cannot safely restore, the context remains unavailable and the process
         capability remains retained. Manager-backed deactivation propagates the caller's
         configured shutdown grace rather than substituting runtime defaults.
       fail_closed:
@@ -33459,7 +33462,9 @@ agent_topology_authority:
       each survivor to the committed plan, and republishes the complete survivor set only after convergence.
       Rollback restores the predecessor source-set head and survivor generations before predecessor publication. If survivor
       generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
-      retries it while all survivors remain fenced; it cannot discard the transition or publish only the predecessor.
+      retries it while all survivors remain fenced. Repeated failure retains a typed rollback finalizer that must converge before
+      any later reload/replacement compiles from loaded contexts and before close may release the selected store; it cannot discard
+      the transition, forget predecessor restoration, or publish only the predecessor.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-

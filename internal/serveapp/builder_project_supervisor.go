@@ -76,6 +76,7 @@ type runtimeProjectSupervisor struct {
 	currentBundleIdentity           runtimecontracts.BundleIdentity
 	runtimeContexts                 *runtime.RuntimeContextManager
 	pendingReplacement              *pendingRuntimeReplacement
+	pendingSourceSetRollback        *pendingRuntimeSourceSetRollback
 	sourceReplacementDisabledReason string
 	executionPosture                executionposture.Posture
 }
@@ -333,6 +334,9 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := s.completePendingSourceSetRollback(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback before close: %w", err)
+	}
 	if err := s.completePendingReplacement(); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement before close: %w", err)
 	}
@@ -358,6 +362,9 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := s.completePendingSourceSetRollback(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback: %w", err)
+	}
 	if err := s.completePendingReplacement(); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement: %w", err)
 	}
@@ -544,6 +551,27 @@ type pendingRuntimeReplacement struct {
 	admission   *processAdmissionCandidate
 	freeze      *startupHandoffFreeze
 	finalized   bool
+}
+
+type pendingRuntimeSourceSetRollback struct {
+	mu                 sync.Mutex
+	manager            *runtime.RuntimeContextManager
+	predecessorContext runtime.BundleContext
+	predecessor        *runtime.Runtime
+	freeze             *startupHandoffFreeze
+	survivorsRecovered bool
+}
+
+type predecessorSurvivorCommitFailure struct {
+	err error
+}
+
+func (e *predecessorSurvivorCommitFailure) Error() string {
+	return fmt.Sprintf("restore predecessor source-set survivors: %v", e.err)
+}
+
+func (e *predecessorSurvivorCommitFailure) Unwrap() error {
+	return e.err
 }
 
 type sourceSetReplacementAttempt struct {
@@ -749,15 +777,70 @@ func (s *runtimeProjectSupervisor) restoreCommittedSourceSetAndSurvivors(
 		return nil
 	}
 	if err := transition.Commit(ctx, s.processCapability); err != nil {
-		commitErr := fmt.Errorf("restore predecessor source-set survivors: %w", err)
-		recovered, recoveryErr := s.completePendingSourceSetSurvivors(context.Background(), manager)
-		if recoveryErr != nil {
-			return errors.Join(commitErr, fmt.Errorf("recover pending predecessor source-set survivors: %w", recoveryErr))
+		return &predecessorSurvivorCommitFailure{err: err}
+	}
+	return nil
+}
+
+func (s *runtimeProjectSupervisor) retainPendingSourceSetRollback(
+	manager *runtime.RuntimeContextManager,
+	predecessorContext runtime.BundleContext,
+	predecessor *runtime.Runtime,
+	freeze *startupHandoffFreeze,
+) error {
+	if s == nil || manager == nil || predecessor == nil {
+		return errors.New("pending runtime source-set rollback requires supervisor, runtime context ownership, and predecessor")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingSourceSetRollback != nil {
+		return errors.New("runtime source-set rollback is already pending")
+	}
+	s.pendingSourceSetRollback = &pendingRuntimeSourceSetRollback{
+		manager:            manager,
+		predecessorContext: predecessorContext,
+		predecessor:        predecessor,
+		freeze:             freeze,
+	}
+	return nil
+}
+
+func (s *runtimeProjectSupervisor) completePendingSourceSetRollback(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	pending := s.pendingSourceSetRollback
+	s.mu.RUnlock()
+	if pending == nil {
+		return nil
+	}
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	s.mu.RLock()
+	current := s.pendingSourceSetRollback
+	s.mu.RUnlock()
+	if current != pending {
+		return nil
+	}
+	if !pending.survivorsRecovered {
+		recovered, err := s.completePendingSourceSetSurvivors(context.Background(), pending.manager)
+		if err != nil {
+			return fmt.Errorf("recover pending predecessor source-set survivors: %w", err)
 		}
 		if !recovered {
-			return errors.Join(commitErr, errors.New("failed predecessor survivor transition was not retained for recovery"))
+			return errors.New("failed predecessor survivor transition was not retained for recovery")
 		}
+		pending.survivorsRecovered = true
 	}
+	if err := s.restoreQuiescedPredecessor(ctx, pending.manager, pending.predecessorContext, pending.predecessor, pending.freeze); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	if s.pendingSourceSetRollback == pending {
+		s.pendingSourceSetRollback = nil
+	}
+	s.mu.Unlock()
 	return nil
 }
 
@@ -891,6 +974,9 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	workOwner *worklifetime.RuntimeOccurrence,
 	admissionCandidate *processAdmissionCandidate,
 ) (builderpkg.ProjectStatus, error) {
+	if err := s.completePendingSourceSetRollback(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback before replacement: %w", err)
+	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	oldHash := s.currentBundleSourceFact.BundleHash()
@@ -972,7 +1058,8 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			freeze = &startupHandoffFreeze{release: release}
 			defer func() {
 				s.mu.RLock()
-				retained := s.pendingReplacement != nil && s.pendingReplacement.freeze == freeze
+				retained := (s.pendingReplacement != nil && s.pendingReplacement.freeze == freeze) ||
+					(s.pendingSourceSetRollback != nil && s.pendingSourceSetRollback.freeze == freeze)
 				s.mu.RUnlock()
 				if !retained {
 					freeze.Release()
@@ -1023,6 +1110,15 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		}
 		restoreAfterSurvivorCommit := func(cause error) error {
 			topologyErr := s.restoreCommittedSourceSetAndSurvivors(context.Background(), manager, candidatePlan, previousPlan, topologyAttempt)
+			var survivorCommitFailure *predecessorSurvivorCommitFailure
+			if errors.As(topologyErr, &survivorCommitFailure) {
+				retainErr := s.retainPendingSourceSetRollback(manager, oldContextDef, oldRT, freeze)
+				if retainErr != nil {
+					return errors.Join(cause, topologyErr, retainErr)
+				}
+				recoveryErr := s.completePendingSourceSetRollback(context.Background())
+				return errors.Join(cause, topologyErr, recoveryErr)
+			}
 			restartErr := s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze)
 			return errors.Join(cause, topologyErr, restartErr)
 		}
