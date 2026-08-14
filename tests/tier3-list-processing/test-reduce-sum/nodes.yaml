@@ -6,7 +6,7 @@ reduce-node:
   event_handlers:
     values.submitted:
       reduce:
-        items_from: entity.values
+        items_from: payload.values
         operation: sum
         store_as: entity.total
       emit:

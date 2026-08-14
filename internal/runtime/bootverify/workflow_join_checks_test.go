@@ -162,7 +162,7 @@ func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	source := semanticview.Wrap(bundle)
 	handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 	var memberReference *expressionReference
-	for _, ref := range handlerEntityExpressions(handler) {
+	for _, ref := range handlerExecutableReaderExpressionsForSource(source, "", "join-node", "item.completed", handler) {
 		if ref.Kind == "join.members.from" {
 			candidate := ref
 			memberReference = &candidate

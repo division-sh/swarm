@@ -1,11 +1,11 @@
 trigger:
   event: values.submitted
   payload:
-  entity:
     values:
       - 10
       - 20
       - 30
+  entity:
 
 expected:
 

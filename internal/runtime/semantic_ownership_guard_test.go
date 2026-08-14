@@ -81,6 +81,10 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 	inspectProductionGo(t, func(path string, file *ast.File) {
 		scopedDemandFunctions := map[string]struct{}{
 			"BuildSingletonCoordinatorDemandProjection": {},
+			"conditionExpressions":                      {},
+			"dataAccumulationExpressions":               {},
+			"emitFieldExpressions":                      {},
+			"expressionFieldReferences":                 {},
 			"wave1AllEntityWriteTargets":                {},
 			"wave1ContainedStateOperations":             {},
 			"wave1EntityReaderCoverageByFlow":           {},
@@ -104,6 +108,10 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok {
 				continue
+			}
+			switch function.Name.Name {
+			case "handlerEntityExpressions", "handlerEntityExpressionsForSource":
+				t.Errorf("%s declares retired partial executable-reader owner %s", path, function.Name.Name)
 			}
 			if _, guarded := scopedDemandFunctions[function.Name.Name]; !guarded {
 				continue

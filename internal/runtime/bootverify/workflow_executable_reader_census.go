@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -38,12 +39,10 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	},
 	"Description":    noHandlerExecutableReaders,
 	"EvidenceTarget": noHandlerExecutableReaders,
-	"Emit": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendEmitExecutableReaders(out, "emit", handler.Emit)
-	},
-	"OnSuccess": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendEmitExecutableReaders(out, "on_success.emit", handler.OnSuccess.Emit)
-	},
+	// Emit readers are lowered once by HandlerDeclarativeEmitSites below so
+	// namespace sugar, fan-out aliases, and join-result visibility stay exact.
+	"Emit":      noHandlerExecutableReaders,
+	"OnSuccess": noHandlerExecutableReaders,
 	"Guard": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendGuardExecutableReaders(out, handler.Guard)
 	},
@@ -61,7 +60,7 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	},
 	"Loop": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		if handler.Loop != nil {
-			appendExecutableReader(out, "loop.from", handler.Loop.From, runtimepipeline.WorkflowEntityFieldLifecycleRule)
+			appendExecutableReader(out, "loop.from", handler.Loop.From, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
 		}
 	},
 	"OnComplete": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
@@ -72,21 +71,21 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	},
 	"Accumulate": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		if handler.Accumulate != nil {
-			appendExecutableReader(out, "accumulate.from", handler.Accumulate.From, runtimepipeline.WorkflowEntityFieldLifecycleRule)
-			appendExecutableReader(out, "accumulate.dedup_by", handler.Accumulate.DedupBy, runtimepipeline.WorkflowEntityFieldLifecycleRule)
+			appendExecutableReader(out, "accumulate.from", handler.Accumulate.From, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
+			appendExecutableReader(out, "accumulate.dedup_by", handler.Accumulate.DedupBy, runtimepipeline.WorkflowEntityFieldLifecycleAccumulate)
 		}
 	},
 	"Join": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendJoinExecutableReaders(out, ctx, handler.Join)
 	},
 	"Compute": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendComputeExecutableReaders(out, "compute", handler.Compute)
+		appendComputeExecutableReaders(out, "compute", handler.Compute, runtimepipeline.WorkflowEntityFieldLifecycleCompute)
 	},
 	"Query": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendQueryExecutableReaders(out, "query", handler.Query)
 	},
 	"FanOut": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendFanOutExecutableReaders(out, "fan_out", handler.FanOut)
+		appendFanOutExecutableReaders(out, "fan_out", handler.FanOut, runtimepipeline.WorkflowEntityFieldLifecycleFanOut)
 	},
 	"GroupBy": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendGroupByExecutableReaders(out, handler.GroupBy)
@@ -111,9 +110,7 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	},
 	"PolicyRow":  noHandlerRuleExecutableReaders,
 	"AdvancesTo": noHandlerRuleExecutableReaders,
-	"Emit": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendEmitExecutableReaders(out, prefix+".emit", rule.Emit)
-	},
+	"Emit":       noHandlerRuleExecutableReaders,
 	"Action": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendActionExecutableReaders(out, prefix+".action", rule.Action)
 	},
@@ -124,10 +121,10 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 		appendDataAccumulationExecutableReaders(out, prefix+".data_accumulation", rule.DataAccumulation)
 	},
 	"Compute": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendComputeExecutableReaders(out, prefix+".compute", rule.Compute)
+		appendComputeExecutableReaders(out, prefix+".compute", rule.Compute, runtimepipeline.WorkflowEntityFieldLifecycleRule)
 	},
 	"FanOut": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendFanOutExecutableReaders(out, prefix+".fan_out", rule.FanOut)
+		appendFanOutExecutableReaders(out, prefix+".fan_out", rule.FanOut, runtimepipeline.WorkflowEntityFieldLifecycleRule)
 	},
 }
 
@@ -219,8 +216,8 @@ func appendActionExecutableReaders(out *[]expressionReference, kind string, acti
 			appendExpressionValueExecutableReaders(out, prefix+".path", file.Path, phase)
 			appendExpressionValueExecutableReaders(out, prefix+".content", file.Content, phase)
 		}
-		appendExpressionValueMapExecutableReaders(out, kind+".artifact_repo.success_payload", artifact.SuccessPayload, phase)
-		appendExpressionValueMapExecutableReaders(out, kind+".artifact_repo.failure_payload", artifact.FailurePayload, phase)
+		// Success/failure payloads are declarative emit sites and are lowered by
+		// the canonical emit pass in handlerExecutableReaderExpressionsForSource.
 	}
 }
 
@@ -258,16 +255,21 @@ func appendGuardExecutableReaders(out *[]expressionReference, guard *runtimecont
 	for i, check := range guard.Checks {
 		appendExecutableReader(out, fmt.Sprintf("guard.checks[%d]", i), check.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
 	}
-	if failure, err := guard.FailureSpec(); err == nil {
-		appendEmitExecutableReaders(out, "guard.on_fail.escalate", failure.EscalationEmitSpec())
-	}
 }
 
 func appendDataAccumulationExecutableReaders(out *[]expressionReference, kind string, spec runtimecontracts.WorkflowDataAccumulation) {
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation
 	for i, write := range spec.Writes {
 		prefix := fmt.Sprintf("%s.writes[%d]", kind, i)
-		appendExecutableReader(out, prefix+".source", write.Source(), phase)
+		if write.Value.IsZero() {
+			if source := strings.TrimSpace(write.Source()); source != "" {
+				expression := source
+				if !runtimepaths.Parse(source).HasExplicitRoot() {
+					expression = "payload." + source
+				}
+				appendExecutableReader(out, prefix+".source", expression, phase)
+			}
+		}
 		appendExpressionValueExecutableReaders(out, prefix+".value", write.Value, phase)
 		appendExpressionValueExecutableReaders(out, prefix+".key", write.Key, phase)
 		appendExpressionValueExecutableReaders(out, prefix+".index", write.Index, phase)
@@ -280,8 +282,16 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 		if id := strings.TrimSpace(rule.ID); id != "" {
 			prefix = kind + "[" + id + "]"
 		}
+		before := len(*out)
 		for _, field := range sortedExecutableReaderFields(handlerRuleEntryExecutableReaderCensus) {
 			handlerRuleEntryExecutableReaderCensus[field](out, ctx, prefix, rule)
+		}
+		if strings.Contains(kind, "on_complete") {
+			for index := before; index < len(*out); index++ {
+				if (*out)[index].Phase == runtimepipeline.WorkflowEntityFieldLifecycleRule {
+					(*out)[index].Phase = runtimepipeline.WorkflowEntityFieldLifecycleOnComplete
+				}
+			}
 		}
 	}
 }
@@ -298,15 +308,18 @@ func appendJoinExecutableReaders(out *[]expressionReference, ctx executableReade
 		appendExecutableReader(out, "join.window.from", join.Window.From, phase)
 		appendExecutableReader(out, "join.window.by", join.Window.By, phase)
 	}
+	before := len(*out)
 	appendRulesExecutableReaders(out, ctx, "join.on_complete", []runtimecontracts.HandlerRuleEntry{join.OnComplete})
 	appendRulesExecutableReaders(out, ctx, "join.timeout", []runtimecontracts.HandlerRuleEntry{join.Timeout.Outcome})
+	for index := before; index < len(*out); index++ {
+		(*out)[index].AllowJoin = true
+	}
 }
 
-func appendComputeExecutableReaders(out *[]expressionReference, kind string, compute *runtimecontracts.ComputeSpec) {
+func appendComputeExecutableReaders(out *[]expressionReference, kind string, compute *runtimecontracts.ComputeSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
 	if compute == nil {
 		return
 	}
-	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
 	if compute.Lookup != nil {
 		for i, value := range compute.Lookup.On {
 			appendExecutableReader(out, fmt.Sprintf("%s.lookup.on[%d]", kind, i), value, phase)
@@ -338,7 +351,11 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleGuard
 	appendExecutableReader(out, kind+".source", query.Source, phase)
 	appendExecutableReader(out, kind+".entities", query.Entities, phase)
+	beforeFilter := len(*out)
 	appendExecutableReader(out, kind+".filter", query.Filter, phase)
+	if len(*out) > beforeFilter {
+		(*out)[len(*out)-1].RequireScalarEntityLeaf = true
+	}
 	appendExecutableReader(out, kind+".group_by", query.GroupBy, phase)
 	for i, selected := range query.Select {
 		appendExecutableReader(out, fmt.Sprintf("%s.select[%d]", kind, i), selected, phase)
@@ -348,21 +365,19 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 	}
 }
 
-func appendFanOutExecutableReaders(out *[]expressionReference, kind string, fanOut *runtimecontracts.FanOutSpec) {
+func appendFanOutExecutableReaders(out *[]expressionReference, kind string, fanOut *runtimecontracts.FanOutSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
 	if fanOut == nil {
 		return
 	}
-	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
 	appendExecutableReader(out, kind+".items_from", fanOut.ItemsFrom, phase)
 	appendExecutableReader(out, kind+".identity", fanOut.Identity, phase)
-	appendEmitExecutableReaders(out, kind+".emit", fanOut.Emit)
 }
 
 func appendGroupByExecutableReaders(out *[]expressionReference, groupBy *runtimecontracts.GroupBySpec) {
 	if groupBy == nil {
 		return
 	}
-	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
+	phase := runtimepipeline.WorkflowEntityFieldLifecycleGroupBy
 	appendExecutableReader(out, "group_by.items_from", groupBy.ItemsFrom, phase)
 	appendExecutableReader(out, "group_by.key", groupBy.Key, phase)
 }
@@ -396,9 +411,4 @@ func appendCountExecutableReaders(out *[]expressionReference, count *runtimecont
 	appendExecutableReader(out, "count.source", count.Source, phase)
 	appendExecutableReader(out, "count.items_from", count.ItemsFrom, phase)
 	appendExecutableReader(out, "count.condition", count.Condition, phase)
-}
-
-func appendEmitExecutableReaders(out *[]expressionReference, kind string, emit runtimecontracts.EmitSpec) {
-	appendExecutableReader(out, kind+".from", emit.From, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields)
-	appendExpressionValueMapExecutableReaders(out, kind+".fields", emit.Fields, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields)
 }

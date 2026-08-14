@@ -204,10 +204,35 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 	if b == nil {
 		return nil
 	}
-	// Hand-built semantic unit sources have no loaded project/flow views. In
-	// that closed test shape Nodes is the root declaration table itself, not a
-	// flattened alias table. Loaded bundles always take the scoped path below.
-	if len(b.scopedNodes) == 0 && len(b.ProjectViews()) == 0 && len(b.FlowViews()) == 0 {
+	if len(b.scopedNodes) > 0 {
+		keys := make([]string, 0, len(b.scopedNodes))
+		for key := range b.scopedNodes {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out := make([]ScopedNodeRecord, 0, len(keys))
+		for _, key := range keys {
+			entry := b.scopedNodes[key]
+			source := b.scopedNodeSources[key]
+			logicalID := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(key, contractScopeKey(source, "")), "::"))
+			if logicalID == "" {
+				logicalID = strings.TrimSpace(entry.ID)
+			}
+			out = append(out, ScopedNodeRecord{
+				LogicalID: logicalID,
+				Entry:     entry,
+				Source:    source,
+			})
+		}
+		return out
+	}
+	if b.FlowTree.Root != nil {
+		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
+	}
+	// Hand-built root-only semantic sources have no exported tree. In that
+	// closed shape Nodes is the authored declaration table, not a merged alias
+	// projection.
+	if len(b.Nodes) > 0 {
 		keys := make([]string, 0, len(b.Nodes))
 		for key := range b.Nodes {
 			keys = append(keys, key)
@@ -223,29 +248,71 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		}
 		return out
 	}
-	if len(b.scopedNodes) == 0 {
+	return nil
+}
+
+func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecord {
+	if root == nil {
 		return nil
 	}
-	keys := make([]string, 0, len(b.scopedNodes))
-	for key := range b.scopedNodes {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]ScopedNodeRecord, 0, len(keys))
-	for _, key := range keys {
-		entry := b.scopedNodes[key]
-		logicalID := strings.TrimSpace(entry.ID)
-		if logicalID == "" {
-			parts := strings.Split(key, "::")
-			logicalID = strings.TrimSpace(parts[len(parts)-1])
+	out := make([]ScopedNodeRecord, 0)
+	var walk func(*FlowContractView, string)
+	walk = func(view *FlowContractView, inheritedPackageKey string) {
+		if view == nil {
+			return
 		}
-		out = append(out, ScopedNodeRecord{
-			LogicalID: logicalID,
-			Entry:     entry,
-			Source:    b.scopedNodeSources[key],
+		packageKey := strings.TrimSpace(view.Paths.PackageKey)
+		if packageKey == "" {
+			packageKey = strings.TrimSpace(inheritedPackageKey)
+		}
+		flowID := strings.TrimSpace(view.Paths.ID)
+		layer := "project"
+		if flowID != "" {
+			layer = "flow"
+		}
+		nodeIDs := make([]string, 0, len(view.Nodes))
+		for nodeID := range view.Nodes {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+		sort.Strings(nodeIDs)
+		for _, nodeID := range nodeIDs {
+			out = append(out, ScopedNodeRecord{
+				LogicalID: strings.TrimSpace(nodeID),
+				Entry:     view.Nodes[nodeID],
+				Source: ContractItemSource{
+					PackageKey: packageKey,
+					FlowID:     flowID,
+					Layer:      layer,
+					File:       strings.TrimSpace(view.Paths.NodesFile),
+				},
+			})
+		}
+		children := flowViewChildren(view)
+		sort.SliceStable(children, func(i, j int) bool {
+			return exportedFlowTreeViewOrderKey(children[i], packageKey) < exportedFlowTreeViewOrderKey(children[j], packageKey)
 		})
+		for _, child := range children {
+			walk(child, packageKey)
+		}
 	}
+	walk(root, "")
 	return out
+}
+
+func exportedFlowTreeViewOrderKey(view *FlowContractView, inheritedPackageKey string) string {
+	if view == nil {
+		return ""
+	}
+	packageKey := strings.TrimSpace(view.Paths.PackageKey)
+	if packageKey == "" {
+		packageKey = strings.TrimSpace(inheritedPackageKey)
+	}
+	return strings.Join([]string{
+		packageKey,
+		strings.TrimSpace(view.Paths.ID),
+		strings.TrimSpace(view.Path),
+		strings.TrimSpace(view.Paths.NodesFile),
+	}, "\x00")
 }
 func (b *WorkflowContractBundle) NodeEntry(id string) (SystemNodeContract, bool) {
 	id = strings.TrimSpace(id)

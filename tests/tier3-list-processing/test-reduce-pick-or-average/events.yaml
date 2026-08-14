@@ -1,2 +1,3 @@
 scores.submitted:
+  scores: array
 scores.resolved:
