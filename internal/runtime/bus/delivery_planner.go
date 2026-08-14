@@ -934,7 +934,25 @@ func routePlanIntentAuthorizesRoutedSubscriber(
 	if target.Empty() {
 		target = intent.TargetOwnership.Route().Normalized()
 	}
-	return routeMatchesInternalSubscriber(target, subscriber)
+	if routeMatchesInternalSubscriber(target, subscriber) {
+		return true
+	}
+	return resolvedSelectedRunRootIntentMatchesSubscriber(intent, key, subscriber, target)
+}
+
+func resolvedSelectedRunRootIntentMatchesSubscriber(
+	intent RoutePlanDeliveryIntent,
+	key routedSubscriberAuthorityKey,
+	subscriber Subscriber,
+	target events.RouteIdentity,
+) bool {
+	// Root static routing uses its semantic path while ownership resolves to the selected run ID.
+	if intent.Producer != routeIntentProducerConcreteNodeRoute {
+		return false
+	}
+	handlerFlowID := strings.TrimSpace(subscriber.handlerFlowID)
+	return handlerFlowID != "" && key.path == handlerFlowID &&
+		key.handler.FlowID() == handlerFlowID && target.FlowID == handlerFlowID
 }
 
 func eventTargetsRoutedSubscriber(evt events.Event, subscriber Subscriber) bool {

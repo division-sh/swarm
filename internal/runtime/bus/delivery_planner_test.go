@@ -1181,6 +1181,46 @@ func TestDeliveryPlanner_LiveCarrierDoesNotAuthorizeNoTargetScopedRoutedNode(t *
 	}
 }
 
+func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *testing.T) {
+	runID := uuid.NewString()
+	planner := newDeliveryPlannerWithHandlers(t,
+		deliveryRouteResolver{
+			resolveRoutedSubscribers: func(events.Event) []Subscriber {
+				return []Subscriber{{
+					Recipient: events.MustNodeDeliveryRecipient("test-node"), Path: "root",
+					MatchPattern: "timer.check", routeSource: subscriberRouteSourceSubscription,
+				}}
+			},
+			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
+			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
+				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
+			},
+			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
+		},
+		testSelectedOwnerPolicy(ActiveTargetDescriptor{
+			ID: "root-owner", FlowInstance: runID, EntityID: "ent-root",
+		}),
+	)
+
+	plan, err := planner.Plan(context.Background(), eventtest.ExistingRunRootIngress(
+		"", "timer.check", "", "", nil, 0, runID,
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "root"), time.Time{},
+	))
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	want := events.RouteIdentity{FlowID: "root", FlowInstance: runID, EntityID: "ent-root"}
+	if routes := plan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.ID() != "test-node" || routes[0].Target.Route() != want {
+		t.Fatalf("delivery routes = %#v, want exact selected-run root owner %#v", routes, want)
+	}
+	if len(plan.DeliveryIntents) != 1 {
+		t.Fatalf("delivery intents = %#v, want one exact concrete-node intent", plan.DeliveryIntents)
+	}
+	if got := plan.DeliveryIntents[0].Producer; got != routeIntentProducerConcreteNodeRoute {
+		t.Fatalf("delivery intent producer = %s, want concrete_node_route", routeIntentProducerCode(got))
+	}
+}
+
 func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *testing.T) {
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,
