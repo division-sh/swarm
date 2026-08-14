@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
@@ -28,7 +29,7 @@ func OperatorAgentFrameHandlers(opts AgentFrameHandlerOptions) map[string]Method
 	}
 	return map[string]MethodHandler{
 		"agent.frame": func(ctx context.Context, req Request) (any, error) {
-			scope, err := requiredStringParam(req.Params, "scope")
+			scope, err := requiredExactAgentFrameScalarParam(req.Params, "scope")
 			if err != nil {
 				return nil, err
 			}
@@ -48,15 +49,18 @@ func inspectStaticAgentFrame(ctx context.Context, catalog BundleCatalogReadStore
 	if catalog == nil {
 		return agentframe.Inspection{}, fmt.Errorf("bundle catalog read store is required for static agent frame inspection")
 	}
-	bundleHash, err := requiredBundleHashParam(params, "bundle_hash")
+	bundleHash, err := requiredExactAgentFrameScalarParam(params, "bundle_hash")
 	if err != nil {
 		return agentframe.Inspection{}, err
+	}
+	if err := bundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
+		return agentframe.Inspection{}, NewInvalidParamsError(map[string]any{"field": "bundle_hash", "reason": "must be bundle-v1:sha256:<64 lowercase hex>"})
 	}
 	flow, err := requiredExactAgentFramePathParam(params, "flow")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	agentID, err := requiredStringParam(params, "agent_id")
+	agentID, err := requiredExactAgentFrameScalarParam(params, "agent_id")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
@@ -139,7 +143,7 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	if resolver == nil {
 		return agentframe.Inspection{}, fmt.Errorf("effective agent frame resolver is required")
 	}
-	agentID, err := requiredStringParam(params, "agent_id")
+	agentID, err := requiredExactAgentFrameScalarParam(params, "agent_id")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
@@ -151,11 +155,11 @@ func inspectEffectiveAgentFrame(resolver AgentFrameEffectiveResolver, params map
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	bundleHash, _, err := optionalStringParam(params, "bundle_hash")
+	bundleHash, _, err := optionalExactAgentFrameScalarParam(params, "bundle_hash")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
-	flow, _, err := optionalStringParam(params, "flow")
+	flow, _, err := optionalExactAgentFramePathParam(params, "flow")
 	if err != nil {
 		return agentframe.Inspection{}, err
 	}
@@ -181,6 +185,37 @@ func requiredExactAgentFramePathParam(params map[string]any, name string) (strin
 		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
 	}
 	return value, nil
+}
+
+func requiredExactAgentFrameScalarParam(params map[string]any, name string) (string, error) {
+	value, present, err := optionalExactAgentFrameScalarParam(params, name)
+	if err != nil {
+		return "", err
+	}
+	if !present || value == "" {
+		return "", NewInvalidParamsError(map[string]any{"field": name, "reason": "is required"})
+	}
+	return value, nil
+}
+
+func optionalExactAgentFrameScalarParam(params map[string]any, name string) (string, bool, error) {
+	if params == nil {
+		return "", false, nil
+	}
+	raw, present := params[name]
+	if !present || raw == nil {
+		return "", present, nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", true, NewInvalidParamsError(map[string]any{"field": name, "reason": "must be a string"})
+	}
+	if value != strings.TrimSpace(value) {
+		return "", true, NewInvalidParamsError(map[string]any{
+			"field": name, "reason": "must be an exact value without surrounding whitespace",
+		})
+	}
+	return value, true, nil
 }
 
 func optionalExactAgentFramePathParam(params map[string]any, name string) (string, bool, error) {

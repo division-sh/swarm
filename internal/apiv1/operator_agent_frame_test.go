@@ -155,6 +155,34 @@ func TestOperatorAgentFrameRejectsNoncanonicalPathAliasesBeforeResolution(t *tes
 	}
 }
 
+func TestOperatorAgentFrameRejectsNoncanonicalScalarAliasesBeforeResolution(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cases := []map[string]any{
+		{"scope": " static ", "agent_id": "reviewer", "bundle_hash": bundleHash, "flow": "review"},
+		{"scope": "static", "agent_id": " reviewer ", "bundle_hash": bundleHash, "flow": "review"},
+		{"scope": "static", "agent_id": "reviewer", "bundle_hash": " " + bundleHash, "flow": "review"},
+		{"scope": "effective", "agent_id": " reviewer ", "root": true},
+		{"scope": "effective", "agent_id": "reviewer", "root": true, "bundle_hash": " "},
+		{"scope": "effective", "agent_id": "reviewer", "root": true, "flow": " "},
+	}
+	for _, params := range cases {
+		catalog := &paginatedAgentFrameCatalog{fakeBundleCatalogReadStore: &fakeBundleCatalogReadStore{}}
+		resolver := &agentFrameEffectiveResolverStub{}
+		handler := OperatorAgentFrameHandlers(AgentFrameHandlerOptions{Catalog: catalog, Effective: resolver})["agent.frame"]
+		_, err := handler(context.Background(), Request{Params: params})
+		var invalid *InvalidParamsError
+		if !errors.As(err, &invalid) {
+			t.Fatalf("params %#v error = %T %v, want invalid params", params, err, err)
+		}
+		if len(catalog.calls) != 0 {
+			t.Fatalf("params %#v catalog calls = %d, want 0", params, len(catalog.calls))
+		}
+		if resolver.calls != 0 {
+			t.Fatalf("params %#v resolver calls = %d, want 0", params, resolver.calls)
+		}
+	}
+}
+
 func TestOperatorAgentFrameNotFoundDetailsMatchDeclaredSchema(t *testing.T) {
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	catalog := &fakeBundleCatalogReadStore{agents: map[string]bundlecatalog.AgentsResult{bundleHash: {}}}
