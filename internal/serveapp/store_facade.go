@@ -149,6 +149,7 @@ type selectedAPICapabilityRequest struct {
 	LoadedBundle            serveRuntimeBundle
 	RuntimeContexts         []serveRuntimeBundleContext
 	RuntimeContextManager   *runtime.RuntimeContextManager
+	RuntimeSupervisor       *runtimeProjectSupervisor
 	Source                  semanticview.Source
 	ContractsRoot           string
 	Config                  *config.Config

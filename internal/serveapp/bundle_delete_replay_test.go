@@ -15,7 +15,10 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimepreservationcleanup "github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -164,14 +167,40 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 	})
 
 	failingCapability := &failOncePostCommitBundleDeleteCapability{ProcessCapability: capability}
+	supervisor := &runtimeProjectSupervisor{
+		currentRT: first.runtime, runtimeContexts: contexts,
+		replacementShutdown: runtimepkg.DefaultShutdownOptions(),
+	}
 	coordinator := &runtimebundledelete.Coordinator{
-		Planner: selected, Finalizer: processOwnedBundleDeleteFinalizer{capability: failingCapability, runtimeContexts: contexts},
-		Locks: selected, RuntimeQuiescer: contexts,
+		Planner:   selected,
+		Finalizer: processOwnedBundleDeleteFinalizer{capability: failingCapability, runtimeContexts: contexts},
+		Locks:     selected,
+		RuntimeQuiescer: bundleDeleteRuntimeQuiescer{
+			contexts: contexts, supervisor: supervisor,
+		},
 	}
 	req := runtimebundledelete.Request{
 		OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "bundle-delete-replay",
 		ReplayKeyHash: strings.Repeat("a", 64),
 		BundleHash:    firstHash, RequestedAt: time.Now().UTC(),
+	}
+	deletePlan, err := selected.PlanBundleDelete(ctx, req)
+	if err != nil {
+		t.Fatalf("plan active fixture runs before replay proof: %v", err)
+	}
+	for _, run := range deletePlan.ActiveRuns {
+		if _, err := selected.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+			RunID: run.RunID, Reason: "bundle delete replay proof", ControlledBy: "test", Now: req.RequestedAt,
+		}); err != nil && !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {
+			t.Fatalf("stop active fixture run %s: %v", run.RunID, err)
+		}
+	}
+	deletePlan, err = selected.PlanBundleDelete(ctx, req)
+	if err != nil {
+		t.Fatalf("replan fixture runs before replay proof: %v", err)
+	}
+	if len(deletePlan.ActiveRuns) != 0 {
+		t.Fatalf("active fixture runs before replay proof = %#v, want none", deletePlan.ActiveRuns)
 	}
 	if _, err := coordinator.Execute(ctx, req); err == nil || !strings.Contains(err.Error(), "injected post-commit survivor refresh failure") {
 		t.Fatalf("first delete error = %v, want injected post-commit failure", err)
@@ -248,6 +277,9 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 	if !replayed.OK || !replayed.Deleted {
 		t.Fatalf("replayed delete result = %#v, want completed deletion", replayed)
 	}
+	if replayed.Plan.BundleHash != firstHash || !replayed.Plan.PlannedAt.Equal(req.RequestedAt) {
+		t.Fatalf("replayed delete plan = %#v, want original plan identity at %s", replayed.Plan, req.RequestedAt)
+	}
 	for _, bundleHash := range []string{secondHash, thirdHash} {
 		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
 			t.Fatalf("survivor %s after replay = %#v, want loaded", bundleHash, lookup)
@@ -276,8 +308,8 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 	if err != nil {
 		t.Fatalf("duplicate committed delete: %v", err)
 	}
-	if !reflect.DeepEqual(duplicate.FinalMutation, replayed.FinalMutation) {
-		t.Fatalf("duplicate final mutation = %#v, want stored %#v", duplicate.FinalMutation, replayed.FinalMutation)
+	if !reflect.DeepEqual(duplicate, replayed) {
+		t.Fatalf("duplicate coordinator result = %#v, want stored %#v", duplicate, replayed)
 	}
 	for _, survivor := range survivorsBeforeReplay {
 		afterGrants := countBundleDeleteReplayRows(t, db, `SELECT COUNT(DISTINCT grant_id) FROM runtime_generation_grants WHERE bundle_hash = $1`, survivor.bundleHash)
@@ -331,6 +363,21 @@ func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperatio
 		OperationID: uuid.NewString(), OperationName: runtimebundledelete.DefaultOperationName,
 		RequestHash: "unloaded-bundle-delete-request", ReplayKeyHash: strings.Repeat("b", 64),
 		BundleHash: bundleHash, RequestedAt: requestedAt,
+		Completion: pendingBundleDeleteCompletion(bundleHash, requestedAt),
+	}
+	request.Completion.Force = true
+	request.Completion.ActiveRunsStopped = 1
+	request.Completion.DeliveriesCancelled = 1
+	request.Completion.ContainersStopped = 1
+	request.Completion.Cleanup = runtimepreservationcleanup.Result{
+		OperationName: runtimebundledelete.DefaultOperationName,
+		AppliedAt:     requestedAt,
+		ControlledBy:  runtimepreservationcleanup.BundleForceDeleteControlledBy,
+	}
+	request.Completion.Containers = runtimedestructivereset.ContainerResetResult{
+		OperationName: runtimebundledelete.DefaultOperationName,
+		AppliedAt:     requestedAt,
+		Stopped:       []runtimedestructivereset.ContainerRef{{Name: "agent-container", Kind: "agent"}},
 	}
 	committed, err := capability.ApplyBundleDeleteFinalMutation(ctx, request, nil)
 	if err != nil {
@@ -357,6 +404,17 @@ func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperatio
 	if !reflect.DeepEqual(replayed, committed) {
 		t.Fatalf("replayed unloaded deletion = %#v, want %#v", replayed, committed)
 	}
+	replayedCompletion, err := capability.ReplayBundleDeleteResult(ctx, replay)
+	if err != nil {
+		t.Fatalf("replay complete unloaded deletion result: %v", err)
+	}
+	wantCompletion, err := runtimebundledelete.CompleteFinalMutation(request, committed)
+	if err != nil {
+		t.Fatalf("complete expected unloaded deletion result: %v", err)
+	}
+	if !reflect.DeepEqual(replayedCompletion, wantCompletion) {
+		t.Fatalf("replayed coordinator result = %#v, want %#v", replayedCompletion, wantCompletion)
+	}
 	var replayRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bundle_delete_final_mutation_replays WHERE replay_key_hash=$1`, request.ReplayKeyHash).Scan(&replayRows); err != nil {
 		t.Fatalf("count unloaded deletion replay facts: %v", err)
@@ -369,6 +427,7 @@ func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperatio
 		OperationID: uuid.NewString(), OperationName: runtimebundledelete.DefaultOperationName,
 		RequestHash: "unloaded-bundle-delete-unkeyed-request",
 		BundleHash:  unkeyedBundleHash, RequestedAt: requestedAt.Add(2 * time.Minute),
+		Completion: pendingBundleDeleteCompletion(unkeyedBundleHash, requestedAt.Add(2*time.Minute)),
 	}
 	unkeyed, err := capability.ApplyBundleDeleteFinalMutation(ctx, unkeyedRequest, nil)
 	if err != nil {
@@ -383,6 +442,14 @@ func TestPostgresUnloadedBundleDeleteFinalMutationReplaysWithoutTopologyOperatio
 	}
 	if unkeyedRows != 1 {
 		t.Fatalf("unkeyed unloaded deletion replay facts=%d, want 1 exact operation fact", unkeyedRows)
+	}
+}
+
+func pendingBundleDeleteCompletion(bundleHash string, requestedAt time.Time) runtimebundledelete.Result {
+	return runtimebundledelete.Result{
+		OK: true, Status: "completed", OperationName: runtimebundledelete.DefaultOperationName,
+		BundleHash: bundleHash,
+		Plan:       runtimebundledelete.Plan{BundleHash: bundleHash, PlannedAt: requestedAt.UTC()},
 	}
 }
 

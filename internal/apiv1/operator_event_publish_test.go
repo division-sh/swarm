@@ -821,7 +821,10 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 		},
 	}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	bus, err := newScopedAPITestEventBus(t, failing, runStartTestEventBusOptions(source))
+	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
+	opts := runStartTestEventBusOptions(source)
+	opts.TestLifecycleProbe = probe
+	bus, err := newScopedAPITestEventBus(t, failing, opts)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -838,6 +841,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
+	probe.RequirePostCommitDispatchCompleted(eventID)
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after post-commit receipt failure = %d, want 1", count)
 	}

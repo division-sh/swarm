@@ -158,7 +158,14 @@ func (w *blockingAdministrativeExternalWork) release() {
 
 type noopBundleRuntimeQuiescer struct{}
 
-func (noopBundleRuntimeQuiescer) QuiesceBundleRuntime(context.Context, string) error { return nil }
+func (noopBundleRuntimeQuiescer) QuiesceBundleRuntime(context.Context, string) (bundledelete.RuntimeQuiescence, error) {
+	return noopBundleRuntimeQuiescence{}, nil
+}
+
+type noopBundleRuntimeQuiescence struct{}
+
+func (noopBundleRuntimeQuiescence) Restore(context.Context) error { return nil }
+func (noopBundleRuntimeQuiescence) Commit()                       {}
 
 func assertAdministrativeUnrelatedQueryProgresses(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()

@@ -13081,12 +13081,14 @@ platform_tables:
         );
     bundle_delete_final_mutation_replays:
       description: >-
-        Immutable replay evidence for one committed bundle-delete final mutation.
+        Immutable replay evidence for one committed bundle-delete coordinator result, including
+        its exact plan, preservation cleanup, managed-container result, counts, and final mutation.
         This owner is independent of complete-source-set mutation because deleting an
         unloaded catalog bundle has no topology operation. The request hash and opaque
         replay-key hash bind exact keyed retries; an unkeyed mutation records an empty
         replay-key fact and is addressable only by its exact operation identity. No bundle
-        identity or content-derived key is accepted as authority.
+        identity or content-derived key is accepted as authority. Replay validates and returns
+        this stored result without synthesizing fields from the current topology or request.
       ddl: |
         CREATE TABLE bundle_delete_final_mutation_replays (
             operation_id       UUID PRIMARY KEY,
@@ -16617,8 +16619,8 @@ multi_bundle_persistence:
           same-runtime event.publish, run.start, runtime-log, and mutation-log attempts fail closed rather than recreating
           bundle_source=persisted with a missing bundle row.
       runtime_context_deactivation:
-        status: implemented_for_runtime_context_manager_unload_first_slice
-        canonical_owner: internal/runtime/bundledelete.Coordinator sequencing through internal/runtime.RuntimeContextManager.QuiesceBundleRuntime
+        status: implemented_with_recoverable_precommit_quiescence_and_terminal_commit_evidence
+        canonical_owner: internal/runtime/bundledelete.Coordinator sequencing through internal/serveapp.bundleDeleteRuntimeQuiescer and internal/runtime.RuntimeContextManager
         consumed_by:
           - internal/runtime/bundledelete non-force and force execution
           - /v1/rpc runtime.nuke when include_bundles=true
@@ -16633,15 +16635,23 @@ multi_bundle_persistence:
           revision without changing its execution generation, phase, run mode, or config revision. Survivors remain
           unselectable until the complete set converges; partial rebind failure MUST NOT publish stale runtime authority
           or report completed deletion. The atomic bundle/source-set mutation MUST retain its exact final result in the
-          source-set operation ledger together with the exact API request hash. A retry after that commit keeps the same
-          keyed operation identity even when the bundle is absent from planning, verifies the stored request and final mutation, and completes only pending survivor
+          source-set operation ledger together with the exact API request hash. The same final selected-store transaction
+          MUST store the complete pre-final coordinator result together with the exact committed final mutation. A retry
+          after that commit keeps the same keyed operation identity even when the bundle
+          is absent from planning, verifies the stored request and complete result, and completes only pending survivor
           refreshes against the current plan before returning success. An ordinary duplicate with no pending refresh
+          MUST return the exact stored plan, cleanup, container, count, and final-mutation facts without synthesis and
           MUST NOT rotate generations or repeat lifecycle transitions. A later startup MUST terminalize any nonterminal
           persisted identity omitted from the current complete source-set plan through the current admitted generation
           grant; it MUST NOT reconstruct the
           removed source coordinate as mutation authority, and an already terminated identity is an inert historical row.
-          A failure after quiescence remains fail-closed with the context unavailable. Non-force active-run refusal,
-          dry-run delete, missing bundle errors, and idempotency
+          Quiescence returns one typed recoverable ownership token. Every failure before durable final-mutation commit MUST
+          restore and republish the exact withdrawn BundleContext through the runtime supervisor, including generation,
+          standing-target, and public-ingress reconciliation; restoring a non-primary loaded bundle MUST NOT replace the
+          supervisor's primary project identity. A committed final mutation is terminal evidence: the token MUST NOT restore
+          the deleted context even when survivor refresh or API-result persistence fails after commit. Restoration failure is
+          returned explicitly and the context remains unavailable rather than being reported as recovered. Non-force
+          active-run refusal, dry-run delete, missing bundle errors, and idempotency
           conflicts MUST NOT quiesce the context. The API handler renders/idempotently replays the coordinator result
           and MUST NOT interpret result fields as independent runtime-deactivation authority.
       reader_invariant: >
@@ -16653,6 +16663,9 @@ multi_bundle_persistence:
         - splitting the runs update and bundle row delete across transactions
         - implementing separate raw-SQL Phase 5 transitions in non-force and force delete paths
         - reading bundles before runs.bundle_source when classifying bundle availability
+        - leaving a quiesced loaded context unavailable after a pre-commit delete failure
+        - restoring a deleted context after the final mutation reports durable commit evidence
+        - reconstructing a replayed coordinator result from only the final mutation or current topology
     force_owner_chain:
       - acquire shared destructive-operation mutex/idempotency owner
       - plan affected runs and deliveries for the bundle_hash

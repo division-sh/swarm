@@ -91,6 +91,10 @@ func (s *supervisorTestRetainedSession) ApplyBundleDeleteFinalMutation(_ context
 	return runtimebundledelete.FinalMutationResult{OperationName: req.OperationName, BundleHash: req.BundleHash, AppliedAt: req.RequestedAt, Deleted: true}, nil
 }
 
+func (*supervisorTestRetainedSession) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
+	return runtimebundledelete.Result{}, errors.New("not implemented")
+}
+
 func (s *supervisorTestRetainedSession) ApplyDestructiveResetCleanup(_ context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

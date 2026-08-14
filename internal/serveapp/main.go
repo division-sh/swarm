@@ -250,7 +250,9 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				Locks:              pg,
 				ContainerInventory: req.Workspaces,
 				Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
-				RuntimeQuiescer:    req.RuntimeContextManager,
+				RuntimeQuiescer: bundleDeleteRuntimeQuiescer{
+					contexts: req.RuntimeContextManager, supervisor: req.RuntimeSupervisor,
+				},
 			},
 			ConversationForks:         pg,
 			ConversationForkLifecycle: pg,
@@ -371,48 +373,48 @@ func (f processOwnedBundleDeleteFinalizer) ApplyBundleDeleteFinalMutation(ctx co
 	}
 	if transition != nil {
 		if err := transition.Commit(ctx, f.capability); err != nil {
-			return runtimebundledelete.FinalMutationResult{}, err
+			return result, err
 		}
 	}
 	return result, nil
 }
 
-func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.FinalMutationResult, error) {
+func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx context.Context, req runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
 	if f.capability == nil {
-		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay requires the process topology capability")
+		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires the process topology capability")
 	}
 	current, exists, err := f.capability.CurrentSourceSet(ctx)
 	if err != nil {
-		return runtimebundledelete.FinalMutationResult{}, err
+		return runtimebundledelete.Result{}, err
 	}
 	if !exists {
-		return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay requires an installed source set")
+		return runtimebundledelete.Result{}, errors.New("bundle delete replay requires an installed source set")
 	}
 	for _, source := range current.Sources {
 		if source.BundleHash == strings.TrimSpace(req.BundleHash) {
-			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay source is still current")
+			return runtimebundledelete.Result{}, errors.New("bundle delete replay source is still current")
 		}
 	}
 	var transition *runtime.PreparedRuntimeSourceSetTransition
 	if len(current.Sources) > 0 {
 		if f.runtimeContexts == nil {
-			return runtimebundledelete.FinalMutationResult{}, errors.New("bundle delete replay with surviving sources requires runtime context ownership")
+			return runtimebundledelete.Result{}, errors.New("bundle delete replay with surviving sources requires runtime context ownership")
 		}
 		transition, err = f.runtimeContexts.PreparePendingSourceSetTransition(ctx, current)
 		if err != nil {
-			return runtimebundledelete.FinalMutationResult{}, err
+			return runtimebundledelete.Result{}, err
 		}
 	}
-	result, replayErr := f.capability.ApplyBundleDeleteFinalMutation(ctx, req, nil)
+	result, replayErr := f.capability.ReplayBundleDeleteResult(ctx, req)
 	if replayErr != nil {
 		if transition != nil {
 			replayErr = errors.Join(replayErr, transition.Abort())
 		}
-		return runtimebundledelete.FinalMutationResult{}, replayErr
+		return runtimebundledelete.Result{}, replayErr
 	}
 	if transition != nil {
 		if err := transition.Commit(ctx, f.capability); err != nil {
-			return runtimebundledelete.FinalMutationResult{}, err
+			return runtimebundledelete.Result{}, err
 		}
 	}
 	return result, nil
@@ -1570,6 +1572,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		ExecutionPosture:        rt.ExecutionPosture,
 		ProcessCapability:       processCapability,
 		RuntimeContextManager:   runtimeContextManager,
+		RuntimeSupervisor:       supervisor,
 	})
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)

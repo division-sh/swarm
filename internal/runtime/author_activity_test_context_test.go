@@ -119,6 +119,10 @@ func (*runtimeTestRetainedSession) ApplyBundleDeleteFinalMutation(context.Contex
 	return runtimebundledelete.FinalMutationResult{}, errors.New("runtime test retained session does not own bundle deletion")
 }
 
+func (*runtimeTestRetainedSession) ReplayBundleDeleteResult(context.Context, runtimebundledelete.FinalMutationRequest) (runtimebundledelete.Result, error) {
+	return runtimebundledelete.Result{}, errors.New("runtime test retained session does not own bundle deletion replay")
+}
+
 func (*runtimeTestRetainedSession) ApplyDestructiveResetCleanup(context.Context, runtimedestructivereset.CleanupRequest, *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	return runtimedestructivereset.CleanupResult{}, errors.New("runtime test retained session does not own destructive reset")
 }
