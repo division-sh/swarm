@@ -47,7 +47,7 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "compute lookup", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"entity.verticals"}}}}},
 		{name: "compute validation", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Validation: &runtimecontracts.ComputeValidationSpec{Input: map[string]string{"value": "entity.verticals"}}}}},
 		{name: "compute module", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Module: &runtimecontracts.ComputeModuleSpec{Input: map[string]string{"value": "entity.verticals"}}}}},
-		{name: "query select", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Select: []string{"entity.verticals"}}}},
+		{name: "query source", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "entity.verticals"}}},
 		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.verticals"}}},
 		{name: "group by key", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{Key: "entity.verticals"}}},
 		{name: "filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals"}}},
@@ -65,6 +65,18 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 			}
 			t.Fatalf("reader census omitted entity.verticals: %#v", readers)
 		})
+	}
+}
+
+func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+		Source: "payload.items",
+		Select: []string{"entity.status"},
+	}}
+	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", handler) {
+		if reader.Expression == "entity.status" || strings.HasPrefix(reader.Kind, "query.select") {
+			t.Fatalf("query select literal entered executable reader census: %#v", reader)
+		}
 	}
 }
 

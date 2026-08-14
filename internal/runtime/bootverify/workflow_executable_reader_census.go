@@ -133,7 +133,11 @@ func handlerExecutableReaderExpressionsForSource(source semanticview.Source, flo
 	ctx := executableReaderContext{source: source, flowID: strings.TrimSpace(flowID), nodeID: strings.TrimSpace(nodeID), eventType: strings.TrimSpace(eventType)}
 	out := make([]expressionReference, 0, 24)
 	for _, field := range sortedExecutableReaderFields(systemNodeEventHandlerExecutableReaderCensus) {
+		before := len(out)
 		systemNodeEventHandlerExecutableReaderCensus[field](&out, ctx, handler)
+		for index := before; index < len(out); index++ {
+			out[index].HandlerField = field
+		}
 	}
 	// Canonical emit lowering expands emit.from and namespace sugar into the
 	// exact expressions executed at every declarative emit site.
@@ -365,9 +369,7 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 		(*out)[len(*out)-1].RequireScalarEntityLeaf = true
 	}
 	appendExecutableReader(out, kind+".group_by", query.GroupBy, phase)
-	for i, selected := range query.Select {
-		appendExecutableReader(out, fmt.Sprintf("%s.select[%d]", kind, i), selected, phase)
-	}
+	// Select entries are literal object field names, not executable expressions.
 	for i := range query.Queries {
 		appendQueryExecutableReaders(out, fmt.Sprintf("%s.queries[%d]", kind, i), &query.Queries[i])
 	}
