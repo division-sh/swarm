@@ -14,6 +14,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -38,6 +39,26 @@ type failOnceRuntimeReplacementPublication struct {
 	attempts         atomic.Int32
 	discardAttempts  atomic.Int32
 	withdrawAttempts atomic.Int32
+}
+
+type failOnceRuntimeReplacementRollback struct {
+	delegate         runtimeReplacementPublication
+	withdrawAttempts atomic.Int32
+}
+
+func (p *failOnceRuntimeReplacementRollback) Publish() error {
+	return p.delegate.Publish()
+}
+
+func (p *failOnceRuntimeReplacementRollback) Discard() error {
+	return p.delegate.Discard()
+}
+
+func (p *failOnceRuntimeReplacementRollback) Withdraw(ctx context.Context) error {
+	if p.withdrawAttempts.Add(1) == 1 {
+		return errors.New("injected transient replacement withdrawal failure")
+	}
+	return p.delegate.Withdraw(ctx)
 }
 
 func (p *failOnceRuntimeReplacementPublication) Publish() error {
@@ -81,7 +102,7 @@ func (p *recordingRuntimeReplacementPublication) Withdraw(context.Context) error
 	return p.withdrawErr
 }
 
-func TestRuntimeProjectSupervisorFailedRollbackCannotResumeForwardPublication(t *testing.T) {
+func TestRuntimeProjectSupervisorFailedRollbackRetainsExactTerminalOperation(t *testing.T) {
 	publication := &recordingRuntimeReplacementPublication{withdrawErr: errors.New("injected withdrawal failure")}
 	pending := &pendingRuntimeReplacement{publication: publication, phase: runtimeReplacementPublished}
 	supervisor := &runtimeProjectSupervisor{pendingReplacement: pending}
@@ -96,6 +117,64 @@ func TestRuntimeProjectSupervisorFailedRollbackCannotResumeForwardPublication(t 
 	}
 	if publication.publishAttempts.Load() != 0 {
 		t.Fatalf("forward publication attempts after failed rollback = %d, want 0", publication.publishAttempts.Load())
+	}
+	publication.withdrawErr = nil
+	if err := supervisor.rollbackPendingReplacement(context.Background(), pending); err != nil {
+		t.Fatalf("retry exact retained withdrawal: %v", err)
+	}
+	if publication.withdrawAttempts.Load() != 2 || supervisor.pendingReplacement != nil {
+		t.Fatalf("retained withdrawal retry = attempts:%d pending:%p, want 2/nil", publication.withdrawAttempts.Load(), supervisor.pendingReplacement)
+	}
+}
+
+func TestRuntimeProjectSupervisorOperationBoundariesFinalizeRetainedReplacementRollback(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*runtimeProjectSupervisor) error
+	}{
+		{
+			name: "close",
+			run: func(supervisor *runtimeProjectSupervisor) error {
+				_, err := supervisor.CloseProject(context.Background())
+				return err
+			},
+		},
+		{
+			name: "load",
+			run: func(supervisor *runtimeProjectSupervisor) error {
+				supervisor.DisableSourceReplacement("test boundary")
+				_, err := supervisor.loadProject(context.Background(), t.TempDir())
+				if err == nil || !strings.Contains(err.Error(), "test boundary") {
+					t.Fatalf("load boundary error = %v, want post-finalization source-replacement refusal", err)
+				}
+				return nil
+			},
+		},
+		{
+			name: "replace",
+			run: func(supervisor *runtimeProjectSupervisor) error {
+				_, err := supervisor.replaceCurrentRuntimeWithSource(
+					context.Background(), "", nil, nil, runtimecorrelation.BundleSourceFact{}, runtimecontracts.BundleIdentity{}, nil, nil,
+				)
+				if err == nil || !strings.Contains(err.Error(), "runtime replacement requires a candidate runtime") {
+					t.Fatalf("replace boundary error = %v, want post-finalization candidate validation", err)
+				}
+				return nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			supervisor := &runtimeProjectSupervisor{
+				pendingReplacementRollback: &pendingRuntimeReplacementRollback{phase: runtimeReplacementRollbackComplete},
+			}
+			if err := tt.run(supervisor); err != nil {
+				t.Fatalf("operation boundary: %v", err)
+			}
+			if supervisor.pendingReplacementRollback != nil {
+				t.Fatal("operation boundary did not finalize retained replacement rollback")
+			}
+		})
 	}
 }
 
@@ -358,8 +437,17 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 
 			var publicationHooks atomic.Int32
+			var rollbackPublication *failOnceRuntimeReplacementRollback
 			supervisor.SetRuntimePublishedHook(func(context.Context) error {
 				if publicationHooks.Add(1) == 1 {
+					supervisor.mu.RLock()
+					pending := supervisor.pendingReplacement
+					supervisor.mu.RUnlock()
+					if pending == nil {
+						t.Fatal("published candidate replacement was not retained")
+					}
+					rollbackPublication = &failOnceRuntimeReplacementRollback{delegate: pending.publication}
+					pending.publication = rollbackPublication
 					return errors.New("public ingress reconciliation failed")
 				}
 				return nil
@@ -371,14 +459,49 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				ctx, failedCandidate.root, failedCandidate.source, failedCandidate.bundle, failedCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: failedCandidate.hash}, failedCandidate.rt, failedCandidate.rt.WorkOccurrence(),
 			)
-			if replacementErr == nil || !strings.Contains(replacementErr.Error(), "public ingress reconciliation failed") {
-				t.Fatalf("post-publication replacement error = %v, want public ingress failure", replacementErr)
+			if replacementErr == nil || !strings.Contains(replacementErr.Error(), "public ingress reconciliation failed") ||
+				!strings.Contains(replacementErr.Error(), "injected transient replacement withdrawal failure") {
+				t.Fatalf("post-publication replacement error = %v, want public ingress and retained withdrawal failures", replacementErr)
+			}
+			if rollbackPublication == nil || rollbackPublication.withdrawAttempts.Load() != 1 {
+				t.Fatalf("retained withdrawal attempts = %v, want one failed attempt", rollbackPublication)
+			}
+			if ready.Load() {
+				t.Fatal("supervisor became ready while replacement rollback remained pending")
+			}
+			supervisor.mu.RLock()
+			retainedReplacementRollback := supervisor.pendingReplacementRollback
+			retainedRollbackPublication := supervisor.pendingReplacement
+			supervisor.mu.RUnlock()
+			if retainedReplacementRollback == nil || retainedRollbackPublication == nil || retainedRollbackPublication.phase != runtimeReplacementRollbackPublished {
+				phase := runtimeReplacementPrepared
+				if retainedRollbackPublication != nil {
+					phase = retainedRollbackPublication.phase
+				}
+				t.Fatalf("failed withdrawal continuation = rollback:%p publication:%p phase:%d", retainedReplacementRollback, retainedRollbackPublication, phase)
+			}
+			_, boundaryErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, candidate.root, candidate.source, candidate.bundle, candidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: candidate.hash}, nil, nil,
+			)
+			if boundaryErr == nil || !strings.Contains(boundaryErr.Error(), "runtime replacement requires a candidate runtime") {
+				t.Fatalf("replacement boundary after retained withdrawal = %v, want candidate validation after recovery", boundaryErr)
+			}
+			if rollbackPublication.withdrawAttempts.Load() != 2 {
+				t.Fatalf("retained withdrawal attempts after replacement boundary = %d, want 2", rollbackPublication.withdrawAttempts.Load())
 			}
 			if publicationHooks.Load() != 2 {
 				t.Fatalf("publication hooks = %d, want failed candidate plus restored predecessor", publicationHooks.Load())
 			}
 			if !ready.Load() || supervisor.CurrentRuntime() != restoredCandidate.rt || supervisor.CurrentProject().ProjectDir != candidate.root {
 				t.Fatalf("restored supervisor state = ready:%v runtime:%p project:%#v", ready.Load(), supervisor.CurrentRuntime(), supervisor.CurrentProject())
+			}
+			supervisor.mu.RLock()
+			retainedReplacementRollback = supervisor.pendingReplacementRollback
+			retainedRollbackPublication = supervisor.pendingReplacement
+			supervisor.mu.RUnlock()
+			if retainedReplacementRollback != nil || retainedRollbackPublication != nil {
+				t.Fatalf("replacement boundary retained settled rollback: rollback:%p publication:%p", retainedReplacementRollback, retainedRollbackPublication)
 			}
 			if lookup := contexts.LookupBundleHashStatus(candidate.hash); !lookup.Loaded() {
 				t.Fatalf("restored predecessor context = %#v, want loaded", lookup)
