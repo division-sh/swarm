@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -134,6 +135,54 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 				if afterDuplicate.Status != runtimedelivery.StatusDelivered || afterDuplicate.ClaimVersion != claimed.Claim.Version() {
 					t.Fatalf("exact duplicate changed lifecycle: %#v", afterDuplicate)
+				}
+			})
+
+			t.Run("delivery_continuation_restart_preserves_exact_payload_bytes", func(t *testing.T) {
+				payload := json.RawMessage("{\n  \"numeric\": 1.0, \"ordered\": {\"b\": 2, \"a\": 1}\n}")
+				event := deliveryLifecycleEventWithPayload("continuation-payload-"+backend.name, payload)
+				route := deliveryLifecycleConformanceRoute(t, "agent", "continuation-payload")
+				storetest.CommitSemanticEventWithInitialFacts(
+					t,
+					ctx,
+					backend.selected,
+					event,
+					[]events.DeliveryRoute{route},
+					runtimepipelineobligation.ScopeSubscribed,
+					storetest.AcknowledgedPipelineDisposition(),
+				)
+				deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, err := backend.store.Snapshot(ctx, deliveryID)
+				if err != nil {
+					t.Fatalf("load continuation authority: %v", err)
+				}
+				page, err := backend.restart.ScanDeliveryContinuations(
+					ctx,
+					snapshot.Authority,
+					runtimedelivery.ContinuationCursor{},
+					10,
+				)
+				if err != nil {
+					t.Fatalf("scan delivery continuations after restart: %v", err)
+				}
+				var restored *runtimedelivery.ContinuationItem
+				for i := range page.Items {
+					if page.Items[i].DeliveryID == deliveryID {
+						restored = &page.Items[i]
+						break
+					}
+				}
+				if restored == nil {
+					t.Fatalf("continuation page = %#v, want delivery %s", page, deliveryID)
+				}
+				if restored.Disposition != runtimedelivery.ClaimAcquired {
+					t.Fatalf("continuation disposition = %s, want acquired", restored.Disposition)
+				}
+				if !bytes.Equal(restored.Event.Payload(), payload) {
+					t.Fatalf("continuation payload = %q, want exact admitted bytes %q", restored.Event.Payload(), payload)
 				}
 			})
 
@@ -1346,12 +1395,16 @@ func assertDeliveryAttemptLeaseMatchesObligation(t *testing.T, ctx context.Conte
 }
 
 func deliveryLifecycleEvent(label string) events.Event {
+	return deliveryLifecycleEventWithPayload(label, json.RawMessage(`{"ok":true}`))
+}
+
+func deliveryLifecycleEventWithPayload(label string, payload json.RawMessage) events.Event {
 	return eventtest.RunCreatingRootIngress(
 		eventtest.UUID(label),
 		events.EventType("delivery.conformance"),
 		"conformance-ingress",
 		"",
-		json.RawMessage(`{"ok":true}`),
+		payload,
 		0,
 		eventtest.UUID(label+"-run"),
 		"",

@@ -21,9 +21,9 @@ func (r *recordingRuntimeMutationRunner) LoadRecordedActivityResult(ctx context.
 	if r == nil || r.db == nil {
 		return runtimeactivityresult.Record{}, false, fmt.Errorf("test activity result reader is required")
 	}
-	query := `SELECT event_id::text, event_name, payload::text FROM events WHERE event_id IN ($1::uuid, $2::uuid) ORDER BY event_id`
+	query := `SELECT event_id::text, event_name FROM events WHERE event_id IN ($1::uuid, $2::uuid) ORDER BY event_id`
 	if r.dialect != workflowStoreDialectPostgres {
-		query = `SELECT event_id, event_name, payload FROM events WHERE event_id IN (?, ?) ORDER BY event_id`
+		query = `SELECT event_id, event_name FROM events WHERE event_id IN (?, ?) ORDER BY event_id`
 	}
 	rows, err := r.db.QueryContext(ctx, query, request.SuccessEventID, request.FailureEventID)
 	if err != nil {
@@ -33,11 +33,9 @@ func (r *recordingRuntimeMutationRunner) LoadRecordedActivityResult(ctx context.
 	found := make([]runtimeactivityresult.Record, 0, 2)
 	for rows.Next() {
 		var record runtimeactivityresult.Record
-		var payload string
-		if err := rows.Scan(&record.EventID, &record.EventType, &payload); err != nil {
+		if err := rows.Scan(&record.EventID, &record.EventType); err != nil {
 			return runtimeactivityresult.Record{}, false, err
 		}
-		record.Payload = append(record.Payload, payload...)
 		found = append(found, record)
 	}
 	if err := rows.Err(); err != nil {

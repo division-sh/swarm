@@ -14,7 +14,7 @@ type Queryer interface {
 
 func LoadPostgres(ctx context.Context, db Queryer, request runtimeactivityresult.Query) (runtimeactivityresult.Record, bool, error) {
 	return load(ctx, db, request, `
-		SELECT event_id::text, event_name, payload::text
+		SELECT event_id::text, event_name
 		FROM events
 		WHERE event_id IN ($1::uuid, $2::uuid)
 		ORDER BY event_id
@@ -23,7 +23,7 @@ func LoadPostgres(ctx context.Context, db Queryer, request runtimeactivityresult
 
 func LoadSQLite(ctx context.Context, db Queryer, request runtimeactivityresult.Query) (runtimeactivityresult.Record, bool, error) {
 	return load(ctx, db, request, `
-		SELECT event_id, event_name, payload
+		SELECT event_id, event_name
 		FROM events
 		WHERE event_id IN (?, ?)
 		ORDER BY event_id
@@ -42,11 +42,9 @@ func load(ctx context.Context, db Queryer, request runtimeactivityresult.Query, 
 	found := make([]runtimeactivityresult.Record, 0, 2)
 	for rows.Next() {
 		var record runtimeactivityresult.Record
-		var payload string
-		if err := rows.Scan(&record.EventID, &record.EventType, &payload); err != nil {
+		if err := rows.Scan(&record.EventID, &record.EventType); err != nil {
 			return runtimeactivityresult.Record{}, false, fmt.Errorf("scan recorded activity result %s: %w", request.ActivityID, err)
 		}
-		record.Payload = append(record.Payload, payload...)
 		found = append(found, record)
 	}
 	if err := rows.Err(); err != nil {
