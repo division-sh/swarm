@@ -49,6 +49,15 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 						Timers:        []WorkflowTimerContract{{ID: "b-timer", Event: "b.tick"}},
 					},
 				},
+				Children: []FlowContractView{{
+					Paths: FlowContractPaths{PackageKey: "root/flows/b/child", NodesFile: "flows/b/child/nodes.yaml"},
+					Nodes: map[string]SystemNodeContract{
+						"package-child": {
+							EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-child-active")},
+							Timers:        []WorkflowTimerContract{{ID: "b-child-timer", Event: "b.child.tick"}},
+						},
+					},
+				}},
 			},
 			{
 				Paths: FlowContractPaths{ID: "a", PackageKey: "root", NodesFile: "flows/a/nodes.yaml"},
@@ -61,11 +70,20 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 			},
 		},
 	}
-	bundle := &WorkflowContractBundle{FlowTree: FlowTree{Root: &root}}
+	rootSource := ContractItemSource{PackageKey: "root", Layer: "project", File: "root/nodes.yaml"}
+	bundle := &WorkflowContractBundle{
+		FlowTree: FlowTree{Root: &root},
+		scopedNodes: map[string]SystemNodeContract{
+			contractScopeKey(rootSource, "package-node"): root.Nodes["package-node"],
+		},
+		scopedNodeSources: map[string]ContractItemSource{
+			contractScopeKey(rootSource, "package-node"): rootSource,
+		},
+	}
 
 	records := bundle.ScopedNodeRecords()
-	if len(records) != 3 {
-		t.Fatalf("ScopedNodeRecords() = %#v, want package root plus two scoped flow records", records)
+	if len(records) != 4 {
+		t.Fatalf("ScopedNodeRecords() = %#v, want package root, two scoped flows, and nested package record", records)
 	}
 	want := []struct {
 		logicalID string
@@ -76,20 +94,25 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 		{logicalID: "package-node", layer: "project", file: "root/nodes.yaml"},
 		{logicalID: "shared", flowID: "a", layer: "flow", file: "flows/a/nodes.yaml"},
 		{logicalID: "shared", flowID: "b", layer: "flow", file: "flows/b/nodes.yaml"},
+		{logicalID: "package-child", flowID: "b", layer: "project", file: "flows/b/child/nodes.yaml"},
 	}
 	for index, expected := range want {
 		got := records[index]
-		if got.LogicalID != expected.logicalID || got.Source.PackageKey != "root" || got.Source.FlowID != expected.flowID || got.Source.Layer != expected.layer || got.Source.File != expected.file {
-			t.Fatalf("ScopedNodeRecords()[%d] = %#v, want logical=%q package=root flow=%q layer=%q file=%q", index, got, expected.logicalID, expected.flowID, expected.layer, expected.file)
+		wantPackage := "root"
+		if expected.logicalID == "package-child" {
+			wantPackage = "root/flows/b/child"
+		}
+		if got.LogicalID != expected.logicalID || got.Source.PackageKey != wantPackage || got.Source.FlowID != expected.flowID || got.Source.Layer != expected.layer || got.Source.File != expected.file {
+			t.Fatalf("ScopedNodeRecords()[%d] = %#v, want logical=%q package=%q flow=%q layer=%q file=%q", index, got, expected.logicalID, wantPackage, expected.flowID, expected.layer, expected.file)
 		}
 	}
 
 	populateWorkflowSemantics(bundle)
-	if len(bundle.Semantics.Joins) != 3 {
-		t.Fatalf("exported-tree joins = %#v, want all three scoped handlers", bundle.Semantics.Joins)
+	if len(bundle.Semantics.Joins) != 4 {
+		t.Fatalf("exported-tree joins = %#v, want all four scoped handlers", bundle.Semantics.Joins)
 	}
-	if len(bundle.Semantics.Timers) != 3 {
-		t.Fatalf("exported-tree timers = %#v, want all three scoped nodes", bundle.Semantics.Timers)
+	if len(bundle.Semantics.Timers) != 4 {
+		t.Fatalf("exported-tree timers = %#v, want all four scoped nodes", bundle.Semantics.Timers)
 	}
 	seenFlow := map[string]bool{}
 	for _, join := range bundle.Semantics.Joins {
@@ -99,6 +122,31 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 		if !seenFlow[flowID] {
 			t.Fatalf("exported-tree joins = %#v, missing flow %q", bundle.Semantics.Joins, flowID)
 		}
+	}
+}
+
+func TestWorkflowContractBundleScopedNodeRecordsIncludeNestedRootOnlyProjects(t *testing.T) {
+	root := ProjectContractView{
+		Paths: ProjectPackagePaths{Key: "root", ProjectNodesFile: "root/nodes.yaml"},
+		Nodes: map[string]SystemNodeContract{"root-node": {ID: "root-node"}},
+	}
+	child := ProjectContractView{
+		Paths: ProjectPackagePaths{Key: "root/child", ProjectNodesFile: "child/nodes.yaml"},
+		Nodes: map[string]SystemNodeContract{"child-node": {ID: "child-node"}},
+	}
+	bundle := &WorkflowContractBundle{
+		projectContracts: map[string]ProjectContractView{"root": root, "root/child": child},
+		scopedNodes: map[string]SystemNodeContract{
+			"root::root-node": root.Nodes["root-node"],
+		},
+	}
+
+	records := bundle.ScopedNodeRecords()
+	if len(records) != 2 || records[0].LogicalID != "root-node" || records[1].LogicalID != "child-node" {
+		t.Fatalf("ScopedNodeRecords() = %#v, want complete root-only project census", records)
+	}
+	if records[1].Source.PackageKey != "root/child" || records[1].Source.FlowID != "" || records[1].Source.Layer != "project" || records[1].Source.File != "child/nodes.yaml" {
+		t.Fatalf("nested root-only project source = %#v", records[1].Source)
 	}
 }
 

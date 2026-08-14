@@ -297,6 +297,55 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 	t.Fatalf("duplicate scoped-node demands = %#v, want flow a shared-node items write", demands)
 }
 
+func TestBuildSingletonCoordinatorDemandProjection_IncludesNestedProjectPackageNodes(t *testing.T) {
+	bundle := loadSingletonCoordinatorFixtureBundle(t, `
+name: coordinator
+mode: singleton
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`, `
+coordinator_state:
+  verticals:
+    type: map[text]VerticalState
+    initial: {}
+`, "", `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received: {}
+`)
+	flow := bundle.FlowTree.ByID["coordinator"]
+	if flow == nil {
+		t.Fatal("coordinator flow view is missing")
+	}
+	flow.Children = append(flow.Children, runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			PackageKey: "flows/coordinator/nested",
+			NodesFile:  "flows/coordinator/nested/nodes.yaml",
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"nested-reader": {
+				ID: "nested-reader",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"job.received": {FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.verticals"}},
+				},
+			},
+		},
+	})
+
+	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
+		if demand.FlowID == "coordinator" && demand.NodeID == "nested-reader" && demand.Kind == "entity_read.fan_out.items_from" && demand.Target == "entity.verticals" && demand.SourceFile == "flows/coordinator/nested/nodes.yaml" {
+			return
+		}
+	}
+	t.Fatalf("nested project-package reader missing from coordinator demand: %#v", BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)))
+}
+
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator

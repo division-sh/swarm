@@ -204,6 +204,12 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 	if b == nil {
 		return nil
 	}
+	if b.FlowTree.Root != nil {
+		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
+	}
+	if len(b.projectContracts) > 0 {
+		return scopedNodeRecordsFromProjectViews(b.ProjectViews())
+	}
 	if len(b.scopedNodes) > 0 {
 		keys := make([]string, 0, len(b.scopedNodes))
 		for key := range b.scopedNodes {
@@ -225,9 +231,6 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 			})
 		}
 		return out
-	}
-	if b.FlowTree.Root != nil {
-		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
 	}
 	// Hand-built root-only semantic sources have no exported tree. In that
 	// closed shape Nodes is the authored declaration table, not a merged alias
@@ -251,13 +254,36 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 	return nil
 }
 
+func scopedNodeRecordsFromProjectViews(views []ProjectContractView) []ScopedNodeRecord {
+	out := make([]ScopedNodeRecord, 0)
+	for _, view := range views {
+		nodeIDs := make([]string, 0, len(view.Nodes))
+		for nodeID := range view.Nodes {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+		sort.Strings(nodeIDs)
+		for _, nodeID := range nodeIDs {
+			out = append(out, ScopedNodeRecord{
+				LogicalID: strings.TrimSpace(nodeID),
+				Entry:     view.Nodes[nodeID],
+				Source: ContractItemSource{
+					PackageKey: strings.TrimSpace(view.Paths.Key),
+					Layer:      "project",
+					File:       strings.TrimSpace(view.Paths.ProjectNodesFile),
+				},
+			})
+		}
+	}
+	return out
+}
+
 func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecord {
 	if root == nil {
 		return nil
 	}
 	out := make([]ScopedNodeRecord, 0)
-	var walk func(*FlowContractView, string)
-	walk = func(view *FlowContractView, inheritedPackageKey string) {
+	var walk func(*FlowContractView, string, string)
+	walk = func(view *FlowContractView, inheritedPackageKey, inheritedFlowID string) {
 		if view == nil {
 			return
 		}
@@ -265,9 +291,13 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecor
 		if packageKey == "" {
 			packageKey = strings.TrimSpace(inheritedPackageKey)
 		}
-		flowID := strings.TrimSpace(view.Paths.ID)
+		declaredFlowID := strings.TrimSpace(view.Paths.ID)
+		flowID := declaredFlowID
+		if flowID == "" {
+			flowID = strings.TrimSpace(inheritedFlowID)
+		}
 		layer := "project"
-		if flowID != "" {
+		if declaredFlowID != "" {
 			layer = "flow"
 		}
 		nodeIDs := make([]string, 0, len(view.Nodes))
@@ -292,10 +322,10 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecor
 			return exportedFlowTreeViewOrderKey(children[i], packageKey) < exportedFlowTreeViewOrderKey(children[j], packageKey)
 		})
 		for _, child := range children {
-			walk(child, packageKey)
+			walk(child, packageKey, flowID)
 		}
 	}
-	walk(root, "")
+	walk(root, "", "")
 	return out
 }
 
