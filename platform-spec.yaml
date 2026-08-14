@@ -10822,9 +10822,11 @@ flow_model:
         payload-backed. Executable readers are projected by one explicit closed
         handler/rule field census shared by demand, entity-reader coverage, and
         expression-reference validation. `query.select` entries are literal
-        object field names, while `filter.predicate` and `reduce.params` are not
-        runtime-executed inputs; none of those declarations creates executable
-        reader or coordinator demand. For filter, reduce, and count,
+        object field names, `activity.approval.decision` is an opaque stable
+        identifier, and nested `query.queries` sequence rows, `filter.predicate`,
+        and `reduce.params` are not runtime-executed inputs. Nested query rows
+        also create no writer or lifecycle availability; none of these
+        declarations creates executable reader, writer, or coordinator demand. For filter, reduce, and count,
         `items_from` is the executable source when present and `source` is only
         its fallback; a shadowed `source` creates no demand. Join derivation and join validation
         consume the same scoped node records, which preserve exact

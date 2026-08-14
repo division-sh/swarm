@@ -639,11 +639,6 @@ func queryReferencesEntity(query *runtimecontracts.QuerySpec) bool {
 		typedPathReferencesEntity(query.GroupBy, query.GroupByPath) {
 		return true
 	}
-	for index := range query.Queries {
-		if queryReferencesEntity(&query.Queries[index]) {
-			return true
-		}
-	}
 	return false
 }
 

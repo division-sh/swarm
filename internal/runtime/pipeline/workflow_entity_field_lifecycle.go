@@ -79,17 +79,9 @@ func WorkflowEntityFieldsAvailableBeforeEmitFields(handler runtimecontracts.Syst
 			available[field] = struct{}{}
 		}
 	}
-	var addQueryWriter func(query *runtimecontracts.QuerySpec)
-	addQueryWriter = func(query *runtimecontracts.QuerySpec) {
-		if query == nil {
-			return
-		}
-		addWriter(query.StoreAs)
-		for i := range query.Queries {
-			addQueryWriter(&query.Queries[i])
-		}
+	if handler.Query != nil {
+		addWriter(handler.Query.StoreAs)
 	}
-	addQueryWriter(handler.Query)
 	if handler.Filter != nil {
 		addWriter(handler.Filter.StoreAs)
 	}
@@ -146,17 +138,9 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 			addWriter(rule.Compute.StoreAs)
 		}
 	}
-	var addQueryWriter func(query *runtimecontracts.QuerySpec)
-	addQueryWriter = func(query *runtimecontracts.QuerySpec) {
-		if query == nil {
-			return
-		}
-		addWriter(query.StoreAs)
-		for i := range query.Queries {
-			addQueryWriter(&query.Queries[i])
-		}
+	if handler.Query != nil {
+		addWriter(handler.Query.StoreAs)
 	}
-	addQueryWriter(handler.Query)
 	if phaseAfter(phase, WorkflowEntityFieldLifecycleFilter) {
 		if handler.Filter != nil {
 			addWriter(handler.Filter.StoreAs)

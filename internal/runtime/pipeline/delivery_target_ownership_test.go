@@ -465,6 +465,12 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 			name:    "count source shadowed by items from",
 			handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{Source: "entity.items", ItemsFrom: "payload.items"}},
 		},
+		{
+			name: "nested query row",
+			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
+				Queries: []runtimecontracts.QuerySpec{{Source: "entity.items"}},
+			}},
+		},
 	}
 
 	for _, tc := range tests {
