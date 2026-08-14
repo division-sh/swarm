@@ -541,20 +541,32 @@ type processAdmissionCandidate struct {
 
 type runtimeReplacementPublication interface {
 	Publish() error
+	Discard() error
+	Withdraw(context.Context) error
 }
 
+type runtimeReplacementPhase uint8
+
+const (
+	runtimeReplacementPrepared runtimeReplacementPhase = iota
+	runtimeReplacementPublished
+	runtimeReplacementRollbackPrepared
+	runtimeReplacementRollbackPublished
+)
+
 type pendingRuntimeReplacement struct {
-	mu          sync.Mutex
-	publication runtimeReplacementPublication
-	root        string
-	source      semanticview.Source
-	bundle      *runtimecontracts.WorkflowContractBundle
-	fact        runtimecorrelation.BundleSourceFact
-	identity    runtimecontracts.BundleIdentity
-	runtime     *runtime.Runtime
-	admission   *processAdmissionCandidate
-	freeze      *startupHandoffFreeze
-	finalized   bool
+	mu                     sync.Mutex
+	publication            runtimeReplacementPublication
+	phase                  runtimeReplacementPhase
+	reconcilePublicIngress func(context.Context) error
+	root                   string
+	source                 semanticview.Source
+	bundle                 *runtimecontracts.WorkflowContractBundle
+	fact                   runtimecorrelation.BundleSourceFact
+	identity               runtimecontracts.BundleIdentity
+	runtime                *runtime.Runtime
+	admission              *processAdmissionCandidate
+	freeze                 *startupHandoffFreeze
 }
 
 type pendingRuntimeSourceSetRollback struct {
@@ -885,37 +897,85 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 	if current != pending {
 		return nil
 	}
-	if err := pending.publication.Publish(); err != nil {
-		s.setReady(false)
-		return fmt.Errorf("publish finalized runtime replacement: %w", err)
-	}
-	s.mu.Lock()
-	if s.pendingReplacement != pending {
+	if pending.phase == runtimeReplacementPrepared {
+		if err := pending.publication.Publish(); err != nil {
+			s.setReady(false)
+			return fmt.Errorf("publish finalized runtime replacement: %w", err)
+		}
+		s.mu.Lock()
+		if s.pendingReplacement != pending {
+			s.mu.Unlock()
+			return errors.New("pending runtime replacement changed before publication")
+		}
+		s.currentRoot = strings.TrimSpace(pending.root)
+		s.currentSource = pending.source
+		s.currentBundle = pending.bundle
+		s.currentRT = pending.runtime
+		s.currentBundleSourceFact = pending.fact
+		s.currentBundleIdentity = pending.identity
+		if pending.admission != nil {
+			s.providerTriggers = pending.admission.catalog
+			s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
+			s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+		}
+		pending.reconcilePublicIngress = s.onRuntimePublished
+		pending.phase = runtimeReplacementPublished
 		s.mu.Unlock()
-		return errors.New("pending runtime replacement changed before publication")
+		pending.freeze.Release()
 	}
-	s.currentRoot = strings.TrimSpace(pending.root)
-	s.currentSource = pending.source
-	s.currentBundle = pending.bundle
-	s.currentRT = pending.runtime
-	s.currentBundleSourceFact = pending.fact
-	s.currentBundleIdentity = pending.identity
-	if pending.admission != nil {
-		s.providerTriggers = pending.admission.catalog
-		s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
-		s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+	if pending.phase == runtimeReplacementRollbackPrepared || pending.phase == runtimeReplacementRollbackPublished {
+		return errors.New("pending runtime replacement rollback is incomplete")
 	}
-	s.pendingReplacement = nil
-	hook := s.onRuntimePublished
-	s.mu.Unlock()
-	pending.freeze.Release()
-	if hook != nil {
-		if err := hook(s.runtimeStartContext(context.Background())); err != nil {
+	if pending.phase != runtimeReplacementPublished {
+		return errors.New("pending runtime replacement has an invalid publication phase")
+	}
+	if pending.reconcilePublicIngress != nil {
+		if err := pending.reconcilePublicIngress(s.runtimeStartContext(context.Background())); err != nil {
 			s.setReady(false)
 			return fmt.Errorf("reconcile published runtime public ingress: %w", err)
 		}
 	}
+	s.mu.Lock()
+	if s.pendingReplacement != pending {
+		s.mu.Unlock()
+		return errors.New("pending runtime replacement changed before ingress reconciliation")
+	}
+	s.pendingReplacement = nil
+	s.mu.Unlock()
 	s.setReady(true)
+	return nil
+}
+
+func (s *runtimeProjectSupervisor) rollbackPendingReplacement(ctx context.Context, pending *pendingRuntimeReplacement) error {
+	if s == nil || pending == nil {
+		return errors.New("pending runtime replacement rollback requires supervisor and publication")
+	}
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	var err error
+	switch pending.phase {
+	case runtimeReplacementPrepared:
+		pending.phase = runtimeReplacementRollbackPrepared
+		err = pending.publication.Discard()
+	case runtimeReplacementRollbackPrepared:
+		err = pending.publication.Discard()
+	case runtimeReplacementPublished:
+		pending.phase = runtimeReplacementRollbackPublished
+		err = pending.publication.Withdraw(ctx)
+	case runtimeReplacementRollbackPublished:
+		err = pending.publication.Withdraw(ctx)
+	default:
+		return errors.New("pending runtime replacement has an invalid rollback phase")
+	}
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingReplacement != pending {
+		return errors.New("pending runtime replacement changed before rollback completed")
+	}
+	s.pendingReplacement = nil
 	return nil
 }
 
@@ -1199,15 +1259,10 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		s.mu.Unlock()
 		transitionRetained = true
 		if err := s.completePendingReplacement(); err != nil {
-			s.mu.Lock()
-			if s.pendingReplacement == pending {
-				s.pendingReplacement = nil
-			}
-			s.mu.Unlock()
-			withdrawErr := publication.Withdraw(context.Background())
+			publicationRollbackErr := s.rollbackPendingReplacement(context.Background(), pending)
 			shutdownErr := s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			if withdrawErr != nil || shutdownErr != nil {
-				return s.CurrentProject(), errors.Join(err, withdrawErr, shutdownErr)
+			if publicationRollbackErr != nil || shutdownErr != nil {
+				return s.CurrentProject(), errors.Join(err, publicationRollbackErr, shutdownErr)
 			}
 			restoreSupervisorPredecessor()
 			return s.CurrentProject(), restoreAfterSurvivorCommit(err)

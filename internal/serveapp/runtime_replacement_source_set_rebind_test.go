@@ -34,8 +34,10 @@ type failSourceSetGrantCapability struct {
 }
 
 type failOnceRuntimeReplacementPublication struct {
-	delegate runtimeReplacementPublication
-	attempts atomic.Int32
+	delegate         runtimeReplacementPublication
+	attempts         atomic.Int32
+	discardAttempts  atomic.Int32
+	withdrawAttempts atomic.Int32
 }
 
 func (p *failOnceRuntimeReplacementPublication) Publish() error {
@@ -43,6 +45,58 @@ func (p *failOnceRuntimeReplacementPublication) Publish() error {
 		return errors.New("injected retained predecessor publication failure")
 	}
 	return p.delegate.Publish()
+}
+
+func (p *failOnceRuntimeReplacementPublication) Discard() error {
+	p.discardAttempts.Add(1)
+	return p.delegate.Discard()
+}
+
+func (p *failOnceRuntimeReplacementPublication) Withdraw(ctx context.Context) error {
+	p.withdrawAttempts.Add(1)
+	return p.delegate.Withdraw(ctx)
+}
+
+type recordingRuntimeReplacementPublication struct {
+	publishAttempts  atomic.Int32
+	discardAttempts  atomic.Int32
+	withdrawAttempts atomic.Int32
+	publishErr       error
+	discardErr       error
+	withdrawErr      error
+}
+
+func (p *recordingRuntimeReplacementPublication) Publish() error {
+	p.publishAttempts.Add(1)
+	return p.publishErr
+}
+
+func (p *recordingRuntimeReplacementPublication) Discard() error {
+	p.discardAttempts.Add(1)
+	return p.discardErr
+}
+
+func (p *recordingRuntimeReplacementPublication) Withdraw(context.Context) error {
+	p.withdrawAttempts.Add(1)
+	return p.withdrawErr
+}
+
+func TestRuntimeProjectSupervisorFailedRollbackCannotResumeForwardPublication(t *testing.T) {
+	publication := &recordingRuntimeReplacementPublication{withdrawErr: errors.New("injected withdrawal failure")}
+	pending := &pendingRuntimeReplacement{publication: publication, phase: runtimeReplacementPublished}
+	supervisor := &runtimeProjectSupervisor{pendingReplacement: pending}
+	if err := supervisor.rollbackPendingReplacement(context.Background(), pending); err == nil || !strings.Contains(err.Error(), "injected withdrawal failure") {
+		t.Fatalf("rollback pending replacement error = %v, want injected withdrawal failure", err)
+	}
+	if pending.phase != runtimeReplacementRollbackPublished || supervisor.pendingReplacement != pending {
+		t.Fatalf("failed rollback did not retain terminal rollback phase: phase=%d pending=%p want=%p", pending.phase, supervisor.pendingReplacement, pending)
+	}
+	if err := supervisor.completePendingReplacement(); err == nil || !strings.Contains(err.Error(), "rollback is incomplete") {
+		t.Fatalf("forward completion after failed rollback = %v, want fail-closed phase rejection", err)
+	}
+	if publication.publishAttempts.Load() != 0 {
+		t.Fatalf("forward publication attempts after failed rollback = %d, want 0", publication.publishAttempts.Load())
+	}
 }
 
 func (c *failSourceSetGrantCapability) IssueGenerationGrant(
@@ -63,6 +117,49 @@ func (c *failSourceSetGrantCapability) IssueGenerationGrant(
 		}
 	}
 	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
+}
+
+func TestRuntimeProjectSupervisorRollbackPendingReplacementUsesExactPublicationPhase(t *testing.T) {
+	tests := []struct {
+		name         string
+		phase        runtimeReplacementPhase
+		publishFails bool
+		wantDiscard  int32
+		wantWithdraw int32
+	}{
+		{name: "failed preparation discards", phase: runtimeReplacementPrepared, publishFails: true, wantDiscard: 1},
+		{name: "published withdraws", phase: runtimeReplacementPublished, wantWithdraw: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			publication := &recordingRuntimeReplacementPublication{}
+			if tt.publishFails {
+				publication.publishErr = errors.New("injected pre-publication failure")
+			}
+			pending := &pendingRuntimeReplacement{publication: publication, phase: tt.phase}
+			supervisor := &runtimeProjectSupervisor{pendingReplacement: pending}
+			if tt.publishFails {
+				if err := supervisor.completePendingReplacement(); err == nil || !strings.Contains(err.Error(), "injected pre-publication failure") {
+					t.Fatalf("complete pending replacement error = %v, want injected pre-publication failure", err)
+				}
+				if pending.phase != runtimeReplacementPrepared || supervisor.pendingReplacement != pending {
+					t.Fatalf("failed publication advanced or lost prepared continuation: phase=%d pending=%p want=%p", pending.phase, supervisor.pendingReplacement, pending)
+				}
+			}
+			if err := supervisor.rollbackPendingReplacement(context.Background(), pending); err != nil {
+				t.Fatalf("rollback pending replacement: %v", err)
+			}
+			if got := publication.discardAttempts.Load(); got != tt.wantDiscard {
+				t.Fatalf("discard attempts = %d, want %d", got, tt.wantDiscard)
+			}
+			if got := publication.withdrawAttempts.Load(); got != tt.wantWithdraw {
+				t.Fatalf("withdraw attempts = %d, want %d", got, tt.wantWithdraw)
+			}
+			if supervisor.pendingReplacement != nil {
+				t.Fatal("settled replacement rollback remained pending")
+			}
+		})
+	}
 }
 
 func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothStores(t *testing.T) {
@@ -367,8 +464,11 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.SetProcessCapability(retainedCapability)
 			var retainedFailureHooks atomic.Int32
 			supervisor.SetRuntimePublishedHook(func(context.Context) error {
-				if retainedFailureHooks.Add(1) == 1 {
+				switch retainedFailureHooks.Add(1) {
+				case 1:
 					return errors.New("public ingress reconciliation failed before retained survivor recovery")
+				case 2:
+					return errors.New("retained predecessor public ingress reconciliation failed")
 				}
 				return nil
 			})
@@ -461,15 +561,44 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatalf("transient predecessor publication lost exact continuation: rollback:%p/%p publication:%p/%p retained:%p", stillPendingRollback, pendingRollback, stillPendingPublication, retainedPublication, pendingRollback.predecessorPublication)
 			}
 
+			_, predecessorIngressErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
+			)
+			if predecessorIngressErr == nil || !strings.Contains(predecessorIngressErr.Error(), "retained predecessor public ingress reconciliation failed") {
+				t.Fatalf("retained predecessor ingress reconciliation failure = %v", predecessorIngressErr)
+			}
+			if failingPublication.attempts.Load() != 2 {
+				t.Fatalf("retained predecessor publication attempts after ingress failure = %d, want one failed and one successful publication attempt", failingPublication.attempts.Load())
+			}
+			if retainedFailureHooks.Load() != 2 || ready.Load() {
+				t.Fatalf("retained predecessor ingress phase = attempts:%d ready:%v, want 2/false", retainedFailureHooks.Load(), ready.Load())
+			}
+			supervisor.mu.RLock()
+			stillPendingRollback = supervisor.pendingSourceSetRollback
+			stillPendingPublication = supervisor.pendingReplacement
+			supervisor.mu.RUnlock()
+			if stillPendingRollback != pendingRollback || stillPendingPublication != retainedPublication || retainedPublication.phase != runtimeReplacementPublished {
+				t.Fatalf("published predecessor ingress continuation was not retained: rollback:%p/%p publication:%p/%p phase:%d", stillPendingRollback, pendingRollback, stillPendingPublication, retainedPublication, retainedPublication.phase)
+			}
+			var successorHooks atomic.Int32
+			supervisor.SetRuntimePublishedHook(func(context.Context) error {
+				successorHooks.Add(1)
+				return nil
+			})
+
 			recoveryStatus, recoveryErr := supervisor.replaceCurrentRuntimeWithSource(
 				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
 			)
 			if recoveryErr != nil {
-				t.Fatalf("replacement boundary did not finalize retained predecessor recovery: %v", recoveryErr)
+				t.Fatalf("replacement boundary did not finalize retained predecessor ingress recovery: %v", recoveryErr)
 			}
 			if failingPublication.attempts.Load() != 2 {
-				t.Fatalf("retained predecessor publication attempts = %d, want exact retry", failingPublication.attempts.Load())
+				t.Fatalf("retained predecessor publication was repeated after ingress failure: attempts=%d want 2", failingPublication.attempts.Load())
+			}
+			if failingPublication.discardAttempts.Load() != 0 || failingPublication.withdrawAttempts.Load() != 0 {
+				t.Fatalf("retained predecessor publication was rolled back: discard=%d withdraw=%d", failingPublication.discardAttempts.Load(), failingPublication.withdrawAttempts.Load())
 			}
 			if !recoveryStatus.Loaded || !ready.Load() || supervisor.CurrentRuntime() != recoveryCandidate.rt {
 				t.Fatalf("replacement after retained recovery = status:%#v ready:%v runtime:%p want:%p", recoveryStatus, ready.Load(), supervisor.CurrentRuntime(), recoveryCandidate.rt)
@@ -477,8 +606,8 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if retainedCapability.attempts.Load() < 3 || retainedCapability.failures.Load() != 2 {
 				t.Fatalf("finalized predecessor survivor grant attempts = %d failures:%d, want retained third attempt", retainedCapability.attempts.Load(), retainedCapability.failures.Load())
 			}
-			if retainedFailureHooks.Load() != 3 {
-				t.Fatalf("retained recovery publication hooks = %d, want failed candidate, restored predecessor, and replacement", retainedFailureHooks.Load())
+			if retainedFailureHooks.Load() != 3 || successorHooks.Load() != 1 {
+				t.Fatalf("captured predecessor/successor publication hooks = %d/%d, want 3/1", retainedFailureHooks.Load(), successorHooks.Load())
 			}
 			supervisor.mu.RLock()
 			pendingRollback = supervisor.pendingSourceSetRollback
