@@ -10818,9 +10818,13 @@ flow_model:
         readers such as fan_out.items_from create demand. Every effective join
         creates intrinsic coordinator demand even when its membership paths are
         payload-backed. Executable readers are projected by one explicit closed
-        handler/rule field census over scoped node records; node IDs are local to
-        their project/flow declaration scope and flattened aliases are not
-        semantic input. Map/list declaration shape without an exact consumer
+        handler/rule field census shared by demand, entity-reader coverage, and
+        expression-reference validation. Scoped node records preserve exact
+        project/flow ownership from the loader or the exported FlowTree,
+        including blank-ID package roots; root Nodes are authoritative only when
+        no tree exists. Node IDs are local to their declaration scope and
+        flattened aliases are not semantic input. Map/list declaration shape
+        without an exact consumer
         creates no demand, no coordinator readback, and no strict-refinement
         call. When demand exists,
         ResolveFlowSingletonCoordinator requires resolvable typed map/list state

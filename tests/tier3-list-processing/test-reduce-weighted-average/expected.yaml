@@ -1,12 +1,12 @@
 trigger:
   event: scores.submitted
   payload:
-  entity:
     scores:
       - score: 80
         weight: 3
       - score: 60
         weight: 1
+  entity:
 
 expected:
 

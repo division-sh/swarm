@@ -6,7 +6,7 @@ reduce-node:
   event_handlers:
     scores.submitted:
       reduce:
-        items_from: entity.scores
+        items_from: payload.scores
         operation: pick_or_average
         store_as: entity.result
       emit:
