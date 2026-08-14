@@ -100,9 +100,17 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			if lookup := manager.LookupBundleHashStatus(fact.BundleHash()); lookup.Loaded() {
 				t.Fatalf("runtime remained loaded during quiescence: %#v", lookup)
 			}
+			if supervisor.operationMu.TryLock() {
+				supervisor.operationMu.Unlock()
+				t.Fatal("bundle delete released supervisor operation ownership before restoration")
+			}
 			if err := quiescence.Restore(context.Background()); err != nil {
 				t.Fatalf("restore bundle runtime: %v", err)
 			}
+			if !supervisor.operationMu.TryLock() {
+				t.Fatal("bundle delete retained supervisor operation ownership after restoration")
+			}
+			supervisor.operationMu.Unlock()
 			use, _, err := manager.AcquireBundleHash(context.Background(), fact.BundleHash())
 			if err != nil || use == nil || use.Runtime() != restored {
 				t.Fatalf("restored runtime authority = use:%#v err:%v", use, err)
@@ -123,6 +131,72 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			}
 		})
 	}
+}
+
+func TestBundleDeleteRuntimeQuiescenceFinalizesRetainedRecoveryBeforeLookup(t *testing.T) {
+	t.Run("replacement_rollback", func(t *testing.T) {
+		contexts := &runtimepkg.RuntimeContextManager{}
+		publication := &recordingRuntimeReplacementPublication{}
+		pendingPublication := &pendingRuntimeReplacement{
+			publication: publication, freeze: &startupHandoffFreeze{}, retainCurrentProject: true,
+		}
+		pendingRollback := &pendingRuntimeReplacementRollback{
+			phase: runtimeReplacementRollbackPredecessor, predecessorPublication: pendingPublication,
+		}
+		supervisor := &runtimeProjectSupervisor{
+			pendingReplacement: pendingPublication, pendingReplacementRollback: pendingRollback,
+		}
+		quiescence, err := (bundleDeleteRuntimeQuiescer{contexts: contexts, supervisor: supervisor}).QuiesceBundleRuntime(context.Background(), "not-loaded")
+		if err != nil {
+			t.Fatalf("finalize replacement rollback before bundle lookup: %v", err)
+		}
+		if publication.publishAttempts.Load() != 1 {
+			t.Fatalf("retained replacement predecessor publication attempts = %d, want 1", publication.publishAttempts.Load())
+		}
+		if supervisor.pendingReplacementRollback != nil || supervisor.pendingReplacement != nil {
+			t.Fatalf("bundle lookup preceded retained replacement rollback finalization: rollback:%p publication:%p", supervisor.pendingReplacementRollback, supervisor.pendingReplacement)
+		}
+		if supervisor.operationMu.TryLock() {
+			supervisor.operationMu.Unlock()
+			t.Fatal("inert bundle delete token did not retain supervisor operation ownership")
+		}
+		quiescence.Commit()
+		if !supervisor.operationMu.TryLock() {
+			t.Fatal("inert bundle delete commit did not release supervisor operation ownership")
+		}
+		supervisor.operationMu.Unlock()
+	})
+
+	t.Run("source_set_rollback", func(t *testing.T) {
+		contexts := &runtimepkg.RuntimeContextManager{}
+		publication := &recordingRuntimeReplacementPublication{}
+		pendingPublication := &pendingRuntimeReplacement{
+			publication: publication, freeze: &startupHandoffFreeze{}, retainCurrentProject: true,
+		}
+		pendingRollback := &pendingRuntimeSourceSetRollback{
+			survivorsRecovered: true, predecessorPublication: pendingPublication,
+		}
+		supervisor := &runtimeProjectSupervisor{
+			pendingReplacement: pendingPublication, pendingSourceSetRollback: pendingRollback,
+		}
+		quiescence, err := (bundleDeleteRuntimeQuiescer{contexts: contexts, supervisor: supervisor}).QuiesceBundleRuntime(context.Background(), "not-loaded")
+		if err != nil {
+			t.Fatalf("finalize source-set rollback before bundle lookup: %v", err)
+		}
+		if publication.publishAttempts.Load() != 1 {
+			t.Fatalf("retained predecessor publication attempts = %d, want 1", publication.publishAttempts.Load())
+		}
+		if supervisor.pendingSourceSetRollback != nil || supervisor.pendingReplacement != nil {
+			t.Fatalf("bundle lookup preceded retained source-set recovery: rollback:%p publication:%p", supervisor.pendingSourceSetRollback, supervisor.pendingReplacement)
+		}
+		if err := quiescence.Restore(context.Background()); err != nil {
+			t.Fatalf("release inert bundle delete operation: %v", err)
+		}
+		if !supervisor.operationMu.TryLock() {
+			t.Fatal("inert bundle delete restore did not release supervisor operation ownership")
+		}
+		supervisor.operationMu.Unlock()
+	})
 }
 
 func TestRuntimeReplacementPublicationCanRetainPrimaryProject(t *testing.T) {

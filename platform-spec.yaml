@@ -16629,6 +16629,10 @@ multi_bundle_persistence:
           In DB-loaded RuntimeContextManager mode, every real bundle.delete for a loaded bundle_hash MUST quiesce and
           join that BundleContext before force cleanup or the non-force final bundle/topology mutation. Static agents
           self-release to the non-running registered state while their predecessor source-set revision is still current;
+          before classifying the target BundleContext as loaded or unloaded, the runtime quiescence owner MUST settle
+          every retained replacement rollback, source-set rollback, and predecessor publication under one serialized
+          supervisor operation. That operation remains owned until the returned quiescence token is restored or committed,
+          so concurrent reload/replacement cannot recreate a withdrawn or fenced context between recovery and lookup;
           only then may the selected-store finalizer atomically remove the source and bundle. Before that deletion can
           report completion, process composition MUST rotate every surviving loaded runtime to an admitted successor
           generation grant and rebind every surviving static lifecycle cell to the committed complete source-set
@@ -16666,6 +16670,7 @@ multi_bundle_persistence:
         - leaving a quiesced loaded context unavailable after a pre-commit delete failure
         - restoring a deleted context after the final mutation reports durable commit evidence
         - reconstructing a replayed coordinator result from only the final mutation or current topology
+        - classifying a bundle runtime as unloaded before retained replacement or source-set rollback finalization
     force_owner_chain:
       - acquire shared destructive-operation mutex/idempotency owner
       - plan affected runs and deliveries for the bundle_hash
@@ -33491,8 +33496,8 @@ agent_topology_authority:
       A pre-publication failure is discarded rather than withdrawn. A successfully published predecessor remains the exact pending
       continuation until its captured public-ingress reconciliation succeeds; retry resumes that reconciliation without republishing.
       A transient discard or withdrawal failure retains the complete typed replacement rollback operation, and every later reload,
-      replacement, or close boundary resumes its exact remaining candidate-shutdown, supervisor-snapshot, source-set/survivor, and
-      predecessor-publication phases before normal operation.
+      replacement, bundle-delete, or close boundary resumes its exact remaining candidate-shutdown, supervisor-snapshot,
+      source-set/survivor, and predecessor-publication phases before normal operation.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
