@@ -399,7 +399,7 @@ func appendFilterExecutableReaders(out *[]expressionReference, filter *runtimeco
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleFilter
 	appendExecutableReader(out, "filter.source", filter.Source, phase)
 	appendExecutableReader(out, "filter.items_from", filter.ItemsFrom, phase)
-	appendExecutableReader(out, "filter.predicate", filter.Predicate, phase)
+	// Predicate is not evaluated by stepFilter; Condition is the executable filter expression.
 	appendExecutableReader(out, "filter.condition", filter.Condition, phase)
 }
 
@@ -410,7 +410,7 @@ func appendReduceExecutableReaders(out *[]expressionReference, reduce *runtimeco
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleReduce
 	appendExecutableReader(out, "reduce.source", reduce.Source, phase)
 	appendExecutableReader(out, "reduce.items_from", reduce.ItemsFrom, phase)
-	appendExpressionValueMapExecutableReaders(out, "reduce.params", reduce.Params, phase)
+	// Params are not evaluated by stepReduce; Operation selects the reduction behavior.
 }
 
 func appendCountExecutableReaders(out *[]expressionReference, count *runtimecontracts.CountSpec) {

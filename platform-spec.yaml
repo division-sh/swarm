@@ -10821,7 +10821,10 @@ flow_model:
         creates intrinsic coordinator demand even when its membership paths are
         payload-backed. Executable readers are projected by one explicit closed
         handler/rule field census shared by demand, entity-reader coverage, and
-        expression-reference validation. Join derivation and join validation
+        expression-reference validation. `query.select` entries are literal
+        object field names, while `filter.predicate` and `reduce.params` are not
+        runtime-executed inputs; none of those declarations creates executable
+        reader or coordinator demand. Join derivation and join validation
         consume the same scoped node records, which preserve exact
         project/flow ownership from the loader or the exported FlowTree,
         including blank-ID package roots; root Nodes are authoritative only when

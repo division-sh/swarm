@@ -436,6 +436,34 @@ func TestHandlerExecutionEntityRequirementOwnsDurableBehaviorCapabilities(t *tes
 	}
 }
 
+func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "filter predicate",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				Predicate: "entity.items",
+			}},
+		},
+		{
+			name: "reduce params",
+			handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{
+				Params: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.items")},
+			}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := handlerExecutionEntityRequirement(nil, "review", tc.handler); got != handlerEntitylessSafe {
+				t.Fatalf("handler execution requirement = %d, want entityless-safe for unevaluated field", got)
+			}
+		})
+	}
+}
+
 func deliveryTargetOwnershipSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},

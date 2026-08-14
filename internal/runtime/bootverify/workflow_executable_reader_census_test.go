@@ -51,7 +51,7 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.verticals"}}},
 		{name: "group by key", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{Key: "entity.verticals"}}},
 		{name: "filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals"}}},
-		{name: "reduce param", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Params: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}},
+		{name: "reduce source", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.verticals"}}},
 		{name: "count", handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{ItemsFrom: "entity.verticals"}}},
 	}
 
@@ -64,6 +64,34 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 				}
 			}
 			t.Fatalf("reader census omitted entity.verticals: %#v", readers)
+		})
+	}
+}
+
+func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name: "filter predicate",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
+				Predicate: "entity.verticals",
+			}},
+		},
+		{
+			name: "reduce params",
+			handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{
+				Params: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.verticals")},
+			}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if readers := handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", tc.handler); len(readers) != 0 {
+				t.Fatalf("unevaluated field entered executable reader census: %#v", readers)
+			}
 		})
 	}
 }
