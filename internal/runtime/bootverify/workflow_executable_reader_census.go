@@ -397,8 +397,7 @@ func appendFilterExecutableReaders(out *[]expressionReference, filter *runtimeco
 		return
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleFilter
-	appendExecutableReader(out, "filter.source", filter.Source, phase)
-	appendExecutableReader(out, "filter.items_from", filter.ItemsFrom, phase)
+	appendCollectionSourceExecutableReader(out, "filter", filter.Source, filter.ItemsFrom, phase)
 	// Predicate is not evaluated by stepFilter; Condition is the executable filter expression.
 	appendExecutableReader(out, "filter.condition", filter.Condition, phase)
 }
@@ -408,8 +407,7 @@ func appendReduceExecutableReaders(out *[]expressionReference, reduce *runtimeco
 		return
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleReduce
-	appendExecutableReader(out, "reduce.source", reduce.Source, phase)
-	appendExecutableReader(out, "reduce.items_from", reduce.ItemsFrom, phase)
+	appendCollectionSourceExecutableReader(out, "reduce", reduce.Source, reduce.ItemsFrom, phase)
 	// Params are not evaluated by stepReduce; Operation selects the reduction behavior.
 }
 
@@ -418,7 +416,14 @@ func appendCountExecutableReaders(out *[]expressionReference, count *runtimecont
 		return
 	}
 	phase := runtimepipeline.WorkflowEntityFieldLifecycleCount
-	appendExecutableReader(out, "count.source", count.Source, phase)
-	appendExecutableReader(out, "count.items_from", count.ItemsFrom, phase)
+	appendCollectionSourceExecutableReader(out, "count", count.Source, count.ItemsFrom, phase)
 	appendExecutableReader(out, "count.condition", count.Condition, phase)
+}
+
+func appendCollectionSourceExecutableReader(out *[]expressionReference, kind, source, itemsFrom string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
+	if strings.TrimSpace(itemsFrom) != "" {
+		appendExecutableReader(out, kind+".items_from", itemsFrom, phase)
+		return
+	}
+	appendExecutableReader(out, kind+".source", source, phase)
 }
