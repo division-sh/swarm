@@ -174,7 +174,7 @@ func TestBundleDeleteRuntimeQuiescenceFinalizesRetainedRecoveryBeforeLookup(t *t
 			publication: publication, freeze: &startupHandoffFreeze{}, retainCurrentProject: true,
 		}
 		pendingRollback := &pendingRuntimeSourceSetRollback{
-			survivorsRecovered: true, predecessorPublication: pendingPublication,
+			sourceSetRestored: true, survivorsRecovered: true, predecessorPublication: pendingPublication,
 		}
 		supervisor := &runtimeProjectSupervisor{
 			pendingReplacement: pendingPublication, pendingSourceSetRollback: pendingRollback,
