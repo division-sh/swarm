@@ -31,6 +31,16 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	}
 }
 
+func TestAPIEventPublicationRouteIntentProducerIsClosedTypedRole(t *testing.T) {
+	producer := routeIntentProducerAPIEventPublication
+	if producer.Normalized() != producer {
+		t.Fatalf("API publication producer normalized to %q", routeIntentProducerCode(producer.Normalized()))
+	}
+	if got, want := routeIntentProducerCode(producer), "api_event_publication_route/route_table_node"; got != want {
+		t.Fatalf("API publication producer = %q, want %q", got, want)
+	}
+}
+
 func TestRoutePlanRejectsMalformedOrUnpairedPersistentDeliveryIntent(t *testing.T) {
 	identity := agentidentitytest.RootRuntime(t, "agent-a", "route-plan-test")
 	plan := RoutePlan{

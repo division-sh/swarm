@@ -154,6 +154,19 @@ func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy del
 }
 
 func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	plan, err := p.planForRecipientMaterialization(ctx, evt)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	if err := validateRoutedNodeDeliveryAuthority(ctx, evt, plan.RoutedRecipients, plan); err != nil {
+		return RoutePlan{}, err
+	}
+	return plan, nil
+}
+
+// planForRecipientMaterialization returns a provisional plan; publish callers
+// must validate routed-node authority after adding materialized delivery intents.
+func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan, nil
@@ -203,9 +216,6 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
-	if err := validateRoutedNodeDeliveryAuthority(ctx, evt, routing.RoutedRecipients, routePlan); err != nil {
-		return RoutePlan{}, err
-	}
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = 0
@@ -856,10 +866,6 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, evt events.Event, 
 			}
 		}
 	}
-	live := make(map[string]struct{}, len(plan.LiveRecipients))
-	for _, recipient := range plan.LiveRecipients {
-		live[recipient.Recipient.ID()] = struct{}{}
-	}
 	for _, subscriber := range routed {
 		if !subscriber.Recipient.IsNode() {
 			continue
@@ -887,9 +893,6 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, evt events.Event, 
 			continue
 		}
 		if _, ok := authorized[key]; ok {
-			continue
-		}
-		if _, ok := live[subscriber.Recipient.ID()]; ok {
 			continue
 		}
 		return fmt.Errorf(

@@ -1584,12 +1584,15 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
 	}
-	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
+	plan, err := eb.deliveryPlanner.planForRecipientMaterialization(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
 	}
 	plan, err = eb.materializePublishRecipientPlan(ctx, evt, plan)
 	if err != nil {
+		return RoutePlan{}, err
+	}
+	if err := validateRoutedNodeDeliveryAuthority(ctx, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {

@@ -718,11 +718,13 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 		EntityID:     eventtest.UUID("ent-1"),
 	}
 	targetRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("target-node"), Target: events.MustExistingEntityTarget(target)}
+	targetHandler := runtimepipeline.MustDeliveryTargetHandler("worker", "target-node")
 	targetBlueprint := DeliveryRouteBlueprint{Recipient: targetRoute.Recipient, Target: target,
-		Handler: runtimepipeline.MustDeliveryTargetHandler("worker", "target-node").ForEvent("work.started")}
+		Handler: targetHandler.ForEvent("work.started")}
 	rt := newRouteTable(nil)
 	rt.eventPath[eventType] = struct{}{}
 	rt.routes[eventType] = []Subscriber{{Recipient: events.MustNodeDeliveryRecipient("target-node"), Path: "worker",
+		LocalizedEvent: "work.started", handlerFlowID: "worker", handlerNodeID: "target-node", targetHandler: targetHandler,
 		routeSource: subscriberRouteSourceSubscription,
 	}}
 	interceptor := &targetRouteConsumingInterceptor{}
@@ -1786,6 +1788,7 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	live := subscribeInternalDeliveriesForTest(t, eb, "child-intake", events.EventType("child/child.start"))
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/child.start"),
@@ -1810,6 +1813,14 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 	}
 	if _, ok := store.settlements[evt.ID()]; ok {
 		t.Fatalf("settlement persisted for rejected event %q", evt.ID())
+	}
+	if _, ok := store.scopes[evt.ID()]; ok || store.receipts[evt.ID()] != "" {
+		t.Fatalf("replay scope or receipt persisted for rejected event %q", evt.ID())
+	}
+	select {
+	case delivery := <-live:
+		t.Fatalf("rejected event reached live carrier: %#v", delivery)
+	default:
 	}
 }
 
