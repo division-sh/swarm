@@ -10799,7 +10799,9 @@ flow_model:
         through RuntimeContextManager. Recovery then prepares and fences every survivor for the predecessor plan before restoring
         the predecessor source-set head, commits every survivor generation/admission rebind under that restored head, and only
         then publishes a fresh predecessor runtime. Preparation failure leaves the candidate head and matching survivor authority
-        current; it cannot restore the head first or reopen candidate-authority survivors under a predecessor head. If bounded recovery cannot safely restore, the context remains unavailable and the process
+        current; it cannot restore the head first or reopen candidate-authority survivors under a predecessor head. A survivor
+        commit failure under the restored predecessor head retains every survivor fenced, immediately adopts that exact pending
+        predecessor transition, and retries it before predecessor publication; the failed transition is never discarded. If bounded recovery cannot safely restore, the context remains unavailable and the process
         capability remains retained. Manager-backed deactivation propagates the caller's
         configured shutdown grace rather than substituting runtime defaults.
       fail_closed:
@@ -33455,7 +33457,9 @@ agent_topology_authority:
       Runtime replacement uses RuntimeContextManager as the complete-plan compiler because it owns the
       private runtime managers. It fences every untouched loaded context before ReplaceSourceSet, rotates
       each survivor to the committed plan, and republishes the complete survivor set only after convergence.
-      Rollback restores the predecessor source-set head and survivor generations before predecessor publication.
+      Rollback restores the predecessor source-set head and survivor generations before predecessor publication. If survivor
+      generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
+      retries it while all survivors remain fenced; it cannot discard the transition or publish only the predecessor.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
