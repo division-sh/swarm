@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -588,22 +587,33 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	if trigger == "" {
 		return false, nil
 	}
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, nodeID, evt)
-	if resolved.Failure != "" {
-		return false, fmt.Errorf("resolve workflow handler for node %s: %s", nodeID, resolved.Failure)
+	resolved := workflowNodeEventHandlerResolution{}
+	if isJoinLifecycleEvent(events.EventType(trigger)) {
+		resolution, refOK, err := resolveWorkflowJoinOccurrence(source, evt)
+		if err != nil {
+			return false, err
+		}
+		if refOK && resolution.Ref.NodeID() == nodeID {
+			handlerFlowID := resolution.Ref.FlowID()
+			if handlerFlowID == "" {
+				handlerFlowID = semanticview.RootExecutionFlowID(source)
+			}
+			resolved = workflowNodeEventHandlerResolution{
+				Handler: resolution.Handler, HandlerEventKey: resolution.Ref.HandlerEvent(),
+				FlowID: handlerFlowID, Matched: true,
+			}
+		}
+	} else {
+		resolved = workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, nodeID, evt)
+		if resolved.Failure != "" {
+			return false, fmt.Errorf("resolve workflow handler for node %s: %s", nodeID, resolved.Failure)
+		}
+	}
+	if !resolved.Matched {
+		return false, nil
 	}
 	handler := resolved.Handler
 	handlerEventKey := resolved.HandlerEventKey
-	ok := resolved.Matched
-	if !ok && isJoinLifecycleEvent(events.EventType(trigger)) {
-		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == nodeID {
-			handler, ok = findJoinHandlerForRef(source, ref)
-			handlerEventKey = ref.HandlerEvent
-		}
-	}
-	if !ok {
-		return false, nil
-	}
 	deliveryStore := pc.deliveryStore
 	if deliveryStore == nil {
 		return false, fmt.Errorf("workflow node delivery lifecycle owner is required")
@@ -650,7 +660,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		}
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
 		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(runtimedelivery.StatusInProgress))
-		attemptCtx = withPipelineFlowScope(attemptCtx, workflowNodeFlowID(source, nodeID))
+		attemptCtx = withPipelineFlowScope(attemptCtx, nodeFlowID)
 		if err := pc.notifyTestWorkflowNodeHandlerStarting(attemptCtx, nodeID, evt); err != nil {
 			return false, err
 		}

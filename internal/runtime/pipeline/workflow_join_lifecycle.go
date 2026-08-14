@@ -9,7 +9,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -21,19 +20,25 @@ const (
 	joinCompleteEvent = "platform.join_complete"
 )
 
-func workflowJoinPlansForStage(source semanticview.Source, flowID, stage string) []runtimecontracts.WorkflowJoinPlan {
-	if source == nil {
+func workflowJoinPlansForStage(source semanticview.Source, route runtimeflowidentity.Route, stage string) []runtimecontracts.WorkflowJoinPlan {
+	if source == nil || !route.Valid() {
 		return nil
 	}
-	flowID = strings.TrimSpace(flowID)
 	stage = strings.TrimSpace(stage)
+	ownerScope := strings.Trim(strings.TrimSpace(route.ScopeKey), "/")
+	hasFlowOwner := false
+	for _, plan := range source.WorkflowJoins() {
+		flowID := strings.TrimSpace(plan.FlowID)
+		if flowID != "" && runtimeflowidentity.ScopeKey(source, flowID) == ownerScope {
+			hasFlowOwner = true
+			break
+		}
+	}
 	out := make([]runtimecontracts.WorkflowJoinPlan, 0, 1)
 	for _, plan := range source.WorkflowJoins() {
 		planFlowID := strings.TrimSpace(plan.FlowID)
-		flowMatches := planFlowID == flowID
-		if planFlowID == "" {
-			flowMatches = flowID == "" || flowID == strings.TrimSpace(source.WorkflowName())
-		}
+		flowMatches := planFlowID == "" && !hasFlowOwner ||
+			planFlowID != "" && runtimeflowidentity.ScopeKey(source, planFlowID) == ownerScope
 		if flowMatches && strings.TrimSpace(plan.Spec.Stage) == stage {
 			out = append(out, plan)
 		}
@@ -88,34 +93,17 @@ func joinTopLevelField(path, root string) string {
 	return field
 }
 
-func joinSchedule(source semanticview.Source, flowID, entityID string, instanceRoute runtimeflowidentity.Route, activation joinruntime.Activation, kind timeridentity.TimerHandleKind, mode executionmode.Mode) (runtimegenericschedule.AdmissionCommand, error) {
+func joinSchedule(source semanticview.Source, entityID string, instanceRoute runtimeflowidentity.Route, activation joinruntime.Activation, mode executionmode.Mode) (runtimegenericschedule.AdmissionCommand, error) {
 	if !mode.Valid() {
 		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule requires exact causal execution mode")
 	}
-	ref := timeridentity.NewJoinRefForGeneration(flowID, activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window, activation.Generation)
-	var handle timeridentity.TimerHandle
-	var eventType string
-	switch kind {
-	case timeridentity.TimerHandleJoinTimeout:
-		handle = timeridentity.JoinTimeoutHandle(ref)
-		eventType = joinTimeoutEvent
-	case timeridentity.TimerHandleJoinComplete:
-		handle = timeridentity.JoinCompleteHandle(ref)
-		eventType = joinCompleteEvent
-	default:
-		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule handle kind %q is invalid", kind)
-	}
-	if activation.TimerTaskID != handle.TaskID() || activation.TimerEventType != eventType {
-		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf(
-			"join schedule declaration does not match persisted activation (task=%q want=%q event=%q want=%q)",
-			activation.TimerTaskID, handle.TaskID(), activation.TimerEventType, eventType,
-		)
+	handle := activation.TimerHandle()
+	ref, ok := handle.JoinRef()
+	if !ok || activation.TimerTaskID() == "" || activation.TimerEventType() == "" {
+		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule requires the activation's typed declaration handle")
 	}
 	payload := handle.PayloadMetadata()
-	if generation := activation.Generation.Normalize(); generation.Valid() {
-		payload[generation.RevisionField] = generation.RevisionID
-	}
-	flowID = strings.TrimSpace(flowID)
+	flowID := ref.FlowID()
 	route := events.RouteIdentity{EntityID: entityID}
 	scheduleFlowInstance := ""
 	if flowID != "" {
@@ -142,7 +130,7 @@ func joinSchedule(source semanticview.Source, flowID, entityID string, instanceR
 		ScheduleKey:   handle.TaskID(),
 		OwnerID:       runtimeWorkflowID,
 		OwnerKind:     runtimegenericschedule.OwnerSystem,
-		EventType:     eventType,
+		EventType:     handle.EventType(),
 		EntityID:      strings.TrimSpace(entityID),
 		FlowInstance:  strings.Trim(strings.TrimSpace(scheduleFlowInstance), "/"),
 		TaskID:        handle.TaskID(),

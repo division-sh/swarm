@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -220,6 +221,10 @@ type ExecutionRequest struct {
 	// runtime dispatch. Concrete Event.Type remains event provenance.
 	HandlerEventKey string
 	Handler         runtimecontracts.SystemNodeEventHandler
+	// JoinDeclaration is the exact authored join identity selected before
+	// execution. Internal timer occurrences carry the same declaration plus
+	// their durable window and generation.
+	JoinDeclaration timeridentity.JoinRef
 	State           StateSnapshot
 	// InitialFieldValues is the exact authored create-entity projection that the
 	// persistence owner records separately from subsequent handler mutations.

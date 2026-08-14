@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 )
 
-func TestForkAttemptGenerationRemintsActivationIdentity(t *testing.T) {
+func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	now := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
 	activation, err := loopruntime.New("source-run", "entity-1", "validation", "revision", "revision_id", "event-1", "drafting", 3, now)
 	if err != nil {
@@ -22,7 +22,15 @@ func TestForkAttemptGenerationRemintsActivationIdentity(t *testing.T) {
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	join, err := joinruntime.NewActivation("review", "review", "review-node", "review.result", "", []string{"a"}, now, now.Add(time.Hour), "join-timeout", "platform.join_timeout", activation.Generation())
+	joinRef, err := timeridentity.NewJoinRefForGeneration("", "review-node", "review.result", "review", "review", "", activation.Generation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinHandle, err := timeridentity.JoinTimeoutHandle(joinRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	join, err := joinruntime.NewActivation(joinHandle, []string{"a"}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +56,13 @@ func TestForkAttemptGenerationRemintsActivationIdentity(t *testing.T) {
 		t.Fatalf("forked activation = %#v, source %#v", forked, activation)
 	}
 	forkedJoins, err := joinruntime.List(forkedCarrier.StateBuckets)
-	if err != nil || len(forkedJoins) != 1 || !forkedJoins[0].Generation.Equal(forked.Generation()) || forkedJoins[0].Key() == join.Key() {
+	if err != nil || len(forkedJoins) != 1 || !forkedJoins[0].Generation().Equal(forked.Generation()) || forkedJoins[0].Key() == join.Key() {
 		t.Fatalf("forked joins = %#v err=%v", forkedJoins, err)
+	}
+	if !forkedJoins[0].JoinRef().Declaration().Equal(join.JoinRef().Declaration()) ||
+		forkedJoins[0].TimerTaskID() == join.TimerTaskID() ||
+		forkedJoins[0].TimerHandle().TaskID() != forkedJoins[0].TimerTaskID() {
+		t.Fatalf("fork remint left stale declaration/task facts: source=%#v fork=%#v", join.JoinRef(), forkedJoins[0].JoinRef())
 	}
 	forkedAccumulators, _ := forkedCarrier.StateBuckets["review-node"]["handler_accumulators"].(map[string]any)
 	if len(forkedAccumulators) != 1 {

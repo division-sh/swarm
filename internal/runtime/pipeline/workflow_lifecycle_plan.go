@@ -293,17 +293,13 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 	}
 	joinStateChanged := false
 	for _, activation := range joins {
-		if activation.Status != joinruntime.StatusClosed || activation.TimerCancelled || strings.TrimSpace(activation.TimerTaskID) == "" {
+		if activation.Status != joinruntime.StatusClosed || activation.TimerCancelled || activation.TimerTaskID() == "" {
 			continue
 		}
-		if activation.TimerEventType == joinCompleteEvent && activation.OutcomePending && !activation.OutcomeFired {
+		if activation.TimerEventType() == joinCompleteEvent && activation.OutcomePending && !activation.OutcomeFired {
 			continue
 		}
-		kind := timeridentity.TimerHandleJoinTimeout
-		if activation.TimerEventType == joinCompleteEvent {
-			kind = timeridentity.TimerHandleJoinComplete
-		}
-		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID.String(), route, activation, kind, mode)
+		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
 		if err != nil {
 			return err
 		}
@@ -453,7 +449,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 	}
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
-	if instance == nil || entityID.IsZero() || nextStage == "" || currentStage == nextStage {
+	if instance == nil || entityID.IsZero() || nextStage == "" {
 		return nil
 	}
 	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
@@ -465,18 +461,14 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		return fmt.Errorf("list join state: %w", err)
 	}
 	for _, activation := range activations {
-		if activation.Stage != currentStage || activation.Stage == nextStage || !activation.CloseForStageExit() {
+		if activation.Stage() != currentStage || activation.Stage() == nextStage || !activation.CloseForStageExit() {
 			continue
-		}
-		kind := timeridentity.TimerHandleJoinTimeout
-		if activation.TimerEventType == joinCompleteEvent {
-			kind = timeridentity.TimerHandleJoinComplete
 		}
 		activation.TimerCancelled = true
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID.String(), route, activation, kind, mode)
+		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
 		if err != nil {
 			return err
 		}
@@ -488,7 +480,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 	if now.IsZero() {
 		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
 	}
-	for _, joinPlan := range workflowJoinPlansForStage(pc.SemanticSource(), instance.WorkflowName, nextStage) {
+	for _, joinPlan := range workflowJoinPlansForStage(pc.SemanticSource(), route, nextStage) {
 		if joinPlan.ResultType.Empty() {
 			return fmt.Errorf("join %s has no resolved output type in the semantic plan", joinPlan.Spec.EffectiveID())
 		}
@@ -518,13 +510,18 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if !ok {
 			return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Timeout.After)
 		}
-		ref := timeridentity.NewJoinRefForGeneration(joinPlan.FlowID, joinPlan.NodeID, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
-		handle := timeridentity.JoinTimeoutHandle(ref)
-		activation, err := joinruntime.NewActivation(joinPlan.Spec.EffectiveID(), joinPlan.Spec.Stage, joinPlan.NodeID, joinPlan.HandlerEvent, window, members, now, now.Add(interval), handle.TaskID(), joinTimeoutEvent, generation)
+		ref, err := timeridentity.NewJoinRefForGeneration(joinPlan.FlowID, joinPlan.NodeID, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
+		if err != nil {
+			return fmt.Errorf("arm join %s identity: %w", joinPlan.Spec.EffectiveID(), err)
+		}
+		handle, err := timeridentity.JoinTimeoutHandle(ref)
+		if err != nil {
+			return fmt.Errorf("arm join %s timer: %w", joinPlan.Spec.EffectiveID(), err)
+		}
+		activation, err := joinruntime.NewActivation(handle, members, now, now.Add(interval))
 		if err != nil {
 			return fmt.Errorf("arm join %s: %w", joinPlan.Spec.EffectiveID(), err)
 		}
-		kind := timeridentity.TimerHandleJoinTimeout
 		complete, err := joinruntime.CompletionSatisfied(activation, joinPlan.Spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
 			return workflowexpr.EvalJoinBool(expression, joinContext, joinPlan.ResultType)
 		})
@@ -533,16 +530,19 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		}
 		if complete {
 			activation.Close(joinruntime.CloseReasonComplete, true, false)
-			kind = timeridentity.TimerHandleJoinComplete
-			completionHandle := timeridentity.JoinCompleteHandle(ref)
-			activation.FireAt = now
-			activation.TimerTaskID = completionHandle.TaskID()
-			activation.TimerEventType = joinCompleteEvent
+			completionHandle, handleErr := timeridentity.JoinCompleteHandle(ref)
+			if handleErr != nil {
+				return fmt.Errorf("arm join %s completion timer: %w", joinPlan.Spec.EffectiveID(), handleErr)
+			}
+			activation, err = activation.WithTimerHandle(completionHandle, now)
+			if err != nil {
+				return fmt.Errorf("arm join %s completion identity: %w", joinPlan.Spec.EffectiveID(), err)
+			}
 		}
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 		}
-		command, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID.String(), route, activation, kind, mode)
+		command, err := joinSchedule(pc.SemanticSource(), entityID.String(), route, activation, mode)
 		if err != nil {
 			return err
 		}

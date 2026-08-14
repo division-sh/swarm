@@ -725,7 +725,11 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	frame.joinResultType = plan.ResultType
 	payload := frame.payload
 	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
-	if internal && (ref.NodeID != frame.req.NodeID.String() || ref.HandlerEvent != strings.TrimSpace(frame.req.HandlerEventKey) || ref.Stage != strings.TrimSpace(spec.Stage) || ref.JoinID != spec.EffectiveID()) {
+	declaration := frame.req.JoinDeclaration.Declaration()
+	if !declaration.Valid() {
+		return false, fmt.Errorf("join %s execution is missing its exact declaration identity", spec.EffectiveID())
+	}
+	if internal && !ref.Declaration().Equal(declaration) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_timer_identity_mismatch", "runtime.engine", "join", map[string]any{
 			"row_id": spec.EffectiveID(), "node_id": frame.req.NodeID.String(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
@@ -733,8 +737,8 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	window := ""
 	generation := attemptgeneration.Generation{}
 	if internal {
-		window = ref.Window
-		generation = ref.Generation
+		window = ref.Window()
+		generation = ref.Generation()
 	} else if spec.Window != nil {
 		value, ok := resolveContractPath(e.currentContext(frame), frame.state, spec.Window.ByPath, spec.Window.By)
 		if !ok || strings.TrimSpace(asString(value)) == "" {
@@ -754,6 +758,14 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	}
 	if !found {
 		return false, e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", spec, window, "")
+	}
+	expectedRef, err := timeridentity.NewJoinRefForGeneration(
+		declaration.FlowID(), declaration.NodeID(), declaration.HandlerEvent(), declaration.Stage(), declaration.JoinID(), window, generation,
+	)
+	if err != nil || !activation.JoinRef().Equal(expectedRef) {
+		return false, failures.New(failures.ClassUnexpectedArrival, "join_activation_identity_mismatch", "runtime.engine", "join", map[string]any{
+			"row_id": spec.EffectiveID(), "node_id": frame.req.NodeID.String(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+		})
 	}
 	if internal && timerKind == timeridentity.TimerHandleJoinComplete {
 		if activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete || !activation.OutcomePending || activation.OutcomeFired {
@@ -1902,17 +1914,10 @@ func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOp
 }
 
 func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoinPlan, bool) {
-	if e == nil || e.deps.Source == nil {
+	if e == nil || e.deps.Source == nil || !req.JoinDeclaration.Valid() {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
-	requestFlowID := strings.TrimSpace(req.FlowID.String())
-	if plan, ok := semanticview.WorkflowJoinPlanForHandler(e.deps.Source, requestFlowID, req.NodeID.String(), req.HandlerEventKey); ok {
-		return plan, true
-	}
-	if requestFlowID == "" {
-		return semanticview.WorkflowJoinPlanForHandler(e.deps.Source, strings.TrimSpace(e.deps.Source.WorkflowName()), req.NodeID.String(), req.HandlerEventKey)
-	}
-	return runtimecontracts.WorkflowJoinPlan{}, false
+	return semanticview.WorkflowJoinPlanForRef(e.deps.Source, req.JoinDeclaration)
 }
 
 func (e *Executor) stepProjection(frame *executionFrame) error {

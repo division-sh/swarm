@@ -4,11 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
 const bucketKey = "handler_joins"
@@ -34,24 +36,31 @@ type MemberOutput struct {
 }
 
 type Activation struct {
-	JoinID          string                       `json:"join_id"`
-	Stage           string                       `json:"stage"`
-	NodeID          string                       `json:"node_id"`
-	HandlerEvent    string                       `json:"handler_event"`
-	Window          string                       `json:"window,omitempty"`
-	Members         []string                     `json:"members"`
-	Outputs         map[string]MemberOutput      `json:"outputs"`
-	Status          Status                       `json:"status"`
-	CloseReason     CloseReason                  `json:"close_reason,omitempty"`
-	ArmedAt         time.Time                    `json:"armed_at"`
-	FireAt          time.Time                    `json:"fire_at"`
-	TimerTaskID     string                       `json:"timer_task_id"`
-	TimerEventType  string                       `json:"timer_event_type"`
-	TimerCancelled  bool                         `json:"timer_cancelled,omitempty"`
-	OutcomePending  bool                         `json:"outcome_pending,omitempty"`
-	OutcomeFired    bool                         `json:"outcome_fired,omitempty"`
-	CompletionEvent string                       `json:"completion_event,omitempty"`
-	Generation      attemptgeneration.Generation `json:"loop_generation,omitempty"`
+	handle          timeridentity.TimerHandle
+	Members         []string                `json:"members"`
+	Outputs         map[string]MemberOutput `json:"outputs"`
+	Status          Status                  `json:"status"`
+	CloseReason     CloseReason             `json:"close_reason,omitempty"`
+	ArmedAt         time.Time               `json:"armed_at"`
+	FireAt          time.Time               `json:"fire_at"`
+	TimerCancelled  bool                    `json:"timer_cancelled,omitempty"`
+	OutcomePending  bool                    `json:"outcome_pending,omitempty"`
+	OutcomeFired    bool                    `json:"outcome_fired,omitempty"`
+	CompletionEvent string                  `json:"completion_event,omitempty"`
+}
+
+type activationJSON struct {
+	Handle          timeridentity.TimerHandle `json:"timer_handle"`
+	Members         []string                  `json:"members"`
+	Outputs         map[string]MemberOutput   `json:"outputs"`
+	Status          Status                    `json:"status"`
+	CloseReason     CloseReason               `json:"close_reason,omitempty"`
+	ArmedAt         time.Time                 `json:"armed_at"`
+	FireAt          time.Time                 `json:"fire_at"`
+	TimerCancelled  bool                      `json:"timer_cancelled,omitempty"`
+	OutcomePending  bool                      `json:"outcome_pending,omitempty"`
+	OutcomeFired    bool                      `json:"outcome_fired,omitempty"`
+	CompletionEvent string                    `json:"completion_event,omitempty"`
 }
 
 type AddDisposition string
@@ -63,27 +72,18 @@ const (
 	AddUnexpected           AddDisposition = "unexpected"
 )
 
-func NewActivation(joinID, stage, nodeID, handlerEvent, window string, members []string, armedAt, fireAt time.Time, taskID, eventType string, generations ...attemptgeneration.Generation) (Activation, error) {
+func NewActivation(handle timeridentity.TimerHandle, members []string, armedAt, fireAt time.Time) (Activation, error) {
 	normalizedMembers, err := normalizeMembers(members)
 	if err != nil {
 		return Activation{}, err
 	}
 	activation := Activation{
-		JoinID:         strings.TrimSpace(joinID),
-		Stage:          strings.TrimSpace(stage),
-		NodeID:         strings.TrimSpace(nodeID),
-		HandlerEvent:   strings.TrimSpace(handlerEvent),
-		Window:         strings.TrimSpace(window),
-		Members:        normalizedMembers,
-		Outputs:        map[string]MemberOutput{},
-		Status:         StatusOpen,
-		ArmedAt:        armedAt.UTC(),
-		FireAt:         fireAt.UTC(),
-		TimerTaskID:    strings.TrimSpace(taskID),
-		TimerEventType: strings.TrimSpace(eventType),
-	}
-	if len(generations) > 0 {
-		activation.Generation = generations[0].Normalize()
+		handle:  handle,
+		Members: normalizedMembers,
+		Outputs: map[string]MemberOutput{},
+		Status:  StatusOpen,
+		ArmedAt: armedAt.UTC(),
+		FireAt:  fireAt.UTC(),
 	}
 	if err := activation.Validate(); err != nil {
 		return Activation{}, err
@@ -92,8 +92,8 @@ func NewActivation(joinID, stage, nodeID, handlerEvent, window string, members [
 }
 
 func (a Activation) Validate() error {
-	if strings.TrimSpace(a.JoinID) == "" || strings.TrimSpace(a.Stage) == "" || strings.TrimSpace(a.NodeID) == "" || strings.TrimSpace(a.HandlerEvent) == "" {
-		return fmt.Errorf("join activation identity is incomplete")
+	if !a.handle.Valid() || a.handle.Kind() != timeridentity.TimerHandleJoinTimeout && a.handle.Kind() != timeridentity.TimerHandleJoinComplete {
+		return fmt.Errorf("join activation requires one valid typed timer handle")
 	}
 	if a.Status != StatusOpen && a.Status != StatusClosed {
 		return fmt.Errorf("join activation status %q is invalid", a.Status)
@@ -126,23 +126,80 @@ func (a Activation) Validate() error {
 }
 
 func (a Activation) Key() string {
-	return ActivationKeyForGeneration(a.Stage, a.JoinID, a.Window, a.Generation)
+	ref, _ := a.handle.JoinRef()
+	return ActivationKeyForGeneration(ref.Stage(), ref.JoinID(), ref.Window(), ref.Generation())
 }
 
 func ReplaceGeneration(buckets map[string]map[string]any, activation Activation, generation attemptgeneration.Generation) error {
 	oldKey := activation.Key()
-	activation.Generation = generation.Normalize()
+	oldNodeID := activation.NodeID()
+	ref, ok := activation.handle.JoinRef()
+	if !ok {
+		return fmt.Errorf("join activation is missing its typed declaration handle")
+	}
+	ref, err := ref.WithGeneration(generation)
+	if err != nil {
+		return err
+	}
+	activation.handle, err = joinHandleForKind(activation.handle.Kind(), ref)
+	if err != nil {
+		return err
+	}
 	if err := Store(buckets, activation); err != nil {
 		return err
 	}
 	if oldKey != activation.Key() {
-		if nodeBucket := buckets[activation.NodeID]; nodeBucket != nil {
+		if nodeBucket := buckets[oldNodeID]; nodeBucket != nil {
 			if joins, ok := nodeBucket[bucketKey].(map[string]any); ok {
 				delete(joins, oldKey)
 			}
 		}
 	}
 	return nil
+}
+
+func (a Activation) TimerHandle() timeridentity.TimerHandle { return a.handle }
+
+func (a Activation) JoinRef() timeridentity.JoinRef {
+	ref, _ := a.handle.JoinRef()
+	return ref
+}
+
+func (a Activation) FlowID() string       { return a.JoinRef().FlowID() }
+func (a Activation) NodeID() string       { return a.JoinRef().NodeID() }
+func (a Activation) HandlerEvent() string { return a.JoinRef().HandlerEvent() }
+func (a Activation) Stage() string        { return a.JoinRef().Stage() }
+func (a Activation) JoinID() string       { return a.JoinRef().JoinID() }
+func (a Activation) Window() string       { return a.JoinRef().Window() }
+func (a Activation) Generation() attemptgeneration.Generation {
+	return a.JoinRef().Generation()
+}
+func (a Activation) TimerTaskID() string    { return a.handle.TaskID() }
+func (a Activation) TimerEventType() string { return a.handle.EventType() }
+
+func (a Activation) WithTimerHandle(handle timeridentity.TimerHandle, fireAt time.Time) (Activation, error) {
+	current, currentOK := a.handle.JoinRef()
+	next, nextOK := handle.JoinRef()
+	if !currentOK || !nextOK || !current.Equal(next) {
+		return Activation{}, fmt.Errorf("join activation timer replacement must preserve declaration identity")
+	}
+	a.handle = handle
+	a.FireAt = fireAt.UTC()
+	if err := a.Validate(); err != nil {
+		return Activation{}, err
+	}
+	return a, nil
+}
+
+func joinHandleForKind(kind timeridentity.TimerHandleKind, ref timeridentity.JoinRef) (timeridentity.TimerHandle, error) {
+	switch kind {
+	case timeridentity.TimerHandleJoinTimeout:
+		return timeridentity.JoinTimeoutHandle(ref)
+	case timeridentity.TimerHandleJoinComplete:
+		return timeridentity.JoinCompleteHandle(ref)
+	default:
+		return timeridentity.TimerHandle{}, fmt.Errorf("join timer handle kind %q is invalid", kind)
+	}
 }
 
 func ActivationKey(stage, joinID, window string) string {
@@ -299,7 +356,7 @@ func Load(stateBuckets map[string]map[string]any, nodeID, key string) (Activatio
 		return Activation{}, false, err
 	}
 	var activation Activation
-	if err := json.Unmarshal(encoded, &activation); err != nil {
+	if err := decodeStrictJSON(encoded, &activation); err != nil {
 		return Activation{}, false, err
 	}
 	if activation.Outputs == nil {
@@ -315,7 +372,7 @@ func Store(stateBuckets map[string]map[string]any, activation Activation) error 
 	if err := activation.Validate(); err != nil {
 		return err
 	}
-	nodeID := strings.TrimSpace(activation.NodeID)
+	nodeID := activation.NodeID()
 	if stateBuckets == nil {
 		return fmt.Errorf("join state bucket set is nil")
 	}
@@ -338,6 +395,45 @@ func Store(stateBuckets map[string]map[string]any, activation Activation) error 
 		return err
 	}
 	joins[activation.Key()] = raw
+	return nil
+}
+
+func (a Activation) MarshalJSON() ([]byte, error) {
+	return json.Marshal(activationJSON{
+		Handle: a.handle, Members: a.Members, Outputs: a.Outputs, Status: a.Status,
+		CloseReason: a.CloseReason, ArmedAt: a.ArmedAt, FireAt: a.FireAt,
+		TimerCancelled: a.TimerCancelled, OutcomePending: a.OutcomePending,
+		OutcomeFired: a.OutcomeFired, CompletionEvent: a.CompletionEvent,
+	})
+}
+
+func (a *Activation) UnmarshalJSON(raw []byte) error {
+	if a == nil {
+		return fmt.Errorf("join activation target is nil")
+	}
+	var persisted activationJSON
+	if err := decodeStrictJSON(raw, &persisted); err != nil {
+		return err
+	}
+	*a = Activation{
+		handle: persisted.Handle, Members: persisted.Members, Outputs: persisted.Outputs,
+		Status: persisted.Status, CloseReason: persisted.CloseReason,
+		ArmedAt: persisted.ArmedAt, FireAt: persisted.FireAt,
+		TimerCancelled: persisted.TimerCancelled, OutcomePending: persisted.OutcomePending,
+		OutcomeFired: persisted.OutcomeFired, CompletionEvent: persisted.CompletionEvent,
+	}
+	return nil
+}
+
+func decodeStrictJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return fmt.Errorf("unexpected trailing JSON")
+	}
 	return nil
 }
 

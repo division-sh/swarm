@@ -65,6 +65,13 @@ func (h DeliveryTargetHandler) FlowID() string {
 	return h.flowID
 }
 
+func (h DeliveryTargetHandler) NodeID() string {
+	if !h.present {
+		return ""
+	}
+	return h.nodeID
+}
+
 func (h DeliveryTargetHandler) ForEvent(eventType events.EventType) DeliveryTargetHandler {
 	if !h.present {
 		return DeliveryTargetHandler{}
@@ -119,6 +126,24 @@ type DeliveryTargetOwnershipRequest struct {
 func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events.DeliveryTargetOwnership, error) {
 	if !req.Recipient.IsNode() {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target ownership classification requires a node recipient")
+	}
+	if isJoinLifecycleEvent(req.Event.Type()) {
+		recipient, target, handler, ok, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(req.Source, req.Event)
+		if err != nil {
+			return events.DeliveryTargetOwnership{}, err
+		}
+		if !ok {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery requires its exact declaration handle")
+		}
+		if req.Recipient != recipient || (!req.Handler.Empty() &&
+			(req.Handler.FlowID() != handler.FlowID() || req.Handler.NodeID() != handler.NodeID())) {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration handler")
+		}
+		if blueprint := req.Blueprint.Normalized(); !blueprint.Empty() && blueprint != target {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration target")
+		}
+		req.Handler = handler
+		req.Blueprint = target
 	}
 	blueprint := req.Blueprint.Normalized()
 	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())

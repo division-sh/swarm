@@ -108,7 +108,7 @@ func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testin
 	})
 	route := events.RouteIdentity{FlowID: "root-workflow", FlowInstance: "run-one"}
 
-	got, err := AdmitNodeExecutionRoutingSource(source, "root-node", route)
+	got, err := AdmitNodeExecutionRoutingSource(source, "root-workflow", "root-node", route)
 	if err != nil {
 		t.Fatalf("AdmitNodeExecutionRoutingSource: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testin
 		t.Fatalf("routing source = %s %#v, want entityless static flow %#v", got.Kind().StorageCode(), got.Route(), route)
 	}
 
-	if _, err := AdmitNodeExecutionRoutingSource(source, "root-node", events.RouteIdentity{FlowID: "root-workflow"}); err == nil || !strings.Contains(err.Error(), "exact selected-run flow route") {
+	if _, err := AdmitNodeExecutionRoutingSource(source, "root-workflow", "root-node", events.RouteIdentity{FlowID: "root-workflow"}); err == nil || !strings.Contains(err.Error(), "exact selected-run flow route") {
 		t.Fatalf("incomplete entityless source error = %v", err)
 	}
 }

@@ -32,7 +32,12 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			if err := runtimecontracts.ValidateJoinHandlerIsolation(handler); err != nil {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, err.Error()))
 			}
-			plan, ok := semanticview.WorkflowJoinPlanForHandler(c.source, flowID, nodeID, eventType)
+			ref, refErr := timeridentity.NewJoinRef(flowID, nodeID, eventType, handler.Join.Stage, handler.Join.EffectiveID(), "")
+			if refErr != nil {
+				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has incomplete declaration identity: "+refErr.Error()))
+				continue
+			}
+			plan, ok := semanticview.WorkflowJoinPlanForRef(c.source, ref)
 			if !ok {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has no effective WorkflowJoinPlan; reload the workflow contract and declare exactly one canonical join row"))
 				continue

@@ -23,6 +23,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -1796,7 +1797,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := joinruntime.NewActivation(spec.ID, spec.Stage, "join-node", "item.completed", "", []string{"a", "b"}, now, now.Add(time.Hour), "join-timeout", "platform.join_timeout")
+	activation, err := newEngineTestJoinActivation("orders", "join-node", "item.completed", spec, "", []string{"a", "b"}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1807,8 +1808,9 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
 	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
-		Event: eventtest.RunCreatingRootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
-		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
+		JoinDeclaration: activation.JoinRef().Declaration(),
+		Event:           eventtest.RunCreatingRootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+		State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
 	})
 	if err != nil {
 		t.Fatalf("first arrival: %v", err)
@@ -1818,8 +1820,9 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	}
 	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
-		Event: eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
-		State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
+		JoinDeclaration: activation.JoinRef().Declaration(),
+		Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
+		State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
 	})
 	if err != nil {
 		t.Fatalf("second arrival: %v", err)
@@ -1870,7 +1873,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	activation, err := joinruntime.NewActivation(plan.Spec.EffectiveID(), plan.Spec.Stage, plan.NodeID, plan.HandlerEvent, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute), "join-timeout", "platform.join_timeout")
+	activation, err := newEngineTestJoinActivation(plan.FlowID, plan.NodeID, plan.HandlerEvent, plan.Spec, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1880,8 +1883,9 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "portfolio/portfolio", NodeID: "portfolio-collector", FlowID: "portfolio", HandlerEventKey: "operating.reported", Handler: rawHandler,
-		Event: eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
-		State: testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
+		JoinDeclaration: activation.JoinRef().Declaration(),
+		Event:           eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
+		State:           testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
 	})
 	if err != nil {
 		t.Fatalf("execute barrier arrival: %v", err)
@@ -1926,7 +1930,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 				t.Fatal(err)
 			}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			activation, err := joinruntime.NewActivation(spec.ID, spec.Stage, "join-node", "item.completed", "", []string{"a"}, now, now.Add(time.Hour), "join-timeout", "platform.join_timeout")
+			activation, err := newEngineTestJoinActivation("orders", "join-node", "item.completed", spec, "", []string{"a"}, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1936,8 +1940,9 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
-				Event: eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
-				State: testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
+				JoinDeclaration: activation.JoinRef().Declaration(),
+				Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
+				State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
 			})
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "no matching overload") {
@@ -1953,6 +1958,18 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newEngineTestJoinActivation(flowID, nodeID, handlerEvent string, spec runtimecontracts.JoinSpec, window string, members []string, armedAt, fireAt time.Time) (joinruntime.Activation, error) {
+	ref, err := timeridentity.NewJoinRef(flowID, nodeID, handlerEvent, spec.Stage, spec.EffectiveID(), window)
+	if err != nil {
+		return joinruntime.Activation{}, err
+	}
+	handle, err := timeridentity.JoinTimeoutHandle(ref)
+	if err != nil {
+		return joinruntime.Activation{}, err
+	}
+	return joinruntime.NewActivation(handle, members, armedAt, fireAt)
 }
 
 func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) {

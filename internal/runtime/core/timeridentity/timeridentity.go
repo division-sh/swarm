@@ -220,20 +220,20 @@ func decodeStrictJSON(raw []byte, target any) error {
 }
 
 type TimerHandle struct {
-	Kind       TimerHandleKind
-	TimerID    string
-	Join       JoinRef
-	Generation attemptgeneration.Generation
+	kind       TimerHandleKind
+	timerID    string
+	join       JoinRef
+	generation attemptgeneration.Generation
 }
 
 type JoinRef struct {
-	FlowID       string
-	NodeID       string
-	HandlerEvent string
-	Stage        string
-	JoinID       string
-	Window       string
-	Generation   attemptgeneration.Generation
+	flowID       string
+	nodeID       string
+	handlerEvent string
+	stage        string
+	joinID       string
+	window       string
+	generation   attemptgeneration.Generation
 }
 
 type AccumulatorBucketRef struct {
@@ -342,45 +342,89 @@ func (t Trigger) String() string {
 
 func WorkflowTimerHandle(timerID string) TimerHandle {
 	return TimerHandle{
-		Kind:    TimerHandleWorkflowTimer,
-		TimerID: strings.TrimSpace(timerID),
+		kind:    TimerHandleWorkflowTimer,
+		timerID: strings.TrimSpace(timerID),
 	}
 }
 
-func JoinTimeoutHandle(ref JoinRef) TimerHandle {
-	return TimerHandle{Kind: TimerHandleJoinTimeout, Join: ref.Normalize(), Generation: ref.Generation.Normalize()}
+func WorkflowTimerHandleForGeneration(timerID string, generation attemptgeneration.Generation) TimerHandle {
+	handle := WorkflowTimerHandle(timerID)
+	handle.generation = generation.Normalize()
+	return handle
 }
 
-func JoinCompleteHandle(ref JoinRef) TimerHandle {
-	return TimerHandle{Kind: TimerHandleJoinComplete, Join: ref.Normalize(), Generation: ref.Generation.Normalize()}
+func JoinTimeoutHandle(ref JoinRef) (TimerHandle, error) {
+	return newJoinHandle(TimerHandleJoinTimeout, ref)
+}
+
+func JoinCompleteHandle(ref JoinRef) (TimerHandle, error) {
+	return newJoinHandle(TimerHandleJoinComplete, ref)
+
+}
+
+func newJoinHandle(kind TimerHandleKind, ref JoinRef) (TimerHandle, error) {
+	ref = ref.Normalize()
+	if !ref.Valid() {
+		return TimerHandle{}, fmt.Errorf("join timer handle requires a complete declaration reference")
+	}
+	return TimerHandle{kind: kind, join: ref}, nil
 }
 
 func (h TimerHandle) Valid() bool {
-	switch h.Kind {
+	switch h.kind {
 	case TimerHandleWorkflowTimer:
-		return strings.TrimSpace(h.TimerID) != ""
+		return strings.TrimSpace(h.timerID) != ""
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
-		return h.Join.Valid()
+		return h.join.Valid() && !h.generation.Valid()
 	default:
 		return false
 	}
 }
 
+func (h TimerHandle) Kind() TimerHandleKind { return h.kind }
+
+func (h TimerHandle) TimerID() string { return strings.TrimSpace(h.timerID) }
+
+func (h TimerHandle) JoinRef() (JoinRef, bool) {
+	if h.kind != TimerHandleJoinTimeout && h.kind != TimerHandleJoinComplete || !h.join.Valid() {
+		return JoinRef{}, false
+	}
+	return h.join.Normalize(), true
+}
+
+func (h TimerHandle) Generation() attemptgeneration.Generation {
+	if ref, ok := h.JoinRef(); ok {
+		return ref.Generation()
+	}
+	return h.generation.Normalize()
+}
+
+func (h TimerHandle) EventType() string {
+	switch h.kind {
+	case TimerHandleJoinTimeout:
+		return "platform.join_timeout"
+	case TimerHandleJoinComplete:
+		return "platform.join_complete"
+	default:
+		return ""
+	}
+}
+
 func (h TimerHandle) TaskID() string {
-	generationSuffix := h.Generation.Normalize().KeySuffix()
+	generationSuffix := h.generation.Normalize().KeySuffix()
 	appendGeneration := func(value string) string {
 		if generationSuffix == "" {
 			return value
 		}
 		return value + ":generation:" + generationSuffix
 	}
-	switch h.Kind {
+	switch h.kind {
 	case TimerHandleWorkflowTimer:
-		return appendGeneration(strings.TrimSpace(h.TimerID))
+		return appendGeneration(strings.TrimSpace(h.timerID))
 	case TimerHandleJoinTimeout:
-		return joinTimeoutTaskPrefix + h.Join.Key()
+		return joinTimeoutTaskPrefix + h.join.Key()
 	case TimerHandleJoinComplete:
-		return joinCompleteTaskPrefix + h.Join.Key()
+		return joinCompleteTaskPrefix + h.join.Key()
 	default:
 		return ""
 	}
@@ -391,20 +435,26 @@ func (h TimerHandle) PayloadMetadata() map[string]any {
 		return nil
 	}
 	handle := map[string]any{
-		"kind": string(h.Kind),
+		"kind": string(h.kind),
 	}
-	switch h.Kind {
+	switch h.kind {
 	case TimerHandleWorkflowTimer:
-		handle["timer_id"] = strings.TrimSpace(h.TimerID)
+		handle["timer_id"] = strings.TrimSpace(h.timerID)
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
-		handle["join"] = h.Join.PayloadValue()
+		handle["join"] = h.join.PayloadValue()
 	}
-	if generation := h.Generation.Normalize(); generation.Valid() {
+	if generation := h.generation.Normalize(); generation.Valid() {
 		handle[attemptgeneration.PayloadKey] = generation.PayloadValue()
 	}
-	return map[string]any{
+	payload := map[string]any{
 		timerHandlePayloadKey: handle,
 	}
+	if ref, ok := h.JoinRef(); ok {
+		if generation := ref.Generation(); generation.Valid() {
+			payload[generation.RevisionField] = generation.RevisionID
+		}
+	}
+	return payload
 }
 
 func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
@@ -412,65 +462,118 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 	if !ok {
 		return TimerHandle{}, false
 	}
-	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: handleMap[attemptgeneration.PayloadKey]})
-	switch TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"]))) {
+	return parseTimerHandleMap(handleMap)
+}
+
+func parseTimerHandleMap(handleMap map[string]any) (TimerHandle, bool) {
+	kind := TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"])))
+	switch kind {
 	case TimerHandleWorkflowTimer:
+		if !onlyKeys(handleMap, "kind", "timer_id", attemptgeneration.PayloadKey) {
+			return TimerHandle{}, false
+		}
+		generation := attemptgeneration.Generation{}
+		if _, present := handleMap[attemptgeneration.PayloadKey]; present {
+			var ok bool
+			generation, ok = attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: handleMap[attemptgeneration.PayloadKey]})
+			if !ok {
+				return TimerHandle{}, false
+			}
+		}
 		handle := WorkflowTimerHandle(asString(handleMap["timer_id"]))
-		handle.Generation = generation
+		handle.generation = generation
 		return handle, handle.Valid()
 	case TimerHandleJoinTimeout, TimerHandleJoinComplete:
+		if !onlyKeys(handleMap, "kind", "join") {
+			return TimerHandle{}, false
+		}
 		ref, ok := joinRefFromAny(handleMap["join"])
 		if !ok {
 			return TimerHandle{}, false
 		}
-		handle := JoinTimeoutHandle(ref)
-		if TimerHandleKind(strings.TrimSpace(asString(handleMap["kind"]))) == TimerHandleJoinComplete {
-			handle = JoinCompleteHandle(ref)
+		var handle TimerHandle
+		var err error
+		if kind == TimerHandleJoinComplete {
+			handle, err = JoinCompleteHandle(ref)
+		} else {
+			handle, err = JoinTimeoutHandle(ref)
 		}
-		handle.Generation = generation
-		return handle, handle.Valid()
+		return handle, err == nil && handle.Valid()
 	default:
 		return TimerHandle{}, false
 	}
 }
 
-func NewJoinRef(flowID, nodeID, handlerEvent, stage, joinID, window string) JoinRef {
-	return JoinRef{
-		FlowID:       strings.TrimSpace(flowID),
-		NodeID:       strings.TrimSpace(nodeID),
-		HandlerEvent: strings.TrimSpace(handlerEvent),
-		Stage:        strings.TrimSpace(stage),
-		JoinID:       strings.TrimSpace(joinID),
-		Window:       strings.TrimSpace(window),
-	}
+func NewJoinRef(flowID, nodeID, handlerEvent, stage, joinID, window string) (JoinRef, error) {
+	return NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window, attemptgeneration.Generation{})
 }
 
-func NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) JoinRef {
-	ref := NewJoinRef(flowID, nodeID, handlerEvent, stage, joinID, window)
-	ref.Generation = generation.Normalize()
-	return ref
+func NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) (JoinRef, error) {
+	ref := JoinRef{
+		flowID:       strings.TrimSpace(flowID),
+		nodeID:       strings.TrimSpace(nodeID),
+		handlerEvent: strings.TrimSpace(handlerEvent),
+		stage:        strings.TrimSpace(stage),
+		joinID:       strings.TrimSpace(joinID),
+		window:       strings.TrimSpace(window),
+		generation:   generation.Normalize(),
+	}
+	if !ref.Valid() {
+		return JoinRef{}, fmt.Errorf("join declaration reference requires node, handler event, stage, and join identity")
+	}
+	if generation != (attemptgeneration.Generation{}) && !ref.generation.Valid() {
+		return JoinRef{}, fmt.Errorf("join declaration reference generation is invalid")
+	}
+	return ref, nil
 }
 
 func (r JoinRef) Normalize() JoinRef {
-	return NewJoinRefForGeneration(r.FlowID, r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window, r.Generation)
+	return JoinRef{
+		flowID: strings.TrimSpace(r.flowID), nodeID: strings.TrimSpace(r.nodeID),
+		handlerEvent: strings.TrimSpace(r.handlerEvent), stage: strings.TrimSpace(r.stage),
+		joinID: strings.TrimSpace(r.joinID), window: strings.TrimSpace(r.window),
+		generation: r.generation.Normalize(),
+	}
 }
 
 func (r JoinRef) Valid() bool {
 	r = r.Normalize()
-	return r.NodeID != "" && r.HandlerEvent != "" && r.Stage != "" && r.JoinID != ""
+	return r.nodeID != "" && r.handlerEvent != "" && r.stage != "" && r.joinID != "" &&
+		(r.generation == (attemptgeneration.Generation{}) || r.generation.Valid())
 }
+
+func (r JoinRef) FlowID() string       { return r.Normalize().flowID }
+func (r JoinRef) NodeID() string       { return r.Normalize().nodeID }
+func (r JoinRef) HandlerEvent() string { return r.Normalize().handlerEvent }
+func (r JoinRef) Stage() string        { return r.Normalize().stage }
+func (r JoinRef) JoinID() string       { return r.Normalize().joinID }
+func (r JoinRef) Window() string       { return r.Normalize().window }
+func (r JoinRef) Generation() attemptgeneration.Generation {
+	return r.Normalize().generation
+}
+
+func (r JoinRef) WithGeneration(generation attemptgeneration.Generation) (JoinRef, error) {
+	return NewJoinRefForGeneration(r.FlowID(), r.NodeID(), r.HandlerEvent(), r.Stage(), r.JoinID(), r.Window(), generation)
+}
+
+func (r JoinRef) Declaration() JoinRef {
+	ref, _ := NewJoinRef(r.FlowID(), r.NodeID(), r.HandlerEvent(), r.Stage(), r.JoinID(), "")
+	return ref
+}
+
+func (r JoinRef) Equal(other JoinRef) bool { return r.Normalize() == other.Normalize() }
 
 func (r JoinRef) Key() string {
 	r = r.Normalize()
 	if !r.Valid() {
 		return ""
 	}
-	parts := []string{r.FlowID, r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window}
+	parts := []string{r.flowID, r.nodeID, r.handlerEvent, r.stage, r.joinID, r.window}
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
 	}
 	key := strings.Join(parts, ".")
-	if suffix := r.Generation.KeySuffix(); suffix != "" {
+	if suffix := r.generation.KeySuffix(); suffix != "" {
 		key += ".generation." + suffix
 	}
 	return key
@@ -482,25 +585,44 @@ func (r JoinRef) PayloadValue() map[string]any {
 		return nil
 	}
 	payload := map[string]any{
-		"flow_id":       r.FlowID,
-		"node_id":       r.NodeID,
-		"handler_event": r.HandlerEvent,
-		"stage":         r.Stage,
-		"join_id":       r.JoinID,
-		"window":        r.Window,
+		"flow_id":       r.flowID,
+		"node_id":       r.nodeID,
+		"handler_event": r.handlerEvent,
+		"stage":         r.stage,
+		"join_id":       r.joinID,
+		"window":        r.window,
 	}
-	if generation := r.Generation.Normalize(); generation.Valid() {
+	if generation := r.generation.Normalize(); generation.Valid() {
 		payload[attemptgeneration.PayloadKey] = generation.PayloadValue()
 	}
 	return payload
 }
 
-func ParseJoinRef(payload map[string]any) (JoinRef, TimerHandleKind, bool) {
+func ParseJoinHandle(payload map[string]any) (TimerHandle, JoinRef, bool) {
 	handle, ok := ParseTimerHandle(payload)
-	if !ok || (handle.Kind != TimerHandleJoinTimeout && handle.Kind != TimerHandleJoinComplete) {
-		return JoinRef{}, "", false
+	if !ok || (handle.Kind() != TimerHandleJoinTimeout && handle.Kind() != TimerHandleJoinComplete) {
+		return TimerHandle{}, JoinRef{}, false
 	}
-	return handle.Join, handle.Kind, handle.Join.Valid()
+	ref, ok := handle.JoinRef()
+	if !ok {
+		return TimerHandle{}, JoinRef{}, false
+	}
+	allowed := []string{timerHandlePayloadKey}
+	if generation := ref.Generation(); generation.Valid() {
+		allowed = append(allowed, generation.RevisionField)
+		if strings.TrimSpace(asString(payload[generation.RevisionField])) != generation.RevisionID {
+			return TimerHandle{}, JoinRef{}, false
+		}
+	}
+	if !onlyKeys(payload, allowed...) {
+		return TimerHandle{}, JoinRef{}, false
+	}
+	return handle, ref, true
+}
+
+func ParseJoinRef(payload map[string]any) (JoinRef, TimerHandleKind, bool) {
+	handle, ref, ok := ParseJoinHandle(payload)
+	return ref, handle.Kind(), ok
 }
 
 func joinRefFromAny(value any) (JoinRef, bool) {
@@ -512,9 +634,56 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	if !hasFlowID {
 		return JoinRef{}, false
 	}
-	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: raw[attemptgeneration.PayloadKey]})
-	ref := NewJoinRefForGeneration(flowID, asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
-	return ref, ref.Valid()
+	if !onlyKeys(raw, "flow_id", "node_id", "handler_event", "stage", "join_id", "window", attemptgeneration.PayloadKey) {
+		return JoinRef{}, false
+	}
+	generation := attemptgeneration.Generation{}
+	if _, present := raw[attemptgeneration.PayloadKey]; present {
+		var generationOK bool
+		generation, generationOK = attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: raw[attemptgeneration.PayloadKey]})
+		if !generationOK {
+			return JoinRef{}, false
+		}
+	}
+	ref, err := NewJoinRefForGeneration(flowID, asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
+	return ref, err == nil
+}
+
+func (h TimerHandle) MarshalJSON() ([]byte, error) {
+	metadata := h.PayloadMetadata()
+	if metadata == nil {
+		return nil, fmt.Errorf("timer handle is invalid")
+	}
+	return json.Marshal(metadata[timerHandlePayloadKey])
+}
+
+func (h *TimerHandle) UnmarshalJSON(raw []byte) error {
+	if h == nil {
+		return fmt.Errorf("timer handle target is nil")
+	}
+	var value map[string]any
+	if err := decodeStrictJSON(raw, &value); err != nil {
+		return err
+	}
+	parsed, ok := parseTimerHandleMap(value)
+	if !ok {
+		return fmt.Errorf("timer handle is invalid")
+	}
+	*h = parsed
+	return nil
+}
+
+func onlyKeys(values map[string]any, allowed ...string) bool {
+	set := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		set[key] = struct{}{}
+	}
+	for key := range values {
+		if _, ok := set[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func NewAccumulatorBucketRef(nodeID, eventType string) AccumulatorBucketRef {

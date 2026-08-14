@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
@@ -225,8 +226,46 @@ func (c AdmissionCommand) Validate() error {
 	if err := validateRoutingScope(c); err != nil {
 		return err
 	}
+	if err := validateSystemJoinSchedule(c); err != nil {
+		return err
+	}
 	if _, err := events.AdmitRuntimeControlEventType(events.EventType(c.EventType), c.RoutingSource); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateSystemJoinSchedule(c AdmissionCommand) error {
+	hasJoinEvent := c.EventType == "platform.join_timeout" || c.EventType == "platform.join_complete"
+	payload, ok := c.Payload.Interface().(map[string]any)
+	if !ok {
+		if hasJoinEvent {
+			return errors.New("join generic schedule requires a typed handle payload")
+		}
+		return nil
+	}
+	handle, ref, hasJoinHandle := timeridentity.ParseJoinHandle(payload)
+	if !hasJoinHandle && !hasJoinEvent {
+		return nil
+	}
+	if !hasJoinHandle || !hasJoinEvent || handle.EventType() != c.EventType {
+		return errors.New("join generic schedule event does not match its typed handle")
+	}
+	if c.OwnerKind != OwnerSystem || c.OwnerID != "workflow-runtime" {
+		return errors.New("join generic schedule requires the workflow-runtime system owner")
+	}
+	if c.ScheduleKey != handle.TaskID() || c.TaskID != handle.TaskID() {
+		return errors.New("join generic schedule task does not match its typed handle")
+	}
+	route := c.RoutingSource.Route().Normalized()
+	if ref.FlowID() == "" {
+		if c.RoutingSource.Kind() != events.RoutingSourceRoot || route.FlowID != "" || c.FlowInstance != "" {
+			return errors.New("root join generic schedule source contradicts its explicit root declaration")
+		}
+		return nil
+	}
+	if c.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl || route.FlowID != ref.FlowID() || route.FlowInstance != c.FlowInstance {
+		return errors.New("flow-owned join generic schedule source contradicts its declaration")
 	}
 	return nil
 }
