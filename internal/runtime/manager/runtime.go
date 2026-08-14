@@ -236,9 +236,8 @@ type AgentFrameConfig struct {
 // and flow-instance coordinates are explicit so same-slug siblings cannot be
 // selected through the broader runtime convenience resolver.
 func (am *AgentManager) ResolveAgentFrameConfig(agentID, flowInstance string, root bool) (AgentFrameConfig, error) {
-	agentID = strings.TrimSpace(agentID)
 	flowInstanceIsExact := root || exactAgentFrameFlowInstance(flowInstance)
-	if agentID == "" || root == (flowInstance != "") || !flowInstanceIsExact {
+	if !exactAgentFrameScalar(agentID) || root == (flowInstance != "") || !flowInstanceIsExact {
 		return AgentFrameConfig{}, fmt.Errorf("agent frame selection requires agent_id and exactly one of root or flow_instance")
 	}
 	var matches []runtimeactors.AgentConfig
@@ -2171,4 +2170,8 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, identity runti
 
 func exactAgentFrameFlowInstance(value string) bool {
 	return value != "" && value == strings.TrimSpace(value) && value == strings.Trim(value, "/")
+}
+
+func exactAgentFrameScalar(value string) bool {
+	return value != "" && value == strings.TrimSpace(value)
 }

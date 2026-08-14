@@ -50,3 +50,30 @@ func TestAgentFrameInspectionRejectsNoncanonicalPathAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentFrameInspectionRejectsNoncanonicalScalarAliases(t *testing.T) {
+	session, _, _ := testExecutionFrameInputs(t)
+	prompt, err := session.ProviderPrompt.Text()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := PreviewSeed{
+		BundleHash: testBundleHash, AgentID: session.AgentIdentity.AgentID(), Intent: session.Intent,
+		Criteria: session.Criteria, ProviderPrompt: prompt,
+	}
+	for _, selector := range []InspectionSelector{
+		{BundleHash: " " + testBundleHash, Flow: "review", AgentID: seed.AgentID},
+		{BundleHash: testBundleHash, Flow: "review", AgentID: " " + seed.AgentID},
+	} {
+		if _, err := InspectStatic(selector, seed); err == nil {
+			t.Fatalf("static inspection accepted noncanonical scalar selector %#v", selector)
+		}
+	}
+
+	identity := agentidentitytest.RootRuntime(t, seed.AgentID, "agent-frame-inspection-test")
+	seed.AgentIdentity = &identity
+	seed.BundleSource = "persisted"
+	if _, err := InspectEffective(InspectionSelector{AgentID: " " + seed.AgentID, Root: true}, seed); err == nil {
+		t.Fatal("effective inspection accepted noncanonical agent_id")
+	}
+}

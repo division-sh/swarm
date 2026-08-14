@@ -66,18 +66,32 @@ func runAgentFrameCommand(ctx context.Context, out, errOut io.Writer, opts agent
 }
 
 func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, error) {
-	agentID = strings.TrimSpace(agentID)
+	var err error
+	agentID, err = exactAgentFrameCLIScalar(agentID, "agent id")
+	if err != nil {
+		return nil, err
+	}
 	if agentID == "" {
 		return nil, fmt.Errorf("agent id is required")
 	}
-	scope := strings.TrimSpace(opts.scope)
+	scope, err := exactAgentFrameCLIScalar(opts.scope, "--scope")
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{"scope": scope, "agent_id": agentID}
 	switch scope {
 	case string(agentframe.InspectionStatic):
-		if opts.root || strings.TrimSpace(opts.flowInstance) != "" {
+		flowInstance, err := exactAgentFrameCLIPath(opts.flowInstance, "--flow-instance")
+		if err != nil {
+			return nil, err
+		}
+		if opts.root || flowInstance != "" {
 			return nil, fmt.Errorf("--scope static forbids --root and --flow-instance")
 		}
-		bundleHash := strings.TrimSpace(opts.bundleHash)
+		bundleHash, err := exactAgentFrameCLIScalar(opts.bundleHash, "--bundle-hash")
+		if err != nil {
+			return nil, err
+		}
 		flow, err := exactAgentFrameCLIPath(opts.flow, "--flow")
 		if err != nil {
 			return nil, err
@@ -88,7 +102,15 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		params["bundle_hash"] = bundleHash
 		params["flow"] = flow
 	case string(agentframe.InspectionEffective):
-		if strings.TrimSpace(opts.bundleHash) != "" || strings.TrimSpace(opts.flow) != "" {
+		bundleHash, err := exactAgentFrameCLIScalar(opts.bundleHash, "--bundle-hash")
+		if err != nil {
+			return nil, err
+		}
+		flow, err := exactAgentFrameCLIPath(opts.flow, "--flow")
+		if err != nil {
+			return nil, err
+		}
+		if bundleHash != "" || flow != "" {
 			return nil, fmt.Errorf("--scope effective forbids --bundle-hash and --flow")
 		}
 		flowInstance, err := exactAgentFrameCLIPath(opts.flowInstance, "--flow-instance")
@@ -107,6 +129,16 @@ func (opts agentFrameCommandOptions) params(agentID string) (map[string]any, err
 		return nil, fmt.Errorf("--scope must be static or effective")
 	}
 	return params, nil
+}
+
+func exactAgentFrameCLIScalar(value, field string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	if value != strings.TrimSpace(value) {
+		return "", fmt.Errorf("%s must be an exact value without surrounding whitespace", field)
+	}
+	return value, nil
 }
 
 func exactAgentFrameCLIPath(value, flag string) (string, error) {
