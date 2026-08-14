@@ -628,10 +628,7 @@ func guardReferencesEntity(guard *runtimecontracts.GuardSpec) bool {
 	if guard == nil {
 		return false
 	}
-	if expressionReferencesEntity(guard.Check) {
-		return true
-	}
-	for _, check := range guard.Checks {
+	for _, check := range guard.EffectiveChecks() {
 		if expressionReferencesEntity(check.Check) {
 			return true
 		}

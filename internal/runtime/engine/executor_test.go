@@ -3192,6 +3192,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
+				Check: "shadowed.top.level.check",
 				Checks: []runtimecontracts.GuardCheck{
 					{ID: "payload_score", Check: "payload.score > 5"},
 					{ID: "registry_guard"},

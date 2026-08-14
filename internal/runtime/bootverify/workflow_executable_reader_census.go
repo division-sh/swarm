@@ -250,9 +250,12 @@ func appendGuardExecutableReaders(out *[]expressionReference, guard *runtimecont
 	if guard == nil {
 		return
 	}
-	appendExecutableReader(out, "guard.check", guard.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
-	for i, check := range guard.Checks {
-		appendExecutableReader(out, fmt.Sprintf("guard.checks[%d]", i), check.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
+	for i, check := range guard.EffectiveChecks() {
+		kind := "guard.check"
+		if len(guard.Checks) > 0 {
+			kind = fmt.Sprintf("guard.checks[%d]", i)
+		}
+		appendExecutableReader(out, kind, check.Check, runtimepipeline.WorkflowEntityFieldLifecycleGuard)
 	}
 }
 

@@ -156,6 +156,21 @@ func TestExecutableReaderCensusHonorsItemsFromPrecedence(t *testing.T) {
 	}
 }
 
+func TestExecutableReaderCensusHonorsGuardChecksPrecedence(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
+		Check:  "entity.verticals",
+		Checks: []runtimecontracts.GuardCheck{{ID: "ready", Check: "payload.ready"}},
+	}}
+	readers := handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", handler)
+	if len(readers) != 1 || readers[0].Kind != "guard.checks[0]" || readers[0].Expression != "payload.ready" {
+		t.Fatalf("reader census = %#v, want only guard.checks[0] payload.ready", readers)
+	}
+	conditions := handlerConditions(handler)
+	if len(conditions) != 1 || conditions[0].Expression != "payload.ready" || conditions[0].Context != runtimepipeline.WorkflowConditionContextGuard {
+		t.Fatalf("handler conditions = %#v, want only active guard collection check", conditions)
+	}
+}
+
 func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 		Source: "payload.items",

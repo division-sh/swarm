@@ -512,6 +512,18 @@ type GuardCheck struct {
 	Check string `yaml:"check"`
 }
 
+// EffectiveChecks returns the exact checks evaluated by a guard. An authored
+// checks collection replaces the legacy top-level id/check pair.
+func (g *GuardSpec) EffectiveChecks() []GuardCheck {
+	if g == nil {
+		return nil
+	}
+	if len(g.Checks) > 0 {
+		return append([]GuardCheck(nil), g.Checks...)
+	}
+	return []GuardCheck{{ID: g.ID, Check: g.Check}}
+}
+
 type GuardFailureAction string
 
 const (
