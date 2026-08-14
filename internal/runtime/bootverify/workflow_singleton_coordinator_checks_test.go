@@ -346,6 +346,85 @@ coordinator-node:
 	t.Fatalf("nested project-package reader missing from coordinator demand: %#v", BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)))
 }
 
+func TestBuildSingletonCoordinatorDemandProjection_ResolvesNestedProjectAgentAgainstOwningFlow(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: nested-project-agent-demand
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: alpha
+    flow: alpha
+    mode: singleton
+  - id: zeta
+    flow: zeta
+    mode: singleton
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-project-agent-demand\n")
+	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeBootverifyFixtureFile(t, filepath.Join(root, file), "{}\n")
+	}
+	for _, flowID := range []string{"alpha", "zeta"} {
+		flowDir := filepath.Join(root, "flows", flowID)
+		writeBootverifyFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: "+flowID+"\nmode: singleton\n")
+		writeBootverifyFixtureFile(t, filepath.Join(flowDir, "entities.yaml"), "coordinator_state:\n  verticals: map[text]text\n")
+		for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+			writeBootverifyFixtureFile(t, filepath.Join(flowDir, file), "{}\n")
+		}
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "zeta", "package.yaml"), `
+name: zeta-package
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows: []
+packages:
+  - path: extensions/writers
+`)
+	nestedDir := filepath.Join(root, "flows", "zeta", "extensions", "writers")
+	writeBootverifyFixtureFile(t, filepath.Join(nestedDir, "package.yaml"), `
+name: zeta-writers
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(nestedDir, "agents.yaml"), `
+nested-writer:
+  id: nested-writer
+  type: factory
+  role: writer
+  intent:
+    inline: Persist the authorized coordinator field.
+  model: regular
+  memory: false
+  subscriptions: []
+  entity_writes:
+    coordinator_state:
+      save: [verticals]
+`)
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
+	foundZeta := false
+	for _, demand := range demands {
+		if demand.AgentID != "nested-writer" {
+			continue
+		}
+		if demand.FlowID == "alpha" {
+			t.Fatalf("nested project agent demand resolved through lexical entity fallback: %#v", demands)
+		}
+		if demand.FlowID == "zeta" && demand.Kind == "agent_entity_writes.save" && demand.Field == "verticals" {
+			foundZeta = true
+		}
+	}
+	if !foundZeta {
+		t.Fatalf("nested project agent demand = %#v, want zeta-owned verticals write", demands)
+	}
+}
+
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator

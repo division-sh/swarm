@@ -49,15 +49,26 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 						Timers:        []WorkflowTimerContract{{ID: "b-timer", Event: "b.tick"}},
 					},
 				},
-				Children: []FlowContractView{{
-					Paths: FlowContractPaths{PackageKey: "root/flows/b/child", NodesFile: "flows/b/child/nodes.yaml"},
-					Nodes: map[string]SystemNodeContract{
-						"package-child": {
-							EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-child-active")},
-							Timers:        []WorkflowTimerContract{{ID: "b-child-timer", Event: "b.child.tick"}},
+				Children: []FlowContractView{
+					{
+						Paths: FlowContractPaths{PackageKey: "root/flows/b", NodesFile: "flows/b/nodes.yaml"},
+						Nodes: map[string]SystemNodeContract{
+							"shared": {
+								EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-active")},
+								Timers:        []WorkflowTimerContract{{ID: "b-timer", Event: "b.tick"}},
+							},
 						},
 					},
-				}},
+					{
+						Paths: FlowContractPaths{PackageKey: "root/flows/b/child", NodesFile: "flows/b/child/nodes.yaml"},
+						Nodes: map[string]SystemNodeContract{
+							"package-child": {
+								EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-child-active")},
+								Timers:        []WorkflowTimerContract{{ID: "b-child-timer", Event: "b.child.tick"}},
+							},
+						},
+					},
+				},
 			},
 			{
 				Paths: FlowContractPaths{ID: "a", PackageKey: "root", NodesFile: "flows/a/nodes.yaml"},
