@@ -297,6 +297,40 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 	t.Fatalf("duplicate scoped-node demands = %#v, want flow a shared-node items write", demands)
 }
 
+func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatQuerySelectAsExpression(t *testing.T) {
+	bundle := loadSingletonCoordinatorFixtureBundle(t, `
+name: coordinator
+mode: singleton
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`, `
+coordinator_state:
+  verticals:
+    type: map[text]VerticalState
+    initial: {}
+`, "", `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      query:
+        source: payload.job
+        select: [entity.verticals]
+        store_as: metadata.selected
+`)
+
+	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
+		if demand.Target == "entity.verticals" || demand.Field == "verticals" {
+			t.Fatalf("literal query selector created singleton coordinator demand: %#v", demand)
+		}
+	}
+}
+
 func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
 	const schema = `
 name: coordinator

@@ -3521,8 +3521,9 @@ handler_specification:
           only precompiled core-json-v1 Wasm with zero author imports and deterministic limits, validate object output, and bind
           computed.*. Module bytes are bundle-pinned and included in bundle identity.
         dead_binding: lookup.into, validate.into, and compute_module.into bindings must be consumed by a supported downstream
-          condition, emit field, activity input, fan_out, or expression in the same handler; unconsumed bindings fail boot
-          verification.
+          condition, emit field, activity input, fan_out, or expression in the same handler. A reader that executes before
+          the binding, including query/guard/collection phases, handler-level compute, or an earlier policy value row, is not
+          a consumer; unconsumed bindings fail boot verification.
       emit_template_specialization:
         syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
           `emit.from` / `emit.fields`. Each rule then declares `emit.fields` and may declare the same `emit.from` without
@@ -3697,7 +3698,7 @@ handler_specification:
         filter: string — optional condition
         group_by: string — field to group by
         count: boolean — count per group
-        select: list — fields to include
+        select: list — literal object field names to include; entries are not expressions or lifecycle entity reads
         store_as: string — where to put results (in emit payload)
       execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
         or on_complete.

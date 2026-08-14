@@ -267,6 +267,7 @@ type expressionReference struct {
 	Kind                    string
 	Expression              string
 	Phase                   runtimepipeline.WorkflowEntityFieldLifecyclePhase
+	HandlerField            string
 	RuleCollection          string
 	RuleField               string
 	RuleIndex               int

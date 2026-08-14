@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -250,7 +251,7 @@ func policySheetLookupBindingConsumed(source semanticview.Source, flowID, nodeID
 		return false
 	}
 	for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
-		if expr.HasRuleIndex && expr.RuleCollection == "rules" && expr.RuleIndex == currentRuleIndex && expr.RuleField == "Compute" {
+		if !policySheetBindingReaderExecutesAfter(expr, currentRuleIndex) {
 			continue
 		}
 		if policySheetLookupExpressionConsumes(expr.Expression, target) {
@@ -258,6 +259,26 @@ func policySheetLookupBindingConsumed(source semanticview.Source, flowID, nodeID
 		}
 	}
 	return false
+}
+
+func policySheetBindingReaderExecutesAfter(expr expressionReference, currentRuleIndex int) bool {
+	if expr.HasRuleIndex && expr.RuleCollection == "rules" && expr.RuleField == "Compute" {
+		return expr.RuleIndex > currentRuleIndex
+	}
+	switch expr.HandlerField {
+	case "SelectEntity", "SelectOrCreateEntity", "Loop", "Query", "Guard", "Join", "Accumulate", "Filter", "GroupBy", "Reduce", "Count", "Compute":
+		return false
+	}
+	switch expr.Phase {
+	case runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
+		runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
+		runtimepipeline.WorkflowEntityFieldLifecycleRule,
+		runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
+		runtimepipeline.WorkflowEntityFieldLifecycleEmitFields:
+		return true
+	default:
+		return false
+	}
 }
 
 func policySheetLookupExpressionConsumes(expression, target string) bool {

@@ -63,6 +63,55 @@ func TestPolicySheetLookupValueRowsRejectsOwnLookupKeyAsConsumer(t *testing.T) {
 	}
 }
 
+func TestPolicySheetLookupValueRowsRejectsPreBindingReadersAsConsumers(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*runtimecontracts.SystemNodeEventHandler)
+	}{
+		{
+			name: "query executes before compute",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
+				handler.Query = &runtimecontracts.QuerySpec{Source: "computed.template_path"}
+			},
+		},
+		{
+			name: "entity selection executes before handler",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
+				handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+					Field: "id",
+					Ref:   "computed.template_path",
+				}}}
+			},
+		},
+		{
+			name: "earlier policy compute row",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler) {
+				earlier := bootverifyLookupConsumerRule("earlier", "computed.earlier", "computed.template_path")
+				handler.Rules = append([]runtimecontracts.HandlerRuleEntry{earlier}, handler.Rules...)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := bootverifyLookupHandler(true, false)
+			tc.mutate(&handler)
+			findings := bootverifyLookupFindings(handler)
+			if !findingContainsAll(findings, policySheetLookupCheckID, "lookup row scaffold_paths", "is not consumed") {
+				t.Fatalf("lookup findings = %#v, want pre-binding reader excluded from scaffold_paths consumers", findings)
+			}
+		})
+	}
+}
+
+func TestPolicySheetLookupValueRowsAcceptsLaterComputeConsumer(t *testing.T) {
+	handler := bootverifyLookupHandler(true, false)
+	handler.Rules = append(handler.Rules, bootverifyLookupConsumerRule("later", "computed.later", "computed.template_path"))
+	findings := bootverifyLookupFindings(handler)
+	if findingContainsAll(findings, policySheetLookupCheckID, "lookup row scaffold_paths", "is not consumed") {
+		t.Fatalf("lookup findings = %#v, want later compute row accepted as scaffold_paths consumer", findings)
+	}
+}
+
 func TestPolicySheetLookupValueRowsTypeChecksPayloadKeys(t *testing.T) {
 	handler := bootverifyLookupHandler(true, true)
 	handler.Rules[0].Compute.Lookup.Entries[0].Key[1] = runtimecontracts.ComputeLookupLiteral{
@@ -140,6 +189,22 @@ func bootverifyLookupHandler(defaultDeclared, includeConsumer bool) runtimecontr
 		})
 	}
 	return handler
+}
+
+func bootverifyLookupConsumerRule(id, storeAs, firstInput string) runtimecontracts.HandlerRuleEntry {
+	rule := bootverifyLookupHandler(true, false).Rules[0]
+	lookup := *rule.Compute.Lookup
+	lookup.On = []string{firstInput, "payload.language"}
+	lookup.OnPaths = []paths.Path{paths.Parse(firstInput), paths.Parse("payload.language")}
+	compute := *rule.Compute
+	compute.StoreAs = storeAs
+	compute.Lookup = &lookup
+	policyRow := rule.PolicyRow
+	policyRow.Lookup = &lookup
+	rule.ID = id
+	rule.Compute = &compute
+	rule.PolicyRow = policyRow
+	return rule
 }
 
 func bootverifyLookupFindingContains(findings []Finding, contains string) bool {
