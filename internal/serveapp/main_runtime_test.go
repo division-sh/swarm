@@ -37,6 +37,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -1591,6 +1592,24 @@ func TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostg
 
 func TestRunServeRuntimeBundleDeleteNonForceQuiescesLoadedAgentsBeforeTopologyRemovalPostgres(t *testing.T) {
 	rt := startServedLiveAgentProofRuntime(t, servedparity.BackendExplicitPostgres)
+	if rt.Postgres == nil {
+		t.Fatal("postgres selected-store owner is required for non-force bundle.delete proof")
+	}
+	deletePlan, err := rt.Postgres.PlanBundleDelete(context.Background(), runtimebundledelete.Request{
+		BundleHash:  rt.BundleHash,
+		RequestedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("plan live-agent fixture runs before non-force bundle.delete: %v", err)
+	}
+	for _, run := range deletePlan.ActiveRuns {
+		requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
+			"run_id":          run.RunID,
+			"idempotency_key": "issue-2125-bundle-non-force-stop-" + uuid.NewString(),
+		})
+		requireServedRunControlState(t, rt.DB, rt.Backend, run.RunID, "stopped", "cancelled")
+	}
+
 	var before, running int
 	if err := rt.DB.QueryRowContext(context.Background(), `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'active' AND lifecycle_phase = 'running')
