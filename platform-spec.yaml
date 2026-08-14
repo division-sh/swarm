@@ -10835,8 +10835,10 @@ flow_model:
         coordinator demand. Join derivation and join validation
         consume the same scoped node records, which preserve exact
         project/flow ownership from the loader or the exported FlowTree,
-        including blank-ID package roots; root Nodes are authoritative only when
-        no tree exists. Node IDs are local to their declaration scope and
+        including every nested blank-ID project-package node under its nearest
+        owning flow. A partial merged alias table cannot replace that census;
+        root Nodes are authoritative only when no tree or project view exists.
+        Node IDs are local to their declaration scope and
         flattened aliases are not semantic input. Map/list declaration shape
         without an exact consumer
         creates no demand, no coordinator readback, and no strict-refinement
