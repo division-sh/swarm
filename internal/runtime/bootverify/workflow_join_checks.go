@@ -21,9 +21,10 @@ func checkJoinValidation(c *checkerContext) []Finding {
 	}
 	findings := make([]Finding, 0)
 	seenIDs := map[string]string{}
-	for _, nodeID := range sortedNodeIDs(c.source) {
-		node := c.source.NodeEntries()[nodeID]
-		flowID := nodeFlowID(c.source, nodeID)
+	for _, record := range wave1ScopedNodeRecords(c.source) {
+		nodeID := strings.TrimSpace(record.LogicalID)
+		flowID := strings.TrimSpace(record.Source.FlowID)
+		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			if handler.Join == nil {

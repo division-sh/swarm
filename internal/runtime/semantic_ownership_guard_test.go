@@ -81,6 +81,7 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 	inspectProductionGo(t, func(path string, file *ast.File) {
 		scopedDemandFunctions := map[string]struct{}{
 			"BuildSingletonCoordinatorDemandProjection": {},
+			"checkJoinValidation":                       {},
 			"conditionExpressions":                      {},
 			"dataAccumulationExpressions":               {},
 			"emitFieldExpressions":                      {},

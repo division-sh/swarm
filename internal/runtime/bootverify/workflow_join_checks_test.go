@@ -2,10 +2,12 @@ package bootverify
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRun_ValidatesStagedJoinContract(t *testing.T) {
@@ -182,6 +184,60 @@ func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	readers := wave1EntityReaderCoverageByFlow(source)
 	if _, ok := readers[""]["expected"]; !ok {
 		t.Fatalf("join.members.from reader coverage = %#v", readers)
+	}
+}
+
+func TestRun_JoinValidationPreservesDuplicateScopedNodeIDs(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	root := canonicalrouting.CopyDuplicateScopedSingletonDemand(t)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "schema.yaml"), `
+name: a
+mode: singleton
+initial_state: active
+states: [active, done, failed]
+pins:
+  inputs:
+    events:
+      - {name: item_received, event: item.received, source: harness}
+  outputs:
+    events: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "entities.yaml"), `
+state:
+  expected:
+    type: '[text]'
+    initial: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "events.yaml"), `
+item.received:
+  member_id: text
+  result: text
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "nodes.yaml"), `
+shared-node:
+  id: shared-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  event_handlers:
+    item.received:
+      join:
+        stage: missing
+        members: {from: entity.expected, by: payload.member_id}
+        output: payload.result
+        on_complete: {advances_to: done}
+        timeout: {after: 1h, advances_to: failed}
+`)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	if _, ok := bundle.Nodes["shared-node"]; ok {
+		t.Fatal("duplicate local node ID unexpectedly survived as a flattened global alias")
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !findingContainsAll(report.HardInvalidities(), joinValidationCheckID, "flow a", "shared-node", `unknown stage "missing"`) {
+		t.Fatalf("join findings = %#v, want exact invalid scoped join rejection", report.HardInvalidities())
 	}
 }
 
