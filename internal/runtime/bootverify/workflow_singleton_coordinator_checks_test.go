@@ -213,6 +213,29 @@ coordinator-node:
 			wantTarget: "entity.verticals",
 		},
 		{
+			name: "accumulate window",
+			entities: `
+coordinator_state:
+  verticals:
+    type: map[text]VerticalState
+    initial: {}
+`,
+			nodes: `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      accumulate:
+        into: jobs
+        from: payload.job
+        window: entity.verticals
+`,
+			wantKind:   "entity_read.accumulate.window",
+			wantTarget: "entity.verticals",
+		},
+		{
 			name:     "payload backed join",
 			entities: "coordinator_state: {}\n",
 			nodes: `

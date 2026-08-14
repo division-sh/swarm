@@ -100,7 +100,7 @@ func validatePolicySheetLookupValueRow(source semanticview.Source, ref policyShe
 		findings = append(findings, policySheetLookupFinding(ref, "lookup.default currently supports only fail"))
 	}
 	findings = append(findings, validatePolicySheetLookupKeyTypes(source, ref, spec)...)
-	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, strings.TrimSpace(rule.Compute.StoreAs)) {
+	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, ref.RuleIndex, strings.TrimSpace(rule.Compute.StoreAs)) {
 		findings = append(findings, policySheetLookupFinding(ref, fmt.Sprintf("lookup.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", strings.TrimSpace(rule.Compute.StoreAs))))
 	}
 	return findings
@@ -244,12 +244,15 @@ func policySheetLookupPathDomain(source semanticview.Source, flowID, eventType s
 	}
 }
 
-func policySheetLookupBindingConsumed(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler, target string) bool {
+func policySheetLookupBindingConsumed(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler, currentRuleIndex int, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return false
 	}
 	for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+		if expr.HasRuleIndex && expr.RuleCollection == "rules" && expr.RuleIndex == currentRuleIndex && expr.RuleField == "Compute" {
+			continue
+		}
 		if policySheetLookupExpressionConsumes(expr.Expression, target) {
 			return true
 		}

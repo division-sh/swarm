@@ -267,6 +267,10 @@ type expressionReference struct {
 	Kind                    string
 	Expression              string
 	Phase                   runtimepipeline.WorkflowEntityFieldLifecyclePhase
+	RuleCollection          string
+	RuleField               string
+	RuleIndex               int
+	HasRuleIndex            bool
 	RequireScalarEntityLeaf bool
 	AllowBareItem           bool
 	ItemAlias               string
