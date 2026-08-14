@@ -680,6 +680,33 @@ func (s *runtimeProjectSupervisor) restoreCommittedSourceSet(ctx context.Context
 	return err
 }
 
+func (s *runtimeProjectSupervisor) completePendingSourceSetSurvivors(
+	ctx context.Context,
+	manager *runtime.RuntimeContextManager,
+) (bool, error) {
+	if s == nil || s.processCapability == nil || manager == nil {
+		return false, nil
+	}
+	current, exists, err := s.processCapability.CurrentSourceSet(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, errors.New("pending runtime source-set survivor transition requires an installed source set")
+	}
+	transition, err := manager.PreparePendingSourceSetTransition(ctx, current)
+	if err != nil {
+		return false, err
+	}
+	if transition == nil {
+		return false, nil
+	}
+	if err := transition.Commit(ctx, s.processCapability); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 func (s *runtimeProjectSupervisor) prepareReplacementSurvivors(
 	ctx context.Context,
 	manager *runtime.RuntimeContextManager,
@@ -722,7 +749,14 @@ func (s *runtimeProjectSupervisor) restoreCommittedSourceSetAndSurvivors(
 		return nil
 	}
 	if err := transition.Commit(ctx, s.processCapability); err != nil {
-		return fmt.Errorf("restore predecessor source-set survivors: %w", err)
+		commitErr := fmt.Errorf("restore predecessor source-set survivors: %w", err)
+		recovered, recoveryErr := s.completePendingSourceSetSurvivors(context.Background(), manager)
+		if recoveryErr != nil {
+			return errors.Join(commitErr, fmt.Errorf("recover pending predecessor source-set survivors: %w", recoveryErr))
+		}
+		if !recovered {
+			return errors.Join(commitErr, errors.New("failed predecessor survivor transition was not retained for recovery"))
+		}
 	}
 	return nil
 }
