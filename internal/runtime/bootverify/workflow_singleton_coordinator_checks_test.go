@@ -331,6 +331,65 @@ coordinator-node:
 	}
 }
 
+func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFieldsAsExpressions(t *testing.T) {
+	tests := []struct {
+		name     string
+		operator string
+	}{
+		{
+			name: "filter predicate",
+			operator: `filter:
+        source: payload.job
+        predicate: entity.verticals
+        condition: "true"
+        store_as: metadata.filtered`,
+		},
+		{
+			name: "reduce params",
+			operator: `reduce:
+        source: payload.job
+        operation: count
+        params:
+          value:
+            ref: entity.verticals
+        store_as: metadata.reduced`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadSingletonCoordinatorFixtureBundle(t, `
+name: coordinator
+mode: singleton
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`, `
+coordinator_state:
+  verticals:
+    type: map[text]VerticalState
+    initial: {}
+`, "", `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      `+tc.operator+`
+`)
+
+			for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
+				if demand.Target == "entity.verticals" || demand.Field == "verticals" {
+					t.Fatalf("unevaluated field created singleton coordinator demand: %#v", demand)
+				}
+			}
+		})
+	}
+}
+
 func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
 	const schema = `
 name: coordinator
