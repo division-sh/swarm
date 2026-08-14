@@ -453,6 +453,18 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 				Params: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.items")},
 			}},
 		},
+		{
+			name:    "filter source shadowed by items from",
+			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.items", ItemsFrom: "payload.items"}},
+		},
+		{
+			name:    "reduce source shadowed by items from",
+			handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.items", ItemsFrom: "payload.items"}},
+		},
+		{
+			name:    "count source shadowed by items from",
+			handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{Source: "entity.items", ItemsFrom: "payload.items"}},
+		},
 	}
 
 	for _, tc := range tests {

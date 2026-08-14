@@ -10824,7 +10824,9 @@ flow_model:
         expression-reference validation. `query.select` entries are literal
         object field names, while `filter.predicate` and `reduce.params` are not
         runtime-executed inputs; none of those declarations creates executable
-        reader or coordinator demand. Join derivation and join validation
+        reader or coordinator demand. For filter, reduce, and count,
+        `items_from` is the executable source when present and `source` is only
+        its fallback; a shadowed `source` creates no demand. Join derivation and join validation
         consume the same scoped node records, which preserve exact
         project/flow ownership from the loader or the exported FlowTree,
         including blank-ID package roots; root Nodes are authoritative only when

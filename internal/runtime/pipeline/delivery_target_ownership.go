@@ -743,8 +743,7 @@ func filterReferencesEntity(spec *runtimecontracts.FilterSpec) bool {
 	if spec == nil {
 		return false
 	}
-	return typedPathReferencesEntity(spec.Source, spec.SourcePath) ||
-		typedPathReferencesEntity(spec.ItemsFrom, spec.ItemsPath) ||
+	return collectionSourceReferencesEntity(spec.Source, spec.SourcePath, spec.ItemsFrom, spec.ItemsPath) ||
 		expressionReferencesEntity(spec.Condition) ||
 		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
 }
@@ -753,8 +752,7 @@ func reduceReferencesEntity(spec *runtimecontracts.ReduceSpec) bool {
 	if spec == nil {
 		return false
 	}
-	return typedPathReferencesEntity(spec.Source, spec.SourcePath) ||
-		typedPathReferencesEntity(spec.ItemsFrom, spec.ItemsPath) ||
+	return collectionSourceReferencesEntity(spec.Source, spec.SourcePath, spec.ItemsFrom, spec.ItemsPath) ||
 		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
 }
 
@@ -762,10 +760,16 @@ func countReferencesEntity(spec *runtimecontracts.CountSpec) bool {
 	if spec == nil {
 		return false
 	}
-	return typedPathReferencesEntity(spec.Source, spec.SourcePath) ||
-		typedPathReferencesEntity(spec.ItemsFrom, spec.ItemsPath) ||
+	return collectionSourceReferencesEntity(spec.Source, spec.SourcePath, spec.ItemsFrom, spec.ItemsPath) ||
 		expressionReferencesEntity(spec.Condition) ||
 		typedPathReferencesEntity(spec.StoreAs, spec.StorePath)
+}
+
+func collectionSourceReferencesEntity(source string, sourcePath paths.Path, itemsFrom string, itemsPath paths.Path) bool {
+	if strings.TrimSpace(itemsFrom) != "" {
+		return typedPathReferencesEntity(itemsFrom, itemsPath)
+	}
+	return typedPathReferencesEntity(source, sourcePath)
 }
 
 func computeReferencesEntity(spec *runtimecontracts.ComputeSpec) bool {

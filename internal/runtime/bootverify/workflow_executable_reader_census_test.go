@@ -96,6 +96,39 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 	}
 }
 
+func TestExecutableReaderCensusHonorsItemsFromPrecedence(t *testing.T) {
+	tests := []struct {
+		name     string
+		handler  runtimecontracts.SystemNodeEventHandler
+		wantKind string
+	}{
+		{
+			name:     "filter",
+			handler:  runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals", ItemsFrom: "payload.items"}},
+			wantKind: "filter.items_from",
+		},
+		{
+			name:     "reduce",
+			handler:  runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.verticals", ItemsFrom: "payload.items"}},
+			wantKind: "reduce.items_from",
+		},
+		{
+			name:     "count",
+			handler:  runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{Source: "entity.verticals", ItemsFrom: "payload.items"}},
+			wantKind: "count.items_from",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			readers := handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", tc.handler)
+			if len(readers) != 1 || readers[0].Kind != tc.wantKind || readers[0].Expression != "payload.items" {
+				t.Fatalf("reader census = %#v, want only %s payload.items", readers, tc.wantKind)
+			}
+		})
+	}
+}
+
 func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 		Source: "payload.items",

@@ -354,6 +354,29 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
             ref: entity.verticals
         store_as: metadata.reduced`,
 		},
+		{
+			name: "filter source shadowed by items from",
+			operator: `filter:
+        source: entity.verticals
+        items_from: payload.job
+        condition: "true"
+        store_as: metadata.filtered`,
+		},
+		{
+			name: "reduce source shadowed by items from",
+			operator: `reduce:
+        source: entity.verticals
+        items_from: payload.job
+        operation: count
+        store_as: metadata.reduced`,
+		},
+		{
+			name: "count source shadowed by items from",
+			operator: `count:
+        source: entity.verticals
+        items_from: payload.job
+        store_as: metadata.counted`,
+		},
 	}
 
 	for _, tc := range tests {
