@@ -10798,8 +10798,11 @@ flow_model:
         before readiness returns. Failure after candidate context publication first withdraws and drains that exact candidate
         through RuntimeContextManager. Recovery then prepares and fences every survivor for the predecessor plan before restoring
         the predecessor source-set head, commits every survivor generation/admission rebind under that restored head, and only
-        then publishes a fresh predecessor runtime. Preparation failure leaves the candidate head and matching survivor authority
-        current; it cannot restore the head first or reopen candidate-authority survivors under a predecessor head. A survivor
+        then publishes a fresh predecessor runtime. The supervisor installs the typed rollback owner before preparing survivors
+        for the predecessor plan; that owner retains the exact candidate plan, predecessor plan, and idempotent restore operation
+        through preparation or source-set restoration failure. Preparation failure leaves the candidate head and matching survivor
+        authority current until the next serialized recovery boundary resumes that exact rollback; it cannot restore the head
+        first, forget the continuation, or reopen candidate-authority survivors under a predecessor head. A survivor
         commit failure under the restored predecessor head retains every survivor fenced, immediately adopts that exact pending
         predecessor transition, and retries it before predecessor publication. A repeated failure retains one supervisor-owned
         rollback finalizer carrying the predecessor restoration and startup-handoff freeze; reload, replacement, and close must
@@ -33487,8 +33490,10 @@ agent_topology_authority:
       Runtime replacement uses RuntimeContextManager as the complete-plan compiler because it owns the
       private runtime managers. It fences every untouched loaded context before ReplaceSourceSet, rotates
       each survivor to the committed plan, and republishes the complete survivor set only after convergence.
-      Rollback restores the predecessor source-set head and survivor generations before predecessor publication. If survivor
-      generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
+      Rollback restores the predecessor source-set head and survivor generations before predecessor publication. Its typed
+      finalizer is retained before predecessor survivor preparation and carries both exact plans plus the idempotent restore
+      operation, so preparation or source-set restoration failure remains resumable at every later serialized operation boundary.
+      If survivor generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
       retries it while all survivors remain fenced. Repeated failure retains a typed rollback finalizer that must converge before
       any later reload/replacement compiles from loaded contexts and before close may release the selected store; it cannot discard
       the transition, forget predecessor restoration, or publish only the predecessor. Once restored-predecessor publication is

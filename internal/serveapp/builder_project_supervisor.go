@@ -621,7 +621,11 @@ type pendingRuntimeSourceSetRollback struct {
 	manager                *runtime.RuntimeContextManager
 	predecessorContext     runtime.BundleContext
 	predecessor            *runtime.Runtime
+	candidatePlan          runtimeagenttopology.SourceSetPlan
+	previousPlan           runtimeagenttopology.SourceSetPlan
+	topologyAttempt        sourceSetReplacementAttempt
 	freeze                 *startupHandoffFreeze
+	sourceSetRestored      bool
 	survivorsRecovered     bool
 	predecessorPublication *pendingRuntimeReplacement
 }
@@ -864,6 +868,10 @@ func (s *runtimeProjectSupervisor) retainPendingSourceSetRollback(
 	manager *runtime.RuntimeContextManager,
 	predecessorContext runtime.BundleContext,
 	predecessor *runtime.Runtime,
+	candidatePlan runtimeagenttopology.SourceSetPlan,
+	previousPlan runtimeagenttopology.SourceSetPlan,
+	topologyAttempt sourceSetReplacementAttempt,
+	sourceSetRestored bool,
 	freeze *startupHandoffFreeze,
 ) error {
 	if s == nil || manager == nil || predecessor == nil {
@@ -878,7 +886,11 @@ func (s *runtimeProjectSupervisor) retainPendingSourceSetRollback(
 		manager:            manager,
 		predecessorContext: predecessorContext,
 		predecessor:        predecessor,
+		candidatePlan:      candidatePlan,
+		previousPlan:       previousPlan,
+		topologyAttempt:    topologyAttempt,
 		freeze:             freeze,
+		sourceSetRestored:  sourceSetRestored,
 	}
 	return nil
 }
@@ -900,6 +912,19 @@ func (s *runtimeProjectSupervisor) completePendingSourceSetRollback(ctx context.
 	s.mu.RUnlock()
 	if current != pending {
 		return nil
+	}
+	if !pending.sourceSetRestored {
+		err := s.restoreCommittedSourceSetAndSurvivors(
+			context.Background(), pending.manager, pending.candidatePlan, pending.previousPlan, pending.topologyAttempt,
+		)
+		var survivorCommitFailure *predecessorSurvivorCommitFailure
+		if err != nil && !errors.As(err, &survivorCommitFailure) {
+			return fmt.Errorf("restore pending predecessor source set: %w", err)
+		}
+		pending.sourceSetRestored = true
+		if err == nil {
+			pending.survivorsRecovered = true
+		}
 	}
 	if !pending.survivorsRecovered {
 		recovered, err := s.completePendingSourceSetSurvivors(context.Background(), pending.manager)
@@ -1103,7 +1128,8 @@ func (s *runtimeProjectSupervisor) completePendingReplacementRollback(ctx contex
 			var survivorCommitFailure *predecessorSurvivorCommitFailure
 			if errors.As(err, &survivorCommitFailure) {
 				if retainErr := s.retainPendingSourceSetRollback(
-					pending.manager, pending.predecessorContext, pending.predecessor, pending.freeze,
+					pending.manager, pending.predecessorContext, pending.predecessor,
+					pending.candidatePlan, pending.previousPlan, pending.topologyAttempt, true, pending.freeze,
 				); retainErr != nil {
 					return errors.Join(err, retainErr)
 				}
@@ -1361,18 +1387,14 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			return errors.Join(cause, topologyErr, restartErr)
 		}
 		restoreAfterSurvivorCommit := func(cause error) error {
-			topologyErr := s.restoreCommittedSourceSetAndSurvivors(context.Background(), manager, candidatePlan, previousPlan, topologyAttempt)
-			var survivorCommitFailure *predecessorSurvivorCommitFailure
-			if errors.As(topologyErr, &survivorCommitFailure) {
-				retainErr := s.retainPendingSourceSetRollback(manager, oldContextDef, oldRT, freeze)
-				if retainErr != nil {
-					return errors.Join(cause, topologyErr, retainErr)
-				}
-				recoveryErr := s.completePendingSourceSetRollback(context.Background())
-				return errors.Join(cause, topologyErr, recoveryErr)
+			retainErr := s.retainPendingSourceSetRollback(
+				manager, oldContextDef, oldRT, candidatePlan, previousPlan, topologyAttempt, false, freeze,
+			)
+			if retainErr != nil {
+				return errors.Join(cause, retainErr)
 			}
-			restartErr := s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze)
-			return errors.Join(cause, topologyErr, restartErr)
+			recoveryErr := s.completePendingSourceSetRollback(context.Background())
+			return errors.Join(cause, recoveryErr)
 		}
 		transitionRetained := false
 		var publication *runtime.PreparedRuntimeContextReplacement

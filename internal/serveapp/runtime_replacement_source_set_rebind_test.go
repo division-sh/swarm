@@ -29,6 +29,8 @@ import (
 type failSourceSetGrantCapability struct {
 	runtimestartupownership.ProcessCapability
 	revision          string
+	bundleHash        string
+	onFailure         func()
 	attempts          atomic.Int32
 	failuresRemaining atomic.Int32
 	failures          atomic.Int32
@@ -182,7 +184,7 @@ func (c *failSourceSetGrantCapability) IssueGenerationGrant(
 	ctx context.Context,
 	req runtimestartupownership.GrantRequest,
 ) (runtimestartupownership.GenerationGrant, error) {
-	if req.SourceSetRevision == c.revision {
+	if (c.revision == "" || req.SourceSetRevision == c.revision) && (c.bundleHash == "" || req.BundleHash == c.bundleHash) {
 		c.attempts.Add(1)
 		for {
 			remaining := c.failuresRemaining.Load()
@@ -191,6 +193,9 @@ func (c *failSourceSetGrantCapability) IssueGenerationGrant(
 			}
 			if c.failuresRemaining.CompareAndSwap(remaining, remaining-1) {
 				c.failures.Add(1)
+				if c.onFailure != nil {
+					c.onFailure()
+				}
 				return nil, errors.New("injected predecessor survivor grant failure")
 			}
 		}
@@ -321,6 +326,9 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			recoveryCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-recovery-candidate", "theta-worker"), runtimeContextTestHash("1"))
 			blockedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-blocked-candidate", "iota-worker"), runtimeContextTestHash("2"))
 			blockedRestored := newRuntime(recoveryCandidate.root, recoveryCandidate.hash)
+			directFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-direct-failure-candidate", "kappa-worker"), runtimeContextTestHash("3"))
+			directFailureRestored := newRuntime(recoveryCandidate.root, recoveryCandidate.hash)
+			finalCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-final-candidate", "lambda-worker"), runtimeContextTestHash("4"))
 
 			coordinates := []runtimeagenttopology.SourceCoordinate{
 				{BundleHash: predecessor.hash, BundleSource: "ephemeral"},
@@ -800,12 +808,116 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil || evidence.SourceSetRevision != blockedPlan.Revision {
 				t.Fatalf("survivor authority after failed predecessor preparation = %#v, head:%s err:%v", evidence, blockedPlan.Revision, err)
 			}
+			supervisor.mu.RLock()
+			blockedReplacementRollback := supervisor.pendingReplacementRollback
+			blockedSourceSetRollback := supervisor.pendingSourceSetRollback
+			supervisor.mu.RUnlock()
+			if blockedReplacementRollback == nil || blockedSourceSetRollback != nil {
+				t.Fatalf("blocked publication rollback owner = replacement:%p source-set:%p, want retained replacement only", blockedReplacementRollback, blockedSourceSetRollback)
+			}
 
-			deactivated := contexts.DeactivateBundleHashWithOptions(
-				survivor.hash, runtimepkg.RuntimeContextCauseUnloaded, runtimepkg.ShutdownOptions{Grace: 5 * time.Second},
+			var blockedRecoveryHooks atomic.Int32
+			supervisor.SetRuntimePublishedHook(func(context.Context) error {
+				blockedRecoveryHooks.Add(1)
+				return nil
+			})
+			_, boundaryErr = supervisor.replaceCurrentRuntimeWithSource(
+				ctx, directFailureCandidate.root, directFailureCandidate.source, directFailureCandidate.bundle,
+				directFailureCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: directFailureCandidate.hash}, nil, nil,
 			)
-			if deactivated.ShutdownErr != nil {
-				t.Fatalf("shutdown rebound survivor: %v", deactivated.ShutdownErr)
+			if boundaryErr == nil || !strings.Contains(boundaryErr.Error(), "runtime replacement requires a candidate runtime") {
+				t.Fatalf("replacement boundary after predecessor preparation recovery = %v, want candidate validation", boundaryErr)
+			}
+			if blockedRecoveryHooks.Load() != 1 || !ready.Load() || supervisor.CurrentRuntime() != blockedRestored.rt {
+				t.Fatalf("preparation recovery state = hooks:%d ready:%v runtime:%p want:%p", blockedRecoveryHooks.Load(), ready.Load(), supervisor.CurrentRuntime(), blockedRestored.rt)
+			}
+			supervisor.mu.RLock()
+			blockedReplacementRollback = supervisor.pendingReplacementRollback
+			supervisor.mu.RUnlock()
+			if blockedReplacementRollback != nil {
+				t.Fatal("replacement boundary did not clear retained preparation rollback")
+			}
+			restoredAfterBlocked, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || restoredAfterBlocked.Revision != recoveredPlan.Revision {
+				t.Fatalf("source set after predecessor preparation recovery = exists:%v revision:%s want:%s err:%v", exists, restoredAfterBlocked.Revision, recoveredPlan.Revision, err)
+			}
+
+			directFailureCapability := &failSourceSetGrantCapability{
+				ProcessCapability: capability,
+				bundleHash:        survivor.hash,
+			}
+			directFailureCapability.failuresRemaining.Store(1)
+			directFailureCapability.onFailure = func() { survivor.rt.Manager = nil }
+			supervisor.SetProcessCapability(directFailureCapability)
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
+				return directFailureRestored.rt, directFailureRestored.rt.WorkOccurrence(), nil
+			}
+			_, directFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, directFailureCandidate.root, directFailureCandidate.source, directFailureCandidate.bundle,
+				directFailureCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: directFailureCandidate.hash}, directFailureCandidate.rt, directFailureCandidate.rt.WorkOccurrence(),
+			)
+			survivor.rt.Manager = survivorManager
+			if directFailureErr == nil || !strings.Contains(directFailureErr.Error(), "injected predecessor survivor grant failure") ||
+				!strings.Contains(directFailureErr.Error(), "prepare predecessor source-set survivor restoration") {
+				t.Fatalf("direct survivor rollback preparation error = %v", directFailureErr)
+			}
+			if directFailureCapability.failures.Load() != 1 || ready.Load() {
+				t.Fatalf("direct survivor rollback state = failures:%d ready:%v, want 1/false", directFailureCapability.failures.Load(), ready.Load())
+			}
+			supervisor.mu.RLock()
+			directRollback := supervisor.pendingSourceSetRollback
+			directReplacementRollback := supervisor.pendingReplacementRollback
+			supervisor.mu.RUnlock()
+			if directRollback == nil || directRollback.sourceSetRestored || directReplacementRollback != nil {
+				t.Fatalf("direct survivor rollback owner = source-set:%p restored:%v replacement:%p", directRollback, directRollback != nil && directRollback.sourceSetRestored, directReplacementRollback)
+			}
+
+			directPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || directPlan.Revision == recoveredPlan.Revision {
+				t.Fatalf("source set while direct rollback is retained = exists:%v revision:%s previous:%s err:%v", exists, directPlan.Revision, recoveredPlan.Revision, err)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+				t.Fatalf("survivor while direct rollback is retained = %#v, want source-set fence", lookup)
+			}
+
+			supervisor.SetProcessCapability(capability)
+			var finalHooks atomic.Int32
+			supervisor.SetRuntimePublishedHook(func(context.Context) error {
+				finalHooks.Add(1)
+				return nil
+			})
+			finalStatus, finalErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, finalCandidate.root, finalCandidate.source, finalCandidate.bundle, finalCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: finalCandidate.hash}, finalCandidate.rt, finalCandidate.rt.WorkOccurrence(),
+			)
+			if finalErr != nil {
+				t.Fatalf("replacement boundary did not recover direct survivor rollback: %v", finalErr)
+			}
+			if !finalStatus.Loaded || !ready.Load() || supervisor.CurrentRuntime() != finalCandidate.rt || finalHooks.Load() != 2 {
+				t.Fatalf("final replacement state = status:%#v ready:%v runtime:%p want:%p hooks:%d", finalStatus, ready.Load(), supervisor.CurrentRuntime(), finalCandidate.rt, finalHooks.Load())
+			}
+			supervisor.mu.RLock()
+			directRollback = supervisor.pendingSourceSetRollback
+			directReplacementRollback = supervisor.pendingReplacementRollback
+			supervisor.mu.RUnlock()
+			if directRollback != nil || directReplacementRollback != nil {
+				t.Fatalf("final replacement retained rollback owner: source-set:%p replacement:%p", directRollback, directReplacementRollback)
+			}
+			finalPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || finalPlan.Revision == directPlan.Revision {
+				t.Fatalf("final source set = exists:%v revision:%s retained:%s err:%v", exists, finalPlan.Revision, directPlan.Revision, err)
+			}
+			if lookup := contexts.LookupBundleHashStatus(finalCandidate.hash); !lookup.Loaded() {
+				t.Fatalf("final candidate context = %#v, want loaded", lookup)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("survivor after direct rollback recovery = %#v, want loaded", lookup)
+			}
+			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
+			if err != nil || evidence.SourceSetRevision != finalPlan.Revision {
+				t.Fatalf("survivor authority after direct rollback recovery = %#v head:%s err:%v", evidence, finalPlan.Revision, err)
 			}
 		})
 	}
