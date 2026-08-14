@@ -7521,6 +7521,42 @@ func TestRunServeRuntimeBundleDeleteRefreshesSurvivingGenerationPostgres(t *test
 		t.Fatalf("read surviving predecessor grant: %v", err)
 	}
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
+	deletePlan, err := pg.PlanBundleDelete(ctx, runtimebundledelete.Request{
+		BundleHash:  firstHash,
+		RequestedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("plan active fixture runs before survivor-refresh bundle.delete: %v", err)
+	}
+	for _, run := range deletePlan.ActiveRuns {
+		stopResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.stop", map[string]any{
+			"run_id":          run.RunID,
+			"idempotency_key": "issue-2125-survivor-refresh-stop-" + uuid.NewString(),
+		}, 30*time.Second)
+		if stopResponse.Error != nil {
+			if stopResponse.Error.Data["code"] != apiv1.RunAlreadyTerminalCode {
+				t.Fatalf("run.stop before survivor-refresh bundle.delete = %#v", stopResponse.Error)
+			}
+			continue
+		}
+		var stopResult map[string]any
+		if err := json.Unmarshal(stopResponse.Result, &stopResult); err != nil {
+			t.Fatalf("decode run.stop before survivor-refresh bundle.delete: %v", err)
+		}
+		if stopResult["ok"] != true {
+			t.Fatalf("run.stop before survivor-refresh bundle.delete = %#v, want ok=true", stopResult)
+		}
+	}
+	deletePlan, err = pg.PlanBundleDelete(ctx, runtimebundledelete.Request{
+		BundleHash:  firstHash,
+		RequestedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("replan active fixture runs before survivor-refresh bundle.delete: %v", err)
+	}
+	if len(deletePlan.ActiveRuns) != 0 {
+		t.Fatalf("active fixture runs before survivor-refresh bundle.delete = %#v, want none", deletePlan.ActiveRuns)
+	}
 	response := requestServedJSONRPCWithTimeout(t, endpoint, "bundle.delete", map[string]any{
 		"bundle_hash": firstHash, "force": false,
 		"idempotency_key": "issue-2125-survivor-refresh-" + uuid.NewString(),
