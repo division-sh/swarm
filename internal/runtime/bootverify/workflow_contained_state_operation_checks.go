@@ -54,6 +54,7 @@ func checkContainedStateOperationCompliance(c *checkerContext) []Finding {
 
 type wave1ContainedStateOperationRef struct {
 	FlowID     string
+	SourceFile string
 	NodeID     string
 	EventType  string
 	Kind       string
@@ -63,36 +64,39 @@ type wave1ContainedStateOperationRef struct {
 
 func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedStateOperationRef {
 	out := make([]wave1ContainedStateOperationRef, 0)
-	nodes := source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(source) {
-		node, ok := nodes[nodeID]
-		if !ok {
-			continue
-		}
-		flowID := ""
-		if sourceRef, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceRef.FlowID)
-		}
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range wave1ScopedNodeRecords(source) {
+		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeID := strings.TrimSpace(record.LogicalID)
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			out = append(out, wave1HandlerContainedStateOperations(flowID, strings.TrimSpace(nodeID), eventType, "handler", handler.DataAccumulation.Writes)...)
+			refs := wave1HandlerContainedStateOperations(flowID, nodeID, eventType, "handler", handler.DataAccumulation.Writes)
+			out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			for idx, rule := range handler.Rules {
 				scope := fmt.Sprintf("handler.rules[%d]", idx)
 				if id := strings.TrimSpace(rule.ID); id != "" {
 					scope = "handler.rules[" + id + "]"
 				}
-				out = append(out, wave1HandlerContainedStateOperations(flowID, strings.TrimSpace(nodeID), eventType, scope, rule.DataAccumulation.Writes)...)
+				refs := wave1HandlerContainedStateOperations(flowID, nodeID, eventType, scope, rule.DataAccumulation.Writes)
+				out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			}
 			for idx, rule := range handler.OnComplete {
 				scope := fmt.Sprintf("handler.on_complete[%d]", idx)
 				if id := strings.TrimSpace(rule.ID); id != "" {
 					scope = "handler.on_complete[" + id + "]"
 				}
-				out = append(out, wave1HandlerContainedStateOperations(flowID, strings.TrimSpace(nodeID), eventType, scope, rule.DataAccumulation.Writes)...)
+				refs := wave1HandlerContainedStateOperations(flowID, nodeID, eventType, scope, rule.DataAccumulation.Writes)
+				out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			}
 		}
 	}
 	return out
+}
+
+func wave1ContainedStateOperationsWithSource(refs []wave1ContainedStateOperationRef, sourceFile string) []wave1ContainedStateOperationRef {
+	for i := range refs {
+		refs[i].SourceFile = strings.TrimSpace(sourceFile)
+	}
+	return refs
 }
 
 func wave1HandlerContainedStateOperations(flowID, nodeID, eventType, kind string, writes []runtimecontracts.WorkflowDataWrite) []wave1ContainedStateOperationRef {

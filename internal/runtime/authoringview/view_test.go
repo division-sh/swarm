@@ -798,6 +798,28 @@ func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 	}
 }
 
+func TestBuildShowsIntrinsicJoinCoordinatorFailureWithExactProvenance(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessPayloadJoin)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load stateless join singleton: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	view := mustBuild(t, source, &report)
+	flow := flowByID(t, view, "coordinator")
+	if flow.SingletonCoordinator != nil || flow.SingletonError == "" {
+		t.Fatalf("stateless join readback = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
+	}
+	for _, diagnostic := range view.Diagnostics {
+		if diagnostic.CheckID == "singleton_coordinator_validation" && diagnostic.Location == "coordinator-node" && strings.Contains(diagnostic.Message, "handler job.received workflow_join") {
+			return
+		}
+	}
+	t.Fatalf("singleton join diagnostics = %#v, want exact node/handler workflow_join provenance", view.Diagnostics)
+}
+
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyStandingTelegramServe(t, "https://telegram.example.test")

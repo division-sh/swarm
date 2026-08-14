@@ -14,6 +14,7 @@ import (
 
 type wave1WriteTarget struct {
 	FlowID        string
+	SourceFile    string
 	NodeID        string
 	EventType     string
 	Kind          string
@@ -546,14 +547,12 @@ func wave1MergeEntityReaderCoverage(into, extra map[string]map[string]struct{}) 
 
 func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
-	for _, nodeID := range sortedNodeIDs(source) {
-		flowID := ""
-		if sourceRef, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceRef.FlowID)
-		}
-		for eventType, handler := range source.NodeEventHandlers(nodeID) {
+	for _, record := range wave1ScopedNodeRecords(source) {
+		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeID := strings.TrimSpace(record.LogicalID)
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerEntityExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
 				for _, ref := range wave1ResolvedExpressionRefs(source, flowID, nodeID, eventType, expr) {
 					ownerFlowID := strings.TrimSpace(ref.OwnerFlowID)
 					if out[ownerFlowID] == nil {
@@ -569,24 +568,26 @@ func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[
 
 func wave1AllEntityWriteTargets(source semanticview.Source) []wave1WriteTarget {
 	out := make([]wave1WriteTarget, 0)
-	nodes := source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(source) {
-		node, ok := nodes[nodeID]
-		if !ok {
-			continue
-		}
-		flowID := ""
-		if sourceRef, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceRef.FlowID)
-		}
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range wave1ScopedNodeRecords(source) {
+		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeID := strings.TrimSpace(record.LogicalID)
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, target := range wave1HandlerWriteTargets(flowID, strings.TrimSpace(nodeID), eventType, handler) {
+			for _, target := range wave1HandlerWriteTargets(flowID, nodeID, eventType, handler) {
+				target.SourceFile = strings.TrimSpace(record.Source.File)
 				out = append(out, target)
 			}
 		}
 	}
 	return out
+}
+
+func wave1ScopedNodeRecords(source semanticview.Source) []runtimecontracts.ScopedNodeRecord {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil
+	}
+	return bundle.ScopedNodeRecords()
 }
 
 func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []wave1WriteTarget {

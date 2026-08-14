@@ -119,9 +119,8 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		if err != nil {
 			continue
 		}
-		sourceRef, _ := source.NodeContractSource(target.NodeID)
 		add(SingletonCoordinatorDemand{
-			FlowID: ownerFlowID, SourceFile: sourceRef.File, Location: target.NodeID,
+			FlowID: ownerFlowID, SourceFile: target.SourceFile, Location: target.NodeID,
 			NodeID: target.NodeID, EventType: target.EventType, Kind: target.Kind,
 			Field: rootField, Target: target.Target, WriteIndex: target.WriteIndex, HasWriteIndex: target.HasWriteIndex,
 		}, true)
@@ -136,29 +135,27 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		if err != nil {
 			continue
 		}
-		sourceRef, _ := source.NodeContractSource(ref.NodeID)
 		add(SingletonCoordinatorDemand{
-			FlowID: ref.FlowID, SourceFile: sourceRef.File, Location: ref.NodeID,
+			FlowID: ref.FlowID, SourceFile: ref.SourceFile, Location: ref.NodeID,
 			NodeID: ref.NodeID, EventType: ref.EventType, Kind: "contained_operation." + ref.Kind,
 			Field: target.RootField, Target: ref.Write.Target(), Operation: string(ref.Write.Operation),
 			WriteIndex: ref.WriteIndex, HasWriteIndex: true,
 		}, true)
 	}
 
-	for _, nodeID := range sortedNodeIDs(source) {
-		flowID := nodeFlowID(source, nodeID)
-		sourceRef, _ := source.NodeContractSource(nodeID)
-		for eventType, handler := range source.NodeEventHandlers(nodeID) {
-			for _, expr := range handlerEntityExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+	for _, record := range wave1ScopedNodeRecords(source) {
+		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeID := strings.TrimSpace(record.LogicalID)
+		for eventType, handler := range record.Entry.EventHandlers {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
 				for _, ref := range singletonDemandEntityRefs(source, flows, flowID, expr.Expression) {
 					add(SingletonCoordinatorDemand{
-						FlowID: ref.OwnerFlowID, SourceFile: sourceRef.File, Location: nodeID,
+						FlowID: ref.OwnerFlowID, SourceFile: record.Source.File, Location: nodeID,
 						NodeID: nodeID, EventType: eventType, Kind: "entity_read." + expr.Kind,
 						Field: ref.Field, Target: "entity." + ref.Ref,
 					}, true)
 				}
 			}
-			appendStructuredSingletonReads(add, source, flows, flowID, nodeID, eventType, sourceRef.File, handler)
 		}
 	}
 
@@ -171,6 +168,25 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 				add(SingletonCoordinatorDemand{FlowID: ref.OwnerFlowID, SourceFile: sourceFile, Location: flowID, Kind: "entity_read." + expr.Kind, Field: ref.Field, Target: "entity." + ref.Ref}, true)
 			}
 		}
+	}
+
+	nodeSources := map[string]runtimecontracts.ContractItemSource{}
+	for _, record := range wave1ScopedNodeRecords(source) {
+		key := strings.TrimSpace(record.Source.FlowID) + "\x00" + strings.TrimSpace(record.LogicalID)
+		nodeSources[key] = record.Source
+	}
+	for _, plan := range source.WorkflowJoins() {
+		flowID := strings.TrimSpace(plan.FlowID)
+		nodeID := strings.TrimSpace(plan.NodeID)
+		sourceRef := nodeSources[flowID+"\x00"+nodeID]
+		target := strings.TrimSpace(plan.Spec.ID)
+		if target == "" {
+			target = strings.TrimSpace(plan.Spec.Stage)
+		}
+		add(SingletonCoordinatorDemand{
+			FlowID: flowID, SourceFile: sourceRef.File, Location: nodeID,
+			NodeID: nodeID, EventType: strings.TrimSpace(plan.HandlerEvent), Kind: "workflow_join", Target: target,
+		}, false)
 	}
 
 	for _, record := range wave1ScopedAgentRecords(bundle) {
@@ -205,62 +221,6 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 			fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", right.FlowID, right.SourceFile, right.NodeID, right.EventType, right.Kind, right.Target, right.WriteIndex)
 	})
 	return demands
-}
-
-func appendStructuredSingletonReads(add func(SingletonCoordinatorDemand, bool), source semanticview.Source, flows map[string]singletonDemandFlow, flowID, nodeID, eventType, sourceFile string, handler runtimecontracts.SystemNodeEventHandler) {
-	addPath := func(kind, raw string) {
-		raw = strings.TrimSpace(raw)
-		if !strings.HasPrefix(raw, "entity.") {
-			return
-		}
-		refs := singletonDemandEntityRefs(source, flows, flowID, raw)
-		if len(refs) == 0 {
-			return
-		}
-		for _, resolved := range refs {
-			add(SingletonCoordinatorDemand{FlowID: resolved.OwnerFlowID, SourceFile: sourceFile, Location: nodeID, NodeID: nodeID, EventType: eventType, Kind: "entity_read." + kind, Field: resolved.Field, Target: raw}, true)
-		}
-	}
-	addFanOut := func(kind string, spec *runtimecontracts.FanOutSpec) {
-		if spec != nil {
-			addPath(kind+".items_from", spec.ItemsFrom)
-		}
-	}
-	addQuery := func(kind string, query *runtimecontracts.QuerySpec) {}
-	addQuery = func(kind string, query *runtimecontracts.QuerySpec) {
-		if query == nil {
-			return
-		}
-		addPath(kind+".source", query.Source)
-		addPath(kind+".entities", query.Entities)
-		addPath(kind+".group_by", query.GroupBy)
-		for i := range query.Queries {
-			addQuery(fmt.Sprintf("%s.queries[%d]", kind, i), &query.Queries[i])
-		}
-	}
-	addQuery("query", handler.Query)
-	addFanOut("fan_out", handler.FanOut)
-	if handler.Filter != nil {
-		addPath("filter.source", handler.Filter.Source)
-		addPath("filter.items_from", handler.Filter.ItemsFrom)
-	}
-	if handler.GroupBy != nil {
-		addPath("group_by.items_from", handler.GroupBy.ItemsFrom)
-	}
-	if handler.Reduce != nil {
-		addPath("reduce.source", handler.Reduce.Source)
-		addPath("reduce.items_from", handler.Reduce.ItemsFrom)
-	}
-	if handler.Count != nil {
-		addPath("count.source", handler.Count.Source)
-		addPath("count.items_from", handler.Count.ItemsFrom)
-	}
-	for i := range handler.Rules {
-		addFanOut(fmt.Sprintf("rules[%d].fan_out", i), handler.Rules[i].FanOut)
-	}
-	for i := range handler.OnComplete {
-		addFanOut(fmt.Sprintf("on_complete[%d].fan_out", i), handler.OnComplete[i].FanOut)
-	}
 }
 
 func singletonDemandEntityRefs(source semanticview.Source, flows map[string]singletonDemandFlow, flowID, expression string) []wave1ResolvedExpressionRef {
