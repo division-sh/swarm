@@ -286,13 +286,7 @@ type handlerCondition struct {
 func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []handlerCondition {
 	out := make([]handlerCondition, 0, 10)
 	if handler.Guard != nil {
-		if check := strings.TrimSpace(handler.Guard.Check); check != "" {
-			out = append(out, handlerCondition{
-				Expression: check,
-				Context:    runtimepipeline.WorkflowConditionContextGuard,
-			})
-		}
-		for _, item := range handler.Guard.Checks {
+		for _, item := range handler.Guard.EffectiveChecks() {
 			if check := strings.TrimSpace(item.Check); check != "" {
 				out = append(out, handlerCondition{
 					Expression: check,

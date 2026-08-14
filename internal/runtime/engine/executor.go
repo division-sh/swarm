@@ -2764,21 +2764,19 @@ func (e *Executor) evaluateGuardSpec(frame *executionFrame, spec *runtimecontrac
 	if spec == nil {
 		return true, nil, nil
 	}
-	if len(spec.Checks) > 0 {
-		evaluated := make([]string, 0, len(spec.Checks))
-		for _, check := range spec.Checks {
-			passed, ids, err := e.evaluateGuardCheck(frame, check.ID, check.Check, spec.PolicyRef)
-			evaluated = append(evaluated, ids...)
-			if err != nil {
-				return false, evaluated, err
-			}
-			if !passed {
-				return false, evaluated, nil
-			}
+	effective := spec.EffectiveChecks()
+	evaluated := make([]string, 0, len(effective))
+	for _, check := range effective {
+		passed, ids, err := e.evaluateGuardCheck(frame, check.ID, check.Check, spec.PolicyRef)
+		evaluated = append(evaluated, ids...)
+		if err != nil {
+			return false, evaluated, err
 		}
-		return true, evaluated, nil
+		if !passed {
+			return false, evaluated, nil
+		}
 	}
-	return e.evaluateGuardCheck(frame, spec.ID, spec.Check, spec.PolicyRef)
+	return true, evaluated, nil
 }
 
 func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRef string) (bool, []string, error) {

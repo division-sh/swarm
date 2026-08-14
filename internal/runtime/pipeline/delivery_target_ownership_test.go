@@ -466,6 +466,13 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 			handler: runtimecontracts.SystemNodeEventHandler{Count: &runtimecontracts.CountSpec{Source: "entity.items", ItemsFrom: "payload.items"}},
 		},
 		{
+			name: "guard check shadowed by checks",
+			handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
+				Check:  "entity.items",
+				Checks: []runtimecontracts.GuardCheck{{ID: "ready", Check: "payload.ready"}},
+			}},
+		},
+		{
 			name: "nested query row",
 			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 				Queries: []runtimecontracts.QuerySpec{{Source: "entity.items"}},

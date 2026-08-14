@@ -506,6 +506,14 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         store_as: metadata.counted`,
 		},
 		{
+			name: "guard check shadowed by checks",
+			operator: `guard:
+        check: entity.verticals
+        checks:
+          - id: ready
+            check: payload.job != null`,
+		},
+		{
 			name: "nested query row",
 			operator: `query:
         - source: entity.verticals
