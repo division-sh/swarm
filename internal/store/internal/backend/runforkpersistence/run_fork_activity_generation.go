@@ -204,11 +204,13 @@ func remintRunForkPayload(raw json.RawMessage, forkRunID string, generations []a
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
+	changed := false
 	for _, generation := range generations {
 		generation = generation.Normalize()
 		if generation.Valid() {
-			if _, ok := payload[generation.RevisionField]; ok {
+			if current, ok := payload[generation.RevisionField]; ok && current != generation.RevisionID {
 				payload[generation.RevisionField] = generation.RevisionID
+				changed = true
 			}
 		}
 	}
@@ -223,18 +225,33 @@ func remintRunForkPayload(raw json.RawMessage, forkRunID string, generations []a
 		}
 		for _, generation := range generations {
 			if strings.TrimSpace(generation.LoopID) == strings.TrimSpace(source.LoopID) {
-				payload["loop_generation"] = generation.Normalize()
+				normalized := generation.Normalize()
+				if source.Normalize() != normalized {
+					payload["loop_generation"] = normalized
+					changed = true
+				}
 				break
 			}
 		}
 	}
-	if _, ok := payload["source_run_id"]; ok {
-		payload["source_run_id"] = strings.TrimSpace(forkRunID)
+	if current, ok := payload["source_run_id"]; ok {
+		forkRunID = strings.TrimSpace(forkRunID)
+		if current != forkRunID {
+			payload["source_run_id"] = forkRunID
+			changed = true
+		}
 	}
 	for _, field := range []string{"source_event_id", "parent_event_id"} {
 		if sourceID, ok := payload[field].(string); ok && strings.TrimSpace(sourceID) != "" {
-			payload[field] = activityidentity.ForkLineageEventID(forkRunID, sourceID)
+			forkID := activityidentity.ForkLineageEventID(forkRunID, sourceID)
+			if sourceID != forkID {
+				payload[field] = forkID
+				changed = true
+			}
 		}
+	}
+	if !changed {
+		return append(json.RawMessage(nil), raw...), nil
 	}
 	return json.Marshal(payload)
 }

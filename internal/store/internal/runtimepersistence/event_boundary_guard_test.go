@@ -6,10 +6,13 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 )
 
 type eventBoundaryCallsite struct {
@@ -70,6 +73,32 @@ var directEventSQLTestFixtures = map[string]int{
 var eventInsertSQL = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+events\b`)
 var completeEventReadSQL = regexp.MustCompile(`(?is)\bevent_class\b.*\bFROM\s+events\b`)
 var eventPayloadBytesSQL = regexp.MustCompile(`(?is)\bpayload_bytes\b`)
+var eventPayloadColumnSQL = regexp.MustCompile(`(?i)\bpayload(?:_bytes)?\b`)
+
+func TestActivityResultExistenceProjectionCannotOwnEventPayload(t *testing.T) {
+	recordType := reflect.TypeOf(runtimeactivityresult.Record{})
+	if recordType.NumField() != 2 || recordType.Field(0).Name != "EventID" || recordType.Field(1).Name != "EventType" {
+		t.Fatalf("activity-result record fields = %#v; existence projection must expose only event identity and type", recordType)
+	}
+
+	path := filepath.Join(eventBoundaryRepositoryRoot(t), "internal/store/internal/backend/activityresult/reader.go")
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse activity-result reader: %v", err)
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		raw, err := strconv.Unquote(literal.Value)
+		if err == nil && eventPayloadColumnSQL.MatchString(raw) {
+			t.Errorf("activity-result existence projection contains payload SQL authority: %q", raw)
+		}
+		return true
+	})
+}
 
 func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)

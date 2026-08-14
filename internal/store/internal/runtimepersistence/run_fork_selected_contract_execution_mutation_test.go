@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"reflect"
@@ -278,6 +279,54 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	}
 	if len(loaded) != 2 || loaded[0].SourceEventID != earlierEventID || loaded[1].SourceEventID != laterEventID {
 		t.Fatalf("loaded source chronology = %#v, want [%s %s]", loaded, earlierEventID, laterEventID)
+	}
+}
+
+func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+	sourceRunID := uuid.NewString()
+	entityID := uuid.NewString()
+	eventID := uuid.NewString()
+	at := time.Unix(1700002408, 0).UTC()
+	payload := []byte("{\n  \"numeric\": 1.0, \"ordered\": {\"b\": 2, \"a\": 1}\n}")
+	seedSelectedContractExecutionStoreSourceRawWithPayload(
+		t, db, sourceRunID, entityID, eventID, at,
+		[]events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}, payload,
+	)
+	captureRunForkTestRevision(t, db, sourceRunID)
+
+	var queryProjection []byte
+	if err := db.QueryRowContext(ctx, `SELECT payload::text FROM events WHERE event_id=$1::uuid`, eventID).Scan(&queryProjection); err != nil {
+		t.Fatalf("load derived payload query projection: %v", err)
+	}
+	if bytes.Equal(queryProjection, payload) {
+		t.Fatalf("test fixture did not diverge JSONB query projection %q from raw bytes %q", queryProjection, payload)
+	}
+
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+		SourceRunID: sourceRunID,
+		At:          eventID,
+		ContractSelection: runfork.RunForkContractSelection{
+			Mode:            "selected_contracts",
+			ContractsRoot:   "/tmp/selected-contracts",
+			WorkflowName:    "selected-workflow",
+			WorkflowVersion: "v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
+	}
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID}, nil)
+	if err != nil {
+		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded source events = %#v, want one", loaded)
+	}
+	if !bytes.Equal(loaded[0].Payload, payload) {
+		t.Fatalf("selected-contract source payload = %q, want exact admitted bytes %q", loaded[0].Payload, payload)
 	}
 }
 
@@ -1908,13 +1957,17 @@ func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *s
 }
 
 func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute) {
+	seedSelectedContractExecutionStoreSourceRawWithPayload(t, db, sourceRunID, entityID, eventID, at, routes, []byte(`{}`))
+}
+
+func seedSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
 	event := semanticEventRecordFixture(
-		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
+		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), payload,
 		semanticEventRecordFixtureEnvelope(entityID, ""), at,
 	)
 	tx, err := db.BeginTx(ctx, nil)

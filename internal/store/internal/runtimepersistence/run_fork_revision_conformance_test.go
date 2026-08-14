@@ -108,6 +108,88 @@ func TestRunForkRevisionCapturePreservesExactEventPayloadBytes(t *testing.T) {
 	}
 }
 
+func TestRunForkRevisionEqualityIncludesExactEventPayloadBytes(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := testAuthorActivityContext()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	firstPayload := []byte(`{"numeric":1,"ordered":{"a":1,"b":2}}`)
+	secondPayload := []byte("{\n  \"ordered\": {\"b\": 2, \"a\": 1}, \"numeric\": 1.0\n}")
+	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+
+	firstTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin first revision transaction: %v", err)
+	}
+	defer func() { _ = firstTx.Rollback() }()
+	event := semanticEventRecordFixture(
+		eventID, runID, "revision.payload_identity", eventtest.Producer(events.EventProducerPlatform, "revision-test"),
+		firstPayload, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, firstTx, event); err != nil {
+		t.Fatalf("insert first event fact: %v", err)
+	}
+	firstRevision, err := runforkrevision.Capture(ctx, firstTx, runID, runforkrevision.FamilyEvents)
+	if err != nil {
+		t.Fatalf("capture first event revision: %v", err)
+	}
+	if err := firstTx.Commit(); err != nil {
+		t.Fatalf("commit first event revision: %v", err)
+	}
+
+	secondTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin second revision transaction: %v", err)
+	}
+	defer func() { _ = secondTx.Rollback() }()
+	if _, err := secondTx.ExecContext(ctx, `UPDATE events SET payload_bytes=$2::bytea WHERE event_id=$1::uuid`, eventID, secondPayload); err != nil {
+		t.Fatalf("mutate only authoritative payload bytes: %v", err)
+	}
+	secondRevision, err := runforkrevision.Capture(ctx, secondTx, runID, runforkrevision.FamilyEvents)
+	if err != nil {
+		t.Fatalf("capture byte-distinct event revision: %v", err)
+	}
+	if secondRevision <= firstRevision {
+		t.Fatalf("byte-distinct payload revision = %d, want newer than %d", secondRevision, firstRevision)
+	}
+	if err := secondTx.Commit(); err != nil {
+		t.Fatalf("commit byte-distinct event revision: %v", err)
+	}
+
+	for _, proof := range []struct {
+		name     string
+		revision int64
+		want     []byte
+	}{
+		{name: "first", revision: firstRevision, want: firstPayload},
+		{name: "second", revision: secondRevision, want: secondPayload},
+	} {
+		t.Run(proof.name, func(t *testing.T) {
+			var fact []byte
+			if err := db.QueryRowContext(ctx, `
+				SELECT fact
+				FROM run_fork_fact_revisions
+				WHERE run_id=$1::uuid AND revision=$2 AND family='events' AND fact_key=$3 AND present
+			`, runID, proof.revision, eventID).Scan(&fact); err != nil {
+				t.Fatalf("load revision fact: %v", err)
+			}
+			var projection struct {
+				PayloadBase64 string `json:"payload_base64"`
+			}
+			if err := json.Unmarshal(fact, &projection); err != nil {
+				t.Fatalf("decode revision fact: %v", err)
+			}
+			restored, err := base64.StdEncoding.DecodeString(projection.PayloadBase64)
+			if err != nil {
+				t.Fatalf("decode revision payload bytes: %v", err)
+			}
+			if !bytes.Equal(restored, proof.want) {
+				t.Fatalf("revision payload = %q, want %q", restored, proof.want)
+			}
+		})
+	}
+}
+
 func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	want := []string{

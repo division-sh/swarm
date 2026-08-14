@@ -1,9 +1,6 @@
 package activityresult
 
-import (
-	"context"
-	"encoding/json"
-)
+import "context"
 
 type Reader interface {
 	LoadRecordedActivityResult(context.Context, Query) (Record, bool, error)
@@ -19,5 +16,4 @@ type Query struct {
 type Record struct {
 	EventID   string
 	EventType string
-	Payload   json.RawMessage
 }
