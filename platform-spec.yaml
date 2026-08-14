@@ -10803,7 +10803,9 @@ flow_model:
         commit failure under the restored predecessor head retains every survivor fenced, immediately adopts that exact pending
         predecessor transition, and retries it before predecessor publication. A repeated failure retains one supervisor-owned
         rollback finalizer carrying the predecessor restoration and startup-handoff freeze; reload, replacement, and close must
-        complete that finalizer before enumerating runtime contexts or releasing the selected store. The failed transition and
+        complete that finalizer before enumerating runtime contexts or releasing the selected store. If predecessor publication
+        then fails, that finalizer retains and resumes the exact prepared publication; it cannot construct a second predecessor
+        or replace the pending publication identity. The failed transition and
         rollback continuation are never discarded. If bounded recovery cannot safely restore, the context remains unavailable and the process
         capability remains retained. Manager-backed deactivation propagates the caller's
         configured shutdown grace rather than substituting runtime defaults.
@@ -33464,7 +33466,8 @@ agent_topology_authority:
       generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
       retries it while all survivors remain fenced. Repeated failure retains a typed rollback finalizer that must converge before
       any later reload/replacement compiles from loaded contexts and before close may release the selected store; it cannot discard
-      the transition, forget predecessor restoration, or publish only the predecessor.
+      the transition, forget predecessor restoration, or publish only the predecessor. Once restored-predecessor publication is
+      prepared, the finalizer retains and resumes that exact publication across transient failure instead of reconstructing it.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-

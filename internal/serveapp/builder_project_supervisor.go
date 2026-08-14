@@ -539,9 +539,13 @@ type processAdmissionCandidate struct {
 	channelBindings  []packs.OutboundBindingPlan
 }
 
+type runtimeReplacementPublication interface {
+	Publish() error
+}
+
 type pendingRuntimeReplacement struct {
 	mu          sync.Mutex
-	publication *runtime.PreparedRuntimeContextReplacement
+	publication runtimeReplacementPublication
 	root        string
 	source      semanticview.Source
 	bundle      *runtimecontracts.WorkflowContractBundle
@@ -554,12 +558,13 @@ type pendingRuntimeReplacement struct {
 }
 
 type pendingRuntimeSourceSetRollback struct {
-	mu                 sync.Mutex
-	manager            *runtime.RuntimeContextManager
-	predecessorContext runtime.BundleContext
-	predecessor        *runtime.Runtime
-	freeze             *startupHandoffFreeze
-	survivorsRecovered bool
+	mu                     sync.Mutex
+	manager                *runtime.RuntimeContextManager
+	predecessorContext     runtime.BundleContext
+	predecessor            *runtime.Runtime
+	freeze                 *startupHandoffFreeze
+	survivorsRecovered     bool
+	predecessorPublication *pendingRuntimeReplacement
 }
 
 type predecessorSurvivorCommitFailure struct {
@@ -833,8 +838,26 @@ func (s *runtimeProjectSupervisor) completePendingSourceSetRollback(ctx context.
 		}
 		pending.survivorsRecovered = true
 	}
-	if err := s.restoreQuiescedPredecessor(ctx, pending.manager, pending.predecessorContext, pending.predecessor, pending.freeze); err != nil {
-		return err
+	if pending.predecessorPublication != nil {
+		s.mu.RLock()
+		currentPublication := s.pendingReplacement
+		s.mu.RUnlock()
+		if currentPublication != pending.predecessorPublication {
+			return errors.New("retained predecessor publication is no longer the pending runtime replacement")
+		}
+		if err := s.completePendingReplacement(); err != nil {
+			return fmt.Errorf("resume retained predecessor publication: %w", err)
+		}
+	} else {
+		s.mu.RLock()
+		conflictingPublication := s.pendingReplacement
+		s.mu.RUnlock()
+		if conflictingPublication != nil {
+			return errors.New("pending runtime source-set rollback conflicts with an unowned runtime replacement publication")
+		}
+		if err := s.restoreQuiescedPredecessorForRollback(ctx, pending); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	if s.pendingSourceSetRollback == pending {
@@ -1316,6 +1339,17 @@ func (s *runtimeProjectSupervisor) quiesceCurrentRuntimeWithOptions(ctx context.
 }
 
 func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime, freeze *startupHandoffFreeze) error {
+	return s.restoreQuiescedPredecessorWithRollback(ctx, manager, predecessorContext, predecessor, freeze, nil)
+}
+
+func (s *runtimeProjectSupervisor) restoreQuiescedPredecessorForRollback(ctx context.Context, rollback *pendingRuntimeSourceSetRollback) error {
+	if rollback == nil {
+		return errors.New("pending runtime source-set rollback is required")
+	}
+	return s.restoreQuiescedPredecessorWithRollback(ctx, rollback.manager, rollback.predecessorContext, rollback.predecessor, rollback.freeze, rollback)
+}
+
+func (s *runtimeProjectSupervisor) restoreQuiescedPredecessorWithRollback(ctx context.Context, manager *runtime.RuntimeContextManager, predecessorContext runtime.BundleContext, predecessor *runtime.Runtime, freeze *startupHandoffFreeze, rollback *pendingRuntimeSourceSetRollback) error {
 	if predecessor == nil {
 		return fmt.Errorf("restore predecessor runtime: predecessor is required")
 	}
@@ -1396,6 +1430,9 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 		return errors.Join(errors.New("runtime replacement transition is already pending"), quiesceErr)
 	}
 	s.pendingReplacement = pending
+	if rollback != nil {
+		rollback.predecessorPublication = pending
+	}
 	s.mu.Unlock()
 	transitionRetained = true
 	return s.completePendingReplacement()

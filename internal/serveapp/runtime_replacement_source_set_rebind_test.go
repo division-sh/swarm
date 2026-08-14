@@ -33,6 +33,18 @@ type failSourceSetGrantCapability struct {
 	failures          atomic.Int32
 }
 
+type failOnceRuntimeReplacementPublication struct {
+	delegate runtimeReplacementPublication
+	attempts atomic.Int32
+}
+
+func (p *failOnceRuntimeReplacementPublication) Publish() error {
+	if p.attempts.Add(1) == 1 {
+		return errors.New("injected retained predecessor publication failure")
+	}
+	return p.delegate.Publish()
+}
+
 func (c *failSourceSetGrantCapability) IssueGenerationGrant(
 	ctx context.Context,
 	req runtimestartupownership.GrantRequest,
@@ -388,6 +400,66 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if lookup := contexts.LookupBundleHashStatus(survivor.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
 				t.Fatalf("survivor after repeated predecessor commit failure = %#v, want retained source-set fence", lookup)
 			}
+			recovered, err := supervisor.completePendingSourceSetSurvivors(context.Background(), pendingRollback.manager)
+			if err != nil || !recovered {
+				t.Fatalf("prepare retained predecessor publication survivor recovery = recovered:%v err:%v", recovered, err)
+			}
+			pendingRollback.survivorsRecovered = true
+			restoredContext := pendingRollback.predecessorContext
+			restoredContext.Runtime = retainedFailureRestored.rt
+			restoredContext.WorkOwner = retainedFailureRestored.rt.WorkOccurrence()
+			restoredPlan, err = replacementSourceSetPlan(contexts, "", restoredContext)
+			if err != nil {
+				t.Fatalf("compile retained predecessor publication source set: %v", err)
+			}
+			if err := supervisor.installProcessGenerationGrant(ctx, retainedFailureRestored.rt, restoredPlan); err != nil {
+				t.Fatalf("install retained predecessor publication grant: %v", err)
+			}
+			if err := supervisor.startCurrentRuntime(ctx, retainedFailureRestored.rt); err != nil {
+				t.Fatalf("start retained predecessor publication runtime: %v", err)
+			}
+			targets, _, err := retainedFailureRestored.rt.EnsureStandingTargets(ctx)
+			if err != nil {
+				t.Fatalf("prepare retained predecessor publication standing targets: %v", err)
+			}
+			restoredContext.StandingTargets = targets
+			publication, err := contexts.PrepareRestoredBundleHashReplacementPublication(restoredContext.BundleHash(), restoredContext)
+			if err != nil {
+				t.Fatalf("prepare retained predecessor publication: %v", err)
+			}
+			failingPublication := &failOnceRuntimeReplacementPublication{delegate: publication}
+			retainedPublication := &pendingRuntimeReplacement{
+				publication: failingPublication,
+				root:        pendingRollback.predecessorContext.ContractsRoot, source: restoredContext.Source,
+				bundle: supervisor.currentBundle, fact: restoredContext.BundleSourceFact,
+				identity: restoredContext.BundleIdentity, runtime: retainedFailureRestored.rt,
+				freeze: pendingRollback.freeze,
+			}
+			pendingRollback.predecessorPublication = retainedPublication
+			supervisor.mu.Lock()
+			supervisor.pendingReplacement = retainedPublication
+			supervisor.mu.Unlock()
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
+				t.Fatal("retained predecessor publication was reconstructed instead of resumed")
+				return nil, nil, nil
+			}
+			_, publicationFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
+			)
+			if publicationFailureErr == nil || !strings.Contains(publicationFailureErr.Error(), "injected retained predecessor publication failure") {
+				t.Fatalf("retained predecessor publication failure = %v", publicationFailureErr)
+			}
+			if failingPublication.attempts.Load() != 1 || ready.Load() {
+				t.Fatalf("retained predecessor publication after transient failure = attempts:%d ready:%v, want 1/false", failingPublication.attempts.Load(), ready.Load())
+			}
+			supervisor.mu.RLock()
+			stillPendingRollback := supervisor.pendingSourceSetRollback
+			stillPendingPublication := supervisor.pendingReplacement
+			supervisor.mu.RUnlock()
+			if stillPendingRollback != pendingRollback || stillPendingPublication != retainedPublication || pendingRollback.predecessorPublication != retainedPublication {
+				t.Fatalf("transient predecessor publication lost exact continuation: rollback:%p/%p publication:%p/%p retained:%p", stillPendingRollback, pendingRollback, stillPendingPublication, retainedPublication, pendingRollback.predecessorPublication)
+			}
 
 			recoveryStatus, recoveryErr := supervisor.replaceCurrentRuntimeWithSource(
 				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
@@ -395,6 +467,9 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			)
 			if recoveryErr != nil {
 				t.Fatalf("replacement boundary did not finalize retained predecessor recovery: %v", recoveryErr)
+			}
+			if failingPublication.attempts.Load() != 2 {
+				t.Fatalf("retained predecessor publication attempts = %d, want exact retry", failingPublication.attempts.Load())
 			}
 			if !recoveryStatus.Loaded || !ready.Load() || supervisor.CurrentRuntime() != recoveryCandidate.rt {
 				t.Fatalf("replacement after retained recovery = status:%#v ready:%v runtime:%p want:%p", recoveryStatus, ready.Load(), supervisor.CurrentRuntime(), recoveryCandidate.rt)
