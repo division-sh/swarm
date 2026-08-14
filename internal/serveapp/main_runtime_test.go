@@ -1603,11 +1603,34 @@ func TestRunServeRuntimeBundleDeleteNonForceQuiescesLoadedAgentsBeforeTopologyRe
 		t.Fatalf("plan live-agent fixture runs before non-force bundle.delete: %v", err)
 	}
 	for _, run := range deletePlan.ActiveRuns {
-		requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
+		response := requestServedJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 			"run_id":          run.RunID,
 			"idempotency_key": "issue-2125-bundle-non-force-stop-" + uuid.NewString(),
 		})
+		if response.Error != nil {
+			if response.Error.Data["code"] != apiv1.RunAlreadyTerminalCode {
+				t.Fatalf("run.stop error = %#v", response.Error)
+			}
+			continue
+		}
+		var result map[string]any
+		if err := json.Unmarshal(response.Result, &result); err != nil {
+			t.Fatalf("decode run.stop result: %v", err)
+		}
+		if result["ok"] != true {
+			t.Fatalf("run.stop result = %#v, want ok=true", result)
+		}
 		requireServedRunControlState(t, rt.DB, rt.Backend, run.RunID, "stopped", "cancelled")
+	}
+	deletePlan, err = rt.Postgres.PlanBundleDelete(context.Background(), runtimebundledelete.Request{
+		BundleHash:  rt.BundleHash,
+		RequestedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("replan live-agent fixture runs before non-force bundle.delete: %v", err)
+	}
+	if len(deletePlan.ActiveRuns) != 0 {
+		t.Fatalf("active fixture runs before non-force bundle.delete = %#v, want none", deletePlan.ActiveRuns)
 	}
 
 	var before, running int
