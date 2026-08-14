@@ -5,7 +5,7 @@ timer-node:
   timers:
     - id: check_timer
       event: timer.check
-      delay: 5s
+      delay: 1h
       start_on: event:timer.scheduled
       cancel_on: event:timer.cancel_requested
   event_handlers:
