@@ -38,7 +38,7 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "logic", handler: runtimecontracts.SystemNodeEventHandler{Logic: "entity.verticals"}},
 		{name: "loop source", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{From: "entity.verticals"}}},
 		{name: "rule action", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Action: runtimecontracts.ActionSpec{InstanceIDFrom: "entity.verticals"}}}}},
-		{name: "on complete activity", handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
+		{name: "rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
 		{name: "accumulate source", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.verticals"}}},
 		{name: "accumulate window", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Window: "entity.verticals"}}},
 		{name: "join members by", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{By: "entity.verticals"}}}},
@@ -96,6 +96,18 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 			handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
 				Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "entity.release"},
 			}},
+		},
+		{
+			name: "on complete activity input",
+			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.verticals")}},
+			}}},
+		},
+		{
+			name: "on complete action input",
+			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				Action: runtimecontracts.ActionSpec{ID: "create_flow_instance", InstanceIDFrom: "entity.verticals"},
+			}}},
 		},
 	}
 

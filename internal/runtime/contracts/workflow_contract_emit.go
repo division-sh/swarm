@@ -46,11 +46,11 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 		out = append(out, eventType)
 	}
 	for _, rule := range handler.OnComplete {
-		out = append(out, ruleEmitEvents(rule)...)
+		out = append(out, completionRuleEmitEvents(rule)...)
 	}
 	if handler.Join != nil {
-		out = append(out, ruleEmitEvents(handler.Join.OnComplete)...)
-		out = append(out, ruleEmitEvents(handler.Join.Timeout.Outcome)...)
+		out = append(out, completionRuleEmitEvents(handler.Join.OnComplete)...)
+		out = append(out, completionRuleEmitEvents(handler.Join.Timeout.Outcome)...)
 	}
 	if handler.FanOut != nil {
 		if eventType := handler.FanOut.Emit.EventType(); eventType != "" {
@@ -106,16 +106,13 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 	add("handler.on_success.emit", "handler.on_success.emit", "", -1, handler.OnSuccess.Emit)
 	for idx, rule := range handler.OnComplete {
 		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
-		addAction("handler.on_complete.action", indexedHandlerEmitSiteKey("handler.on_complete", idx, "action"), rule.ID, idx, rule.Action)
 		if rule.FanOut != nil {
 			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 		}
 	}
 	if handler.Join != nil {
 		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), 0, handler.Join.OnComplete.Emit)
-		addAction("handler.join.on_complete.action", "handler.join.on_complete.action", handler.Join.EffectiveID(), 0, handler.Join.OnComplete.Action)
 		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), 0, handler.Join.Timeout.Outcome.Emit)
-		addAction("handler.join.timeout.action", "handler.join.timeout.action", handler.Join.EffectiveID(), 0, handler.Join.Timeout.Outcome.Action)
 	}
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit, handler.FanOut.As)
@@ -191,6 +188,19 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 		out = append(out, eventType)
 	}
 	out = append(out, actionResultEvents(rule.Action)...)
+	if rule.FanOut != nil {
+		if eventType := rule.FanOut.Emit.EventType(); eventType != "" {
+			out = append(out, eventType)
+		}
+	}
+	return uniqueOrderedStrings(out)
+}
+
+func completionRuleEmitEvents(rule HandlerRuleEntry) []string {
+	out := make([]string, 0, 2)
+	if eventType := rule.Emit.EventType(); eventType != "" {
+		out = append(out, eventType)
+	}
 	if rule.FanOut != nil {
 		if eventType := rule.FanOut.Emit.EventType(); eventType != "" {
 			out = append(out, eventType)

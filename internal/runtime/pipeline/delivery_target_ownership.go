@@ -466,10 +466,10 @@ var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClass
 		return existingWhen(handler.Loop != nil)
 	},
 	"OnComplete": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
-		return rulesEntityRequirement(source, flowID, handler.OnComplete)
+		return completionRulesEntityRequirement(source, flowID, handler.OnComplete)
 	},
 	"Rules": func(source semanticview.Source, flowID string, handler SystemNodeEventHandler) handlerEntityRequirement {
-		return rulesEntityRequirement(source, flowID, handler.Rules)
+		return selectableRulesEntityRequirement(source, flowID, handler.Rules)
 	},
 	"Accumulate": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) handlerEntityRequirement {
 		return existingWhen(handler.Accumulate != nil)
@@ -560,10 +560,21 @@ func noHandlerRuleEntityRequirement(semanticview.Source, string, runtimecontract
 	return handlerEntitylessSafe
 }
 
-func rulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+func selectableRulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+	return rulesEntityRequirement(source, flowID, rules, true)
+}
+
+func completionRulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry) handlerEntityRequirement {
+	return rulesEntityRequirement(source, flowID, rules, false)
+}
+
+func rulesEntityRequirement(source semanticview.Source, flowID string, rules []runtimecontracts.HandlerRuleEntry, effectsSelectable bool) handlerEntityRequirement {
 	requirement := handlerEntitylessSafe
 	for _, rule := range rules {
-		for _, classify := range handlerRuleEntryEntityClassifiers {
+		for field, classify := range handlerRuleEntryEntityClassifiers {
+			if !effectsSelectable && (field == "Action" || field == "Activity") {
+				continue
+			}
 			requirement = requirement.merge(classify(source, flowID, rule))
 		}
 	}
@@ -822,7 +833,7 @@ func joinReferencesEntity(source semanticview.Source, flowID string, spec *runti
 	if spec.Window != nil && (typedPathReferencesEntity(spec.Window.From, spec.Window.FromPath) || typedPathReferencesEntity(spec.Window.By, spec.Window.ByPath)) {
 		return true
 	}
-	return rulesEntityRequirement(source, flowID, []runtimecontracts.HandlerRuleEntry{spec.OnComplete, spec.Timeout.Outcome}) != handlerEntitylessSafe
+	return completionRulesEntityRequirement(source, flowID, []runtimecontracts.HandlerRuleEntry{spec.OnComplete, spec.Timeout.Outcome}) != handlerEntitylessSafe
 }
 
 func expressionValueMapReferencesEntity(values map[string]runtimecontracts.ExpressionValue) bool {

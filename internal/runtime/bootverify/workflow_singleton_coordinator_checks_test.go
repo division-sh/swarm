@@ -390,6 +390,16 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         approval:
           decision: entity.release`,
 		},
+		{
+			name: "on complete activity input",
+			operator: `on_complete:
+        - condition: "true"
+          activity:
+            tool: review
+            input:
+              value:
+                ref: entity.verticals`,
+		},
 	}
 
 	for _, tc := range tests {

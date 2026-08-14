@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,37 @@ func TestHandlerEmitEventsIncludesArtifactRepoCommitResults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
+	}
+}
+
+func TestHandlerEmitEventsExcludesUnsupportedCompletionActionResults(t *testing.T) {
+	completionAction := ActionSpec{
+		ID: "artifact_repo_commit",
+		ArtifactRepo: &ArtifactRepoSpec{
+			SuccessEvent: "artifact_repo.completion_succeeded",
+			FailureEvent: "artifact_repo.completion_failed",
+		},
+	}
+	handler := SystemNodeEventHandler{
+		OnComplete: []HandlerRuleEntry{{
+			Action: completionAction,
+			Emit:   EmitSpec{Event: "handler.completed"},
+		}},
+		Join: &JoinSpec{
+			OnComplete: HandlerRuleEntry{Action: completionAction, Emit: EmitSpec{Event: "join.completed"}},
+			Timeout:    JoinTimeoutSpec{Outcome: HandlerRuleEntry{Action: completionAction, Emit: EmitSpec{Event: "join.timed_out"}}},
+		},
+	}
+
+	want := []string{"handler.completed", "join.completed", "join.timed_out"}
+	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, want) {
+		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
+	}
+	for _, site := range HandlerDeclarativeEmitSites(handler) {
+		if site.Source == "handler.on_complete.action.success" || site.Source == "handler.on_complete.action.failure" ||
+			strings.Contains(site.Source, "handler.join.on_complete.action") || strings.Contains(site.Source, "handler.join.timeout.action") {
+			t.Fatalf("unsupported completion action created declarative emit site: %#v", site)
+		}
 	}
 }
 

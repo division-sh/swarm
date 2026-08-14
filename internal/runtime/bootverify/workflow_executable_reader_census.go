@@ -287,6 +287,9 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 		}
 		before := len(*out)
 		for _, field := range sortedExecutableReaderFields(handlerRuleEntryExecutableReaderCensus) {
+			if !handlerRuleExecutableReaderFieldIsActive(kind, field) {
+				continue
+			}
 			fieldBefore := len(*out)
 			handlerRuleEntryExecutableReaderCensus[field](out, ctx, prefix, rule)
 			for index := fieldBefore; index < len(*out); index++ {
@@ -303,6 +306,18 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 				}
 			}
 		}
+	}
+}
+
+func handlerRuleExecutableReaderFieldIsActive(collection, field string) bool {
+	if collection == "rules" {
+		return true
+	}
+	switch field {
+	case "Action", "Activity":
+		return false
+	default:
+		return true
 	}
 }
 
