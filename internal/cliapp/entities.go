@@ -565,8 +565,8 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	entity := result.Entity
 	now := cliRelativeTimeNow()
 	header := []cliLabeledDetailRow{
-		{Label: "run", Value: entityOneLine(entity.RunID)},
-		{Label: "flow", Value: entityOneLine(entity.FlowInstance)},
+		{Label: "run", Value: cliSanitizeOneLineValue(entity.RunID)},
+		{Label: "flow", Value: cliSanitizeOneLineValue(entity.FlowInstance)},
 		{Label: "type", Value: entityDash(entityOneLine(entity.EntityType))},
 		{Label: "state", Value: entityDash(entityOneLine(entity.CurrentState))},
 		{Label: "revision", Value: fmt.Sprintf("%d", entity.Revision)},
@@ -598,9 +598,9 @@ func entityTimestampText(now time.Time, raw string, verbose bool) string {
 	return relative + " (" + raw + ")"
 }
 
-// entityOneLine normalizes an unconstrained summary string (run id, flow,
-// type, state, slug, name) so embedded line-breaking characters cannot break
-// the aligned detail-row or table line discipline.
+// entityOneLine normalizes a truncatable descriptive value so embedded
+// line-breaking characters cannot break the aligned detail-row or table line
+// discipline. Exact identifiers and semantic keys use the full-value sanitizer.
 func entityOneLine(value string) string {
 	return cliRenderOneLineValue(value)
 }
@@ -643,7 +643,7 @@ func entityFieldRows(fields map[string]any, include func(string) bool) []cliLabe
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
 	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(key), Value: entityFieldValue(fields[key])})
+		rows = append(rows, cliLabeledDetailRow{Label: cliSanitizeOneLineValue(key), Value: entityFieldValue(fields[key])})
 	}
 	return rows
 }
@@ -690,7 +690,7 @@ func writeEntityGatesSection(out io.Writer, gates map[string]bool) {
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
 	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(key), Value: fmt.Sprintf("%t", gates[key])})
+		rows = append(rows, cliLabeledDetailRow{Label: cliSanitizeOneLineValue(key), Value: fmt.Sprintf("%t", gates[key])})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Gates", Rows: rows})
 }
@@ -723,7 +723,7 @@ func writeEntityLoopSection(out io.Writer, loops []loopruntime.PublicActivation)
 			summary += " · close_reason " + loop.CloseReason
 		}
 		summary += " · stage " + loop.CurrentStage
-		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(loop.ID), Value: cliRenderOneLineValue(summary)})
+		rows = append(rows, cliLabeledDetailRow{Label: cliSanitizeOneLineValue(loop.ID), Value: cliRenderOneLineValue(summary)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
 }

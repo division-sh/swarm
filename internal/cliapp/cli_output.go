@@ -451,23 +451,6 @@ func cliSanitizeOneLineValue(value string) string {
 	return strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(value))
 }
 
-// cliRenderOneLineLabel sanitizes a row label and, when it exceeds the one-line
-// ceiling, retains a distinguishing suffix so two long labels sharing a common
-// prefix never render as identical rows.
-func cliRenderOneLineLabel(value string) string {
-	value = cliSanitizeOneLineValue(value)
-	runes := []rune(value)
-	if len(runes) <= cliOneLineMaxRunes {
-		return value
-	}
-	const retainedSuffixRunes = 12
-	kept := cliOneLineMaxRunes - retainedSuffixRunes - 1
-	if kept < 1 {
-		kept = 1
-	}
-	return string(runes[:kept]) + "…" + string(runes[len(runes)-retainedSuffixRunes:])
-}
-
 func cliReplaceLineBreakingRune(r rune) rune {
 	if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
 		return ' '
