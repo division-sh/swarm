@@ -76,6 +76,7 @@ type runtimeProjectSupervisor struct {
 	currentBundleIdentity           runtimecontracts.BundleIdentity
 	runtimeContexts                 *runtime.RuntimeContextManager
 	pendingReplacement              *pendingRuntimeReplacement
+	pendingReplacementRollback      *pendingRuntimeReplacementRollback
 	pendingSourceSetRollback        *pendingRuntimeSourceSetRollback
 	sourceReplacementDisabledReason string
 	executionPosture                executionposture.Posture
@@ -334,6 +335,9 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := s.completePendingReplacementRollback(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement rollback before close: %w", err)
+	}
 	if err := s.completePendingSourceSetRollback(ctx); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback before close: %w", err)
 	}
@@ -362,6 +366,9 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	if err := s.completePendingReplacementRollback(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement rollback: %w", err)
+	}
 	if err := s.completePendingSourceSetRollback(ctx); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback: %w", err)
 	}
@@ -569,6 +576,45 @@ type pendingRuntimeReplacement struct {
 	freeze                 *startupHandoffFreeze
 }
 
+type runtimeProjectSnapshot struct {
+	root            string
+	source          semanticview.Source
+	bundle          *runtimecontracts.WorkflowContractBundle
+	runtime         *runtime.Runtime
+	fact            runtimecorrelation.BundleSourceFact
+	identity        runtimecontracts.BundleIdentity
+	providerCatalog *providertriggers.CatalogSnapshot
+	channelPlans    []packs.SatisfactionPlan
+	channelBindings []packs.OutboundBindingPlan
+}
+
+type runtimeReplacementRollbackPhase uint8
+
+const (
+	runtimeReplacementRollbackPublication runtimeReplacementRollbackPhase = iota
+	runtimeReplacementRollbackCandidate
+	runtimeReplacementRollbackSourceSet
+	runtimeReplacementRollbackPredecessor
+	runtimeReplacementRollbackComplete
+)
+
+type pendingRuntimeReplacementRollback struct {
+	mu                        sync.Mutex
+	phase                     runtimeReplacementRollbackPhase
+	publication               *pendingRuntimeReplacement
+	candidate                 *runtime.Runtime
+	manager                   *runtime.RuntimeContextManager
+	predecessorContext        runtime.BundleContext
+	predecessor               *runtime.Runtime
+	predecessorProject        runtimeProjectSnapshot
+	candidatePlan             runtimeagenttopology.SourceSetPlan
+	previousPlan              runtimeagenttopology.SourceSetPlan
+	topologyAttempt           sourceSetReplacementAttempt
+	freeze                    *startupHandoffFreeze
+	sourceSetRollbackRetained bool
+	predecessorPublication    *pendingRuntimeReplacement
+}
+
 type pendingRuntimeSourceSetRollback struct {
 	mu                     sync.Mutex
 	manager                *runtime.RuntimeContextManager
@@ -632,6 +678,20 @@ func cloneProcessAdmissionCandidate(candidate *processAdmissionCandidate) *proce
 	cloned.channelPlans = append([]packs.SatisfactionPlan(nil), candidate.channelPlans...)
 	cloned.channelBindings = append([]packs.OutboundBindingPlan(nil), candidate.channelBindings...)
 	return &cloned
+}
+
+func (s *runtimeProjectSupervisor) restoreProjectSnapshot(snapshot runtimeProjectSnapshot) {
+	s.mu.Lock()
+	s.currentRoot = snapshot.root
+	s.currentSource = snapshot.source
+	s.currentBundle = snapshot.bundle
+	s.currentRT = snapshot.runtime
+	s.currentBundleSourceFact = snapshot.fact
+	s.currentBundleIdentity = snapshot.identity
+	s.providerTriggers = snapshot.providerCatalog
+	s.channelPlans = append([]packs.SatisfactionPlan(nil), snapshot.channelPlans...)
+	s.channelBindings = append([]packs.OutboundBindingPlan(nil), snapshot.channelBindings...)
+	s.mu.Unlock()
 }
 
 func (s *runtimeProjectSupervisor) installProcessGenerationGrant(ctx context.Context, rt *runtime.Runtime, plan runtimeagenttopology.SourceSetPlan) error {
@@ -979,6 +1039,116 @@ func (s *runtimeProjectSupervisor) rollbackPendingReplacement(ctx context.Contex
 	return nil
 }
 
+func (s *runtimeProjectSupervisor) retainPendingReplacementRollback(pending *pendingRuntimeReplacementRollback) error {
+	if s == nil || pending == nil || pending.publication == nil || pending.manager == nil || pending.predecessor == nil {
+		return errors.New("pending runtime replacement rollback requires publication, runtime context ownership, and predecessor")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingReplacementRollback != nil {
+		return errors.New("runtime replacement rollback is already pending")
+	}
+	s.pendingReplacementRollback = pending
+	return nil
+}
+
+func (s *runtimeProjectSupervisor) completePendingReplacementRollback(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	pending := s.pendingReplacementRollback
+	s.mu.RUnlock()
+	if pending == nil {
+		return nil
+	}
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	s.mu.RLock()
+	current := s.pendingReplacementRollback
+	s.mu.RUnlock()
+	if current != pending {
+		return nil
+	}
+
+	for {
+		switch pending.phase {
+		case runtimeReplacementRollbackPublication:
+			if err := s.rollbackPendingReplacement(ctx, pending.publication); err != nil {
+				return fmt.Errorf("rollback retained runtime publication: %w", err)
+			}
+			pending.phase = runtimeReplacementRollbackCandidate
+
+		case runtimeReplacementRollbackCandidate:
+			if err := s.shutdownCurrentRuntimeWithOptions(ctx, pending.candidate, s.replacementShutdown); err != nil {
+				return fmt.Errorf("shutdown retained replacement candidate: %w", err)
+			}
+			s.restoreProjectSnapshot(pending.predecessorProject)
+			pending.phase = runtimeReplacementRollbackSourceSet
+
+		case runtimeReplacementRollbackSourceSet:
+			if pending.sourceSetRollbackRetained {
+				if err := s.completePendingSourceSetRollback(ctx); err != nil {
+					return fmt.Errorf("resume retained replacement source-set rollback: %w", err)
+				}
+				pending.phase = runtimeReplacementRollbackComplete
+				continue
+			}
+			err := s.restoreCommittedSourceSetAndSurvivors(
+				context.Background(), pending.manager, pending.candidatePlan, pending.previousPlan, pending.topologyAttempt,
+			)
+			var survivorCommitFailure *predecessorSurvivorCommitFailure
+			if errors.As(err, &survivorCommitFailure) {
+				if retainErr := s.retainPendingSourceSetRollback(
+					pending.manager, pending.predecessorContext, pending.predecessor, pending.freeze,
+				); retainErr != nil {
+					return errors.Join(err, retainErr)
+				}
+				pending.sourceSetRollbackRetained = true
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			pending.phase = runtimeReplacementRollbackPredecessor
+
+		case runtimeReplacementRollbackPredecessor:
+			if pending.predecessorPublication != nil {
+				s.mu.RLock()
+				currentPublication := s.pendingReplacement
+				s.mu.RUnlock()
+				if currentPublication != pending.predecessorPublication {
+					return errors.New("retained predecessor publication is no longer the pending runtime replacement")
+				}
+				if err := s.completePendingReplacement(); err != nil {
+					return fmt.Errorf("resume retained predecessor publication: %w", err)
+				}
+			} else if err := s.restoreQuiescedPredecessor(
+				ctx, pending.manager, pending.predecessorContext, pending.predecessor, pending.freeze,
+			); err != nil {
+				s.mu.RLock()
+				pending.predecessorPublication = s.pendingReplacement
+				s.mu.RUnlock()
+				return err
+			}
+			pending.phase = runtimeReplacementRollbackComplete
+
+		case runtimeReplacementRollbackComplete:
+			s.mu.Lock()
+			if s.pendingReplacementRollback != pending {
+				s.mu.Unlock()
+				return errors.New("pending runtime replacement rollback changed before completion")
+			}
+			s.pendingReplacementRollback = nil
+			s.mu.Unlock()
+			return nil
+
+		default:
+			return errors.New("pending runtime replacement rollback has an invalid phase")
+		}
+	}
+}
+
 func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.Context, catalog *providertriggers.CatalogSnapshot) (processAdmissionCandidate, error) {
 	installed, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
@@ -1057,6 +1227,9 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	workOwner *worklifetime.RuntimeOccurrence,
 	admissionCandidate *processAdmissionCandidate,
 ) (builderpkg.ProjectStatus, error) {
+	if err := s.completePendingReplacementRollback(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement rollback before replacement: %w", err)
+	}
 	if err := s.completePendingSourceSetRollback(ctx); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback before replacement: %w", err)
 	}
@@ -1114,18 +1287,10 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		oldChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
 		oldChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
 		s.mu.RUnlock()
-		restoreSupervisorPredecessor := func() {
-			s.mu.Lock()
-			s.currentRoot = oldRoot
-			s.currentSource = oldSource
-			s.currentBundle = oldBundle
-			s.currentRT = oldRT
-			s.currentBundleSourceFact = oldFact
-			s.currentBundleIdentity = oldIdentity
-			s.providerTriggers = oldProviderTriggers
-			s.channelPlans = append([]packs.SatisfactionPlan(nil), oldChannelPlans...)
-			s.channelBindings = append([]packs.OutboundBindingPlan(nil), oldChannelBindings...)
-			s.mu.Unlock()
+		predecessorProject := runtimeProjectSnapshot{
+			root: oldRoot, source: oldSource, bundle: oldBundle, runtime: oldRT,
+			fact: oldFact, identity: oldIdentity, providerCatalog: oldProviderTriggers,
+			channelPlans: oldChannelPlans, channelBindings: oldChannelBindings,
 		}
 		s.setReady(false)
 		s.mu.RLock()
@@ -1142,7 +1307,8 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			defer func() {
 				s.mu.RLock()
 				retained := (s.pendingReplacement != nil && s.pendingReplacement.freeze == freeze) ||
-					(s.pendingSourceSetRollback != nil && s.pendingSourceSetRollback.freeze == freeze)
+					(s.pendingSourceSetRollback != nil && s.pendingSourceSetRollback.freeze == freeze) ||
+					(s.pendingReplacementRollback != nil && s.pendingReplacementRollback.freeze == freeze)
 				s.mu.RUnlock()
 				if !retained {
 					freeze.Release()
@@ -1259,13 +1425,16 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		s.mu.Unlock()
 		transitionRetained = true
 		if err := s.completePendingReplacement(); err != nil {
-			publicationRollbackErr := s.rollbackPendingReplacement(context.Background(), pending)
-			shutdownErr := s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
-			if publicationRollbackErr != nil || shutdownErr != nil {
-				return s.CurrentProject(), errors.Join(err, publicationRollbackErr, shutdownErr)
+			rollback := &pendingRuntimeReplacementRollback{
+				publication: pending, candidate: newRT, manager: manager,
+				predecessorContext: oldContextDef, predecessor: oldRT, predecessorProject: predecessorProject,
+				candidatePlan: candidatePlan, previousPlan: previousPlan, topologyAttempt: topologyAttempt, freeze: freeze,
 			}
-			restoreSupervisorPredecessor()
-			return s.CurrentProject(), restoreAfterSurvivorCommit(err)
+			if retainErr := s.retainPendingReplacementRollback(rollback); retainErr != nil {
+				return s.CurrentProject(), errors.Join(err, retainErr)
+			}
+			recoveryErr := s.completePendingReplacementRollback(context.Background())
+			return s.CurrentProject(), errors.Join(err, recoveryErr)
 		}
 		return s.CurrentProject(), nil
 	}

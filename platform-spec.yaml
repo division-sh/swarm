@@ -10806,7 +10806,11 @@ flow_model:
         complete that finalizer before enumerating runtime contexts or releasing the selected store. If predecessor publication
         then fails, that finalizer retains and resumes the exact prepared publication; it cannot construct a second predecessor
         or replace the pending publication identity. Runtime replacement rollback discards a preparation that never published and
-        withdraws only a publication that RuntimeContextManager successfully made visible. After publication, the supervisor retains
+        withdraws only a publication that RuntimeContextManager successfully made visible. Failure of either terminal operation
+        retains one supervisor-owned replacement rollback finalizer carrying that exact publication phase, candidate shutdown,
+        predecessor project snapshot, source-set and survivor restoration, predecessor publication, and startup-handoff freeze.
+        Reload, replacement, and close retry the complete finalizer before admitting new work; they never resume forward candidate
+        publication from a rollback phase or clear only the publication while leaving later rollback phases unowned. After publication, the supervisor retains
         that exact pending operation until its captured public-ingress reconciliation succeeds; retry resumes reconciliation without
         publishing the runtime context again. The failed transition and
         rollback continuation are never discarded. If bounded recovery cannot safely restore, the context remains unavailable and the process
@@ -33473,6 +33477,9 @@ agent_topology_authority:
       prepared, the finalizer retains and resumes that exact publication across transient failure instead of reconstructing it.
       A pre-publication failure is discarded rather than withdrawn. A successfully published predecessor remains the exact pending
       continuation until its captured public-ingress reconciliation succeeds; retry resumes that reconciliation without republishing.
+      A transient discard or withdrawal failure retains the complete typed replacement rollback operation, and every later reload,
+      replacement, or close boundary resumes its exact remaining candidate-shutdown, supervisor-snapshot, source-set/survivor, and
+      predecessor-publication phases before normal operation.
   admission:
     variants: [StaticDeclarationPlan, FlowReadinessPlan, EphemeralExecution]
     rule: >-
