@@ -189,7 +189,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		}, false)
 	}
 
-	for _, record := range wave1ScopedAgentRecords(bundle) {
+	for _, record := range wave1ScopedAgentRecords(source) {
 		for entityType, decl := range record.Entry.EntityWrites {
 			contract, ok := wave1ResolveEntityWriteContract(source, record.Source, entityType)
 			if !ok {

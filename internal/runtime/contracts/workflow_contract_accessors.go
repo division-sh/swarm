@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -282,6 +283,24 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecor
 		return nil
 	}
 	out := make([]ScopedNodeRecord, 0)
+	declarationIndexes := map[string]int{}
+	appendRecord := func(record ScopedNodeRecord) {
+		declarationKey := scopedNodeDeclarationKey(record)
+		if declarationKey == "" {
+			out = append(out, record)
+			return
+		}
+		if index, exists := declarationIndexes[declarationKey]; exists {
+			// Package and explicit-flow views can project the same physical
+			// declaration. The flow view carries the more specific owner.
+			if strings.TrimSpace(out[index].Source.Layer) != "flow" && strings.TrimSpace(record.Source.Layer) == "flow" {
+				out[index] = record
+			}
+			return
+		}
+		declarationIndexes[declarationKey] = len(out)
+		out = append(out, record)
+	}
 	var walk func(*FlowContractView, string, string)
 	walk = func(view *FlowContractView, inheritedPackageKey, inheritedFlowID string) {
 		if view == nil {
@@ -306,7 +325,7 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecor
 		}
 		sort.Strings(nodeIDs)
 		for _, nodeID := range nodeIDs {
-			out = append(out, ScopedNodeRecord{
+			appendRecord(ScopedNodeRecord{
 				LogicalID: strings.TrimSpace(nodeID),
 				Entry:     view.Nodes[nodeID],
 				Source: ContractItemSource{
@@ -327,6 +346,18 @@ func scopedNodeRecordsFromExportedTree(root *FlowContractView) []ScopedNodeRecor
 	}
 	walk(root, "", "")
 	return out
+}
+
+func scopedNodeDeclarationKey(record ScopedNodeRecord) string {
+	sourceFile := strings.TrimSpace(record.Source.File)
+	if sourceFile == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		filepath.Clean(sourceFile),
+		strings.TrimSpace(record.Source.FlowID),
+		strings.TrimSpace(record.LogicalID),
+	}, "\x00")
 }
 
 func exportedFlowTreeViewOrderKey(view *FlowContractView, inheritedPackageKey string) string {

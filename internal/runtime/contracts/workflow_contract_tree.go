@@ -237,6 +237,7 @@ func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]Flow
 					PackageKey: pkg.Key,
 					PackageDir: pkg.Paths.Dir,
 					Dir:        pkg.Paths.Dir,
+					NodesFile:  view.Paths.ProjectNodesFile,
 				},
 				view,
 			)}

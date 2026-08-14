@@ -247,11 +247,10 @@ func wave1EntityWriterCoverageByFlow(source semanticview.Source) map[string]map[
 
 func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
+	if bundle, ok := semanticview.Bundle(source); !ok || bundle == nil {
 		return out
 	}
-	for _, record := range wave1ScopedAgentRecords(bundle) {
+	for _, record := range wave1ScopedAgentRecords(source) {
 		if len(record.Entry.EntityWrites) == 0 {
 			continue
 		}
@@ -455,9 +454,14 @@ func wave1AgentPromptEntityContract(source semanticview.Source, agentSource runt
 	return wave1EntityContractView{}, false
 }
 
-func wave1ScopedAgentRecords(bundle *runtimecontracts.WorkflowContractBundle) []wave1ScopedAgentRecord {
-	if bundle == nil {
+func wave1ScopedAgentRecords(source semanticview.Source) []wave1ScopedAgentRecord {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
 		return nil
+	}
+	projectFlowIDs := map[string]string{}
+	for _, scope := range source.ProjectScopes() {
+		projectFlowIDs[strings.TrimSpace(scope.Key)] = strings.TrimSpace(scope.OwningFlowID)
 	}
 	out := make([]wave1ScopedAgentRecord, 0)
 	for _, view := range bundle.ProjectViews() {
@@ -470,11 +474,13 @@ func wave1ScopedAgentRecords(bundle *runtimecontracts.WorkflowContractBundle) []
 		}
 		sort.Strings(agentIDs)
 		for _, logicalID := range agentIDs {
+			packageKey := strings.TrimSpace(view.Paths.Key)
 			out = append(out, wave1ScopedAgentRecord{
 				LogicalID: logicalID,
 				Entry:     view.Agents[logicalID],
 				Source: runtimecontracts.ContractItemSource{
-					PackageKey: strings.TrimSpace(view.Paths.Key),
+					PackageKey: packageKey,
+					FlowID:     projectFlowIDs[packageKey],
 					Layer:      "project",
 					File:       strings.TrimSpace(view.Paths.ProjectAgentsFile),
 				},
