@@ -1195,6 +1195,14 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
 	seedEventPublishEntityState(t, db, runID, targetEntityID, targetFlowInstance, "waiting")
+	if _, err := db.ExecContext(ctx, `
+		UPDATE entity_state
+		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
+		    bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, runID, targetEntityID); err != nil {
+		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
+	}
 	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}

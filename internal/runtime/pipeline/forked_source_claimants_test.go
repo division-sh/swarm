@@ -85,14 +85,9 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			storageRef := "freeze/" + instanceID
 			entityID := uuid.NewString()
 			instance := WorkflowInstance{
-				InstanceID: instanceID, StorageRef: storageRef, WorkflowName: "freeze", WorkflowVersion: "1",
+				InstanceID: instanceID, StorageRef: storageRef, EntityID: entityID, WorkflowName: "freeze", WorkflowVersion: "1",
 				CurrentState: "active", EnteredStageAt: fixture.frozenAt.Add(-time.Minute),
-				Metadata: map[string]any{
-					"marker":      "source",
-					"flow_path":   storageRef,
-					"instance_id": instanceID,
-					"entity_id":   entityID,
-				},
+				Fields: map[string]any{"marker": "source"},
 			}
 			if err := fixture.store.create(fixture.ctx, instance); err != nil {
 				t.Fatal(err)
@@ -108,9 +103,7 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			requireForkedPipelineRefusal(t, "upsert workflow", fixture.store.upsert(fixture.ctx, late))
 			late.InstanceID = uuid.NewString()
 			late.StorageRef = "freeze/" + late.InstanceID
-			late.Metadata = cloneStringAnyMap(late.Metadata)
-			late.Metadata["flow_path"] = late.StorageRef
-			late.Metadata["instance_id"] = late.InstanceID
+			late.Fields = cloneStringAnyMap(late.Fields)
 			requireForkedPipelineRefusal(t, "create workflow", fixture.store.create(fixture.ctx, late))
 			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) { item.CurrentState = "changed" }))
 			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) error {

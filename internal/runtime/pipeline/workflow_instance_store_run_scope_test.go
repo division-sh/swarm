@@ -47,8 +47,9 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 		{ctx: ctxB, state: "fork_state"},
 	} {
 		if err := store.upsert(tc.ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-			InstanceID:      entityID,
-			StorageRef:      entityID,
+			InstanceID:      "run-scope",
+			StorageRef:      "run-scope",
+			EntityID:        entityID,
 			WorkflowName:    "run-scope",
 			WorkflowVersion: "1.0.0",
 			CurrentState:    tc.state,

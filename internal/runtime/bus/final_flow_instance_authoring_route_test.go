@@ -31,7 +31,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescrip
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	s.activations = append(s.activations, req)
-	accountID, _ := req.Metadata[finalflowinstanceauthoring.TemplateInstanceBy].(string)
+	accountID, _ := req.Fields[finalflowinstanceauthoring.TemplateInstanceBy].(string)
 	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
 		InstanceID:    req.Instance.InstanceID,
 		EntityID:      req.Instance.EntityID,
@@ -92,13 +92,17 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	}
 	activation := store.activations[0]
 	if activation.Config[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" ||
-		activation.Metadata[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" {
-		t.Fatalf("activation config/metadata = %#v/%#v, want account_id from receiver carry", activation.Config, activation.Metadata)
+		activation.Fields[finalflowinstanceauthoring.TemplateInstanceBy] != "acct-42" {
+		t.Fatalf("activation config/fields = %#v/%#v, want account_id from receiver carry", activation.Config, activation.Fields)
 	}
-	if activation.Metadata["entity_type"] != finalflowinstanceauthoring.TemplateEntityType ||
-		activation.Metadata["instance_kind"] != "template" ||
-		activation.Metadata["last_source_event"] != evt.ID() {
-		t.Fatalf("activation metadata = %#v, want entity_type/instance_kind/last_source_event", activation.Metadata)
+	if _, exists := activation.Fields["entity_type"]; exists {
+		t.Fatalf("activation fields retain typed entity_type: %#v", activation.Fields)
+	}
+	if _, exists := activation.Fields["instance_kind"]; exists {
+		t.Fatalf("activation fields retain typed instance_kind: %#v", activation.Fields)
+	}
+	if activation.Bookkeeping["last_source_event"] != evt.ID() {
+		t.Fatalf("activation bookkeeping = %#v, want last_source_event", activation.Bookkeeping)
 	}
 	persistedRoutes := store.routes[evt.ID()]
 	if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.ID() != finalflowinstanceauthoring.TemplateNodeID {

@@ -1229,7 +1229,7 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 	if strings.TrimSpace(entityID) != "" && h.workflow != nil {
 		if instance, ok, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute()); err == nil && ok {
 			state.Stage = runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState)
-			state.Metadata = cloneStringAnyMap(instance.Metadata)
+			state.Metadata = cloneStringAnyMap(instance.Fields)
 		}
 	}
 	preview, err := runtimepipeline.PreviewContractHandlerExecution(h.ctx, h.bundle, nodeID, evt, state, nil)
@@ -1272,16 +1272,12 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      catalogRuntimeRunID,
 		StorageRef:      catalogRuntimeRunID,
+		EntityID:        entityID,
 		WorkflowName:    h.bundle.WorkflowName(),
 		WorkflowVersion: h.bundle.WorkflowVersion(),
 		CurrentState:    initialState,
 		EnteredStageAt:  h.startedAt,
 		CreatedAt:       h.startedAt,
-		Metadata: map[string]any{
-			"entity_id":   entityID,
-			"flow_path":   catalogRuntimeRunID,
-			"instance_id": catalogRuntimeRunID,
-		},
 	}, h.startedAt); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
 	}
@@ -1348,16 +1344,12 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 		instance = runtimepipeline.WorkflowInstance{
 			InstanceID:      catalogRuntimeRunID,
 			StorageRef:      catalogRuntimeRunID,
+			EntityID:        entityID,
 			WorkflowName:    h.bundle.WorkflowName(),
 			WorkflowVersion: h.bundle.WorkflowVersion(),
 			CurrentState:    h.initialState,
 			EnteredStageAt:  h.startedAt,
 			CreatedAt:       h.startedAt,
-			Metadata: map[string]any{
-				"entity_id":   entityID,
-				"flow_path":   catalogRuntimeRunID,
-				"instance_id": catalogRuntimeRunID,
-			},
 		}
 	}
 	if strings.TrimSpace(instance.InstanceID) == "" {
@@ -1378,36 +1370,34 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if seededState := strings.TrimSpace(expected.Trigger.EntityStateBefore); seededState != "" {
 		instance.CurrentState = seededState
 	}
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
+	if instance.Fields == nil {
+		instance.Fields = map[string]any{}
 	}
 	for key, value := range expected.Trigger.Entity {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		instance.Metadata[key] = value
+		instance.Fields[key] = value
 	}
 	for key, value := range expected.Trigger.EntityFieldsBefore {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		instance.Metadata[key] = value
+		instance.Fields[key] = value
 	}
 	if len(expected.Trigger.GatesBefore) > 0 {
-		gates, _ := instance.Metadata["gates"].(map[string]any)
-		if gates == nil {
-			gates = map[string]any{}
+		if instance.Gates == nil {
+			instance.Gates = map[string]bool{}
 		}
 		for key, value := range expected.Trigger.GatesBefore {
 			key = h.catalogGateKey(h.bundle.WorkflowName(), key)
 			if key == "" {
 				continue
 			}
-			gates[key] = value
+			instance.Gates[key] = value
 		}
-		instance.Metadata["gates"] = gates
 	}
 	if ok {
 		h.t.Fatalf("entity field fixture %s was already materialized before exact fixture projection", entityID)

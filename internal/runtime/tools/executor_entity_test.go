@@ -958,7 +958,7 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 			if err := db.QueryRowContext(ctx, `
 				SELECT COUNT(*)
 				FROM entity_mutations
-				WHERE entity_id = $1::uuid AND field = $2
+					WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = $2
 			`, entityID, tc.field).Scan(&mutationCount); err != nil {
 				t.Fatalf("count entity mutations: %v", err)
 			}
@@ -1101,6 +1101,7 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	}
 
 	var (
+		domain     string
 		field      string
 		oldValue   string
 		newValue   string
@@ -1109,19 +1110,20 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 	)
 	if err := db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(field, ''),
+			COALESCE(domain, ''),
+			COALESCE(path, ''),
 			COALESCE(old_value::text, ''),
 			COALESCE(new_value::text, ''),
 			COALESCE(writer_type, ''),
 			COALESCE(handler_step, '')
 		FROM entity_mutations
-		WHERE entity_id = $1::uuid AND field = 'status'
+		WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = 'status'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, entityID).Scan(&field, &oldValue, &newValue, &writerType, &step); err != nil {
+	`, entityID).Scan(&domain, &field, &oldValue, &newValue, &writerType, &step); err != nil {
 		t.Fatalf("load entity mutation: %v", err)
 	}
-	if field != "status" {
+	if domain != "authored_field" || field != "status" {
 		t.Fatalf("mutation field = %q, want status", field)
 	}
 	if oldValue != `"open"` {
@@ -1160,6 +1162,7 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 	}
 
 	var (
+		domain     string
 		field      string
 		oldValue   string
 		newValue   string
@@ -1168,19 +1171,20 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 	)
 	if err := db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(field, ''),
+			COALESCE(domain, ''),
+			COALESCE(path, ''),
 			COALESCE(old_value::text, ''),
 			COALESCE(new_value::text, ''),
 			COALESCE(writer_type, ''),
 			COALESCE(handler_step, '')
 		FROM entity_mutations
-		WHERE entity_id = $1::uuid AND field = 'metadata.region'
+		WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = 'metadata.region'
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, entityID).Scan(&field, &oldValue, &newValue, &writerType, &step); err != nil {
+	`, entityID).Scan(&domain, &field, &oldValue, &newValue, &writerType, &step); err != nil {
 		t.Fatalf("load nested entity mutation: %v", err)
 	}
-	if field != "metadata.region" {
+	if domain != "authored_field" || field != "metadata.region" {
 		t.Fatalf("mutation field = %q, want metadata.region", field)
 	}
 	if oldValue != `"us"` {
@@ -1208,7 +1212,7 @@ func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
 	})
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
+		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
 		FROM entity_mutations
 		WHERE entity_id = $1::uuid
 		ORDER BY created_at ASC, mutation_id ASC
@@ -1221,21 +1225,22 @@ func TestEntityTools_CreateEntity_LogsInitialMutationRows(t *testing.T) {
 	fields := map[string][3]string{}
 	for rows.Next() {
 		var (
-			field       string
+			domain      string
+			path        string
 			writerType  string
 			writerID    string
 			handlerStep string
 		)
-		if err := rows.Scan(&field, &writerType, &writerID, &handlerStep); err != nil {
+		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
 			t.Fatalf("scan entity mutation: %v", err)
 		}
-		fields[strings.TrimSpace(field)] = [3]string{writerType, writerID, handlerStep}
+		fields[strings.TrimSpace(domain)+":"+strings.TrimSpace(path)] = [3]string{writerType, writerID, handlerStep}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read entity mutations: %v", err)
 	}
 
-	for _, want := range []string{"current_state", "score", "status"} {
+	for _, want := range []string{"lifecycle_state:", "authored_field:score", "authored_field:status"} {
 		meta, ok := fields[want]
 		if !ok {
 			t.Fatalf("missing mutation field %q in %#v", want, fields)
@@ -1320,11 +1325,11 @@ accounts:
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $5),
-			($1::uuid, $2::uuid, 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'revision-test', 'field-only', $6)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $5),
+			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'revision-test', 'field-only', $6)
 	`, sourceRunID, entityID, stateEventID, forkEventID, at, forkAt); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
@@ -1418,11 +1423,11 @@ accounts:
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $5),
-			($1::uuid, $2::uuid, 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'activation-tool-test', 'field-only', $6)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $5),
+			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'activation-tool-test', 'field-only', $6)
 	`, sourceRunID, entityID, stateEventID, forkEventID, at, forkAt); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
@@ -1491,14 +1496,14 @@ accounts:
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_mutations
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND field = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'authored_field' AND path = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
 	`, materialized.ForkRunID, entityID).Scan(&forkMutationCount); err != nil {
 		t.Fatalf("count fork status mutation: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_mutations
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND field = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'authored_field' AND path = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
 	`, sourceRunID, entityID).Scan(&sourceMutationCount); err != nil {
 		t.Fatalf("count source status mutation: %v", err)
 	}

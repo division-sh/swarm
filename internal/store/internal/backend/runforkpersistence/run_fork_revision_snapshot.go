@@ -49,7 +49,8 @@ type runForkRevisionEntityMutation struct {
 	runForkRevisionedFact
 	MutationID    string          `json:"mutation_id"`
 	EntityID      string          `json:"entity_id"`
-	Field         string          `json:"field"`
+	Domain        string          `json:"domain"`
+	Path          string          `json:"path"`
 	NewValue      json.RawMessage `json:"new_value"`
 	CausedByEvent string          `json:"caused_by_event"`
 	CreatedAt     time.Time       `json:"created_at"`
@@ -60,6 +61,8 @@ type runForkRevisionEntityMetadata struct {
 	EntityID     string    `json:"entity_id"`
 	FlowInstance string    `json:"flow_instance"`
 	EntityType   string    `json:"entity_type"`
+	Slug         string    `json:"slug"`
+	Name         string    `json:"name"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 

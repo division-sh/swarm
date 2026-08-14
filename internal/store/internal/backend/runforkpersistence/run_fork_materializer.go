@@ -362,8 +362,8 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 		meta := runForkEntityMetadata{
 			FlowInstance: strings.TrimSpace(entity.MaterializationMetadata.FlowInstance),
 			EntityType:   strings.TrimSpace(entity.MaterializationMetadata.EntityType),
-			Slug:         stringFieldValue(entity.Fields, "slug"),
-			Name:         stringFieldValue(entity.Fields, "name"),
+			Slug:         strings.TrimSpace(entity.MaterializationMetadata.Slug),
+			Name:         strings.TrimSpace(entity.MaterializationMetadata.Name),
 		}
 		if meta.FlowInstance == "" || meta.EntityType == "" {
 			return nil, fmt.Errorf("source entity_state metadata for entity %s must include flow_instance and entity_type", entityID)
@@ -371,28 +371,6 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 		out[entityID] = meta
 	}
 	return out, nil
-}
-
-func stringFieldValue(fields map[string]any, key string) string {
-	value, ok := fields[strings.TrimSpace(key)]
-	if !ok {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case json.RawMessage:
-		var out string
-		if err := json.Unmarshal(typed, &out); err == nil {
-			return strings.TrimSpace(out)
-		}
-	case []byte:
-		var out string
-		if err := json.Unmarshal(typed, &out); err == nil {
-			return strings.TrimSpace(out)
-		}
-	}
-	return ""
 }
 
 func materializeRunForkEntityState(ctx context.Context, decisions *storedecision.DecisionPostgresOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
@@ -407,6 +385,10 @@ func materializeRunForkEntityState(ctx context.Context, decisions *storedecision
 	fieldsJSON, err := jsonMapArg(entity.Fields)
 	if err != nil {
 		return fmt.Errorf("encode fork fields for entity %s: %w", entityID, err)
+	}
+	bookkeepingJSON, err := jsonMapArg(entity.Bookkeeping)
+	if err != nil {
+		return fmt.Errorf("encode fork bookkeeping for entity %s: %w", entityID, err)
 	}
 	gatesJSON, err := jsonMapArg(entity.Gates)
 	if err != nil {
@@ -427,16 +409,16 @@ func materializeRunForkEntityState(ctx context.Context, decisions *storedecision
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name,
-			current_state, gates, fields, accumulator, revision,
+			current_state, gates, fields, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
-			$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
-			$11, $12, $12
+			$7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1,
+			$12, $13, $13
 		)
 	`, forkRunID, entityID, meta.FlowInstance, meta.EntityType, meta.Slug, meta.Name,
-		currentState, gatesJSON, fieldsJSON, accJSON, entity.EnteredStateAt, now); err != nil {
+		currentState, gatesJSON, fieldsJSON, bookkeepingJSON, accJSON, entity.EnteredStateAt, now); err != nil {
 		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
 	}
 	if err := materializeRunForkDecisionCards(ctx, decisions, tx, story, forkRunID, entityID, gateBindings, now); err != nil {
@@ -448,6 +430,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions *storedecision
 	return privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,
+		Bookkeeping:  entity.Bookkeeping,
 		Gates:        entity.Gates,
 		Accumulator:  forkAccumulator,
 	}, runtimemutationlog.Writer{

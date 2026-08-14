@@ -98,10 +98,12 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if got := strings.TrimSpace(instance.CurrentState); got != "done" {
 				t.Fatalf("current state = %q, want done", got)
 			}
-			assertMetadataNumber(t, instance.Metadata, "amount", 250)
-			assertMetadataString(t, instance.Metadata, "who", "alice")
-			assertMetadataNumber(t, instance.Metadata, "counter", 1)
-			assertGateSet(t, instance.Metadata, "ready")
+			assertMetadataNumber(t, instance.Fields, "amount", 250)
+			assertMetadataString(t, instance.Fields, "who", "alice")
+			assertMetadataNumber(t, instance.Fields, "counter", 1)
+			if !instance.Gates["ready"] {
+				t.Fatalf("ready gate = false, want true (all=%v)", instance.Gates)
+			}
 
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "who", "entity_initial_value", "create_entity", 1)
@@ -307,7 +309,7 @@ func seedExactOnceEvent(t *testing.T, store *workflowInstanceStore, ctx context.
 	seedPipelineEventRecord(t, ctx, store.testDB(), evt)
 }
 
-func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, field, writerID, handlerStep string, want int) {
+func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, path, writerID, handlerStep string, want int) {
 	t.Helper()
 	var (
 		got int
@@ -318,25 +320,27 @@ func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context
 			SELECT COUNT(*)
 			FROM entity_mutations
 			WHERE caused_by_event = ?
-			  AND field = ?
+			  AND domain = 'authored_field'
+			  AND path = ?
 			  AND writer_id = ?
 			  AND handler_step = ?
-		`, eventID, field, writerID, handlerStep).Scan(&got)
+		`, eventID, path, writerID, handlerStep).Scan(&got)
 	} else {
 		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM entity_mutations
 			WHERE caused_by_event = $1::uuid
-			  AND field = $2
+			  AND domain = 'authored_field'
+			  AND path = $2
 			  AND writer_id = $3
 			  AND handler_step = $4
-		`, eventID, field, writerID, handlerStep).Scan(&got)
+		`, eventID, path, writerID, handlerStep).Scan(&got)
 	}
 	if err != nil {
 		t.Fatalf("count mutation rows: %v", err)
 	}
 	if got != want {
-		t.Fatalf("mutation count event=%s field=%s writer=%s step=%s = %d, want %d", eventID, field, writerID, handlerStep, got, want)
+		t.Fatalf("mutation count event=%s path=%s writer=%s step=%s = %d, want %d", eventID, path, writerID, handlerStep, got, want)
 	}
 }
 

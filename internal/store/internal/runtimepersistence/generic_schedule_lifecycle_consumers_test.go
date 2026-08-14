@@ -271,9 +271,8 @@ func TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores(t *test
 			}
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, WorkflowName: "run-stop-timer-proof", WorkflowVersion: "1",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "run-stop-timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Metadata: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}

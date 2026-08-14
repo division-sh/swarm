@@ -1065,15 +1065,15 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				t.Fatalf("create loop activation: %v", err)
 			}
 			carrier := runtimeengine.NewStateCarrier(
-				map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID}, nil, map[string]map[string]any{},
+				map[string]any{}, nil, map[string]map[string]any{},
 			)
 			if err := loopruntime.Store(carrier.StateBuckets, loopActivation); err != nil {
 				t.Fatalf("store loop activation: %v", err)
 			}
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, WorkflowName: "workflow-timer-owner-test",
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -1126,7 +1126,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 			if err != nil || !ok {
 				t.Fatalf("load repeated workflow instance found=%v err=%v", ok, err)
 			}
-			persistedCarrier, err := runtimeengine.StateCarrierFromPersisted(persistedInstance.Metadata, persistedInstance.StateBuckets)
+			persistedCarrier, err := workflowInstanceStateCarrier(persistedInstance)
 			if err != nil {
 				t.Fatalf("decode repeated loop state: %v", err)
 			}
@@ -1467,10 +1467,10 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 						}
 					case "unrelated":
 						if err := store.mutateE(ctx, workflowTimerRootRoute(ctx), func(instance *WorkflowInstance) error {
-							if instance.Metadata == nil {
-								instance.Metadata = map[string]any{}
+							if instance.Fields == nil {
+								instance.Fields = map[string]any{}
 							}
-							instance.Metadata["unrelated_timer_order_proof"] = test.name
+							instance.Fields["unrelated_timer_order_proof"] = test.name
 							return nil
 						}); err != nil {
 							t.Fatalf("unrelated workflow mutation: %v", err)
@@ -1487,8 +1487,8 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 				}
 				if unrelatedApplied {
 					instance, found, err := store.Load(ctx, workflowTimerRootRoute(ctx))
-					if err != nil || !found || instance.Metadata["unrelated_timer_order_proof"] != test.name {
-						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Metadata["unrelated_timer_order_proof"], err)
+					if err != nil || !found || instance.Fields["unrelated_timer_order_proof"] != test.name {
+						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Fields["unrelated_timer_order_proof"], err)
 					}
 				}
 			})
@@ -2336,7 +2336,7 @@ func workflowTimerRootRoute(ctx context.Context) runtimeflowidentity.Route {
 }
 
 func workflowTimerMaterializedInstance(
-	ctx context.Context,
+	_ context.Context,
 	entityID string,
 	instancePath string,
 	instance WorkflowInstance,
@@ -2344,14 +2344,11 @@ func workflowTimerMaterializedInstance(
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	instance.InstanceID = runtimeflowidentity.LogicalInstanceID(instancePath)
 	instance.StorageRef = instancePath
-	instance.Metadata = cloneStringAnyMap(instance.Metadata)
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
+	instance.EntityID = strings.TrimSpace(entityID)
+	instance.Fields = cloneStringAnyMap(instance.Fields)
+	if instance.Fields == nil {
+		instance.Fields = map[string]any{}
 	}
-	instance.Metadata["run_id"] = runtimecorrelation.RunIDFromContext(ctx)
-	instance.Metadata["entity_id"] = entityID
-	instance.Metadata["flow_path"] = instancePath
-	instance.Metadata["instance_id"] = instance.InstanceID
 	return materializedWorkflowInstanceForTest(instance)
 }
 

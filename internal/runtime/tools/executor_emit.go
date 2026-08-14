@@ -287,7 +287,11 @@ func (e *Executor) emitTargetEvidenceForActor(ctx context.Context, actor models.
 				return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, err
 			}
 			if ok {
-				parent := runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata).Normalized()
+				parent := (runtimeflowidentity.ParentRoute{
+					FlowID:       instance.ParentFlowID,
+					FlowInstance: instance.ParentFlowInstance,
+					EntityID:     instance.ParentEntityID,
+				}).Normalized()
 				return runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
 					FlowID:       parent.FlowID,
 					FlowInstance: parent.FlowInstance,

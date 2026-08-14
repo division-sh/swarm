@@ -30,16 +30,16 @@ type ContextBuilderInput struct {
 
 func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 	base := values.NewContext()
-	materializedMetadata, err := entityruntime.MaterializeMetadataForFlow(input.Source, input.FlowID, input.State.StateCarrier.Metadata)
+	materializedFields, err := entityruntime.MaterializeMetadataForFlow(input.Source, input.FlowID, input.State.StateCarrier.Fields)
 	if err != nil {
 		return BaseContext{}, err
 	}
 	materializedState := input.State
-	materializedState.StateCarrier.Metadata = materializedMetadata
+	materializedState.StateCarrier.Fields = materializedFields
 	base.Entity = values.Wrap(materializedState.EntityContext())
 	base.PlatformEntity = values.Wrap(materializedState.PlatformEntityContext(contextFlowInstance(input.State, input.Event, input.FlowID)))
 	base.FlowID = firstNonEmpty(strings.TrimSpace(input.State.WorkflowName), strings.TrimSpace(input.FlowID))
-	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Metadata))
+	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Fields))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Event = values.Wrap(input.Event.ContextMap(input.State.CurrentState))
 	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))
@@ -51,7 +51,7 @@ func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 
 func contextFlowInstance(state StateSnapshot, evt events.Event, fallbackFlowID string) string {
 	return firstNonEmpty(
-		normalizedContextFlowInstance(asString(state.StateCarrier.Metadata["flow_path"])),
+		normalizedContextFlowInstance(state.StateCarrier.Control.FlowPath),
 		normalizedContextFlowInstance(evt.FlowInstance()),
 		normalizedContextFlowInstance(fallbackFlowID),
 	)

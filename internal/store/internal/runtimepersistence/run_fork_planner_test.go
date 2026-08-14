@@ -111,13 +111,13 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, runID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
-			($1::uuid, $2::uuid, 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
-			($1::uuid, $2::uuid, 'gates.ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
-			($1::uuid, $2::uuid, 'accumulator.score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
+			($1::uuid, $2::uuid, 'gate', 'ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4),
+			($1::uuid, $2::uuid, 'accumulator', 'score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'planner-test', 'before', $4)
 	`, runID, entityID, firstEventID, at); err != nil {
 		t.Fatalf("seed first revision mutations: %v", err)
 	}
@@ -125,11 +125,11 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, runID, "fork.after", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'planner-test', 'after', $4),
-			($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'after', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', '"queued"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'planner-test', 'after', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'title', '"before-title"'::jsonb, '"after-title"'::jsonb, $3::uuid, 'platform', 'planner-test', 'after', $4)
 	`, runID, entityID, secondEventID, at); err != nil {
 		t.Fatalf("seed second revision mutations: %v", err)
 	}
@@ -443,9 +443,9 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.state", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
+		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
 	`, runID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}
@@ -546,9 +546,9 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.timer_route", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"waiting"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
+		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"waiting"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
 	`, runID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}

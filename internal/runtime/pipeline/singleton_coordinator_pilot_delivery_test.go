@@ -64,9 +64,9 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if loaded.WorkflowName != singletoncoordinatorpilot.FlowID || loaded.CurrentState != "active" {
 		t.Fatalf("loaded singleton coordinator = storage:%q workflow:%q state:%q, want coordinator/active", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
 	}
-	leadIndex, ok := loaded.Metadata["lead_index"].(map[string]any)
+	leadIndex, ok := loaded.Fields["lead_index"].(map[string]any)
 	if !ok {
-		t.Fatalf("lead_index = %#v, want map", loaded.Metadata["lead_index"])
+		t.Fatalf("lead_index = %#v, want map", loaded.Fields["lead_index"])
 	}
 	lead, ok := leadIndex["lead-42"].(map[string]any)
 	if !ok {
@@ -83,9 +83,9 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if !ok || observation["source"] != "feed" || observation["note"] != "first seen" {
 		t.Fatalf("observation = %#v, want feed/first seen", observations[0])
 	}
-	auditLog, ok := loaded.Metadata["audit_log"].([]any)
+	auditLog, ok := loaded.Fields["audit_log"].([]any)
 	if !ok || len(auditLog) != 3 {
-		t.Fatalf("audit_log = %#v, want three entries", loaded.Metadata["audit_log"])
+		t.Fatalf("audit_log = %#v, want three entries", loaded.Fields["audit_log"])
 	}
 	firstAudit, ok := auditLog[0].(map[string]any)
 	if !ok || firstAudit["ref"] != "bootstrap" || firstAudit["action"] != "corrected" {
@@ -154,15 +154,13 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
 	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
+		InstanceID:      singletoncoordinatorpilot.FlowInstance,
 		StorageRef:      singletoncoordinatorpilot.FlowInstance,
+		EntityID:        entityID,
 		WorkflowName:    singletoncoordinatorpilot.FlowID,
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "active",
-		Metadata: map[string]any{
-			"entity_id":      entityID,
-			"flow_path":      singletoncoordinatorpilot.FlowInstance,
-			"instance_id":    singletoncoordinatorpilot.FlowInstance,
+		Fields: map[string]any{
 			"coordinator_id": "global",
 			"lead_index":     map[string]any{},
 			"audit_log": []any{

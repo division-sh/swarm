@@ -255,7 +255,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 	if instance == nil || plan == nil {
 		return nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return fmt.Errorf("decode current loop state: %w", err)
 	}
@@ -452,7 +452,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 	if instance == nil || entityID.IsZero() || nextStage == "" {
 		return nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return fmt.Errorf("decode join state: %w", err)
 	}
@@ -484,13 +484,13 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if joinPlan.ResultType.Empty() {
 			return fmt.Errorf("join %s has no resolved output type in the semantic plan", joinPlan.Spec.EffectiveID())
 		}
-		members, ok := joinMemberSnapshot(instance.Metadata, joinPlan.Spec.Members.From)
+		members, ok := joinMemberSnapshot(instance.Fields, joinPlan.Spec.Members.From)
 		if !ok {
 			return fmt.Errorf("join %s members source %s is not a unique list of non-empty text", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Members.From)
 		}
 		window := ""
 		if joinPlan.Spec.Window != nil {
-			window = strings.TrimSpace(asString(instance.Metadata[joinTopLevelField(joinPlan.Spec.Window.From, "entity")]))
+			window = strings.TrimSpace(asString(instance.Fields[joinTopLevelField(joinPlan.Spec.Window.From, "entity")]))
 			if window == "" {
 				return fmt.Errorf("join %s window source %s resolved empty", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Window.From)
 			}
@@ -563,7 +563,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 	if now.IsZero() {
 		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return fmt.Errorf("decode gate state: %w", err)
 	}

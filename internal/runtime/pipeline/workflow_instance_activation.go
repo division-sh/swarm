@@ -22,7 +22,8 @@ type FlowInstanceActivationRequest struct {
 	Instance                      runtimeflowidentity.Instance
 	InitialState                  string
 	Config                        map[string]any
-	Metadata                      map[string]any
+	Fields                        map[string]any
+	Bookkeeping                   map[string]any
 	TriggerEvent                  events.Event
 	OccurredAt                    time.Time
 	StandingGenerationReplacement bool
@@ -67,25 +68,27 @@ func (a CommittedFlowInstanceActivation) Validate() error {
 // for one planned activation. Runtime derives semantic facts; selected-store
 // adapters decide only how those facts are represented by their backend.
 type FlowInstanceActivationRecord struct {
-	State                  WorkflowEngineStateRecord
-	RunID                  string
-	Route                  runtimeflowidentity.Route
-	EntityID               string
-	WorkflowName           string
-	WorkflowVersion        string
-	Mode                   string
-	CurrentState           string
-	EntityType             string
-	Slug                   string
-	Name                   string
-	Fields                 json.RawMessage
-	Gates                  json.RawMessage
-	Accumulator            json.RawMessage
-	Config                 json.RawMessage
-	InitialMaterialization json.RawMessage
-	Readiness              json.RawMessage
-	EnteredStageAt         time.Time
-	CreatedAt              time.Time
+	State                    WorkflowEngineStateRecord
+	RunID                    string
+	Route                    runtimeflowidentity.Route
+	EntityID                 string
+	WorkflowName             string
+	WorkflowVersion          string
+	Mode                     string
+	CurrentState             string
+	EntityType               string
+	Slug                     string
+	Name                     string
+	Fields                   json.RawMessage
+	Bookkeeping              json.RawMessage
+	Gates                    json.RawMessage
+	Accumulator              json.RawMessage
+	Config                   json.RawMessage
+	InitialProjectionVersion int
+	InitialMaterialization   json.RawMessage
+	Readiness                json.RawMessage
+	EnteredStageAt           time.Time
+	CreatedAt                time.Time
 }
 
 func (r FlowInstanceActivationRecord) Validate() error {
@@ -105,11 +108,14 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.WorkflowVersion) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("flow instance activation record requires exact workflow and initial state")
 	}
+	if r.InitialProjectionVersion != workflowInitialMaterializationProjectionVersion {
+		return fmt.Errorf("flow instance activation record requires initial projection version %d", workflowInitialMaterializationProjectionVersion)
+	}
 	if r.Mode != "template" {
 		return fmt.Errorf("flow instance activation record mode %q is unsupported", r.Mode)
 	}
 	for label, raw := range map[string]json.RawMessage{
-		"fields": r.Fields, "gates": r.Gates, "accumulator": r.Accumulator,
+		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "gates": r.Gates, "accumulator": r.Accumulator,
 		"config": r.Config, "initial materialization": r.InitialMaterialization,
 		"readiness": r.Readiness,
 	} {
@@ -145,6 +151,10 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		return FlowInstanceActivationRecord{}, err
 	}
 	fields, err := canonicaljson.Bytes(projection.Fields)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	bookkeeping, err := canonicaljson.Bytes(projection.Bookkeeping)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
@@ -188,8 +198,9 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		RunID: normalized.Readiness.RunID, Route: normalized.Identity.Route(), EntityID: identity.RowID(),
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: workflowInstanceMode(instance),
 		CurrentState: instance.CurrentState, EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
-		Fields: fields, Gates: gates, Accumulator: accumulator, Config: config,
-		InitialMaterialization: initialJSON, Readiness: readinessJSON,
+		Fields: fields, Bookkeeping: bookkeeping, Gates: gates, Accumulator: accumulator, Config: config,
+		InitialProjectionVersion: workflowInitialMaterializationProjectionVersion,
+		InitialMaterialization:   initialJSON, Readiness: readinessJSON,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 	}
@@ -201,7 +212,8 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 
 func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, error) {
 	p.Instance.Config = cloneMap(p.Instance.Config)
-	p.Instance.Metadata = cloneMap(p.Instance.Metadata)
+	p.Instance.Fields = cloneMap(p.Instance.Fields)
+	p.Instance.Bookkeeping = cloneMap(p.Instance.Bookkeeping)
 	readiness, err := p.Readiness.Normalized()
 	if err != nil {
 		return FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation readiness: %w", err)
@@ -560,7 +572,7 @@ func workflowEntityMetadataPayload(source semanticview.Source, flowID string, me
 	if len(allowed) == 0 {
 		return nil
 	}
-	materialized := workflowMaterializeEntityMetadata(source, flowID, metadata)
+	materialized := workflowMaterializeEntityFields(source, flowID, metadata)
 	out := make(map[string]any, len(allowed))
 	for key := range allowed {
 		if value, ok := materialized[key]; ok {

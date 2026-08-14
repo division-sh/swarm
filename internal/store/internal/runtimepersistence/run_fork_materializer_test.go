@@ -118,27 +118,33 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, sourceRunID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'slug', 'null'::jsonb, '"before-slug"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Before Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'gates.ready', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'accumulator.score', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+			VALUES
+				($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'slug', 'null'::jsonb, '"before-slug"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Before Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'gates.review', 'null'::jsonb, '"authored-review"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'accumulator.total', 'null'::jsonb, '"authored-total"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'bookkeeping.activation', 'null'::jsonb, '"manual"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'bookkeeping', 'activation', 'null'::jsonb, '"standing"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'gate', 'review', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+				($1::uuid, $2::uuid, 'accumulator', 'total', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
 	`, sourceRunID, entityID, firstEventID, at); err != nil {
 		t.Fatalf("seed first mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name,
-			current_state, gates, fields, accumulator, revision,
+				current_state, gates, fields, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'before-slug', 'Before Name',
-			'queued', '{"ready": true}'::jsonb, '{"title": "before-title", "slug": "before-slug", "name": "Before Name"}'::jsonb, '{"score": 7}'::jsonb, 1,
+				'queued', '{"review": true}'::jsonb,
+				'{"title":"before-title","slug":"before-slug","name":"Before Name","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}'::jsonb,
+				'{"activation":"standing"}'::jsonb, '{"total":7}'::jsonb, 1,
 			$3, $3, $3
 		)
 	`, sourceRunID, entityID, at); err != nil {
@@ -149,15 +155,17 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, sourceRunID, "fork.field_only", events.EventProducerPlatform, "test", entityID, "", fieldOnlyAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'title', '"before-title"'::jsonb, '"fork-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'field-only', $4)
+			VALUES
+				($1::uuid, $2::uuid, 'authored_field', 'title', '"before-title"'::jsonb, '"fork-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'field-only', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'current_state', 'null'::jsonb, '"business-state"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'field-only', $4)
 	`, sourceRunID, entityID, secondEventID, fieldOnlyAt); err != nil {
 		t.Fatalf("seed selected mutation: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
-		SET fields = jsonb_set(fields, '{title}', '"fork-title"'::jsonb, true),
+			SET fields = jsonb_set(jsonb_set(fields, '{title}', '"fork-title"'::jsonb, true), '{current_state}', '"business-state"'::jsonb, true),
 		    revision = 2,
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
@@ -169,13 +177,13 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, thirdEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', '"queued"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4),
-			($1::uuid, $2::uuid, 'title', '"fork-title"'::jsonb, '"after-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4),
-			($1::uuid, $2::uuid, 'slug', '"before-slug"'::jsonb, '"after-slug"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4),
-			($1::uuid, $2::uuid, 'name', '"Before Name"'::jsonb, '"After Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', '"queued"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'title', '"fork-title"'::jsonb, '"after-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'slug', '"before-slug"'::jsonb, '"after-slug"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'name', '"Before Name"'::jsonb, '"After Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4)
 	`, sourceRunID, entityID, thirdEventID, afterAt); err != nil {
 		t.Fatalf("seed later mutations: %v", err)
 	}
@@ -272,6 +280,37 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if !forkEnteredStateAt.Equal(at) {
 		t.Fatalf("fork entered_state_at = %s, want state-entry timestamp %s", forkEnteredStateAt, at)
 	}
+	var forkFieldsJSON, forkBookkeepingJSON, forkGatesJSON, forkAccumulatorJSON []byte
+	if err := db.QueryRowContext(ctx, `
+			SELECT fields, bookkeeping, gates, accumulator
+			FROM entity_state
+			WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		`, result.ForkRunID, entityID).Scan(&forkFieldsJSON, &forkBookkeepingJSON, &forkGatesJSON, &forkAccumulatorJSON); err != nil {
+		t.Fatalf("load fork semantic domains: %v", err)
+	}
+	var forkFields, forkBookkeeping, forkGates, forkAccumulator map[string]any
+	for label, item := range map[string]struct {
+		raw    []byte
+		target *map[string]any
+	}{
+		"fields":      {forkFieldsJSON, &forkFields},
+		"bookkeeping": {forkBookkeepingJSON, &forkBookkeeping},
+		"gates":       {forkGatesJSON, &forkGates},
+		"accumulator": {forkAccumulatorJSON, &forkAccumulator},
+	} {
+		if err := json.Unmarshal(item.raw, item.target); err != nil {
+			t.Fatalf("decode fork %s: %v", label, err)
+		}
+	}
+	if forkFields["current_state"] != "business-state" ||
+		runtimeProjectionNestedValue(t, forkFields, "gates", "review") != "authored-review" ||
+		runtimeProjectionNestedValue(t, forkFields, "accumulator", "total") != "authored-total" ||
+		runtimeProjectionNestedValue(t, forkFields, "bookkeeping", "activation") != "manual" {
+		t.Fatalf("fork authored collision fields = %#v", forkFields)
+	}
+	if forkBookkeeping["activation"] != "standing" || forkGates["review"] != true || forkAccumulator["total"] != float64(7) {
+		t.Fatalf("fork typed semantic domains = bookkeeping:%#v gates:%#v accumulator:%#v", forkBookkeeping, forkGates, forkAccumulator)
+	}
 	var forkFlow, forkType, forkSlug, forkName string
 	if err := db.QueryRowContext(ctx, `
 		SELECT flow_instance, entity_type, COALESCE(slug, ''), COALESCE(name, '')
@@ -304,21 +343,34 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 		t.Fatalf("source title after fork divergence = %q, want after-title", sourceTitle)
 	}
 
-	for _, field := range []string{"current_state", "title", "slug", "name", "gates.ready", "accumulator.score"} {
+	for _, mutation := range []struct{ domain, path string }{
+		{"lifecycle_state", ""},
+		{"authored_field", "title"},
+		{"authored_field", "slug"},
+		{"authored_field", "name"},
+		{"authored_field", "current_state"},
+		{"authored_field", "gates"},
+		{"authored_field", "accumulator"},
+		{"authored_field", "bookkeeping"},
+		{"bookkeeping", "activation"},
+		{"gate", "review"},
+		{"accumulator", "total"},
+	} {
 		var count int
 		if err := db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM entity_mutations
 			WHERE run_id = $1::uuid
 			  AND entity_id = $2::uuid
-			  AND field = $3
+			  AND domain = $3
+			  AND path = $4
 			  AND writer_type = 'platform'
 			  AND writer_id = 'run_fork_materializer'
-		`, result.ForkRunID, entityID, field).Scan(&count); err != nil {
-			t.Fatalf("count mutation %s: %v", field, err)
+		`, result.ForkRunID, entityID, mutation.domain, mutation.path).Scan(&count); err != nil {
+			t.Fatalf("count mutation %s:%s: %v", mutation.domain, mutation.path, err)
 		}
 		if count != 1 {
-			t.Fatalf("mutation count for %s = %d, want 1", field, count)
+			t.Fatalf("mutation count for %s:%s = %d, want 1", mutation.domain, mutation.path, count)
 		}
 	}
 
@@ -343,6 +395,15 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 }
 
+func runtimeProjectionNestedValue(t *testing.T, root map[string]any, objectKey, valueKey string) any {
+	t.Helper()
+	object, ok := root[objectKey].(map[string]any)
+	if !ok {
+		t.Fatalf("projection %s = %#v, want object", objectKey, root[objectKey])
+	}
+	return object[valueKey]
+}
+
 func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlowAbsent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
@@ -358,11 +419,11 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_event_flow", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Fork Point Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Fork Point Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed selected mutations: %v", err)
 	}
@@ -385,9 +446,9 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, postEventID, sourceRunID, "fork.post_flow", events.EventProducerPlatform, "test", entityID, "post-flow/ignored", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'current_state', '"pending"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4)
+		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', '"pending"'::jsonb, '"done"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'after', $4)
 	`, sourceRunID, entityID, postEventID, afterAt); err != nil {
 		t.Fatalf("seed later mutation: %v", err)
 	}
@@ -454,9 +515,9 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_metadata", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}
@@ -512,11 +573,11 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.event_flow_only", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
@@ -534,7 +595,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	}
 }
 
-func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadata(t *testing.T) {
+func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -547,11 +608,11 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.conflicting_entity_type", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
@@ -575,11 +636,19 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if plan.ExecutionReady {
-		t.Fatalf("ExecutionReady = true, want false for conflicting entity_type authority")
+	if runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
+		t.Fatalf("plan blockers = %#v, authored entity_type must not challenge typed source metadata", plan.UnsupportedBlockers)
 	}
-	if !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
-		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
+	if len(plan.Entities) != 1 || plan.Entities[0].MaterializationMetadata == nil {
+		t.Fatalf("plan entities = %#v, want one typed source-at-revision metadata owner", plan.Entities)
+	}
+	entity := plan.Entities[0]
+	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "event-flow/at-T" ||
+		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEvent {
+		t.Fatalf("typed source metadata = %#v", entity.MaterializationMetadata)
+	}
+	if entity.Fields["entity_type"] != "field_case" {
+		t.Fatalf("authored entity_type collision = %#v, want preserved authored value", entity.Fields)
 	}
 }
 
@@ -780,9 +849,9 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	sourceEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.pending", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
-		VALUES ($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'seed', $4)
+		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'seed', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}
@@ -2019,11 +2088,11 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'current_state', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'name', 'null'::jsonb, '"Activation Entity"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Activation Entity"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}

@@ -4987,7 +4987,7 @@ engine:
       deduplication between paths — if the same event fires from both, it runs twice (idempotency_key in the events table
       prevents true duplicates).
   state_management:
-    description: The platform tracks three kinds of state per entity instance. All state is persisted. All mutations happen
+    description: The platform tracks five closed mutation domains per entity instance. All state is persisted. All mutations happen
       within the handler atomic boundary.
     entity_state:
       description: A single string value representing where the entity is in the flow lifecycle. Set by advances_to in handler
@@ -4995,6 +4995,14 @@ engine:
         initial value comes from schema.yaml initial_state and terminal values from schema.yaml terminal_states.
       storage: Entity table, state column, indexed.
       mutation: Only via advances_to or on_complete branch. Never by agents directly.
+    authored_field_state:
+      description: Contract-declared business values exposed through entity.* and authored entity tools. Authored names do not classify or alias platform facts.
+      storage: Entity table, fields JSONB column.
+      mutation: Producers explicitly write the authored_field domain and an uninterpreted path.
+    bookkeeping_state:
+      description: Platform-owned runtime facts selected explicitly by their producers. Bookkeeping is operator-visible and is never exposed through entity.*.
+      storage: Entity table, bookkeeping JSONB column, independently required even when empty.
+      mutation: Producers explicitly write the bookkeeping domain and an uninterpreted path; readers never infer ownership from key spelling.
     accumulator_state:
       description: 'Structured data for admitted open/windowed stream arrivals within a handler''s accumulate pattern.'
       storage: Per-node state table (from nodes.yaml state_schema). Keyed by entity_id.
@@ -7332,7 +7340,7 @@ engine:
       only process-local wakeups whose typed activation cause is `initial_stage`, and leaves every durable timer row active
       for exact retry. Event- and transition-caused wakeups on the same instance remain projected. Route retirement without matching
       timer-projection retirement, terminal timer mutation as compensation, and unjoined rearm are prohibited. Exact replay
-      compares the immutable creation projection and immutable readiness plan; mutable current state, fields,
+      compares the immutable creation projection and immutable readiness plan; mutable current state, fields, bookkeeping,
       gates, accumulator, transition history, and readiness completion coordinates never participate in creation identity. A
       concurrent create conflict is rechecked under the same instance-serialized transaction and returns exact replay only
       when both immutable projections match. A missing or conflicting immutable creation projection fails closed. No stale
@@ -13863,11 +13871,12 @@ platform_tables:
         table. Current-state identity is (run_id, entity_id), allowing source and fork runs to preserve the same entity_id
         while diverging independently. slug and name are top-level columns for fast lookup/display without JSONB queries.
         entity_type records the inferred flow-scoped entity contract for the row; callers do not author or choose multiple
-        entity kinds inside one flow in Wave 1. fields JSONB holds all contract-driven entity fields. Generic store reads
-        use entity_state for run-scoped listing, filtering, and lookup.
+        entity kinds inside one flow in Wave 1. fields JSONB holds only contract-driven authored entity fields. bookkeeping
+        JSONB independently holds platform facts chosen by explicit bookkeeping producers; readers never classify either
+        map by key spelling. Generic store reads use entity_state for run-scoped listing, filtering, and lookup.
       ddl: "CREATE TABLE entity_state (\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    entity_id         UUID NOT NULL,\n    flow_instance     TEXT NOT NULL,\n    entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n\
         \    name              TEXT,\n    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n\
-        \    fields            JSONB NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision\
+        \    fields            JSONB NOT NULL DEFAULT '{}',\n    bookkeeping       JSONB NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision\
         \          INTEGER NOT NULL DEFAULT 0,\n    entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    PRIMARY\
         \ KEY (run_id, entity_id),\n    INDEX idx_entity_flow (run_id, flow_instance, current_state),\n\
@@ -13876,8 +13885,8 @@ platform_tables:
     workflow_instance_initial_materializations:
       description: >-
         Immutable run-generation-scoped creation identity for a workflow instance. The initial materialization transaction
-        inserts exactly one canonical projection of the original workflow, state, config, entity fields, gates, accumulator,
-        control facts, and exact occurrence coordinate. Exact replay compares this record together with the separately owned
+        inserts exactly one canonical projection of the original workflow, state, config, entity fields, bookkeeping, gates,
+        accumulator, control facts, and exact occurrence coordinate. Exact replay compares this record together with the separately owned
         immutable flow_instance_runtime_readiness plan. Later workflow progress never updates or reconstructs this record and
         never participates in creation replay identity. A current entity without this record is invalid fresh-schema state and
         fails closed; no migration, fallback, inference, or compatibility reader is supported.
@@ -13886,7 +13895,7 @@ platform_tables:
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             entity_id          UUID NOT NULL,
             instance_id        TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
-            projection_version INTEGER NOT NULL CHECK (projection_version = 1),
+            projection_version INTEGER NOT NULL CHECK (projection_version = 2),
             projection         JSONB NOT NULL,
             occurred_at        TIMESTAMPTZ NOT NULL,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -15016,16 +15025,29 @@ platform_tables:
         may transition persisted rows to deleted; deleted rows cannot construct executable work.'
     entity_mutations:
       description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
-        entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
+        entity_state.bookkeeping, entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
         The mutation log is the audit trail for the flight recorder and the undo log for fork/replay.
-        Not a separate event stream — just a side-table that captures the before/after of every state change.'
-      ddl: "CREATE TABLE entity_mutations (\n    mutation_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
-        \            UUID NOT NULL REFERENCES runs(run_id),\n    entity_id         UUID NOT NULL,\n    field             TEXT\
-        \ NOT NULL,\n    old_value         JSONB,\n    new_value         JSONB,\n    caused_by_event   UUID REFERENCES\
-        \ events(event_id),\n    writer_type       TEXT NOT NULL CHECK (writer_type IN ('system_node', 'agent', 'platform')),\n\
-        \    writer_id         TEXT NOT NULL,\n    handler_step      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL\
-        \ DEFAULT NOW(),\n    INDEX idx_mutations_run (run_id, created_at),\n    INDEX idx_mutations_entity (entity_id,\
-        \ created_at),\n    INDEX idx_mutations_event (caused_by_event) WHERE caused_by_event IS NOT NULL\n);"
+        Not a separate event stream — just a side-table that captures the before/after of every state change. Domain is
+        producer-owned and never inferred from path spelling; path is uninterpreted within its selected domain.'
+      ddl: |
+        CREATE TABLE entity_mutations (
+            mutation_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            run_id          UUID NOT NULL REFERENCES runs(run_id),
+            entity_id       UUID NOT NULL,
+            domain          TEXT NOT NULL CHECK (domain IN ('lifecycle_state', 'authored_field', 'bookkeeping', 'gate', 'accumulator')),
+            path            TEXT NOT NULL,
+            old_value       JSONB,
+            new_value       JSONB,
+            caused_by_event UUID REFERENCES events(event_id),
+            writer_type     TEXT NOT NULL CHECK (writer_type IN ('system_node', 'agent', 'platform')),
+            writer_id       TEXT NOT NULL,
+            handler_step    TEXT,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((domain = 'lifecycle_state' AND path = '') OR (domain <> 'lifecycle_state' AND NULLIF(TRIM(path), '') IS NOT NULL)),
+            INDEX idx_mutations_run (run_id, created_at),
+            INDEX idx_mutations_entity (entity_id, created_at),
+            INDEX idx_mutations_event (caused_by_event) WHERE caused_by_event IS NOT NULL
+        );
       write_sources:
         system_node_handlers: 'data_accumulation writes, compute store_as, sets_gate, advances_to (current_state),
           clear (gate/accumulator resets). writer_type = system_node, writer_id = node ID,
@@ -16182,7 +16204,9 @@ run_model:
     write_contract: 'Every write to entity_state MUST carry an explicit run_id and produce a corresponding
       entity_mutations row with the same run_id in the same transaction. This includes system node handler writes
       (data_accumulation, compute, sets_gate, advances_to, clear) and agent tool writes (save_entity_field).
-      The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
+      Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, `gate`, or
+      `accumulator`) plus an uninterpreted path. lifecycle_state alone requires an empty path; every other domain requires
+      a nonempty path. The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
     drift_detection: 'swarm verify --run <run_id> reconstructs entity state from the mutation log and compares
       it to current entity_state rows for that same run_id. Any mismatch indicates a write that bypassed the mutation log. This is a
       correctness check, not a normal operation — run it when debugging unexpected state.'
@@ -16193,7 +16217,7 @@ run_model:
       events (what happened), entity_mutations (what changed), agent_turns (why it changed), event_deliveries
       (who processed it). All four tables carry run_id for scoped queries.'
     reconstruction_query: 'To reconstruct a run step-by-step:
-      SELECT e.event_type, e.payload, m.field, m.old_value, m.new_value, m.writer_type, m.writer_id
+      SELECT e.event_type, e.payload, m.domain, m.path, m.old_value, m.new_value, m.writer_type, m.writer_id
       FROM events e LEFT JOIN entity_mutations m ON m.caused_by_event = e.event_id
       WHERE e.run_id = :run_id ORDER BY e.created_at, m.created_at.
       Join with agent_turns on trigger_event_id for agent reasoning context.'
@@ -16207,7 +16231,7 @@ run_model:
       complete run history and applying pagination after hydration is forbidden.'
     entity_timeline: 'To see one entity''s full history across runs:
       SELECT * FROM entity_mutations WHERE entity_id = :entity_id ORDER BY created_at.
-      This shows every field change, who made it, and which event caused it.'
+      This shows every domain/path change, who made it, and which event caused it.'
   builder_api:
     runs_list: 'GET /runs — list runs with status filter. Returns run_id, status, event_count, entity_count,
       started_at, ended_at.'
@@ -17818,6 +17842,7 @@ observation_model:
       current_state: The state after advances_to (or unchanged if no advances_to)
       gates: Map of gate names to boolean values, after sets_gate and clear_gates
       fields: JSONB of entity fields, after data_accumulation writes
+      bookkeeping: JSONB of platform bookkeeping facts, independently written by explicit platform producers
       accumulator: JSONB of accumulated items, after accumulate step
       revision: Incremented on every handler commit
   handler_outcome:
@@ -25519,10 +25544,10 @@ cli_specification:
         default_text:
           heading: Entity <entity-id>
           identity_rows: Labeled run, flow, type, state, revision, created, updated, slug, and name rows; omitted slug/name render as `-`; type/state are required validated facts; timestamps are relative.
-          sections: Labeled Fields and Gates rows plus an Accumulated presence count; empty sections render explicitly as `none`; every declared false gate remains visible.
-          field_projection: Platform bookkeeping fields are omitted from the default Fields section pending the API-owned separation tracked by #2242.
-        verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and a separate Bookkeeping section.
-        json: The complete validated entity.get result object, including entity identity, fields, gates, accumulated data, and loops when present.
+          sections: Labeled Fields and Gates rows plus an Accumulated presence count and `Bookkeeping <N> facts (--verbose to expand)` or `Bookkeeping none`; empty sections render explicitly as `none`; every declared false gate remains visible.
+          field_projection: Fields contains authored values only. Bookkeeping is a required independent API projection and is never inferred from field names.
+        verbose: Uses the default projection with relative plus absolute RFC3339 timestamps, full accumulated rows, loop activation rows when present, and an expanded Bookkeeping section.
+        json: The complete validated entity.get result object, including entity identity, fields, bookkeeping, gates, accumulated data, and loops when present.
         quiet: The canonical entity_id only.
       exit_codes:
         success: 0
@@ -25534,7 +25559,7 @@ cli_specification:
       - exact /v1/rpc entity.get call with required entity_id and optional run_id params only
       - missing/blank/invalid entity id, blank or invalid --run-id, invalid args, unsupported flags, and missing explicit token for non-loopback API targets make zero API calls
       - ENTITY_NOT_FOUND maps to resource-not-found exit 5
-      - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/gates/accumulated maps fail closed with tested exit-code behavior
+      - auth/HTTP/RPC failures, malformed EntityFull result, malformed nested EntitySummary, and missing fields/bookkeeping/gates/accumulated maps fail closed with tested exit-code behavior
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, query_entities, search_entities, get_entity, or swarm investigate usage
     entity_aggregate:
       command: swarm entity aggregate [--group-by <field>]
@@ -27404,6 +27429,7 @@ api_specification:
         required:
         - entity
         - fields
+        - bookkeeping
         - gates
         - accumulated
         properties:
@@ -27412,6 +27438,10 @@ api_specification:
           fields:
             type: object
             description: Typed entity fields per the entity contract. Shape depends on entity_type.
+            additionalProperties: true
+          bookkeeping:
+            type: object
+            description: Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.
             additionalProperties: true
           gates:
             type: object
@@ -29677,6 +29707,9 @@ api_specification:
           fields:
             type: object
             additionalProperties: true
+          bookkeeping:
+            type: object
+            additionalProperties: true
           gates:
             type: object
             additionalProperties: true
@@ -31925,7 +31958,7 @@ api_specification:
       errors: []
     entity.get:
       tier: should_have
-      description: Read one entity in full, including fields, gates, and accumulator state.
+      description: Read one entity in full, including independent authored fields, platform bookkeeping, gates, and accumulator state.
       scope:
         required:
         - read:entities

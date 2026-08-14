@@ -14,9 +14,6 @@ expected:
     - item.assigned
     - item.assigned
     - item.assigned
-  entity_fields:
-    fan_out_count: 3
-
 conformance:
   disposition: runtime
   verify: pass

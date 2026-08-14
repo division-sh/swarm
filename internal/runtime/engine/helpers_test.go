@@ -241,19 +241,19 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
-	if got := state.StateCarrier.Metadata["score"]; got != 4 {
+	if got := state.StateCarrier.Fields["score"]; got != 4 {
 		t.Fatalf("score = %#v", got)
 	}
-	if got := state.StateCarrier.Metadata["status"]; got != "ok" {
+	if got := state.StateCarrier.Fields["status"]; got != "ok" {
 		t.Fatalf("status = %#v", got)
 	}
-	if got := state.StateCarrier.Metadata["literal"]; got != "fixed" {
+	if got := state.StateCarrier.Fields["literal"]; got != "fixed" {
 		t.Fatalf("literal = %#v", got)
 	}
-	if got := state.StateCarrier.Metadata["dispatch_count"]; got != 3 {
+	if got := state.StateCarrier.Fields["dispatch_count"]; got != 3 {
 		t.Fatalf("dispatch_count = %#v", got)
 	}
-	if got := state.StateCarrier.Metadata["last_data_accumulation_source"]; got != "task.completed" {
+	if got := state.StateCarrier.Bookkeeping["last_data_accumulation_source"]; got != "task.completed" {
 		t.Fatalf("source event = %#v", got)
 	}
 }
@@ -318,11 +318,11 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
-	dimensions, ok := state.StateCarrier.Metadata["dimensions_requested"].([]any)
+	dimensions, ok := state.StateCarrier.Fields["dimensions_requested"].([]any)
 	if !ok || len(dimensions) != 2 || dimensions[0] != "build_complexity" || dimensions[1] != "automation_completeness" {
-		t.Fatalf("dimensions_requested = %#v", state.StateCarrier.Metadata["dimensions_requested"])
+		t.Fatalf("dimensions_requested = %#v", state.StateCarrier.Fields["dimensions_requested"])
 	}
-	if got := state.StateCarrier.Metadata["scoring_rubric"]; got != "corpus_rubric" {
+	if got := state.StateCarrier.Fields["scoring_rubric"]; got != "corpus_rubric" {
 		t.Fatalf("scoring_rubric = %#v", got)
 	}
 }
@@ -347,7 +347,7 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
-	if got := state.StateCarrier.Metadata["revision_count"]; got != 1.0 && got != 1 {
+	if got := state.StateCarrier.Fields["revision_count"]; got != 1.0 && got != 1 {
 		t.Fatalf("revision_count = %#v, want 1", got)
 	}
 }
@@ -375,9 +375,9 @@ func TestApplyDataAccumulationToState_WritesNestedTargetPath(t *testing.T) {
 		t.Fatalf("applyDataAccumulationToState(...) error = %v", err)
 	}
 
-	analysis, ok := state.StateCarrier.Metadata["analysis"].(map[string]any)
+	analysis, ok := state.StateCarrier.Fields["analysis"].(map[string]any)
 	if !ok {
-		t.Fatalf("analysis = %#v", state.StateCarrier.Metadata["analysis"])
+		t.Fatalf("analysis = %#v", state.StateCarrier.Fields["analysis"])
 	}
 	if got := analysis["summary"]; got != "ready" {
 		t.Fatalf("analysis.summary = %#v, want ready", got)
@@ -408,8 +408,8 @@ func TestApplyDataAccumulationToState_FailsClosedOnCELRuntimeError(t *testing.T)
 	if !strings.Contains(err.Error(), "data_accumulation target entity.revision_count") {
 		t.Fatalf("error = %v, want data_accumulation target context", err)
 	}
-	if _, exists := state.StateCarrier.Metadata["revision_count"]; exists {
-		t.Fatalf("revision_count unexpectedly persisted after CEL runtime error: %#v", state.StateCarrier.Metadata["revision_count"])
+	if _, exists := state.StateCarrier.Fields["revision_count"]; exists {
+		t.Fatalf("revision_count unexpectedly persisted after CEL runtime error: %#v", state.StateCarrier.Fields["revision_count"])
 	}
 }
 

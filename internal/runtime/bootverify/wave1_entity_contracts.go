@@ -124,6 +124,9 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 	}
 	segments := strings.Split(ref, ".")
 	head := strings.TrimSpace(segments[0])
+	if head == "fan_out_count" {
+		return wave1ResolvedType{}, "", fmt.Errorf("entity.fan_out_count is platform bookkeeping; use the handler-local fan_out.count")
+	}
 	view := wave1EntityContractForFlow(source, flowID)
 	if !view.Defined || view.Contract.Fields == nil {
 		if flowID != "" && wave1FlowReadsRootField(source, flowID, head) {

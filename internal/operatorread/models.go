@@ -123,6 +123,7 @@ type OperatorEntitySummary struct {
 type OperatorEntityFull struct {
 	Entity      OperatorEntitySummary          `json:"entity"`
 	Fields      map[string]any                 `json:"fields"`
+	Bookkeeping map[string]any                 `json:"bookkeeping"`
 	Gates       map[string]bool                `json:"gates"`
 	Accumulated map[string]any                 `json:"accumulated"`
 	Loops       []loopruntime.PublicActivation `json:"loops,omitempty"`
@@ -810,7 +811,8 @@ type RunDebugEvent struct {
 type RunDebugMutation struct {
 	MutationID    string          `json:"mutation_id,omitempty"`
 	EntityID      string          `json:"entity_id,omitempty"`
-	Field         string          `json:"field"`
+	Domain        string          `json:"domain"`
+	Path          string          `json:"path"`
 	OldValue      json.RawMessage `json:"old_value,omitempty"`
 	NewValue      json.RawMessage `json:"new_value,omitempty"`
 	WriterType    string          `json:"writer_type,omitempty"`

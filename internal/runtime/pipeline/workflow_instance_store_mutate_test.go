@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -138,16 +139,14 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 				t.Run(tc.name, func(t *testing.T) {
 					entityID := uuid.NewString()
 					if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-						InstanceID:      tc.instancePath,
+						InstanceID:      runtimeflowidentity.LogicalInstanceID(tc.instancePath),
 						StorageRef:      tc.instancePath,
+						EntityID:        entityID,
 						WorkflowName:    tc.instancePath,
 						WorkflowVersion: "v1",
 						CurrentState:    "active",
 						EnteredStageAt:  time.Now().UTC(),
-						Metadata: map[string]any{
-							"entity_id": entityID,
-							"flow_path": tc.instancePath,
-						},
+						Fields:          map[string]any{},
 					})); err != nil {
 						t.Fatalf("create workflow instance: %v", err)
 					}
@@ -227,7 +226,7 @@ func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing
 	if got := instance.CurrentState; got != "done" {
 		t.Fatalf("current_state = %q, want done", got)
 	}
-	gates := workflowStateGatesAsBools(instance.Metadata)
+	gates := instance.Gates
 	if gates["g_first"] || !gates["g_second"] {
 		t.Fatalf("gates = %#v, want only the committed snapshot", gates)
 	}
@@ -289,7 +288,7 @@ func TestUpdateEntityState_RejectsCompetingStaleCallbackSnapshot(t *testing.T) {
 	if got := instance.CurrentState; got != "done" {
 		t.Fatalf("current_state = %q, want done", got)
 	}
-	gates := workflowStateGatesAsBools(instance.Metadata)
+	gates := instance.Gates
 	if gates["g_ready"] {
 		t.Fatalf("gates = %#v, stale callback mutation survived", gates)
 	}
@@ -324,7 +323,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 	if got := instance.CurrentState; got != "processing" {
 		t.Fatalf("current_state = %q, want processing", got)
 	}
-	gates := workflowStateGatesAsBools(instance.Metadata)
+	gates := instance.Gates
 	if !gates["g_single"] {
 		t.Fatalf("gates = %#v, want g_single=true", gates)
 	}
@@ -343,12 +342,13 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 	storageRef := "mutation-flow"
 	now := time.Now().UTC().Round(time.Microsecond)
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
+		InstanceID:      storageRef,
 		StorageRef:      storageRef,
+		EntityID:        entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		Metadata:        map[string]any{"entity_id": entityID},
+		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
@@ -400,12 +400,13 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 func seedWorkflowInstanceForMutationTest(t *testing.T, store *workflowInstanceStore, entityID string) {
 	t.Helper()
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      "mutation-flow",
+		StorageRef:      "mutation-flow",
+		EntityID:        entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		Metadata:        map[string]any{"entity_id": entityID},
+		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
@@ -413,11 +414,10 @@ func seedWorkflowInstanceForMutationTest(t *testing.T, store *workflowInstanceSt
 }
 
 func setWorkflowGate(instance *WorkflowInstance, gate string) {
-	metadata := cloneStringAnyMap(instance.Metadata)
-	gates := workflowStateGatesAsBools(metadata)
-	gates[gate] = true
-	metadata["gates"] = workflowBoolGatesAsMap(gates)
-	instance.Metadata = metadata
+	if instance.Gates == nil {
+		instance.Gates = map[string]bool{}
+	}
+	instance.Gates[gate] = true
 }
 
 func appendWorkflowEvidence(instance *WorkflowInstance, bucketID string, payload map[string]any) {

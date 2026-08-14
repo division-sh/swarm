@@ -102,7 +102,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowInstances(ctx co
 		}
 		matched := true
 		for _, selector := range selectors {
-			value, found := workflowMetadataValue(item.Metadata, selector.Field)
+			value, found := workflowMetadataValue(item.Fields, selector.Field)
 			if !found || !workflowJSONValuesEqual(value, selector.Value) {
 				matched = false
 				break
@@ -118,7 +118,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowInstances(ctx co
 const pipelineTestWorkflowInstanceSelectPostgres = `
 	SELECT es.entity_id::text, fi.flow_template, fi.config->>'workflow_version', fi.status,
 	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
-	       es.gates, es.fields, es.accumulator, fi.config, es.flow_instance,
+	       es.gates, es.fields, es.bookkeeping, es.accumulator, fi.config, es.flow_instance,
 	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
 	FROM entity_state es JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 `
@@ -126,7 +126,7 @@ const pipelineTestWorkflowInstanceSelectPostgres = `
 const pipelineTestWorkflowInstanceSelectSQLite = `
 	SELECT es.entity_id, fi.flow_template, json_extract(fi.config, '$.workflow_version'), fi.status,
 	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
-	       es.gates, es.fields, es.accumulator, fi.config, es.flow_instance,
+	       es.gates, es.fields, es.bookkeeping, es.accumulator, fi.config, es.flow_instance,
 	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
 	FROM entity_state es JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 `
@@ -138,18 +138,18 @@ func scanPipelineTestWorkflowInstances(rows *sql.Rows, dialect workflowStoreDial
 		var workflowVersion, slug, name sql.NullString
 		var terminatedAt sql.NullTime
 		var terminatedAtRaw, enteredAtRaw, createdAtRaw, updatedAtRaw any
-		var gates, fields, accumulator, config any
+		var gates, fields, bookkeeping, accumulator, config any
 		destinations := []any{
 			&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Status,
 			&terminatedAt, &record.CurrentState, &record.Revision, &record.EnteredStageAt,
-			&record.Gates, &record.Fields, &record.Accumulator, &record.Config,
+			&record.Gates, &record.Fields, &record.Bookkeeping, &record.Accumulator, &record.Config,
 			&record.FlowInstance, &record.EntityType, &slug, &name, &record.CreatedAt, &record.UpdatedAt,
 		}
 		if dialect != workflowStoreDialectPostgres {
 			destinations = []any{
 				&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Status,
 				&terminatedAtRaw, &record.CurrentState, &record.Revision, &enteredAtRaw,
-				&gates, &fields, &accumulator, &config,
+				&gates, &fields, &bookkeeping, &accumulator, &config,
 				&record.FlowInstance, &record.EntityType, &slug, &name, &createdAtRaw, &updatedAtRaw,
 			}
 		}
@@ -163,6 +163,7 @@ func scanPipelineTestWorkflowInstances(rows *sql.Rows, dialect workflowStoreDial
 			}
 		} else {
 			record.Gates, record.Fields = pipelineTestJSONBytes(gates), pipelineTestJSONBytes(fields)
+			record.Bookkeeping = pipelineTestJSONBytes(bookkeeping)
 			record.Accumulator, record.Config = pipelineTestJSONBytes(accumulator), pipelineTestJSONBytes(config)
 			for _, value := range []struct {
 				raw    any

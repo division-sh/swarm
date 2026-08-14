@@ -15,6 +15,8 @@ type runForkMaterializedEntitySnapshotMetadataAdmission struct {
 type runForkSourceEntityStateMetadata struct {
 	FlowInstance string
 	EntityType   string
+	Slug         string
+	Name         string
 	Exists       bool
 }
 
@@ -59,9 +61,6 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision entity metadata for entity %s", entityID), false
 	}
 	entityType := strings.TrimSpace(sourceState.EntityType)
-	if reconstructedEntityType := stringFieldValue(entity.Fields, "entity_type"); reconstructedEntityType != "" && reconstructedEntityType != entityType {
-		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot reconcile reconstructed entity_type %q with source-at-revision entity metadata %q for entity %s", reconstructedEntityType, entityType, entityID), false
-	}
 	if flowInstance == "" || entityType == "" {
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
 	}
@@ -69,6 +68,8 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 		FlowInstance: flowInstance,
 		EntityType:   entityType,
+		Slug:         strings.TrimSpace(sourceState.Slug),
+		Name:         strings.TrimSpace(sourceState.Name),
 		Source:       source,
 	}, "", true
 }
@@ -101,6 +102,8 @@ func loadRunForkSourceEntityStateMetadata(snapshot *runForkRevisionSnapshot, ent
 		return runForkSourceEntityStateMetadata{
 			FlowInstance: strings.TrimSpace(fact.FlowInstance),
 			EntityType:   entityType,
+			Slug:         strings.TrimSpace(fact.Slug),
+			Name:         strings.TrimSpace(fact.Name),
 			Exists:       true,
 		}
 	}

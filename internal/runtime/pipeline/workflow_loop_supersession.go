@@ -12,7 +12,9 @@ func supersedePriorLoopGenerationArtifacts(instance *WorkflowInstance, previousB
 	if instance == nil || nextCarrier == nil {
 		return nil
 	}
-	previous, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, previousBuckets)
+	previousInstance := *instance
+	previousInstance.StateBuckets = previousBuckets
+	previous, err := workflowInstanceStateCarrier(previousInstance)
 	if err != nil {
 		return fmt.Errorf("decode prior loop state: %w", err)
 	}

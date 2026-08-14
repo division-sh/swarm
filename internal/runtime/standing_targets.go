@@ -489,7 +489,7 @@ func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID 
 				Instance:       instance,
 				InitialState:   source.FlowInitialStage(declaration.FlowID),
 				Config:         map[string]any{},
-				Metadata: map[string]any{
+				Bookkeeping: map[string]any{
 					"activation":  runtimecontracts.ProjectFlowActivationStanding,
 					"bundle_hash": fact.BundleHash(),
 					"package_key": declaration.PackageKey,

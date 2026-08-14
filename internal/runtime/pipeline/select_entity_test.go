@@ -47,7 +47,7 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 	if !ok {
 		t.Fatal("expected budget entity to exist")
 	}
-	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+	if got := instance.Fields["spent_usd"]; got != float64(42) && got != 42 {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
 	if got := FlowInstanceEntityID(instance.StorageRef); got != budgetEntityID {
@@ -88,7 +88,7 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	if !ok {
 		t.Fatal("expected budget entity to exist")
 	}
-	if got := instance.Metadata["spent_usd"]; got != float64(99) && got != 99 {
+	if got := instance.Fields["spent_usd"]; got != float64(99) && got != 99 {
 		t.Fatalf("spent_usd after replay = %#v, want 99", got)
 	}
 }
@@ -153,10 +153,10 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 	if !ok {
 		t.Fatal("expected budget entity to exist")
 	}
-	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+	if got := instance.Fields["spent_usd"]; got != float64(42) && got != 42 {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "pending" {
+	if got := strings.TrimSpace(asString(instance.Fields["status"])); got != "pending" {
 		t.Fatalf("typed status metadata = %q, want pending", got)
 	}
 	assertEntityStateField(t, db, budgetEntityID, "status", "pending")
@@ -184,13 +184,13 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 
 	assertEntityStateRowCount(t, db, 1)
 	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
-	if got := instance.Metadata["vertical_id"]; got != "vertical-1" {
+	if got := instance.Fields["vertical_id"]; got != "vertical-1" {
 		t.Fatalf("vertical_id = %#v, want vertical-1", got)
 	}
-	if got := instance.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+	if got := instance.Fields["spent_usd"]; got != float64(42) && got != 42 {
 		t.Fatalf("spent_usd = %#v, want 42", got)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["entity_type"])); got != "opco_budget" {
+	if got := strings.TrimSpace(instance.EntityType); got != "opco_budget" {
 		t.Fatalf("entity_type metadata = %q, want opco_budget", got)
 	}
 	assertEntityStateEntityType(t, db, FlowInstanceEntityID(instance.StorageRef), "opco_budget")
@@ -219,7 +219,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey
 	}
 
 	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "vertical-1")
-	if got := instance.Metadata["spent_usd"]; got != float64(99) && got != 99 {
+	if got := instance.Fields["spent_usd"]; got != float64(99) && got != 99 {
 		t.Fatalf("spent_usd after replay = %#v, want 99", got)
 	}
 }
@@ -253,18 +253,14 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministi
 	}
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      identity.EntityID,
+		InstanceID:      identity.InstanceID,
 		StorageRef:      identity.InstancePath,
+		EntityID:        identity.EntityID,
+		EntityType:      "opco_budget",
 		WorkflowName:    "treasury",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "active",
-		Metadata: map[string]any{
-			"flow_path":   identity.InstancePath,
-			"instance_id": identity.InstanceID,
-			"vertical_id": "other-key",
-			"storage_ref": identity.InstancePath,
-			"entity_type": "opco_budget",
-		},
+		Fields:          map[string]any{"vertical_id": "other-key"},
 	})); err != nil {
 		t.Fatalf("seed conflicting entity: %v", err)
 	}
@@ -349,10 +345,10 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 
 	instance := loadSelectOrCreateBudgetByKey(t, pc.workflowStore, ctx, pc.SemanticSource(), "case-1")
 	entityID := FlowInstanceEntityID(instance.StorageRef)
-	if got := strings.TrimSpace(asString(instance.Metadata["repo_url"])); got != "swarm-artifact://repos/"+entityID {
+	if got := strings.TrimSpace(asString(instance.Fields["repo_url"])); got != "swarm-artifact://repos/"+entityID {
 		t.Fatalf("repo_url = %q, want repo url derived from entity id %q", got, entityID)
 	}
-	if ref := strings.TrimSpace(asString(instance.Metadata["current_ref"])); len(ref) != 40 {
+	if ref := strings.TrimSpace(asString(instance.Fields["current_ref"])); len(ref) != 40 {
 		t.Fatalf("current_ref length = %d ref=%q", len(ref), ref)
 	}
 }
@@ -397,7 +393,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected active budget entity to exist")
 	}
-	if got := active.Metadata["spent_usd"]; got != float64(42) && got != 42 {
+	if got := active.Fields["spent_usd"]; got != float64(42) && got != 42 {
 		t.Fatalf("active spent_usd = %#v, want 42", got)
 	}
 	terminal, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-archived").Route())
@@ -407,7 +403,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected terminal budget entity to exist")
 	}
-	if got := terminal.Metadata["spent_usd"]; got != float64(10) && got != 10 {
+	if got := terminal.Fields["spent_usd"]; got != float64(10) && got != 10 {
 		t.Fatalf("terminal spent_usd = %#v, want unchanged 10", got)
 	}
 	reloadedTerminated, ok, err := pc.workflowStore.Load(ctx, DeriveFlowInstanceIdentity(source, "treasury", "budget-terminated").Route())
@@ -417,7 +413,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 	if !ok {
 		t.Fatal("expected terminated budget entity to exist")
 	}
-	if got := reloadedTerminated.Metadata["spent_usd"]; got != float64(20) && got != 20 {
+	if got := reloadedTerminated.Fields["spent_usd"]; got != float64(20) && got != 20 {
 		t.Fatalf("terminated spent_usd = %#v, want unchanged 20", got)
 	}
 	assertEntityStateRowCount(t, db, 3)
@@ -761,18 +757,16 @@ func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *workflowIns
 		metadata = map[string]any{}
 	}
 	config = cloneStringAnyMap(config)
-	metadata["flow_path"] = identity.InstancePath
-	metadata["instance_id"] = identity.InstanceID
-	metadata["storage_ref"] = identity.InstancePath
-	metadata["entity_type"] = "opco_budget"
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      identity.EntityID,
+		InstanceID:      identity.InstanceID,
 		StorageRef:      identity.InstancePath,
+		EntityID:        identity.EntityID,
+		EntityType:      "opco_budget",
 		WorkflowName:    "treasury",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    strings.TrimSpace(currentState),
 		Config:          config,
-		Metadata:        metadata,
+		Fields:          metadata,
 	})
 	if err := store.upsert(ctx, instance); err != nil {
 		t.Fatalf("seed budget entity: %v", err)

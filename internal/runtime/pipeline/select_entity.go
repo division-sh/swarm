@@ -199,7 +199,8 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	state := WorkflowState{
 		EntityID: entityID,
 		Stage:    NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID)),
-		Metadata: workflowCreateEntityMetadata(source, flowID, instance),
+		Metadata: workflowCreateEntityFields(source, flowID),
+		Control:  workflowStateControlFromIdentity(instance),
 	}
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
@@ -222,7 +223,7 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 
 func selectEntityCandidateMatches(candidate WorkflowInstance, expected map[string]any) bool {
 	for field, value := range expected {
-		actual, ok := entityruntime.PathValue(candidate.Metadata, field)
+		actual, ok := entityruntime.PathValue(candidate.Fields, field)
 		if !ok {
 			return false
 		}

@@ -39,7 +39,8 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route r
 		return WorkflowState{}, fmt.Errorf("validate loaded workflow state identity: %w", err)
 	}
 	state.Stage = NormalizeWorkflowStateID(strings.TrimSpace(instance.CurrentState))
-	state.Metadata = cloneStringAnyMap(instance.Metadata)
+	state.Metadata = cloneStringAnyMap(instance.Fields)
+	state.Control = workflowInstanceStateControl(instance)
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}
@@ -64,7 +65,7 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	if strings.TrimSpace(event.ID()) == "" || event.CreatedAt().IsZero() {
 		return nil, fmt.Errorf("record_evidence requires exact accepted event identity")
 	}
-	metadata := workflowMaterializeEntityMetadata(pc.SemanticSource(), flowID, execCtx.Request.State.StateCarrier.Metadata)
+	metadata := workflowMaterializeEntityFields(pc.SemanticSource(), flowID, execCtx.Request.State.StateCarrier.Fields)
 	buckets := make(map[string]map[string]any, len(execCtx.Request.State.StateCarrier.StateBuckets)+1)
 	for key, bucket := range execCtx.Request.State.StateCarrier.StateBuckets {
 		buckets[key] = cloneStringAnyMap(bucket)

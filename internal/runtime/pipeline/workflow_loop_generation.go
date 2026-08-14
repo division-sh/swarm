@@ -14,7 +14,7 @@ func workflowLoopGenerationForStage(source semanticview.Source, instance *Workfl
 	if source == nil || instance == nil {
 		return attemptgeneration.Generation{}, false, nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return attemptgeneration.Generation{}, false, fmt.Errorf("decode loop state: %w", err)
 	}
@@ -40,7 +40,7 @@ func workflowLoopGenerationForStage(source semanticview.Source, instance *Workfl
 }
 
 func workflowLoopGenerationFromBuckets(source semanticview.Source, raw map[string]any) (attemptgeneration.Generation, bool, error) {
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, raw)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, raw)
 	if err != nil {
 		return attemptgeneration.Generation{}, false, fmt.Errorf("decode loop state: %w", err)
 	}
@@ -66,7 +66,7 @@ func workflowLoopGenerationCurrent(instance *WorkflowInstance, generation attemp
 	if !generation.Valid() {
 		return true, nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return false, err
 	}
@@ -78,8 +78,8 @@ func workflowLoopGenerationCurrent(instance *WorkflowInstance, generation attemp
 		(strings.TrimSpace(expectedStage) == "" || activation.CurrentStage == strings.TrimSpace(expectedStage)), nil
 }
 
-func WorkflowLoopGenerationCurrent(metadata, stateBuckets map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
-	return workflowLoopGenerationCurrent(&WorkflowInstance{Metadata: metadata, StateBuckets: stateBuckets}, generation, expectedStage)
+func WorkflowLoopGenerationCurrent(fields, stateBuckets map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
+	return workflowLoopGenerationCurrent(&WorkflowInstance{Fields: fields, StateBuckets: stateBuckets}, generation, expectedStage)
 }
 
 func loopPlanOwnsStage(source semanticview.Source, flowID, loopID, stage string) bool {

@@ -511,7 +511,7 @@ const canonicalEntityMutationsProjectionSQL = `
 	SELECT m.mutation_id::text AS fact_key,
 	       jsonb_build_object(
 	           'mutation_id', m.mutation_id, 'entity_id', m.entity_id,
-	           'field', m.field, 'new_value', m.new_value,
+	           'domain', m.domain, 'path', m.path, 'new_value', m.new_value,
 	           'caused_by_event', m.caused_by_event, 'created_at', m.created_at) AS fact, m.xmin::text::bigint AS source_transaction_id
 	FROM entity_mutations m
 	WHERE m.run_id = $1::uuid
@@ -521,7 +521,8 @@ const canonicalEntityMetadataProjectionSQL = `
 	SELECT e.entity_id::text AS fact_key,
 	       jsonb_build_object(
 	           'entity_id', e.entity_id, 'flow_instance', e.flow_instance,
-	           'entity_type', e.entity_type, 'created_at', e.created_at) AS fact, e.xmin::text::bigint AS source_transaction_id
+	           'entity_type', e.entity_type, 'slug', e.slug, 'name', e.name,
+	           'created_at', e.created_at) AS fact, e.xmin::text::bigint AS source_transaction_id
 	FROM entity_state e
 	WHERE e.run_id = $1::uuid
 `

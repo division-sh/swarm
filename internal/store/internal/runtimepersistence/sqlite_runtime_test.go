@@ -1264,18 +1264,16 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	if _, err := owner.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      "acme",
 		StorageRef:      "root/acme",
+		EntityID:        entityID,
+		Slug:            "acme",
+		Name:            "Acme",
+		EntityType:      "company",
 		WorkflowName:    "root",
 		WorkflowVersion: "v1",
 		CurrentState:    "qualified",
 		EnteredStageAt:  createdAt,
-		Metadata: map[string]any{
-			"flow_path":   "root/acme",
-			"slug":        "acme",
-			"name":        "Acme",
-			"entity_type": "company",
-			"score":       float64(9),
-		},
-		StateBuckets: map[string]any{"evidence": map[string]any{"seed": true}},
+		Fields:          map[string]any{"score": float64(9)},
+		StateBuckets:    map[string]any{"evidence": map[string]any{"seed": true}},
 	}, createdAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)
 	}
@@ -1283,7 +1281,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
-	if !ok || loaded.CurrentState != "qualified" || loaded.Metadata["slug"] != "acme" {
+	if !ok || loaded.CurrentState != "qualified" || loaded.Slug != "acme" {
 		t.Fatalf("loaded workflow instance = %#v, want qualified acme", loaded)
 	}
 	var mutationCount int

@@ -201,25 +201,34 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type,
-			current_state, gates, fields, accumulator, revision,
+				current_state, gates, fields, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow/forkchat', 'default',
-			'after', '{}'::jsonb, '{"name":"After"}'::jsonb, '{}'::jsonb, 2,
+				'after', '{"review":true}'::jsonb,
+				'{"name":"After","current_state":"business-draft","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}'::jsonb,
+				'{"activation":"standing"}'::jsonb, '{"total":7}'::jsonb, 2,
 			$3, $3, $3
 		)
 	`, source.runID, entityID, source.turn1At.Add(10*time.Second)); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (run_id, entity_id, field, old_value, new_value, writer_type, writer_id, created_at)
-		VALUES
-			($1::uuid, $2::uuid, 'current_state', NULL, '"draft"'::jsonb, 'platform', 'test', $3),
-			($1::uuid, $2::uuid, 'name', NULL, '"Before"'::jsonb, 'platform', 'test', $3),
-			($1::uuid, $2::uuid, 'current_state', '"draft"'::jsonb, '"after"'::jsonb, 'platform', 'test', $4),
-			($1::uuid, $2::uuid, 'name', '"Before"'::jsonb, '"After"'::jsonb, 'platform', 'test', $4)
-	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(10*time.Second)); err != nil {
+		INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at)
+			VALUES
+				($1::uuid, $2::uuid, 'lifecycle_state', '', NULL, '"draft"'::jsonb, 'platform', 'test', $3),
+				($1::uuid, $2::uuid, 'authored_field', 'name', NULL, '"Before"'::jsonb, 'platform', 'test', $3),
+				($1::uuid, $2::uuid, 'authored_field', 'current_state', NULL, '"business-draft"'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'authored_field', 'gates.review', NULL, '"authored-review"'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'authored_field', 'accumulator.total', NULL, '"authored-total"'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'authored_field', 'bookkeeping.activation', NULL, '"manual"'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'bookkeeping', 'activation', NULL, '"standing"'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'gate', 'review', NULL, 'true'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'accumulator', 'total', NULL, '7'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'lifecycle_state', '', '"draft"'::jsonb, '"after"'::jsonb, 'platform', 'test', $4),
+				($1::uuid, $2::uuid, 'authored_field', 'name', '"Before"'::jsonb, '"After"'::jsonb, 'platform', 'test', $4)
+	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(10*time.Second), source.turn1At.Add(-20*time.Second)); err != nil {
 		t.Fatalf("seed source entity mutations: %v", err)
 	}
 	var mutationsBefore int
@@ -312,6 +321,18 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	entity := result.Snapshot.EntitySnapshot[0]
 	if entity.EntityID != entityID || entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
+	}
+	if entity.EnteredStateAt == nil || !entity.EnteredStateAt.Equal(source.turn1At.Add(-30*time.Second)) {
+		t.Fatalf("entity entered_state_at = %#v, want lifecycle timestamp", entity.EnteredStateAt)
+	}
+	if entity.Fields["current_state"] != "business-draft" ||
+		runtimeProjectionNestedValue(t, entity.Fields, "gates", "review") != "authored-review" ||
+		runtimeProjectionNestedValue(t, entity.Fields, "accumulator", "total") != "authored-total" ||
+		runtimeProjectionNestedValue(t, entity.Fields, "bookkeeping", "activation") != "manual" {
+		t.Fatalf("conversation fork authored collision fields = %#v", entity.Fields)
+	}
+	if entity.Bookkeeping["activation"] != "standing" || entity.Gates["review"] != true || entity.Accumulator["total"] != float64(7) {
+		t.Fatalf("conversation fork typed semantic domains = bookkeeping:%#v gates:%#v accumulator:%#v", entity.Bookkeeping, entity.Gates, entity.Accumulator)
 	}
 	readCall := requireConversationForkToolCall(t, result.Turn.ToolCalls, "fork_snapshot_read_entities")
 	readArgs := conversationForkToolCallMap(t, readCall.Arguments)

@@ -29,7 +29,7 @@ func (pc *PipelineCoordinator) prepareWorkflowTermination(
 	if terminatedAt.IsZero() {
 		return prepared, fmt.Errorf("workflow termination requires exact occurrence time")
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(*instance)
 	if err != nil {
 		return prepared, err
 	}

@@ -351,11 +351,7 @@ func verifyPreparedWorkflowEmitPersistence(instance WorkflowInstance, prerequisi
 }
 
 func workflowInstancePersistedProjectionMetadata(instance WorkflowInstance) map[string]any {
-	projection, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef)
-	if err != nil {
-		return cloneStringAnyMap(instance.Metadata)
-	}
-	return projection.Metadata()
+	return cloneStringAnyMap(instance.Fields)
 }
 
 type pipelineEngineLocker struct {
@@ -377,7 +373,9 @@ type pipelineEngineStateRepo struct {
 
 func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowInstance {
 	instance.Config = cloneStringAnyMap(instance.Config)
-	instance.Metadata = cloneStringAnyMap(instance.Metadata)
+	instance.Fields = cloneStringAnyMap(instance.Fields)
+	instance.Bookkeeping = cloneStringAnyMap(instance.Bookkeeping)
+	instance.Gates = cloneWorkflowGates(instance.Gates)
 	instance.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
 	instance.InitialFieldValues = cloneStringAnyMap(instance.InitialFieldValues)
 	instance.TransitionHistory = append([]WorkflowTransitionRecord(nil), instance.TransitionHistory...)
@@ -439,18 +437,6 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		if mutation.TriggeredAt.IsZero() {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
 		}
-		initialMetadata := cloneStringAnyMap(mutation.StateCarrier.PersistedMetadata())
-		if initialMetadata == nil {
-			initialMetadata = map[string]any{}
-		}
-		for key, exact := range map[string]string{
-			"flow_path": address.Route.InstancePath, "instance_id": address.Route.InstanceID, "entity_id": entityID.String(),
-		} {
-			if existing := strings.TrimSpace(asString(initialMetadata[key])); existing != "" && existing != exact {
-				return preparedWorkflowEngineState{}, fmt.Errorf("engine state %s %q disagrees with exact value %q", key, existing, exact)
-			}
-			initialMetadata[key] = exact
-		}
 		source := r.coordinator.SemanticSource()
 		workflowName := flowID
 		workflowVersion := ""
@@ -460,9 +446,14 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		}
 		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
 		current = WorkflowInstance{
-			InstanceID: address.Route.InstanceID, StorageRef: address.Route.InstancePath,
+			InstanceID: address.Route.InstanceID, StorageRef: address.Route.InstancePath, EntityID: entityID.String(),
 			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Status: "active", CurrentState: initialState,
-			Metadata:     workflowMaterializeEntityMetadata(source, flowID, initialMetadata),
+			EntityType:   firstNonEmptyString(mutation.StateCarrier.Control.EntityType, workflowEntityType(source, flowID)),
+			InstanceKind: mutation.StateCarrier.Control.InstanceKind, TemplateVersion: mutation.StateCarrier.Control.TemplateVersion,
+			ParentFlowID: mutation.StateCarrier.Control.ParentFlowID, ParentFlowInstance: mutation.StateCarrier.Control.ParentFlowInstance,
+			ParentEntityID: mutation.StateCarrier.Control.ParentEntityID,
+			Fields:         workflowMaterializeEntityFields(source, flowID, mutation.StateCarrier.PersistedFields()),
+			Bookkeeping:    mutation.StateCarrier.PersistedBookkeeping(), Gates: cloneWorkflowGates(mutation.StateCarrier.Gates),
 			StateBuckets: mutation.StateCarrier.PersistedStateBuckets(), InitialFieldValues: cloneStringAnyMap(mutation.InitialFieldValues),
 			EnteredStageAt: mutation.TriggeredAt.UTC(), CreatedAt: mutation.TriggeredAt.UTC(), UpdatedAt: mutation.TriggeredAt.UTC(),
 		}
@@ -531,7 +522,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 			if _, err := requireWorkflowInstanceIdentity(address.Route, entityID, instance); err != nil {
 				return runtimeengine.StateSnapshot{}, false, fmt.Errorf("validate engine state identity: %w", err)
 			}
-			carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), strings.TrimSpace(instance.WorkflowName), instance.Metadata), instance.StateBuckets)
+			carrier, err := workflowInstanceStateCarrier(instance)
 			if err != nil {
 				return runtimeengine.StateSnapshot{}, false, err
 			}
@@ -546,7 +537,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 			out.StateCarrier.Gates = workflowStateGatesForScope(
 				r.coordinator.SemanticSource(),
 				flowID,
-				out.StateCarrier.PersistedMetadata(),
+				out.StateCarrier.Gates,
 			)
 			return out, true, nil
 		}
@@ -559,10 +550,11 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 	if strings.TrimSpace(string(state.Stage)) == "" && len(state.Metadata) == 0 {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityMetadata(r.coordinator.SemanticSource(), flowID, state.Metadata), nil)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(workflowMaterializeEntityFields(r.coordinator.SemanticSource(), flowID, state.Metadata), nil, nil, nil)
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
+	carrier.Control = state.Control
 	return runtimeengine.StateSnapshot{
 		EntityID:     entityID,
 		CurrentState: strings.TrimSpace(string(state.Stage)),
@@ -604,7 +596,7 @@ func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, addr
 			missingExpected = append(missingExpected, field)
 			continue
 		}
-		actual, ok := workflowMetadataValue(persisted.StateCarrier.Metadata, field)
+		actual, ok := workflowMetadataValue(persisted.StateCarrier.Fields, field)
 		if !ok {
 			missingPersisted = append(missingPersisted, field)
 			continue
@@ -1105,10 +1097,12 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		return nil
 	}
 	previousBuckets := cloneStringAnyMap(instance.StateBuckets)
-	if instance.Metadata == nil {
-		instance.Metadata = map[string]any{}
+	if instance.Fields == nil {
+		instance.Fields = map[string]any{}
 	}
-	controlMetadata := workflowRuntimeControlMetadata(instance.Metadata)
+	if instance.Bookkeeping == nil {
+		instance.Bookkeeping = map[string]any{}
+	}
 	if strings.TrimSpace(instance.WorkflowName) == "" {
 		defaultWorkflowName := strings.TrimSpace(flowID)
 		if defaultWorkflowName == "" && source != nil {
@@ -1125,11 +1119,10 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance.EnteredStageAt.IsZero() {
 		return fmt.Errorf("workflow mutation requires materialized entry time")
 	}
-	existingGates := workflowStateGatesAsBools(instance.Metadata)
+	existingGates := cloneWorkflowGates(instance.Gates)
 	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
-		if mutation.StateCarrier.Metadata == nil {
-			mutation.StateCarrier.Metadata = cloneStringAnyMap(instance.Metadata)
-			delete(mutation.StateCarrier.Metadata, "gates")
+		if mutation.StateCarrier.Fields == nil {
+			mutation.StateCarrier.Fields = cloneStringAnyMap(instance.Fields)
 		}
 		gates := workflowCloneBoolMap(existingGates)
 		for key, value := range mutation.StateCarrier.Gates {
@@ -1149,12 +1142,13 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		}
 		mutation.StateCarrier.Gates = gates
 	}
-	if mutation.StateCarrier.Metadata != nil && len(mutation.StateCarrier.Gates) == 0 && len(existingGates) > 0 {
+	if mutation.StateCarrier.Fields != nil && len(mutation.StateCarrier.Gates) == 0 && len(existingGates) > 0 {
 		mutation.StateCarrier.Gates = workflowCloneBoolMap(existingGates)
 	}
-	if mutation.StateCarrier.Metadata != nil || len(mutation.StateCarrier.Gates) > 0 {
-		instance.Metadata = mutation.StateCarrier.PersistedMetadata()
-		restoreWorkflowRuntimeControlMetadata(instance.Metadata, controlMetadata)
+	if mutation.StateCarrier.Fields != nil || len(mutation.StateCarrier.Gates) > 0 {
+		instance.Fields = mutation.StateCarrier.PersistedFields()
+		instance.Bookkeeping = mutation.StateCarrier.PersistedBookkeeping()
+		instance.Gates = cloneWorkflowGates(mutation.StateCarrier.Gates)
 	}
 	if mutation.StateCarrier.StateBuckets != nil {
 		if err := supersedePriorLoopGenerationArtifacts(instance, previousBuckets, &mutation.StateCarrier); err != nil {
@@ -1166,7 +1160,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		return nil
 	}
 	entityProjection := workflowMutableStateBucket(instance, workflowStateBucketEntityProjection)
-	if instance.Metadata == nil {
+	if instance.Fields == nil {
 		return nil
 	}
 	for targetField := range allowedFields {
@@ -1174,7 +1168,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		if targetField == "" {
 			continue
 		}
-		value, ok := instance.Metadata[targetField]
+		value, ok := instance.Fields[targetField]
 		if !ok {
 			continue
 		}
@@ -1184,57 +1178,6 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		workflowSetStateBucket(instance, workflowStateBucketEntityProjection, entityProjection)
 	}
 	return nil
-}
-
-var workflowRuntimeControlMetadataKeys = []string{
-	"storage_ref",
-	"instance_id",
-	"flow_path",
-	"entity_id",
-	"workflow_version",
-	"template_version",
-	"instance_kind",
-	"parent_flow_id",
-	"parent_flow_instance",
-	"parent_entity_id",
-}
-
-var workflowRuntimeParentRouteMetadataKeys = []string{
-	"parent_flow_id",
-	"parent_flow_instance",
-	"parent_entity_id",
-}
-
-func workflowRuntimeControlMetadata(metadata map[string]any) map[string]any {
-	if len(metadata) == 0 {
-		return nil
-	}
-	control := make(map[string]any, len(workflowRuntimeControlMetadataKeys))
-	for _, key := range workflowRuntimeControlMetadataKeys {
-		value, ok := metadata[key]
-		if ok {
-			control[key] = value
-		}
-	}
-	return control
-}
-
-func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[string]any) {
-	if metadata == nil {
-		return
-	}
-	for _, key := range workflowRuntimeControlMetadataKeys {
-		value, ok := control[key]
-		if ok {
-			metadata[key] = value
-		}
-	}
-	for _, key := range workflowRuntimeParentRouteMetadataKeys {
-		if _, ok := control[key]; ok {
-			continue
-		}
-		delete(metadata, key)
-	}
 }
 
 func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID, nextState string) error {
@@ -1310,27 +1253,13 @@ func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowStat
 	state := &WorkflowState{
 		EntityID: snapshot.EntityID.String(),
 		Stage:    NormalizeWorkflowStateID(snapshot.CurrentState),
-		Metadata: snapshot.StateCarrier.PersistedMetadata(),
+		Metadata: snapshot.StateCarrier.PersistedFields(),
+		Control:  snapshot.StateCarrier.Control,
 	}
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}
 	return state
-}
-
-func workflowStateGatesAsBools(metadata map[string]any) map[string]bool {
-	raw, _ := metadata["gates"].(map[string]any)
-	out := make(map[string]bool, len(raw))
-	for key, value := range raw {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if b, ok := value.(bool); ok {
-			out[key] = b
-		}
-	}
-	return out
 }
 
 func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowInstance, flowID string) bool {
@@ -1355,8 +1284,8 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	return ownerScope == targetScope
 }
 
-func workflowStateGatesForScope(source semanticview.Source, flowID string, metadata map[string]any) map[string]bool {
-	gates := workflowStateGatesAsBools(metadata)
+func workflowStateGatesForScope(source semanticview.Source, flowID string, persisted map[string]bool) map[string]bool {
+	gates := cloneWorkflowGates(persisted)
 	scopeKey := workflowScopeKey(source, flowID)
 	if scopeKey == "" {
 		return gates
@@ -1433,7 +1362,8 @@ func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerCon
 		State: WorkflowState{
 			EntityID: req.EntityID.String(),
 			Stage:    NormalizeWorkflowStateID(req.State.CurrentState),
-			Metadata: req.State.StateCarrier.PersistedMetadata(),
+			Metadata: req.State.StateCarrier.PersistedFields(),
+			Control:  req.State.StateCarrier.Control,
 		},
 	}
 }

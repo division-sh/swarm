@@ -129,7 +129,7 @@ func loopTestRequest(state StateSnapshot, handler runtimecontracts.SystemNodeEve
 
 func loopTestNextState(result ExecutionResult) StateSnapshot {
 	return StateSnapshot{CurrentState: result.NextState, StateCarrier: NewStateCarrier(
-		result.StateMutation.Metadata, result.StateMutation.Gates, result.StateMutation.StateBuckets,
+		result.StateMutation.Fields, result.StateMutation.Gates, result.StateMutation.StateBuckets,
 	)}
 }
 

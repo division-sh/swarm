@@ -14,9 +14,6 @@ expected:
     - task.dispatched
     - task.dispatched
     - task.dispatched
-  entity_fields:
-    fan_out_count: 3
-
 conformance:
   disposition: runtime
   verify: pass

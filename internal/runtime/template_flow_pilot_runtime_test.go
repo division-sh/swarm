@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +46,18 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager not initialized")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return errors.New("agent manager not initialized")
+			}
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -136,8 +149,8 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if loaded.StorageRef != flowInstance || loaded.WorkflowName != "account" || loaded.CurrentState != "pending" {
 		t.Fatalf("loaded account instance = storage:%q workflow:%q state:%q, want %s/account/pending", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState, flowInstance)
 	}
-	if loaded.Metadata["account_id"] != "acct-1" {
-		t.Fatalf("loaded account metadata = %#v, want account_id from route activation", loaded.Metadata)
+	if loaded.Fields["account_id"] != "acct-1" {
+		t.Fatalf("loaded account fields = %#v, want account_id from route activation", loaded.Fields)
 	}
 }
 

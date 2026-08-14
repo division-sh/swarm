@@ -1477,14 +1477,14 @@ func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, 
 	var err error
 	if s.isSQLite() {
 		result, err = tx.ExecContext(ctx, `
-			INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at)
-			SELECT ?, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, ?
+			INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			SELECT ?, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, ?
 			FROM entity_state WHERE run_id = ? AND entity_id = ?
 		`, newRunID, time.Now().UTC(), oldRunID, entityID)
 	} else {
 		result, err = tx.ExecContext(ctx, `
-			INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at)
-			SELECT $1::uuid, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, now()
+			INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
+			SELECT $1::uuid, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, now()
 			FROM entity_state WHERE run_id = $2::uuid AND entity_id = $3::uuid
 		`, newRunID, oldRunID, entityID)
 	}

@@ -248,8 +248,8 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	seedPostgresSemanticEventRecordFixtureTx(t, ctx, tx, eventID, runID, "revision.rollback", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, new_value, caused_by_event, writer_type, writer_id
-		) VALUES ($1::uuid, $2::uuid, 'current_state', '"ready"'::jsonb, $3::uuid, 'platform', 'revision-test')
+			run_id, entity_id, domain, path, new_value, caused_by_event, writer_type, writer_id
+		) VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', '"ready"'::jsonb, $3::uuid, 'platform', 'revision-test')
 	`, runID, uuid.NewString(), eventID); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}

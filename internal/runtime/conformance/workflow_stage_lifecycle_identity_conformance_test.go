@@ -409,8 +409,8 @@ func assertStageLifecycleInstanceIdentity(t *testing.T, ctx context.Context, pip
 		instance, ok, err := pipeline.Load(ctx, route)
 		if err == nil && ok {
 			last = instance
-			if instance.StorageRef != route.InstancePath || instance.InstanceID != route.InstanceID || instance.Metadata["entity_id"] != entityID {
-				t.Fatalf("persisted lifecycle identity = route:%q instance:%q entity:%v, want %q/%q/%q", instance.StorageRef, instance.InstanceID, instance.Metadata["entity_id"], route.InstancePath, route.InstanceID, entityID)
+			if instance.StorageRef != route.InstancePath || instance.InstanceID != route.InstanceID || instance.EntityID != entityID {
+				t.Fatalf("persisted lifecycle identity = route:%q instance:%q entity:%v, want %q/%q/%q", instance.StorageRef, instance.InstanceID, instance.EntityID, route.InstancePath, route.InstanceID, entityID)
 			}
 			if instance.CurrentState == state && instance.Status == status {
 				return instance
@@ -430,8 +430,8 @@ func waitStageLifecycleJoin(t *testing.T, ctx context.Context, pipeline *runtime
 		instance, ok, err := pipeline.Load(ctx, route)
 		if err == nil && ok {
 			last = instance
-			if instance.StorageRef != route.InstancePath || instance.Metadata["entity_id"] != entityID {
-				t.Fatalf("persisted join identity = route:%q entity:%v, want %q/%q", instance.StorageRef, instance.Metadata["entity_id"], route.InstancePath, entityID)
+			if instance.StorageRef != route.InstancePath || instance.EntityID != entityID {
+				t.Fatalf("persisted join identity = route:%q entity:%v, want %q/%q", instance.StorageRef, instance.EntityID, route.InstancePath, entityID)
 			}
 			activation, found := findStageLifecycleJoin(instance, batchID)
 			if found && activation.Completed() == completed && instance.CurrentState == state && instance.Status == status {
@@ -504,7 +504,7 @@ func loadStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInsta
 }
 
 func findStageLifecycleJoin(instance runtimepipeline.WorkflowInstance, batchID string) (joinruntime.Activation, bool) {
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 	if err != nil {
 		return joinruntime.Activation{}, false
 	}

@@ -44,7 +44,7 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 		t.Fatalf("gates bucket missing review: %#v", base.Gates.Raw())
 	}
 	input.Payload["p"] = "changed"
-	input.State.StateCarrier.Metadata["k"] = "changed"
+	input.State.StateCarrier.Fields["k"] = "changed"
 	if got := base.Payload.Raw()["p"]; got != "x" {
 		t.Fatalf("payload clone lost isolation: %#v", got)
 	}
@@ -60,9 +60,12 @@ func TestBuildBaseContext_UsesConcreteFlowInstanceForPlatformEntity(t *testing.T
 			EntityID:     "entity-1",
 			WorkflowName: "child",
 			CurrentState: "waiting",
-			StateCarrier: NewStateCarrier(map[string]any{
-				"flow_path": "child/inst-1",
-			}, nil, nil),
+			StateCarrier: StateCarrier{
+				Fields: map[string]any{},
+				Control: StateControl{
+					FlowPath: "child/inst-1",
+				},
+			},
 		},
 	}
 
@@ -129,10 +132,10 @@ func TestExecutionStateBucketHelpers(t *testing.T) {
 
 func TestStateSnapshotBucketHelpers(t *testing.T) {
 	var snapshot StateSnapshot
-	snapshot.SetMetadata("status", "ready")
+	snapshot.SetField("status", "ready")
 	snapshot.SetGate("review", true)
 
-	if got := snapshot.MetadataBucket().String("status"); got != "ready" {
+	if got := snapshot.FieldsBucket().String("status"); got != "ready" {
 		t.Fatalf("metadata string = %q", got)
 	}
 	if !snapshot.StateCarrier.Gates["review"] {
@@ -145,11 +148,11 @@ func TestStateSnapshotBucketHelpers(t *testing.T) {
 
 func TestStateMutationAndResultBucketHelpers(t *testing.T) {
 	var mutation StateMutation
-	mutation.SetMetadata("status", "ready")
+	mutation.SetField("status", "ready")
 	mutation.SetGateValue("review", false)
 	mutation.SetStateBuckets(map[string]map[string]any{"node-1": {"count": 2}})
 
-	if got := mutation.MetadataBucket().String("status"); got != "ready" {
+	if got := mutation.FieldsBucket().String("status"); got != "ready" {
 		t.Fatalf("mutation metadata string = %q", got)
 	}
 	if mutation.StateCarrier.Gates["review"] {

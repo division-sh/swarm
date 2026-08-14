@@ -56,7 +56,7 @@ func TestTier11Probe(t *testing.T) {
 			t.Logf("rows=%s", rows)
 			instance, ok, err := h.workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
 			if err == nil && ok {
-				t.Logf("root metadata=%#v", instance.Metadata)
+				t.Logf("root fields=%#v bookkeeping=%#v gates=%#v", instance.Fields, instance.Bookkeeping, instance.Gates)
 			}
 			if h.rt != nil && h.rt.Pipeline != nil {
 				source := h.rt.Pipeline.SemanticSource()

@@ -217,8 +217,9 @@ func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
 						EntityType:   "order",
 						CurrentState: "reviewing",
 					},
-					Fields: map[string]any{"business_status": "approved"},
-					Gates:  map[string]bool{"review_gate": true},
+					Fields:      map[string]any{"business_status": "approved", "activation": "manual"},
+					Bookkeeping: map[string]any{"activation": "standing"},
+					Gates:       map[string]bool{"review_gate": true},
 					Accumulated: map[string]any{
 						"score":       float64(9),
 						"accumulator": map[string]any{"count": float64(2)},
@@ -263,7 +264,7 @@ func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("unmarshal instance detail: %v", err)
 	}
-	if detail.Entity.CurrentState != "reviewing" || detail.Fields["business_status"] != "approved" || !detail.Gates["review_gate"] || detail.Accumulated["score"] != float64(9) {
+	if detail.Entity.CurrentState != "reviewing" || detail.Fields["business_status"] != "approved" || detail.Fields["activation"] != "manual" || detail.Bookkeeping["activation"] != "standing" || !detail.Gates["review_gate"] || detail.Accumulated["score"] != float64(9) {
 		t.Fatalf("detail payload = %#v", detail)
 	}
 	if bucket, ok := detail.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {

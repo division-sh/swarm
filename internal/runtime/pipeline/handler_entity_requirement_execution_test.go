@@ -70,8 +70,8 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 					t.Fatal("clear execution was not handled")
 				}
 				for _, field := range []string{"revision_count", "dedup_key", "accumulated_count"} {
-					if _, ok := instance.Metadata[field]; ok {
-						t.Fatalf("clear retained metadata field %q in %#v", field, instance.Metadata)
+					if _, ok := instance.Fields[field]; ok {
+						t.Fatalf("clear retained field %q in %#v", field, instance.Fields)
 					}
 				}
 				if nodeBucket, ok := instance.StateBuckets["node-a"].(map[string]any); ok {
@@ -188,16 +188,14 @@ func executeExistingOwnerBehavior(
 	if seedMetadata == nil {
 		seedMetadata = map[string]any{}
 	}
-	seedMetadata["entity_id"] = entityID
-	seedMetadata["flow_path"] = flowInstance
-	seedMetadata["instance_id"] = name
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      name,
 		StorageRef:      flowInstance,
+		EntityID:        entityID,
 		WorkflowName:    "review",
 		WorkflowVersion: "1",
 		CurrentState:    "active",
-		Metadata:        seedMetadata,
+		Fields:          seedMetadata,
 		StateBuckets:    stateBuckets,
 	})); err != nil {
 		t.Fatalf("seed %s workflow instance: %v", name, err)

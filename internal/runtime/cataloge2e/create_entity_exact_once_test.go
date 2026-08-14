@@ -37,21 +37,22 @@ func catalogCreateEntityFindingContains(findings []runtimebootverify.Finding, ch
 	return false
 }
 
-func assertCatalogMutationCount(t *testing.T, h *runtimeHarness, eventID, field, writerID, handlerStep string, want int) {
+func assertCatalogMutationCount(t *testing.T, h *runtimeHarness, eventID, path, writerID, handlerStep string, want int) {
 	t.Helper()
 	var got int
 	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
 		SELECT COUNT(*)
 		FROM entity_mutations
 		WHERE caused_by_event = $1::uuid
-		  AND field = $2
+		  AND domain = 'authored_field'
+		  AND path = $2
 		  AND writer_id = $3
 		  AND handler_step = $4
-	`, eventID, field, writerID, handlerStep).Scan(&got); err != nil {
+	`, eventID, path, writerID, handlerStep).Scan(&got); err != nil {
 		t.Fatalf("count entity_mutations: %v", err)
 	}
 	if got != want {
-		t.Fatalf("mutation count field=%s writer=%s step=%s = %d, want %d", field, writerID, handlerStep, got, want)
+		t.Fatalf("mutation count path=%s writer=%s step=%s = %d, want %d", path, writerID, handlerStep, got, want)
 	}
 }
 

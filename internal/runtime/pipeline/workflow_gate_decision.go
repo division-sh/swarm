@@ -370,7 +370,7 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if !found {
 		return gateruntime.Route{}, fmt.Errorf("decision card workflow instance is missing")
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return gateruntime.Route{}, err
 	}
@@ -509,7 +509,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		return fmt.Errorf("decision card workflow instance is missing")
 	}
 	currentStage := strings.TrimSpace(instance.CurrentState)
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		return err
 	}

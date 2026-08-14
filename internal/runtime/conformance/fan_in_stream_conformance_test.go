@@ -82,7 +82,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(100) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("last revenue after first = %#v, want 100", got)
 	}
 
@@ -91,7 +91,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after duplicate = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(100) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
 	}
 
@@ -103,7 +103,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q2"); got != 1 {
 		t.Fatalf("Q2 accumulator items = %d, want 1", got)
 	}
-	if got := state.StateCarrier.Metadata["last_revenue"]; got != float64(300) {
+	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(300) {
 		t.Fatalf("last revenue after next window = %#v, want 300", got)
 	}
 }
@@ -124,18 +124,14 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	if _, err := runtime.pipeline.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
 		StorageRef:      templatefanin.ReceiverFlowInstance,
+		EntityID:        runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
+		InstanceKind:    "singleton",
 		WorkflowName:    templatefanin.ReceiverFlowID,
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "active",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Metadata: map[string]any{
-			"entity_id":     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
-			"portfolio_id":  "portfolio-default",
-			"flow_path":     templatefanin.ReceiverFlowInstance,
-			"instance_id":   templatefanin.ReceiverFlowInstance,
-			"instance_kind": "singleton",
-		},
+		Fields:          map[string]any{"portfolio_id": "portfolio-default"},
 	}, enteredAt); err != nil {
 		t.Fatalf("seed fan-in stream singleton: %v", err)
 	}
@@ -174,14 +170,14 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 		t.Fatalf("producer request delivery routes = %#v, want stamped operating_id %s", routes, requestEventID)
 	}
 	portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
-	carrier, err := runtimeengine.StateCarrierFromPersisted(portfolio.Metadata, portfolio.StateBuckets)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(portfolio.Fields, portfolio.Bookkeeping, portfolio.Gates, portfolio.StateBuckets)
 	if err != nil {
 		t.Fatalf("load producer-driven stream state: %v", err)
 	}
 	if got := fanInStreamAccumulatorItemCount(t, carrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("producer-driven stream accumulator items = %d, want 1", got)
 	}
-	if got := carrier.Metadata["last_revenue"]; got != float64(100) {
+	if got := carrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("producer-driven stream last revenue = %#v, want 100", got)
 	}
 }
@@ -388,9 +384,9 @@ func fanInStreamPublishAndExecute(
 	if err != nil {
 		t.Fatalf("Execute(%s): %v", evt.ID(), err)
 	}
-	metadata := state.StateCarrier.Metadata
-	if result.StateMutation.StateCarrier.Metadata != nil {
-		metadata = result.StateMutation.StateCarrier.Metadata
+	metadata := state.StateCarrier.Fields
+	if result.StateMutation.StateCarrier.Fields != nil {
+		metadata = result.StateMutation.StateCarrier.Fields
 	}
 	gates := state.StateCarrier.Gates
 	if result.StateMutation.StateCarrier.Gates != nil {

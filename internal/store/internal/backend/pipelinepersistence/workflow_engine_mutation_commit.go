@@ -85,16 +85,16 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, accumulator, revision,
+				current_state, gates, fields, bookkeeping, accumulator, revision,
 				entered_state_at, created_at, updated_at
 			)
 			VALUES (
 				$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
-				$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
-				$11, $12, $12
+				$7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1,
+				$12, $13, $13
 			)
 		`, record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
-			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Accumulator),
+			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 			record.EnteredStageAt, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert workflow engine entity state: %w", err)
 		}
@@ -108,16 +108,17 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 		    current_state = $4,
 		    gates = $5::jsonb,
 		    fields = $6::jsonb,
-		    accumulator = $7::jsonb,
+		    bookkeeping = $7::jsonb,
+		    accumulator = $8::jsonb,
 		    revision = revision + 1,
-		    entered_state_at = $8,
-		    updated_at = $9
-		WHERE run_id = $10::uuid
-		  AND entity_id = $11::uuid
-		  AND flow_instance = $12
-		  AND revision = $13
-		  AND current_state = $14
-	`, record.EntityType, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Accumulator),
+		    entered_state_at = $9,
+		    updated_at = $10
+		WHERE run_id = $11::uuid
+		  AND entity_id = $12::uuid
+		  AND flow_instance = $13
+		  AND revision = $14
+		  AND current_state = $15
+	`, record.EntityType, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
@@ -186,12 +187,12 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, accumulator, revision,
+				current_state, gates, fields, bookkeeping, accumulator, revision,
 				entered_state_at, created_at, updated_at
 			)
-			VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?)
+			VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
 		`, record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
-			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Accumulator),
+			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 			record.EnteredStageAt, record.CreatedAt, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert workflow engine entity state: %w", err)
 		}
@@ -205,6 +206,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		    current_state = ?,
 		    gates = ?,
 		    fields = ?,
+		    bookkeeping = ?,
 		    accumulator = ?,
 		    revision = revision + 1,
 		    entered_state_at = ?,
@@ -214,7 +216,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		  AND flow_instance = ?
 		  AND revision = ?
 		  AND current_state = ?
-	`, record.EntityType, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Accumulator),
+	`, record.EntityType, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
 		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
@@ -294,6 +296,10 @@ func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRec
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
+	bookkeeping, err := decode("bookkeeping", record.Bookkeeping)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
 	gates, err := decode("gates", record.Gates)
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
@@ -305,6 +311,7 @@ func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRec
 	return runtimemutationlog.EntityStateProjection{
 		CurrentState: record.CurrentState,
 		Fields:       fields,
+		Bookkeeping:  bookkeeping,
 		Gates:        gates,
 		Accumulator:  accumulator,
 	}, nil
@@ -319,14 +326,14 @@ func loadWorkflowEngineStateProjection(
 	if record.Create {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
-	query := `SELECT current_state, fields, gates, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+	query := `SELECT current_state, fields, bookkeeping, gates, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
 	args := []any{record.RunID, record.EntityID, record.Route.InstancePath}
 	if postgres {
-		query = `SELECT current_state, fields, gates, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3 FOR UPDATE`
+		query = `SELECT current_state, fields, bookkeeping, gates, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3 FOR UPDATE`
 	}
 	var currentState string
-	var fieldsRaw, gatesRaw, accumulatorRaw any
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&currentState, &fieldsRaw, &gatesRaw, &accumulatorRaw); err != nil {
+	var fieldsRaw, bookkeepingRaw, gatesRaw, accumulatorRaw any
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accumulatorRaw); err != nil {
 		if err == sql.ErrNoRows {
 			return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine state route is missing: %s", record.Route.InstancePath)
 		}
@@ -335,6 +342,10 @@ func loadWorkflowEngineStateProjection(
 	fields, err := storeentity.DecodeJSONMap(fieldsRaw)
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine persisted fields: %w", err)
+	}
+	bookkeeping, err := storeentity.DecodeJSONMap(bookkeepingRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine persisted bookkeeping: %w", err)
 	}
 	gates, err := storeentity.DecodeJSONMap(gatesRaw)
 	if err != nil {
@@ -347,6 +358,7 @@ func loadWorkflowEngineStateProjection(
 	return runtimemutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       fields,
+		Bookkeeping:  bookkeeping,
 		Gates:        gates,
 		Accumulator:  accumulator,
 	}, nil
@@ -404,6 +416,7 @@ func commitWorkflowEngineInitialValues(
 	adjusted := runtimemutationlog.EntityStateProjection{
 		CurrentState: before.CurrentState,
 		Fields:       copyWorkflowEngineProjectionMap(before.Fields),
+		Bookkeeping:  copyWorkflowEngineProjectionMap(before.Bookkeeping),
 		Gates:        copyWorkflowEngineProjectionMap(before.Gates),
 		Accumulator:  copyWorkflowEngineProjectionMap(before.Accumulator),
 	}

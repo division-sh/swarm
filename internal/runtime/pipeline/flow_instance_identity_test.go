@@ -39,7 +39,7 @@ func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *te
 	}
 }
 
-func TestFlowInstanceIdentity_CreateEntityUsesScopeKeyForPathAndLogicalInstanceForMetadata(t *testing.T) {
+func TestFlowInstanceIdentity_CreateEntityUsesTypedPathAndLogicalInstance(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
 
 	handler, ok := source.NodeEventHandler("validator", "validate.start")
@@ -59,15 +59,15 @@ func TestFlowInstanceIdentity_CreateEntityUsesScopeKeyForPathAndLogicalInstanceF
 	if got := strings.TrimSpace(state.EntityID); got != entityID {
 		t.Fatalf("state.EntityID = %q, want %q", got, entityID)
 	}
-	instanceID := strings.TrimSpace(asString(state.Metadata["instance_id"]))
+	instanceID := strings.TrimSpace(state.Control.InstanceID)
 	if instanceID == "" {
-		t.Fatal("expected logical instance_id in state metadata")
+		t.Fatal("expected typed logical instance_id")
 	}
-	flowPath := strings.TrimSpace(asString(state.Metadata["flow_path"]))
+	flowPath := strings.TrimSpace(state.Control.FlowPath)
 	if flowPath != "child" {
 		t.Fatalf("flow_path = %q, want child", flowPath)
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != flowPath {
+	if got := strings.TrimSpace(state.Control.StorageRef); got != flowPath {
 		t.Fatalf("storage_ref = %q, want %q", got, flowPath)
 	}
 	if wantEntityID := FlowInstanceEntityID(flowPath); entityID != wantEntityID {
@@ -142,10 +142,7 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 	instance := WorkflowInstance{
 		WorkflowName: "grandchild",
 		StorageRef:   "child/grandchild/inst-1",
-		Metadata: map[string]any{
-			"flow_path":   "child/grandchild/inst-1",
-			"instance_id": "inst-1",
-		},
+		InstanceID:   "inst-1",
 	}
 
 	if workflowInstanceOwnedByFlow(source, instance, "child") {
@@ -161,10 +158,7 @@ func TestWorkflowInstanceRouteForPersistedUsesAuthoredNestedSingletonScope(t *te
 	instance := WorkflowInstance{
 		WorkflowName: "grandchild",
 		StorageRef:   "child/grandchild",
-		Metadata: map[string]any{
-			"flow_path":   "child/grandchild",
-			"instance_id": "grandchild",
-		},
+		InstanceID:   "grandchild",
 	}
 
 	route, err := workflowInstanceRouteForPersisted(source, instance)
@@ -183,26 +177,20 @@ func TestRequireWorkflowInstanceIdentityRejectsMissingAndMismatchedFacts(t *test
 	valid := WorkflowInstance{
 		StorageRef: "review/instance-1",
 		InstanceID: "instance-1",
-		Metadata: map[string]any{
-			"flow_path":   "review/instance-1",
-			"instance_id": "instance-1",
-			"entity_id":   entityID.String(),
-		},
+		EntityID:   entityID.String(),
 	}
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, valid); err != nil {
 		t.Fatalf("exact identity rejected: %v", err)
 	}
 
 	missing := valid
-	missing.Metadata = cloneStringAnyMap(valid.Metadata)
-	delete(missing.Metadata, "entity_id")
+	missing.EntityID = ""
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, missing); err == nil || !strings.Contains(err.Error(), "missing entity_id") {
 		t.Fatalf("missing entity error = %v", err)
 	}
 
 	mismatch := valid
-	mismatch.Metadata = cloneStringAnyMap(valid.Metadata)
-	mismatch.Metadata["entity_id"] = "22222222-2222-4222-8222-222222222222"
+	mismatch.EntityID = "22222222-2222-4222-8222-222222222222"
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, mismatch); err == nil || !strings.Contains(err.Error(), "disagrees with requested entity") {
 		t.Fatalf("mismatched entity error = %v", err)
 	}

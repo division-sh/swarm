@@ -164,7 +164,7 @@ func loadFlowInstanceActivationEqual(
 		SELECT
 			fi.flow_template, fi.mode, fi.config, fi.status, fi.created_at,
 			es.flow_instance, es.entity_type, COALESCE(es.slug, ''), COALESCE(es.name, ''),
-			es.current_state, es.gates, es.fields, es.accumulator,
+			es.current_state, es.gates, es.fields, es.bookkeeping, es.accumulator,
 			es.entered_state_at, es.created_at,
 			m.projection_version, m.projection, m.occurred_at,
 			r.plan, r.created_at
@@ -187,7 +187,7 @@ func loadFlowInstanceActivationEqual(
 			SELECT
 				fi.flow_template, fi.mode, fi.config, fi.status, fi.created_at,
 				es.flow_instance, es.entity_type, COALESCE(es.slug, ''), COALESCE(es.name, ''),
-				es.current_state, es.gates, es.fields, es.accumulator,
+				es.current_state, es.gates, es.fields, es.bookkeeping, es.accumulator,
 				es.entered_state_at, es.created_at,
 				m.projection_version, m.projection, m.occurred_at,
 				r.plan, r.created_at
@@ -208,7 +208,7 @@ func loadFlowInstanceActivationEqual(
 	}
 	var (
 		workflowName, mode, status, instancePath, entityType, slug, name, state      string
-		config, gates, fields, accumulator, initial, readiness                       []byte
+		config, gates, fields, bookkeeping, accumulator, initial, readiness          []byte
 		projectionVersion                                                            int
 		flowCreated, enteredAt, entityCreated, initialAt, readinessAt                time.Time
 		flowCreatedRaw, enteredAtRaw, entityCreatedRaw, initialAtRaw, readinessAtRaw any
@@ -216,7 +216,7 @@ func loadFlowInstanceActivationEqual(
 	destinations := []any{
 		&workflowName, &mode, &config, &status, &flowCreated,
 		&instancePath, &entityType, &slug, &name,
-		&state, &gates, &fields, &accumulator,
+		&state, &gates, &fields, &bookkeeping, &accumulator,
 		&enteredAt, &entityCreated,
 		&projectionVersion, &initial, &initialAt,
 		&readiness, &readinessAt,
@@ -225,7 +225,7 @@ func loadFlowInstanceActivationEqual(
 		destinations = []any{
 			&workflowName, &mode, &config, &status, &flowCreatedRaw,
 			&instancePath, &entityType, &slug, &name,
-			&state, &gates, &fields, &accumulator,
+			&state, &gates, &fields, &bookkeeping, &accumulator,
 			&enteredAtRaw, &entityCreatedRaw,
 			&projectionVersion, &initial, &initialAtRaw,
 			&readiness, &readinessAtRaw,
@@ -280,9 +280,9 @@ func loadFlowInstanceActivationEqual(
 		strings.TrimSpace(mode) == want.Mode && strings.TrimSpace(status) == "active" &&
 		strings.Trim(strings.TrimSpace(instancePath), "/") == want.Route.InstancePath &&
 		strings.TrimSpace(entityType) == want.EntityType && strings.TrimSpace(slug) == want.Slug && strings.TrimSpace(name) == want.Name &&
-		strings.TrimSpace(state) == want.CurrentState && projectionVersion == 1 &&
+		strings.TrimSpace(state) == want.CurrentState && projectionVersion == want.InitialProjectionVersion &&
 		jsonEqual(config, want.Config) && jsonEqual(gates, want.Gates) && jsonEqual(fields, want.Fields) &&
-		jsonEqual(accumulator, want.Accumulator) && jsonEqual(initial, want.InitialMaterialization) && jsonEqual(readiness, want.Readiness) &&
+		jsonEqual(bookkeeping, want.Bookkeeping) && jsonEqual(accumulator, want.Accumulator) && jsonEqual(initial, want.InitialMaterialization) && jsonEqual(readiness, want.Readiness) &&
 		canonicalActivationTime(flowCreated).Equal(canonicalActivationTime(want.CreatedAt)) &&
 		canonicalActivationTime(enteredAt).Equal(canonicalActivationTime(want.EnteredStageAt)) &&
 		canonicalActivationTime(entityCreated).Equal(canonicalActivationTime(want.CreatedAt)) &&
@@ -351,8 +351,8 @@ func insertFlowInstanceActivation(
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workflow_instance_initial_materializations (
 				run_id, entity_id, instance_id, projection_version, projection, occurred_at
-			) VALUES ($1::uuid, $2::uuid, $3, 1, $4::jsonb, $5)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)
+		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow initial materialization: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -366,8 +366,8 @@ func insertFlowInstanceActivation(
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workflow_instance_initial_materializations (
 				run_id, entity_id, instance_id, projection_version, projection, occurred_at
-			) VALUES (?, ?, ?, 1, ?, ?)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
+			) VALUES (?, ?, ?, ?, ?, ?)
+		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow initial materialization: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `

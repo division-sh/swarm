@@ -313,9 +313,9 @@ func seedSelectedContractActivityLoop(t *testing.T, db *sql.DB, runID, entityID,
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event,
+			run_id, entity_id, domain, path, old_value, new_value, caused_by_event,
 			writer_type, writer_id, handler_step, created_at
-		) VALUES ($1::uuid, $2::uuid, 'accumulator.handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'activity-fork-proof', 'seed', $5)
+		) VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'activity-fork-proof', 'seed', $5)
 	`, runID, entityID, handlerLoops, requestEventID, at); err != nil {
 		t.Fatalf("seed source loop mutation: %v", err)
 	}

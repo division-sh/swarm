@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -684,10 +685,11 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      runID,
 		StorageRef:      runID,
+		EntityID:        entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -732,8 +734,8 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 	if got := strings.TrimSpace(instance.CurrentState); got != "researching" {
 		t.Fatalf("current_state = %q, want researching after rollback", got)
 	}
-	if _, exists := instance.Metadata["business_brief"]; exists {
-		t.Fatalf("business_brief unexpectedly persisted after rejected emit: %#v", instance.Metadata["business_brief"])
+	if _, exists := instance.Fields["business_brief"]; exists {
+		t.Fatalf("business_brief unexpectedly persisted after rejected emit: %#v", instance.Fields["business_brief"])
 	}
 }
 
@@ -748,10 +750,11 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      runID,
 		StorageRef:      runID,
+		EntityID:        entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -803,9 +806,9 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 	if got := strings.TrimSpace(instance.CurrentState); got != "mvp_speccing" {
 		t.Fatalf("current_state = %q, want mvp_speccing", got)
 	}
-	brief, ok := instance.Metadata["business_brief"].(map[string]any)
+	brief, ok := instance.Fields["business_brief"].(map[string]any)
 	if !ok || brief["summary"] != "validated" {
-		t.Fatalf("business_brief = %#v, want persisted payload", instance.Metadata["business_brief"])
+		t.Fatalf("business_brief = %#v, want persisted payload", instance.Fields["business_brief"])
 	}
 }
 
@@ -838,13 +841,11 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
+		EntityID:        entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID,
-			"revision_count": 0,
-		},
+		Fields:          map[string]any{"revision_count": 0},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -873,7 +874,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	if !ok {
 		t.Fatal("workflow instance missing after declarative write")
 	}
-	switch got := instance.Metadata["revision_count"].(type) {
+	switch got := instance.Fields["revision_count"].(type) {
 	case int:
 		if got != 1 {
 			t.Fatalf("revision_count = %d, want 1", got)
@@ -883,7 +884,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 			t.Fatalf("revision_count = %v, want 1", got)
 		}
 	default:
-		t.Fatalf("revision_count = %#v (%T), want 1", instance.Metadata["revision_count"], instance.Metadata["revision_count"])
+		t.Fatalf("revision_count = %#v (%T), want 1", instance.Fields["revision_count"], instance.Fields["revision_count"])
 	}
 }
 
@@ -916,12 +917,11 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
+		EntityID:        entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID,
-		},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -953,8 +953,8 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	if !ok {
 		t.Fatal("expected workflow instance to remain available")
 	}
-	if _, exists := instance.Metadata["revision_count"]; exists {
-		t.Fatalf("revision_count unexpectedly persisted after CEL runtime error: %#v", instance.Metadata["revision_count"])
+	if _, exists := instance.Fields["revision_count"]; exists {
+		t.Fatalf("revision_count unexpectedly persisted after CEL runtime error: %#v", instance.Fields["revision_count"])
 	}
 }
 
@@ -988,12 +988,11 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      testPipelineRunID,
 		StorageRef:      testPipelineRunID,
+		EntityID:        entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID,
-		},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1022,7 +1021,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	if !ok {
 		t.Fatal("workflow instance missing after declarative write")
 	}
-	if got := instance.Metadata["kill_reason_missing"]; got != true {
+	if got := instance.Fields["kill_reason_missing"]; got != true {
 		t.Fatalf("kill_reason_missing = %#v, want true", got)
 	}
 }
@@ -1357,21 +1356,18 @@ vertical:
 	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
 		t.Fatalf("state subject_id = %q, want empty", got)
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); got != inboundEntityID {
+	if got := strings.TrimSpace(state.Control.ParentEntityID); got != inboundEntityID {
 		t.Fatalf("state parent_entity_id = %q, want %q", got, inboundEntityID)
 	}
-	instanceID := strings.TrimSpace(asString(state.Metadata["instance_id"]))
+	instanceID := strings.TrimSpace(state.Control.InstanceID)
 	if instanceID == "" {
 		t.Fatal("state instance_id is empty, want generated logical instance id")
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != "scoring" {
+	if got := strings.TrimSpace(state.Control.FlowPath); got != "scoring" {
 		t.Fatalf("state flow_path = %q, want scoring", got)
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring" {
+	if got := strings.TrimSpace(state.Control.StorageRef); got != "scoring" {
 		t.Fatalf("state storage_ref = %q, want scoring", got)
-	}
-	if got := strings.TrimSpace(asString(state.Metadata["entity_type"])); got != "vertical" {
-		t.Fatalf("state entity_type = %q, want vertical", got)
 	}
 	if got := state.Metadata["revision_count"]; !isZeroIntegerValue(got) {
 		t.Fatalf("state revision_count = %#v, want 0", got)
@@ -1409,36 +1405,14 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 	if snapshot.WorkflowVersion != "v-test" {
 		t.Fatalf("snapshot workflow_version = %q, want v-test", snapshot.WorkflowVersion)
 	}
-	if snapshot.Metadata == nil {
-		t.Fatal("snapshot metadata = nil, want persisted metadata")
+	if snapshot.Fields == nil {
+		t.Fatal("snapshot fields = nil, want persisted fields")
 	}
-	if got := snapshot.Metadata["revision_count"]; got != 0 {
+	if got := snapshot.Fields["revision_count"]; got != 0 {
 		t.Fatalf("snapshot revision_count = %#v, want 0", got)
 	}
-	if got := snapshot.Metadata["is_duplicate"]; got != false {
+	if got := snapshot.Fields["is_duplicate"]; got != false {
 		t.Fatalf("snapshot is_duplicate = %#v, want false", got)
-	}
-}
-
-func TestExecuteNodeContractHandlerRejectsMalformedPersistedGateShape(t *testing.T) {
-	pc := &PipelineCoordinator{
-		bus:            &recordingPipelineBus{},
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-	}
-
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
-		State: WorkflowState{
-			Stage:    WorkflowStateID("queued"),
-			Metadata: map[string]any{"gates": "invalid"},
-		},
-	}, false)
-	if err == nil {
-		t.Fatal("expected malformed persisted gates to fail closed")
-	}
-	if !strings.Contains(err.Error(), "metadata.gates") {
-		t.Fatalf("error = %v, want metadata.gates context", err)
 	}
 }
 
@@ -1451,11 +1425,11 @@ func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testin
 	if want := FlowInstanceEntityID("scoring/scoring"); gotID != want {
 		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, want)
 	}
-	if state.Metadata == nil {
-		t.Fatal("state metadata = nil, want create entity metadata")
-	}
 	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != "" {
 		t.Fatalf("state subject_id = %q, want empty", got)
+	}
+	if strings.TrimSpace(state.Control.FlowPath) != "scoring/scoring" || strings.TrimSpace(state.Control.InstanceID) != "scoring" {
+		t.Fatalf("typed state control = %#v, want scoring/scoring and scoring", state.Control)
 	}
 }
 
@@ -1556,16 +1530,16 @@ node-a:
 	if !ok {
 		t.Fatal("expected created entity to persist")
 	}
-	if got := instance.Metadata["revision_count"]; got != float64(0) && got != 0 {
+	if got := instance.Fields["revision_count"]; got != float64(0) && got != 0 {
 		t.Fatalf("persisted revision_count = %#v, want 0", got)
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)
 
 	rows, err := db.QueryContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
+		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
 		FROM entity_mutations
 		WHERE entity_id = $1::uuid
-		ORDER BY field, created_at
+		ORDER BY domain, path, created_at
 	`, entityID)
 	if err != nil {
 		t.Fatalf("query entity_mutations: %v", err)
@@ -1574,18 +1548,18 @@ node-a:
 
 	initialMutations := map[string][3]string{}
 	for rows.Next() {
-		var field, writerType, writerID, handlerStep string
-		if err := rows.Scan(&field, &writerType, &writerID, &handlerStep); err != nil {
+		var domain, path, writerType, writerID, handlerStep string
+		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
 			t.Fatalf("scan entity_mutations: %v", err)
 		}
 		if writerType == "platform" && writerID == "entity_initial_value" {
-			initialMutations[field] = [3]string{writerType, writerID, handlerStep}
+			initialMutations[domain+":"+path] = [3]string{writerType, writerID, handlerStep}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows error: %v", err)
 	}
-	if got, ok := initialMutations["revision_count"]; !ok {
+	if got, ok := initialMutations["authored_field:revision_count"]; !ok {
 		t.Fatalf("expected initial-value mutation for revision_count, got %#v", initialMutations)
 	} else if got[2] != "create_entity" {
 		t.Fatalf("revision_count initial mutation metadata = %#v, want handler_step create_entity", got)
@@ -1698,15 +1672,13 @@ node-a:
 func seedQueryEntitiesGuardInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, storageRef, requestID string) {
 	t.Helper()
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
+		InstanceID:      runtimeflowidentity.LogicalInstanceID(storageRef),
 		StorageRef:      storageRef,
+		EntityID:        entityID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
-		Metadata: map[string]any{
-			"entity_id":  entityID,
-			"request_id": requestID,
-		},
+		Fields:          map[string]any{"request_id": requestID},
 	})); err != nil {
 		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
 	}
@@ -1800,7 +1772,7 @@ node-a:
 	if !ok {
 		t.Fatal("expected created entity to persist")
 	}
-	if got := instance.Metadata["status"]; got != "pending" {
+	if got := instance.Fields["status"]; got != "pending" {
 		t.Fatalf("persisted status = %#v, want pending", got)
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "review", entityID, emitted, instance)
@@ -1808,19 +1780,13 @@ node-a:
 
 func assertCreatedChildFlowIdentityCoherent(t *testing.T, db *sql.DB, flowID, entityID string, emitted events.Event, instance WorkflowInstance) {
 	t.Helper()
-	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
+	instanceID := strings.TrimSpace(instance.InstanceID)
 	if instanceID == "" {
-		t.Fatalf("created %s entity %s missing instance_id metadata: %#v", flowID, entityID, instance.Metadata)
+		t.Fatalf("created %s entity %s missing typed instance_id", flowID, entityID)
 	}
 	flowPath := flowID
 	if got := strings.TrimSpace(instance.StorageRef); got != flowPath {
 		t.Fatalf("created %s entity storage_ref = %q, want %q", flowID, got, flowPath)
-	}
-	if got := strings.TrimSpace(asString(instance.Metadata["storage_ref"])); got != flowPath {
-		t.Fatalf("created %s entity metadata storage_ref = %q, want %q", flowID, got, flowPath)
-	}
-	if got := strings.TrimSpace(asString(instance.Metadata["flow_path"])); got != flowPath {
-		t.Fatalf("created %s entity flow_path = %q, want %q", flowID, got, flowPath)
 	}
 	if got := entityID; got != FlowInstanceEntityID(flowPath) {
 		t.Fatalf("created %s entity id = %q, want %q for flow path %q", flowID, got, FlowInstanceEntityID(flowPath), flowPath)
@@ -1929,14 +1895,14 @@ node-a:
 	if !ok {
 		t.Fatal("expected created entity to persist")
 	}
-	if _, ok := instance.Metadata["revision_count"]; ok {
-		t.Fatalf("persisted revision_count = %#v, want field cleared", instance.Metadata["revision_count"])
+	if _, ok := instance.Fields["revision_count"]; ok {
+		t.Fatalf("persisted revision_count = %#v, want field cleared", instance.Fields["revision_count"])
 	}
 
 	rows, err := db.QueryContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT field, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
+		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
 		FROM entity_mutations
-		WHERE entity_id = $1::uuid AND field = 'revision_count'
+		WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = 'revision_count'
 		ORDER BY created_at
 	`, entityID)
 	if err != nil {
@@ -1946,8 +1912,8 @@ node-a:
 
 	var sawInitial bool
 	for rows.Next() {
-		var field, writerType, writerID, handlerStep string
-		if err := rows.Scan(&field, &writerType, &writerID, &handlerStep); err != nil {
+		var domain, path, writerType, writerID, handlerStep string
+		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
 			t.Fatalf("scan entity_mutations: %v", err)
 		}
 		if writerType == "platform" && writerID == "entity_initial_value" && handlerStep == "create_entity" {
@@ -2291,30 +2257,26 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	childEntityID := FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      childEntityID,
+		InstanceID:      "inst-1",
 		StorageRef:      "child/inst-1",
+		EntityID:        childEntityID,
+		ParentEntityID:  rootEntityID,
 		WorkflowName:    "child",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-		Metadata: map[string]any{
-			"entity_id":        childEntityID,
-			"flow_path":        "child/inst-1",
-			"parent_entity_id": rootEntityID,
-		},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      grandchildEntityID,
+		InstanceID:      "inst-1",
 		StorageRef:      "child/grandchild/inst-1",
+		EntityID:        grandchildEntityID,
+		ParentEntityID:  childEntityID,
 		WorkflowName:    "grandchild",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "finished",
-		Metadata: map[string]any{
-			"entity_id":        grandchildEntityID,
-			"flow_path":        "child/grandchild/inst-1",
-			"parent_entity_id": childEntityID,
-		},
+		Fields:          map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}

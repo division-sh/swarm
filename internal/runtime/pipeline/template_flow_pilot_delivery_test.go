@@ -29,17 +29,14 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
+		EntityID:        entityID,
 		WorkflowName:    "account",
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 		Config: map[string]any{
 			"account_id": "acct-1",
 		},
-		Metadata: map[string]any{
-			"entity_id":   entityID,
-			"flow_path":   flowInstance,
-			"instance_id": instanceID,
-		},
+		Fields: map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed scoring workflow instance: %v", err)
 	}
@@ -78,8 +75,8 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	if loaded.WorkflowName != "account" || loaded.CurrentState != "done" {
 		t.Fatalf("loaded account instance = storage:%q workflow:%q state:%q, want account/done", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
 	}
-	if loaded.Metadata["account_id"] != "acct-1" || loaded.Metadata["score"] != "91" || loaded.Metadata["decision"] != "approved" {
-		t.Fatalf("loaded account metadata = %#v, want account_id/score/decision from routed payload", loaded.Metadata)
+	if loaded.Fields["account_id"] != "acct-1" || loaded.Fields["score"] != "91" || loaded.Fields["decision"] != "approved" {
+		t.Fatalf("loaded account fields = %#v, want account_id/score/decision from routed payload", loaded.Fields)
 	}
 	assertTemplateFlowPilotPipelineDeliveryStatus(t, db, evt.ID(), "account-node", "delivered")
 }

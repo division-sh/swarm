@@ -34,14 +34,14 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "acme",
 		StorageRef:      storageRef,
+		EntityID:        entityID,
 		WorkflowName:    "root",
 		WorkflowVersion: "v1",
 		CurrentState:    "created",
 		EnteredStageAt:  time.Now().UTC(),
-		Metadata: map[string]any{
-			"flow_path": storageRef,
-			"region":    "west",
-			"tier":      float64(2),
+		Fields: map[string]any{
+			"region": "west",
+			"tier":   float64(2),
 		},
 		InitialFieldValues: map[string]any{
 			"region": "west",
@@ -124,18 +124,16 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	storageRef := "review/inst-1"
 
 	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "inst-1",
-		StorageRef:      storageRef,
-		WorkflowName:    "review",
-		WorkflowVersion: "v1",
-		CurrentState:    "created",
-		EnteredStageAt:  time.Now().UTC(),
-		Metadata: map[string]any{
-			"flow_path":            storageRef,
-			"parent_flow_id":       "operating",
-			"parent_flow_instance": "operating/root",
-			"parent_entity_id":     "parent-ent",
-		},
+		InstanceID:         "inst-1",
+		StorageRef:         storageRef,
+		ParentFlowID:       "operating",
+		ParentFlowInstance: "operating/root",
+		ParentEntityID:     "parent-ent",
+		WorkflowName:       "review",
+		WorkflowVersion:    "v1",
+		CurrentState:       "created",
+		EnteredStageAt:     time.Now().UTC(),
+		Fields:             map[string]any{},
 	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
@@ -147,14 +145,8 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	if !ok {
 		t.Fatal("expected workflow instance to persist")
 	}
-	for key, want := range map[string]string{
-		"parent_flow_id":       "operating",
-		"parent_flow_instance": "operating/root",
-		"parent_entity_id":     "parent-ent",
-	} {
-		if got := strings.TrimSpace(asString(loaded.Metadata[key])); got != want {
-			t.Fatalf("loaded.Metadata[%s] = %#v, want %q", key, loaded.Metadata[key], want)
-		}
+	if loaded.ParentFlowID != "operating" || loaded.ParentFlowInstance != "operating/root" || loaded.ParentEntityID != "parent-ent" {
+		t.Fatalf("loaded parent identity = %q/%q/%q", loaded.ParentFlowID, loaded.ParentFlowInstance, loaded.ParentEntityID)
 	}
 	identity, err := workflowInstancePersistedIdentity(nil, loaded)
 	if err != nil {
@@ -176,8 +168,8 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	entityID := uuid.NewString()
 	terminatedAt := time.Now().UTC().Truncate(time.Millisecond)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID: entityID, StorageRef: storageRef, WorkflowName: "root", WorkflowVersion: "1",
-		CurrentState: "running", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID},
+		InstanceID: "terminated", StorageRef: storageRef, EntityID: entityID, WorkflowName: "root", WorkflowVersion: "1",
+		CurrentState: "running", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -253,7 +245,7 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}})
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Fields: map[string]any{}})
 	if err := store.upsert(ctx, instance); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -573,6 +565,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			current_state TEXT,
 			gates TEXT,
 			fields TEXT,
+			bookkeeping TEXT,
 			accumulator TEXT,
 			revision INTEGER,
 			entered_state_at TIMESTAMP,
@@ -584,7 +577,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
 			entity_id TEXT NOT NULL,
 			instance_id TEXT NOT NULL REFERENCES flow_instances(instance_id) ON DELETE CASCADE,
-			projection_version INTEGER NOT NULL CHECK (projection_version = 1),
+			projection_version INTEGER NOT NULL CHECK (projection_version = 2),
 			projection TEXT NOT NULL,
 			occurred_at TIMESTAMP NOT NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -647,7 +640,8 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			mutation_id TEXT PRIMARY KEY,
 			run_id TEXT,
 			entity_id TEXT,
-			field TEXT,
+			domain TEXT NOT NULL,
+			path TEXT NOT NULL,
 			old_value TEXT,
 			new_value TEXT,
 			caused_by_event TEXT,
@@ -873,8 +867,9 @@ func assertSQLiteMutationCount(t *testing.T, db *sql.DB, entityID, field, writer
 	query := `
 		SELECT COUNT(*)
 		FROM entity_mutations
-		WHERE entity_id = ?
-		  AND field = ?
+			WHERE entity_id = ?
+			  AND domain = 'authored_field'
+			  AND path = ?
 		  AND writer_id = ?
 		  AND handler_step = ?
 	`

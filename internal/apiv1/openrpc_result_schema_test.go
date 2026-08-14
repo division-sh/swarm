@@ -87,8 +87,9 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 			"created_at":    "2026-05-20T01:00:00Z",
 			"updated_at":    "2026-05-20T01:05:00Z",
 		},
-		"fields": map[string]any{"priority": "high"},
-		"gates":  map[string]any{"approved": true},
+		"fields":      map[string]any{"priority": "high", "activation": "manual"},
+		"bookkeeping": map[string]any{"activation": "standing"},
+		"gates":       map[string]any{"approved": true},
 		"accumulated": map[string]any{
 			"score":       float64(3),
 			"accumulator": map[string]any{"count": float64(2)},

@@ -359,7 +359,8 @@ func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts
 		SELECT
 			mutation_id::text,
 			COALESCE(entity_id::text, ''),
-			COALESCE(field, ''),
+			COALESCE(domain, ''),
+			COALESCE(path, ''),
 			COALESCE(old_value, 'null'::jsonb),
 			COALESCE(new_value, 'null'::jsonb),
 			COALESCE(writer_type, ''),
@@ -385,7 +386,8 @@ func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts
 		if err := mutationRows.Scan(
 			&item.MutationID,
 			&item.EntityID,
-			&item.Field,
+			&item.Domain,
+			&item.Path,
 			&oldValue,
 			&newValue,
 			&item.WriterType,

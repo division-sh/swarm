@@ -361,7 +361,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
-				Metadata: map[string]any{
+				Fields: map[string]any{
 					"run_id":      runID,
 					"entity_id":   entityID,
 					"flow_path":   "workflow-timer-startup",
@@ -503,7 +503,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
-				Metadata: map[string]any{
+				Fields: map[string]any{
 					"run_id":      runID,
 					"entity_id":   entityID,
 					"flow_path":   "workflow-timer-startup",

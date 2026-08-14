@@ -44,7 +44,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, forkedRaw)
+	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, forkedRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestForkGateActivationStateRemintsAuthorityIdentity(t *testing.T) {
 	if len(bindings) != 1 || bindings[0].Source.ActivationID != source.ActivationID {
 		t.Fatalf("bindings = %#v", bindings)
 	}
-	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, forkedRaw)
+	forkedCarrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, forkedRaw)
 	if err != nil {
 		t.Fatal(err)
 	}

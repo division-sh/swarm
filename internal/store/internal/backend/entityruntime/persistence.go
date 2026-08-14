@@ -305,12 +305,12 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 		if _, err := tx.ExecContext(txctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
+			current_state, gates, fields, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''),
-			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, 1,
+			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
 			$8, $8, $8
 		)
 	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, rec.Name, rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt); err != nil {
@@ -341,10 +341,10 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 		if _, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, name,
-				current_state, gates, fields, accumulator, revision,
+				current_state, gates, fields, bookkeeping, accumulator, revision,
 				entered_state_at, created_at, updated_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, '{}', ?, '{}', 1, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, '{}', ?, '{}', '{}', 1, ?, ?, ?)
 		`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, sqliteNullString(rec.Name),
 			rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
 			return fmt.Errorf("insert sqlite entity: %w", err)
@@ -362,7 +362,7 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 func toolEntitySelectSQL(where string) string {
 	return `
 		SELECT entity_id, run_id, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
-		       COALESCE(gates, '{}'), COALESCE(fields, '{}'), COALESCE(accumulator, '{}'),
+		       COALESCE(gates, '{}'), COALESCE(fields, '{}'), COALESCE(bookkeeping, '{}'), COALESCE(accumulator, '{}'),
 		       revision, entered_state_at, created_at, updated_at
 		FROM entity_state
 		WHERE ` + where
@@ -373,7 +373,7 @@ func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 	for rows.Next() {
 		var entityID, runID, flowInstance, entityType, currentState string
 		var name sql.NullString
-		var gatesRaw, fieldsRaw, accumulatorRaw any
+		var gatesRaw, fieldsRaw, bookkeepingRaw, accumulatorRaw any
 		var revision int
 		var enteredStateAtRaw, createdAtRaw, updatedAtRaw any
 		if err := rows.Scan(
@@ -385,6 +385,7 @@ func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 			&currentState,
 			&gatesRaw,
 			&fieldsRaw,
+			&bookkeepingRaw,
 			&accumulatorRaw,
 			&revision,
 			&enteredStateAtRaw,
@@ -400,6 +401,10 @@ func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 		fields, err := DecodeJSONMap(fieldsRaw)
 		if err != nil {
 			return nil, fmt.Errorf("decode entity fields: %w", err)
+		}
+		bookkeeping, err := DecodeJSONMap(bookkeepingRaw)
+		if err != nil {
+			return nil, fmt.Errorf("decode entity bookkeeping: %w", err)
 		}
 		accumulator, err := DecodeJSONMap(accumulatorRaw)
 		if err != nil {
@@ -431,6 +436,7 @@ func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 			"current_state":    strings.TrimSpace(currentState),
 			"gates":            gates,
 			"fields":           fields,
+			"bookkeeping":      bookkeeping,
 			"accumulator":      accumulator,
 			"loops":            loops,
 			"revision":         revision,
@@ -794,11 +800,11 @@ func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivit
 		mutationID := uuid.NewString()
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_mutations (
-				mutation_id, run_id, entity_id, field, old_value, new_value,
+				mutation_id, run_id, entity_id, domain, path, old_value, new_value,
 				caused_by_event, writer_type, writer_id, handler_step, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, mutationID, runID, rec.EntityID, rec.Field, oldValue, newValue,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, mutationID, runID, rec.EntityID, rec.Domain, rec.Path, oldValue, newValue,
 			sqliteNullUUID(causedByEvent), rec.WriterType, rec.WriterID, sqliteNullString(rec.HandlerStep), createdAt.UTC()); err != nil {
 			return fmt.Errorf("insert sqlite entity mutation: %w", err)
 		}

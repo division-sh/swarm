@@ -67,6 +67,23 @@ func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *t
 	}
 }
 
+func TestWave1EntityResolverRejectsRetiredFanOutCountRead(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"record": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"fan_out_count": {Type: "integer"},
+				},
+			},
+		},
+	})
+
+	_, _, err := wave1ResolveEntityPathWithOwner(source, "", "fan_out_count")
+	if err == nil || !strings.Contains(err.Error(), "entity.fan_out_count is platform bookkeeping; use the handler-local fan_out.count") {
+		t.Fatalf("entity.fan_out_count error = %v, want handler-local fan_out.count teaching error", err)
+	}
+}
+
 func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 	t.Run("missing contract path", func(t *testing.T) {
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})

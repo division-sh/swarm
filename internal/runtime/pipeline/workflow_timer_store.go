@@ -328,5 +328,5 @@ func workflowTimerJSONEqual(left, right []byte) bool {
 }
 
 func workflowTimerRunID(ctx context.Context, instance WorkflowInstance) string {
-	return strings.TrimSpace(firstNonEmptyString(runtimecorrelation.RunIDFromContext(ctx), asString(instance.Metadata["run_id"])))
+	return strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 }

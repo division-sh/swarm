@@ -247,6 +247,8 @@ type RunForkMaterializedEntitySnapshotMetadata struct {
 	Owner        string `json:"owner"`
 	FlowInstance string `json:"flow_instance"`
 	EntityType   string `json:"entity_type"`
+	Slug         string `json:"slug,omitempty"`
+	Name         string `json:"name,omitempty"`
 	Source       string `json:"source"`
 }
 
@@ -353,6 +355,7 @@ type RunForkEntityState struct {
 	CurrentState            string                                     `json:"current_state,omitempty"`
 	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
 	Fields                  map[string]any                             `json:"fields,omitempty"`
+	Bookkeeping             map[string]any                             `json:"bookkeeping,omitempty"`
 	Gates                   map[string]any                             `json:"gates,omitempty"`
 	Accumulator             map[string]any                             `json:"accumulator,omitempty"`
 	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata `json:"materialization_metadata,omitempty"`

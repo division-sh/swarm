@@ -17,12 +17,49 @@ func ErrInvalidMutationLogWriter(message string) error {
 
 type Record struct {
 	EntityID    string
-	Field       string
+	Domain      Domain
+	Path        string
 	OldValue    any
 	NewValue    any
 	WriterType  string
 	WriterID    string
 	HandlerStep string
+}
+
+type Domain string
+
+const (
+	DomainLifecycleState Domain = "lifecycle_state"
+	DomainAuthoredField  Domain = "authored_field"
+	DomainBookkeeping    Domain = "bookkeeping"
+	DomainGate           Domain = "gate"
+	DomainAccumulator    Domain = "accumulator"
+)
+
+func (d Domain) Valid() bool {
+	switch d {
+	case DomainLifecycleState, DomainAuthoredField, DomainBookkeeping, DomainGate, DomainAccumulator:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidateDomainPath(domain Domain, path string) error {
+	if !domain.Valid() {
+		return ErrInvalidMutationLogWriter(fmt.Sprintf("mutation domain %q is invalid", domain))
+	}
+	path = strings.TrimSpace(path)
+	if domain == DomainLifecycleState {
+		if path != "" {
+			return ErrInvalidMutationLogWriter("lifecycle_state mutation path must be empty")
+		}
+		return nil
+	}
+	if path == "" {
+		return ErrInvalidMutationLogWriter(fmt.Sprintf("%s mutation path is required", domain))
+	}
+	return nil
 }
 
 type Writer struct {
@@ -34,17 +71,19 @@ type Writer struct {
 type EntityStateProjection struct {
 	CurrentState string
 	Fields       map[string]any
+	Bookkeeping  map[string]any
 	Gates        map[string]any
 	Accumulator  map[string]any
 }
 
 type ProjectionMutation struct {
-	Field    string
+	Domain   Domain
+	Path     string
 	NewValue any
 }
 
 func AuthorActivityDraft(ctx context.Context, runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
-	if strings.TrimSpace(rec.Field) != "current_state" {
+	if rec.Domain != DomainLifecycleState {
 		return runtimeauthoractivity.Draft{}, false, nil
 	}
 	runID = strings.TrimSpace(runID)
@@ -104,7 +143,7 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 	if strings.TrimSpace(before.CurrentState) != strings.TrimSpace(after.CurrentState) {
 		records = append(records, Record{
 			EntityID:    entityID,
-			Field:       "current_state",
+			Domain:      DomainLifecycleState,
 			OldValue:    stringOrNil(before.CurrentState),
 			NewValue:    stringOrNil(after.CurrentState),
 			WriterType:  writerType,
@@ -112,17 +151,22 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 			HandlerStep: handlerStep,
 		})
 	}
-	fieldRecords, err := diffMapRecords(entityID, "", before.Fields, after.Fields, writerType, writerID, handlerStep)
+	fieldRecords, err := diffMapRecords(entityID, DomainAuthoredField, before.Fields, after.Fields, writerType, writerID, handlerStep)
 	if err != nil {
 		return nil, err
 	}
 	records = append(records, fieldRecords...)
-	gateRecords, err := diffMapRecords(entityID, "gates.", before.Gates, after.Gates, writerType, writerID, handlerStep)
+	bookkeepingRecords, err := diffMapRecords(entityID, DomainBookkeeping, before.Bookkeeping, after.Bookkeeping, writerType, writerID, handlerStep)
+	if err != nil {
+		return nil, err
+	}
+	records = append(records, bookkeepingRecords...)
+	gateRecords, err := diffMapRecords(entityID, DomainGate, before.Gates, after.Gates, writerType, writerID, handlerStep)
 	if err != nil {
 		return nil, err
 	}
 	records = append(records, gateRecords...)
-	accRecords, err := diffMapRecords(entityID, "accumulator.", before.Accumulator, after.Accumulator, writerType, writerID, handlerStep)
+	accRecords, err := diffMapRecords(entityID, DomainAccumulator, before.Accumulator, after.Accumulator, writerType, writerID, handlerStep)
 	if err != nil {
 		return nil, err
 	}
@@ -133,43 +177,47 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 func ReconstructEntityStateProjection(records []ProjectionMutation) (EntityStateProjection, error) {
 	state := EntityStateProjection{
 		Fields:      map[string]any{},
+		Bookkeeping: map[string]any{},
 		Gates:       map[string]any{},
 		Accumulator: map[string]any{},
 	}
 	for _, rec := range records {
-		if err := ApplyEntityStateProjectionMutation(&state, rec.Field, rec.NewValue); err != nil {
+		if err := ApplyEntityStateProjectionMutation(&state, rec.Domain, rec.Path, rec.NewValue); err != nil {
 			return EntityStateProjection{}, err
 		}
 	}
 	return state, nil
 }
 
-func ApplyEntityStateProjectionMutation(state *EntityStateProjection, field string, value any) error {
+func ApplyEntityStateProjectionMutation(state *EntityStateProjection, domain Domain, path string, value any) error {
 	if state == nil {
 		return ErrInvalidMutationLogWriter("projection state is required")
 	}
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return ErrInvalidMutationLogWriter("mutation field is required")
+	path = strings.TrimSpace(path)
+	if err := ValidateDomainPath(domain, path); err != nil {
+		return err
 	}
-	switch {
-	case field == "current_state":
+	switch domain {
+	case DomainLifecycleState:
 		next, ok := value.(string)
 		if !ok {
-			return ErrInvalidMutationLogWriter("current_state mutation value must be a string")
+			return ErrInvalidMutationLogWriter("lifecycle_state mutation value must be a string")
 		}
 		state.CurrentState = strings.TrimSpace(next)
 		return nil
-	case strings.HasPrefix(field, "gates."):
-		return applyProjectionMapValue(state.ensureGates(), strings.TrimPrefix(field, "gates."), value, "gates")
-	case strings.HasPrefix(field, "accumulator."):
-		return applyProjectionMapValue(state.ensureAccumulator(), strings.TrimPrefix(field, "accumulator."), value, "accumulator")
-	default:
-		return applyProjectionMapValue(state.ensureFields(), field, value, "fields")
+	case DomainAuthoredField:
+		return applyProjectionMapValue(state.ensureFields(), path, value, "authored_field")
+	case DomainBookkeeping:
+		return applyProjectionMapValue(state.ensureBookkeeping(), path, value, "bookkeeping")
+	case DomainGate:
+		return applyProjectionMapValue(state.ensureGates(), path, value, "gate")
+	case DomainAccumulator:
+		return applyProjectionMapValue(state.ensureAccumulator(), path, value, "accumulator")
 	}
+	return ErrInvalidMutationLogWriter(fmt.Sprintf("mutation domain %q is invalid", domain))
 }
 
-func diffMapRecords(entityID, prefix string, before, after map[string]any, writerType, writerID, handlerStep string) ([]Record, error) {
+func diffMapRecords(entityID string, domain Domain, before, after map[string]any, writerType, writerID, handlerStep string) ([]Record, error) {
 	keys := make([]string, 0, len(before)+len(after))
 	seen := map[string]struct{}{}
 	for key := range before {
@@ -214,7 +262,8 @@ func diffMapRecords(entityID, prefix string, before, after map[string]any, write
 		}
 		records = append(records, Record{
 			EntityID:    entityID,
-			Field:       strings.TrimSpace(prefix + key),
+			Domain:      domain,
+			Path:        key,
 			OldValue:    oldValue,
 			NewValue:    newValue,
 			WriterType:  writerType,
@@ -250,6 +299,13 @@ func (p *EntityStateProjection) ensureFields() map[string]any {
 		p.Fields = map[string]any{}
 	}
 	return p.Fields
+}
+
+func (p *EntityStateProjection) ensureBookkeeping() map[string]any {
+	if p.Bookkeeping == nil {
+		p.Bookkeeping = map[string]any{}
+	}
+	return p.Bookkeeping
 }
 
 func (p *EntityStateProjection) ensureGates() map[string]any {

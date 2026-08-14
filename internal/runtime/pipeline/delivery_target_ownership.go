@@ -892,7 +892,8 @@ func prepareStampedSelectOrCreateState(source semanticview.Source, flowID string
 	}
 	state.EntityID = route.EntityID
 	state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
-	state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
+	state.Metadata = workflowCreateEntityFields(source, flowID)
+	state.Control = workflowStateControlFromIdentity(instance)
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}

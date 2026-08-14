@@ -270,10 +270,8 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 	instance.ParentRoute = templateInstanceLifecycleParentRoute(evt, plan)
 	instance.ParentEntityID = instance.ParentRoute.EntityID
 	config := templateInstanceLifecycleKeyMap(keyMaterial)
-	metadata := templateInstanceLifecycleKeyMap(keyMaterial)
-	metadata["entity_type"] = strings.TrimSpace(instanceContract.PrimaryEntity.EntityType)
-	metadata["instance_kind"] = "template"
-	metadata["last_source_event"] = strings.TrimSpace(evt.ID())
+	fields := templateInstanceLifecycleKeyMap(keyMaterial)
+	bookkeeping := map[string]any{"last_source_event": strings.TrimSpace(evt.ID())}
 	config["template_instance_key"] = plan.ReceiverKeyDigest(keyMaterial)
 	config["template_instance_source_event"] = strings.TrimSpace(evt.ID())
 	decision := TemplateInstanceLifecycleDecision{
@@ -290,7 +288,8 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 		ContractBundle: o.source,
 		Instance:       instance,
 		Config:         config,
-		Metadata:       metadata,
+		Fields:         fields,
+		Bookkeeping:    bookkeeping,
 		TriggerEvent:   evt,
 	}, decision, 0
 }

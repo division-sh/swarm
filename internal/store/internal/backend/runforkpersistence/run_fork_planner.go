@@ -187,10 +187,11 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 	seen := map[string]struct{}{}
 	for _, fact := range snapshot.EntityMutations {
 		entityID := strings.TrimSpace(fact.EntityID)
-		field := strings.TrimSpace(fact.Field)
+		domain := mutationlog.Domain(strings.TrimSpace(fact.Domain))
+		path := strings.TrimSpace(fact.Path)
 		var value any
 		if err := json.Unmarshal(fact.NewValue, &value); err != nil {
-			return nil, fmt.Errorf("decode fork entity mutation %s/%s: %w", entityID, field, err)
+			return nil, fmt.Errorf("decode fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
 		}
 		if _, ok := seen[entityID]; !ok {
 			seen[entityID] = struct{}{}
@@ -198,7 +199,8 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 		}
 		grouped[entityID] = append(grouped[entityID], timedProjectionMutation{
 			ProjectionMutation: mutationlog.ProjectionMutation{
-				Field:    field,
+				Domain:   domain,
+				Path:     path,
 				NewValue: value,
 			},
 			CreatedAt: fact.CreatedAt,
@@ -212,7 +214,7 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 		var enteredStateAt *time.Time
 		for _, mutation := range mutations {
 			projectionMutations = append(projectionMutations, mutation.ProjectionMutation)
-			if strings.TrimSpace(mutation.Field) == "current_state" {
+			if mutation.Domain == mutationlog.DomainLifecycleState {
 				tm := mutation.CreatedAt
 				enteredStateAt = &tm
 			}
@@ -226,6 +228,7 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 			CurrentState:   projection.CurrentState,
 			EnteredStateAt: enteredStateAt,
 			Fields:         projection.Fields,
+			Bookkeeping:    projection.Bookkeeping,
 			Gates:          projection.Gates,
 			Accumulator:    projection.Accumulator,
 		})

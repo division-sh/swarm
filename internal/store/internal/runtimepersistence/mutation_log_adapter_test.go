@@ -64,7 +64,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(tc.contextHash), runID)
 			ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 			err = insertMutationLogPrivateAdapter(ctx, selected, runtimemutationlog.Record{
-				EntityID: uuid.NewString(), Field: "current_state", NewValue: "active",
+				EntityID: uuid.NewString(), Domain: runtimemutationlog.DomainLifecycleState, NewValue: "active",
 				WriterType: "system_node", WriterID: "review",
 			})
 			if tc.want == "" {

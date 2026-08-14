@@ -382,7 +382,7 @@ rows:
     proof_refs:
       - {kind: go_test, name: TestActivateFlowInstancePersistsFullParentRouteMetadata}
       - {kind: go_test, name: TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata}
-      - {kind: go_test, name: TestApplyEngineStateMutationRejectsAuthoredParentRouteInsertion}
+      - {kind: go_test, name: TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames}
 
   - id: empire_auto_emit_run_id
     category: runtime_lifecycle

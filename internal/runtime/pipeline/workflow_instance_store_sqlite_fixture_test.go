@@ -70,6 +70,10 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		if err != nil {
 			return err
 		}
+		bookkeepingJSON, err := json.Marshal(projection.Bookkeeping)
+		if err != nil {
+			return err
+		}
 		gatesJSON, err := json.Marshal(projection.GatesAny())
 		if err != nil {
 			return err
@@ -102,12 +106,12 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 			if _, err := tx.ExecContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, slug, name,
-					current_state, gates, fields, accumulator, revision,
+					current_state, gates, fields, bookkeeping, accumulator, revision,
 					entered_state_at, created_at, updated_at
 				)
-				VALUES (?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, 1, ?, ?, ?)
+				VALUES (?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
 			`, runID, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name,
-				instance.CurrentState, jsonOrDefault(gatesJSON, "{}"), jsonOrDefault(fieldsJSON, "{}"), jsonOrDefault(accumulatorState, "{}"),
+				instance.CurrentState, jsonOrDefault(gatesJSON, "{}"), jsonOrDefault(fieldsJSON, "{}"), jsonOrDefault(bookkeepingJSON, "{}"), jsonOrDefault(accumulatorState, "{}"),
 				instance.EnteredStageAt.UTC(), now, now); err != nil {
 				return err
 			}
@@ -127,10 +131,10 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 			if _, err := tx.ExecContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, slug, name,
-					current_state, gates, fields, accumulator, revision,
+					current_state, gates, fields, bookkeeping, accumulator, revision,
 					entered_state_at, created_at, updated_at
 				)
-				VALUES (?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, 1, ?, ?, ?)
+				VALUES (?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
 				ON CONFLICT(run_id, entity_id) DO UPDATE SET
 					flow_instance = excluded.flow_instance,
 					entity_type = excluded.entity_type,
@@ -139,12 +143,13 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 					current_state = excluded.current_state,
 					gates = excluded.gates,
 					fields = excluded.fields,
+					bookkeeping = excluded.bookkeeping,
 					accumulator = excluded.accumulator,
 					revision = entity_state.revision + 1,
 					entered_state_at = excluded.entered_state_at,
 					updated_at = excluded.updated_at
 			`, runID, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name,
-				instance.CurrentState, jsonOrDefault(gatesJSON, "{}"), jsonOrDefault(fieldsJSON, "{}"), jsonOrDefault(accumulatorState, "{}"),
+				instance.CurrentState, jsonOrDefault(gatesJSON, "{}"), jsonOrDefault(fieldsJSON, "{}"), jsonOrDefault(bookkeepingJSON, "{}"), jsonOrDefault(accumulatorState, "{}"),
 				instance.EnteredStageAt.UTC(), instance.CreatedAt.UTC(), now); err != nil {
 				return err
 			}
@@ -152,6 +157,7 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		afterProjection := runtimemutationlog.EntityStateProjection{
 			CurrentState: strings.TrimSpace(instance.CurrentState),
 			Fields:       projection.Fields,
+			Bookkeeping:  projection.Bookkeeping,
 			Gates:        projection.GatesAny(),
 			Accumulator:  projection.Accumulator,
 		}
@@ -200,12 +206,12 @@ func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx conte
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
 	var currentState sql.NullString
-	var fieldsRaw, gatesRaw, accRaw any
+	var fieldsRaw, bookkeepingRaw, gatesRaw, accRaw any
 	err := tx.QueryRowContext(ctx, `
-		SELECT current_state, COALESCE(fields, '{}'), COALESCE(gates, '{}'), COALESCE(accumulator, '{}')
+		SELECT current_state, COALESCE(fields, '{}'), COALESCE(bookkeeping, '{}'), COALESCE(gates, '{}'), COALESCE(accumulator, '{}')
 		FROM entity_state
 		WHERE run_id = ? AND entity_id = ?
-	`, runID, entityID).Scan(&currentState, &fieldsRaw, &gatesRaw, &accRaw)
+	`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accRaw)
 	if err == sql.ErrNoRows {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
@@ -213,6 +219,10 @@ func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx conte
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", sqliteWorkflowJSONBytes(fieldsRaw))
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	bookkeeping, err := decodeWorkflowInstanceJSONMap("entity_state.bookkeeping", sqliteWorkflowJSONBytes(bookkeepingRaw))
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
@@ -227,6 +237,7 @@ func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx conte
 	return runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState.String),
 		Fields:       fields,
+		Bookkeeping:  bookkeeping,
 		Gates:        workflowBoolGatesAsMap(gates),
 		Accumulator:  accumulator,
 	}, nil
@@ -282,6 +293,7 @@ func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	adjusted := runtimemutationlog.EntityStateProjection{
 		CurrentState: before.CurrentState,
 		Fields:       cloneStringAnyMap(before.Fields),
+		Bookkeeping:  cloneStringAnyMap(before.Bookkeeping),
 		Gates:        cloneStringAnyMap(before.Gates),
 		Accumulator:  cloneStringAnyMap(before.Accumulator),
 	}
@@ -300,7 +312,8 @@ func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 		}
 		if err := insertSQLiteEntityMutationRecord(ctx, tx, runID, runtimemutationlog.Record{
 			EntityID:    entityID,
-			Field:       field,
+			Domain:      runtimemutationlog.DomainAuthoredField,
+			Path:        field,
 			OldValue:    oldValueOrNil(oldValue, hadOld),
 			NewValue:    declared,
 			WriterType:  "platform",
@@ -323,13 +336,17 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation log DB is required")
 	}
 	entityID := strings.TrimSpace(rec.EntityID)
-	field := strings.TrimSpace(rec.Field)
+	domain := rec.Domain
+	path := strings.TrimSpace(rec.Path)
 	writerType := strings.TrimSpace(rec.WriterType)
 	writerID := strings.TrimSpace(rec.WriterID)
-	if entityID == "" || field == "" || writerType == "" || writerID == "" {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
+	if entityID == "" || writerType == "" || writerID == "" {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, writer_type, and writer_id are required")
 	}
-	if field == "current_state" {
+	if err := runtimemutationlog.ValidateDomainPath(domain, path); err != nil {
+		return err
+	}
+	if domain == runtimemutationlog.DomainLifecycleState {
 		if err := authoractivityfixture.Require(ctx); err != nil {
 			return runtimemutationlog.ErrInvalidMutationLogWriter(err.Error())
 		}
@@ -352,14 +369,14 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 	occurredAt := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_mutations (
-				mutation_id, run_id, entity_id, field, old_value, new_value,
+				mutation_id, run_id, entity_id, domain, path, old_value, new_value,
 				caused_by_event, writer_type, writer_id, handler_step, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?)
-	`, mutationID, runID, entityID, field, string(oldValue), string(newValue), causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?)
+	`, mutationID, runID, entityID, domain, path, string(oldValue), string(newValue), causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
 		return err
 	}
-	if field != "current_state" {
+	if domain != runtimemutationlog.DomainLifecycleState {
 		return nil
 	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
