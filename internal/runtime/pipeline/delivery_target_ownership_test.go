@@ -368,7 +368,7 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 		{name: "platform entity state", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.current_state == "active"`}}},
 		{name: "platform entity gate", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.gates.ready`}}},
 		{name: "nested rule fan out", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.items"}}}}},
-		{name: "nested rule activity", handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"owner": runtimecontracts.CELExpression("entity.owner")}}}}}},
+		{name: "nested rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"owner": runtimecontracts.CELExpression("entity.owner")}}}}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -470,6 +470,18 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 				Queries: []runtimecontracts.QuerySpec{{Source: "entity.items"}},
 			}},
+		},
+		{
+			name: "on complete activity input",
+			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"owner": runtimecontracts.CELExpression("entity.owner")}},
+			}}},
+		},
+		{
+			name: "on complete action input",
+			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				Action: runtimecontracts.ActionSpec{ID: "create_flow_instance", InstanceIDFrom: "entity.owner"},
+			}}},
 		},
 	}
 

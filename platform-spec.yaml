@@ -10828,7 +10828,9 @@ flow_model:
         also create no writer or lifecycle availability; none of these
         declarations creates executable reader, writer, or coordinator demand. For filter, reduce, and count,
         `items_from` is the executable source when present and `source` is only
-        its fallback; a shadowed `source` creates no demand. Join derivation and join validation
+        its fallback; a shadowed `source` creates no demand. Unsupported
+        `on_complete` action and activity fields are never selected and create
+        no executable reader or coordinator demand. Join derivation and join validation
         consume the same scoped node records, which preserve exact
         project/flow ownership from the loader or the exported FlowTree,
         including blank-ID package roots; root Nodes are authoritative only when
