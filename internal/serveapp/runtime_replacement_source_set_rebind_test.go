@@ -25,21 +25,29 @@ import (
 	"github.com/google/uuid"
 )
 
-type failOnceSourceSetGrantCapability struct {
+type failSourceSetGrantCapability struct {
 	runtimestartupownership.ProcessCapability
-	revision string
-	attempts atomic.Int32
-	failed   atomic.Bool
+	revision          string
+	attempts          atomic.Int32
+	failuresRemaining atomic.Int32
+	failures          atomic.Int32
 }
 
-func (c *failOnceSourceSetGrantCapability) IssueGenerationGrant(
+func (c *failSourceSetGrantCapability) IssueGenerationGrant(
 	ctx context.Context,
 	req runtimestartupownership.GrantRequest,
 ) (runtimestartupownership.GenerationGrant, error) {
 	if req.SourceSetRevision == c.revision {
 		c.attempts.Add(1)
-		if c.failed.CompareAndSwap(false, true) {
-			return nil, errors.New("injected predecessor survivor grant failure")
+		for {
+			remaining := c.failuresRemaining.Load()
+			if remaining <= 0 {
+				break
+			}
+			if c.failuresRemaining.CompareAndSwap(remaining, remaining-1) {
+				c.failures.Add(1)
+				return nil, errors.New("injected predecessor survivor grant failure")
+			}
 		}
 	}
 	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
@@ -118,10 +126,13 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			candidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-candidate", "gamma-worker"), runtimeContextTestHash("c"))
 			restoredCandidate := newRuntime(candidate.root, candidate.hash)
 			failedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-failed-candidate", "delta-worker"), runtimeContextTestHash("d"))
-			blockedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-blocked-candidate", "epsilon-worker"), runtimeContextTestHash("e"))
 			commitFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-commit-failure-candidate", "zeta-worker"), runtimeContextTestHash("f"))
 			commitFailureRestored := newRuntime(candidate.root, candidate.hash)
-			blockedRestored := newRuntime(candidate.root, candidate.hash)
+			retainedFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-retained-failure-candidate", "eta-worker"), runtimeContextTestHash("0"))
+			retainedFailureRestored := newRuntime(candidate.root, candidate.hash)
+			recoveryCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-recovery-candidate", "theta-worker"), runtimeContextTestHash("1"))
+			blockedCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-blocked-candidate", "iota-worker"), runtimeContextTestHash("2"))
+			blockedRestored := newRuntime(recoveryCandidate.root, recoveryCandidate.hash)
 
 			coordinates := []runtimeagenttopology.SourceCoordinate{
 				{BundleHash: predecessor.hash, BundleSource: "ephemeral"},
@@ -292,10 +303,11 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatalf("restored topology = gamma:%v beta:%v", restoredGamma, restoredBeta)
 			}
 
-			failingCapability := &failOnceSourceSetGrantCapability{
+			failingCapability := &failSourceSetGrantCapability{
 				ProcessCapability: capability,
 				revision:          currentPlan.Revision,
 			}
+			failingCapability.failuresRemaining.Store(1)
 			supervisor.SetProcessCapability(failingCapability)
 			var commitFailureHooks atomic.Int32
 			supervisor.SetRuntimePublishedHook(func(context.Context) error {
@@ -314,8 +326,8 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if commitFailureErr == nil || !strings.Contains(commitFailureErr.Error(), "public ingress reconciliation failed before survivor commit retry") {
 				t.Fatalf("survivor commit retry replacement error = %v", commitFailureErr)
 			}
-			if !failingCapability.failed.Load() || failingCapability.attempts.Load() < 2 {
-				t.Fatalf("predecessor survivor grant attempts = %d failed:%v, want failed commit plus immediate adopted retry", failingCapability.attempts.Load(), failingCapability.failed.Load())
+			if failingCapability.failures.Load() != 1 || failingCapability.attempts.Load() < 2 {
+				t.Fatalf("predecessor survivor grant attempts = %d failures:%d, want failed commit plus immediate adopted retry", failingCapability.attempts.Load(), failingCapability.failures.Load())
 			}
 			if commitFailureHooks.Load() != 2 {
 				t.Fatalf("survivor commit retry publication hooks = %d, want failed candidate plus restored predecessor", commitFailureHooks.Load())
@@ -333,6 +345,82 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
 			if err != nil || evidence.SourceSetRevision != retriedPlan.Revision {
 				t.Fatalf("survivor authority after adopted predecessor retry = %#v head:%s err:%v", evidence, retriedPlan.Revision, err)
+			}
+
+			retainedCapability := &failSourceSetGrantCapability{
+				ProcessCapability: capability,
+				revision:          currentPlan.Revision,
+			}
+			retainedCapability.failuresRemaining.Store(2)
+			supervisor.SetProcessCapability(retainedCapability)
+			var retainedFailureHooks atomic.Int32
+			supervisor.SetRuntimePublishedHook(func(context.Context) error {
+				if retainedFailureHooks.Add(1) == 1 {
+					return errors.New("public ingress reconciliation failed before retained survivor recovery")
+				}
+				return nil
+			})
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
+				return retainedFailureRestored.rt, retainedFailureRestored.rt.WorkOccurrence(), nil
+			}
+			_, retainedFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, retainedFailureCandidate.root, retainedFailureCandidate.source, retainedFailureCandidate.bundle, retainedFailureCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: retainedFailureCandidate.hash}, retainedFailureCandidate.rt, retainedFailureCandidate.rt.WorkOccurrence(),
+			)
+			if retainedFailureErr == nil || !strings.Contains(retainedFailureErr.Error(), "recover pending predecessor source-set survivors") {
+				t.Fatalf("retained survivor recovery error = %v, want second adopted commit failure", retainedFailureErr)
+			}
+			if retainedCapability.failures.Load() != 2 || retainedCapability.attempts.Load() != 2 {
+				t.Fatalf("retained predecessor survivor grant attempts = %d failures:%d, want two failed commits", retainedCapability.attempts.Load(), retainedCapability.failures.Load())
+			}
+			if retainedFailureHooks.Load() != 1 {
+				t.Fatalf("retained survivor publication hooks = %d, want failed candidate only", retainedFailureHooks.Load())
+			}
+			if ready.Load() {
+				t.Fatal("supervisor became ready while predecessor survivor recovery remained pending")
+			}
+			supervisor.mu.RLock()
+			pendingRollback := supervisor.pendingSourceSetRollback
+			supervisor.mu.RUnlock()
+			if pendingRollback == nil {
+				t.Fatal("failed predecessor survivor recovery was not retained")
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+				t.Fatalf("survivor after repeated predecessor commit failure = %#v, want retained source-set fence", lookup)
+			}
+
+			recoveryStatus, recoveryErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
+			)
+			if recoveryErr != nil {
+				t.Fatalf("replacement boundary did not finalize retained predecessor recovery: %v", recoveryErr)
+			}
+			if !recoveryStatus.Loaded || !ready.Load() || supervisor.CurrentRuntime() != recoveryCandidate.rt {
+				t.Fatalf("replacement after retained recovery = status:%#v ready:%v runtime:%p want:%p", recoveryStatus, ready.Load(), supervisor.CurrentRuntime(), recoveryCandidate.rt)
+			}
+			if retainedCapability.attempts.Load() < 3 || retainedCapability.failures.Load() != 2 {
+				t.Fatalf("finalized predecessor survivor grant attempts = %d failures:%d, want retained third attempt", retainedCapability.attempts.Load(), retainedCapability.failures.Load())
+			}
+			if retainedFailureHooks.Load() != 3 {
+				t.Fatalf("retained recovery publication hooks = %d, want failed candidate, restored predecessor, and replacement", retainedFailureHooks.Load())
+			}
+			supervisor.mu.RLock()
+			pendingRollback = supervisor.pendingSourceSetRollback
+			supervisor.mu.RUnlock()
+			if pendingRollback != nil {
+				t.Fatal("retained predecessor survivor recovery was not cleared")
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("survivor after retained recovery replacement = %#v, want loaded", lookup)
+			}
+			recoveredPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists {
+				t.Fatalf("load source set after retained recovery replacement: exists=%v err=%v", exists, err)
+			}
+			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
+			if err != nil || evidence.SourceSetRevision != recoveredPlan.Revision {
+				t.Fatalf("survivor authority after retained recovery replacement = %#v head:%s err:%v", evidence, recoveredPlan.Revision, err)
 			}
 
 			survivorManager := survivor.rt.Manager
@@ -361,18 +449,18 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatal("supervisor became ready after predecessor survivor preparation failure")
 			}
 			blockedPlan, exists, err := capability.CurrentSourceSet(ctx)
-			if err != nil || !exists || blockedPlan.Revision == currentPlan.Revision {
-				t.Fatalf("source set after predecessor preparation failure = exists:%v revision:%s previous:%s err:%v", exists, blockedPlan.Revision, currentPlan.Revision, err)
+			if err != nil || !exists || blockedPlan.Revision == recoveredPlan.Revision {
+				t.Fatalf("source set after predecessor preparation failure = exists:%v revision:%s previous:%s err:%v", exists, blockedPlan.Revision, recoveredPlan.Revision, err)
 			}
 			var blockedSource, restoredSource bool
 			for _, source := range blockedPlan.Sources {
 				blockedSource = blockedSource || source.BundleHash == blockedCandidate.hash
-				restoredSource = restoredSource || source.BundleHash == candidate.hash
+				restoredSource = restoredSource || source.BundleHash == recoveryCandidate.hash
 			}
 			if !blockedSource || restoredSource {
 				t.Fatalf("source set changed before predecessor survivor preparation: %#v", blockedPlan.Sources)
 			}
-			if lookup := contexts.LookupBundleHashStatus(candidate.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
+			if lookup := contexts.LookupBundleHashStatus(recoveryCandidate.hash); lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
 				t.Fatalf("predecessor after failed survivor preparation = %#v, want unavailable replacing", lookup)
 			}
 			if lookup := contexts.LookupBundleHashStatus(blockedCandidate.hash); lookup.Found {
