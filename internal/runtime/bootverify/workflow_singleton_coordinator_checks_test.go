@@ -436,6 +436,52 @@ coordinator-node:
 	}
 }
 
+func TestBuildSingletonCoordinatorDemandProjection_TreatsLoopFromAsStageIdentifier(t *testing.T) {
+	bundle := loadSingletonCoordinatorFixtureBundle(t, `
+name: coordinator
+mode: singleton
+stages:
+  entity.verticals: {initial: true}
+  review: {}
+  exhausted: {terminal: true}
+loops:
+  revision:
+    revision_field: revision_id
+    max_attempts: 2
+    escape:
+      advances_to: exhausted
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`, `
+coordinator_state:
+  verticals:
+    type: map[text]VerticalState
+    initial: {}
+`, "", `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  subscribes_to: [job.received]
+  event_handlers:
+    job.received:
+      loop: {start: revision, from: entity.verticals}
+      advances_to: review
+`)
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if findingContainsAll(report.Errors(), "expression_field_reference_validation", "loop.from", "entity.verticals") {
+		t.Fatalf("literal loop source stage failed expression validation: %#v", report.Errors())
+	}
+
+	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
+		if demand.Target == "entity.verticals" || demand.Field == "verticals" {
+			t.Fatalf("literal loop source stage created singleton coordinator demand: %#v", demand)
+		}
+	}
+}
+
 func TestRun_IntrinsicJoinDemandRejectsStatelessAndAcceptsStatefulCoordinator(t *testing.T) {
 	const schema = `
 name: coordinator
