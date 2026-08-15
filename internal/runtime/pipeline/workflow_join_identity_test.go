@@ -13,7 +13,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -92,10 +91,8 @@ func newExactWorkflowJoinHarness(
 	harness.pc = harness.newCoordinator()
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: harness.path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-		CurrentState: initialState, EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
-			"entity_id": harness.entityID, "flow_path": harness.path, "instance_id": harness.route.InstanceID,
-			"expected": append([]any{}, members...),
-		},
+		EntityID: harness.entityID, CurrentState: initialState, EnteredStageAt: time.Now().UTC(),
+		Fields: map[string]any{"expected": append([]any{}, members...)},
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +155,7 @@ func (h *exactWorkflowJoinHarness) instance() WorkflowInstance {
 func (h *exactWorkflowJoinHarness) activation() joinruntime.Activation {
 	h.t.Helper()
 	instance := h.instance()
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -187,7 +184,9 @@ func exactJoinSemanticStateEqual(left, right WorkflowInstance) bool {
 	return left.CurrentState == right.CurrentState &&
 		reflect.DeepEqual(left.TransitionHistory, right.TransitionHistory) &&
 		reflect.DeepEqual(left.StateBuckets, right.StateBuckets) &&
-		reflect.DeepEqual(left.Metadata, right.Metadata)
+		reflect.DeepEqual(left.Fields, right.Fields) &&
+		reflect.DeepEqual(left.Bookkeeping, right.Bookkeeping) &&
+		reflect.DeepEqual(left.Gates, right.Gates)
 }
 
 type exactJoinScope struct {
@@ -220,9 +219,8 @@ func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.
 	entityID := FlowInstanceEntityID(path)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
-			"entity_id": entityID, "flow_path": path, "instance_id": route.InstanceID, "expected": []any{"a", "b"},
-		},
+		EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(),
+		Fields: map[string]any{"expected": []any{"a", "b"}},
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +233,7 @@ func exactJoinActivationForScope(t *testing.T, pc *PipelineCoordinator, store *w
 	if err != nil || !found {
 		t.Fatalf("load exact join scope %s: found=%v err=%v", scope.path, found, err)
 	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,9 +466,8 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				entityID := FlowInstanceEntityID(path)
 				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-					CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
-						"entity_id": entityID, "flow_path": path, "instance_id": route.InstanceID, "expected": []any{"a", "b"},
-					},
+					EntityID: entityID, CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(),
+					Fields: map[string]any{"expected": []any{"a", "b"}},
 				})); err != nil {
 					t.Fatal(err)
 				}
@@ -490,7 +487,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err != nil || !found {
 					t.Fatalf("load armed instance: found=%v err=%v", found, err)
 				}
-				armedCarrier, err := runtimeengine.StateCarrierFromPersisted(armedInstance.Metadata, armedInstance.StateBuckets)
+				armedCarrier, err := workflowInstanceStateCarrier(armedInstance)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -520,7 +517,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err != nil || !found {
 					t.Fatalf("load closed instance: found=%v err=%v", found, err)
 				}
-				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+				carrier, err := workflowInstanceStateCarrier(instance)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -698,7 +695,7 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 					t.Fatal(err)
 				}
 				instance := h.instance()
-				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+				carrier, err := workflowInstanceStateCarrier(instance)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -735,7 +732,7 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 				}
 
 				instance = h.instance()
-				carrier, err = runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+				carrier, err = workflowInstanceStateCarrier(instance)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -871,7 +868,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 				t.Fatal(err)
 			}
 			instance := h.instance()
-			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			carrier, err := workflowInstanceStateCarrier(instance)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -922,7 +919,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			}
 
 			instance = h.instance()
-			carrier, err = runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			carrier, err = workflowInstanceStateCarrier(instance)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -949,7 +946,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			}
 			h.transition("dispatching", "manual.abort")
 			instance = h.instance()
-			carrier, err = runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+			carrier, err = workflowInstanceStateCarrier(instance)
 			if err != nil {
 				t.Fatal(err)
 			}
