@@ -2351,10 +2351,16 @@ func (e *Executor) mergeActionState(frame *executionFrame, baseline StateSnapsho
 	if e == nil || frame == nil || mutation == nil {
 		return nil
 	}
-	metadata := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	fields := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	for key, value := range mutation.StateCarrier.Fields {
 		if baselineValue, ok := baseline.StateCarrier.Fields[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
-			metadata[key] = value
+			fields[key] = value
+		}
+	}
+	bookkeeping := cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping)
+	for key, value := range mutation.StateCarrier.Bookkeeping {
+		if baselineValue, ok := baseline.StateCarrier.Bookkeeping[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
+			bookkeeping[key] = value
 		}
 	}
 	gates := mapsClone(frame.state.State.StateCarrier.Gates)
@@ -2376,10 +2382,13 @@ func (e *Executor) mergeActionState(frame *executionFrame, baseline StateSnapsho
 			buckets[key] = currentBucket
 		}
 	}
-	frame.state.State.StateCarrier.Fields = metadata
+	frame.state.State.StateCarrier.Fields = fields
+	frame.state.State.StateCarrier.Bookkeeping = bookkeeping
 	frame.state.State.StateCarrier.Gates = gates
 	frame.state.State.StateCarrier.StateBuckets = buckets
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(metadata)
+	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(fields)
+	frame.result.StateMutation.StateCarrier.Bookkeeping = cloneStringAnyMap(bookkeeping)
+	frame.result.StateMutation.StateCarrier.Control = frame.state.State.StateCarrier.Control
 	frame.result.StateMutation.StateCarrier.Gates = gates
 	frame.result.StateMutation.SetStateBuckets(buckets)
 	return nil
@@ -2467,12 +2476,13 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 			}
 		}
 	}
-	if frame.result.StateMutation.StateCarrier.Fields == nil {
-		frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	}
-	if frame.result.StateMutation.StateCarrier.StateBuckets == nil {
-		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
-	}
+	frame.result.StateMutation.StateCarrier = NewStateCarrierWithOwners(
+		frame.state.State.StateCarrier.Fields,
+		frame.state.State.StateCarrier.Bookkeeping,
+		frame.state.State.StateCarrier.Control,
+		frame.state.State.StateCarrier.Gates,
+		frame.state.State.StateCarrier.StateBuckets,
+	)
 	effects := make([]runtimeworkflowlifecycle.Effect, 0, 1)
 	if hasLifecycleEffect {
 		effects = append(effects, lifecycleEffect)

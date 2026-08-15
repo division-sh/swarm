@@ -641,6 +641,9 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
+	if _, err := db.Exec(`UPDATE entity_state SET bookkeeping = '{"private_fact":"must-not-leak"}'::jsonb WHERE entity_id = $1::uuid`, currentID); err != nil {
+		t.Fatalf("inject role-scoped hostile bookkeeping: %v", err)
+	}
 	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
@@ -658,6 +661,13 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"value": map[string]any{"summary": "after", "confidence": 9},
 	}); err != nil {
 		t.Fatalf("save_validation_case_business_brief: %v", err)
+	}
+	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
+	if err != nil {
+		t.Fatalf("read_validation_case with hostile bookkeeping: %v", err)
+	}
+	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
+		t.Fatalf("role-scoped read exposed platform bookkeeping: %#v", whole)
 	}
 	got, err := exec.Execute(currentCtx, "read_validation_case_business_brief", map[string]any{})
 	if err != nil {
@@ -1033,7 +1043,7 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 		ExecutionMode: "live",
 		ID:            "tester",
 		Role:          "operator",
-		Tools:         []string{"create_entity", "get_entity", "query_entities"},
+		Tools:         []string{"create_entity", "get_entity", "query_entities", "search_entities"},
 	})
 	entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "review/inst-1",
@@ -1044,7 +1054,8 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 	})
 	if _, err := db.Exec(`
 		UPDATE entity_state
-		SET fields = jsonb_set(COALESCE(fields, '{}'::jsonb), '{legacy_flag}', 'true'::jsonb, true)
+		SET fields = jsonb_set(COALESCE(fields, '{}'::jsonb), '{legacy_flag}', 'true'::jsonb, true),
+		    bookkeeping = '{"private_fact":"must-not-leak"}'::jsonb
 		WHERE entity_id = $1::uuid
 	`, entityID); err != nil {
 		t.Fatalf("inject legacy field: %v", err)
@@ -1065,6 +1076,23 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 	if _, exists := fields["legacy_flag"]; exists {
 		t.Fatalf("legacy stored field leaked into materialized entity: %#v", fields)
 	}
+	if _, exists := entity["bookkeeping"]; exists {
+		t.Fatalf("platform bookkeeping leaked through get_entity: %#v", entity)
+	}
+	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
+		"flow_instance": "review/inst-1",
+		"limit":         10,
+	})
+	if err != nil {
+		t.Fatalf("search_entities with hostile bookkeeping: %v", err)
+	}
+	searchRows := searchOut.(map[string]any)["results"].([]map[string]any)
+	if len(searchRows) != 1 {
+		t.Fatalf("search rows = %#v", searchRows)
+	}
+	if _, exists := searchRows[0]["bookkeeping"]; exists {
+		t.Fatalf("platform bookkeeping leaked through search_entities: %#v", searchRows[0])
+	}
 
 	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"filter": `status == "open"`,
@@ -1081,6 +1109,21 @@ func TestEntityTools_ReadsIgnoreLegacyUndeclaredStoredFields(t *testing.T) {
 	queryRows, ok := queryResult["results"].([]map[string]any)
 	if !ok || len(queryRows) != 1 {
 		t.Fatalf("unexpected query results: %#v", queryResult["results"])
+	}
+
+	wholeOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `status == "open"`,
+		"limit":  10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities whole rows with hostile bookkeeping: %v", err)
+	}
+	wholeRows := wholeOut.(map[string]any)["results"].([]map[string]any)
+	if len(wholeRows) != 1 {
+		t.Fatalf("whole query rows = %#v", wholeRows)
+	}
+	if _, exists := wholeRows[0]["bookkeeping"]; exists {
+		t.Fatalf("platform bookkeeping leaked through query_entities: %#v", wholeRows[0])
 	}
 }
 

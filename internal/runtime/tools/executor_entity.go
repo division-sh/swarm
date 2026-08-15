@@ -74,21 +74,31 @@ func loadEntityState(ctx context.Context, store EntityPersistence, entityID stri
 }
 
 func materializeEntityStateRow(source semanticview.Source, row map[string]any) (map[string]any, error) {
-	contract, ok := entityruntime.ResolveForEntityRow(source, row)
+	projected := projectAgentEntityStateRow(row)
+	contract, ok := entityruntime.ResolveForEntityRow(source, projected)
 	if !ok {
-		return row, nil
+		return projected, nil
 	}
-	fields := entityRowFieldMap(row)
+	fields := entityRowFieldMap(projected)
 	materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
 	if err != nil {
 		return nil, err
 	}
-	cloned := cloneEntityRows([]map[string]any{row})[0]
-	cloned["fields"] = materialized
-	if strings.TrimSpace(asString(cloned["entity_type"])) == "" {
-		cloned["entity_type"] = contract.EntityType
+	projected["fields"] = materialized
+	if strings.TrimSpace(asString(projected["entity_type"])) == "" {
+		projected["entity_type"] = contract.EntityType
 	}
-	return cloned, nil
+	return projected, nil
+}
+
+func projectAgentEntityStateRow(row map[string]any) map[string]any {
+	projected := make(map[string]any, len(entityStateTopLevelFields))
+	for field := range entityStateTopLevelFields {
+		if value, ok := row[field]; ok {
+			projected[field] = deepCloneJSONValue(value)
+		}
+	}
+	return projected
 }
 
 func materializeEntityStateRows(source semanticview.Source, rows []map[string]any) ([]map[string]any, error) {

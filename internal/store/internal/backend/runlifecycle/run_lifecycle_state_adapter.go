@@ -19,11 +19,12 @@ const runLifecycleActiveStateSQLValues = "'" +
 	string(runtimerunlifecycle.StatePaused) + "'"
 
 type terminalRunMutation struct {
-	RunID            string
-	State            runtimerunlifecycle.State
-	Failure          *runtimefailures.Envelope
-	ContinuedAsRunID string
-	EndedAt          time.Time
+	RunID                         string
+	State                         runtimerunlifecycle.State
+	Failure                       *runtimefailures.Envelope
+	ContinuedAsRunID              string
+	EndedAt                       time.Time
+	IncludeCommittedDecisionCards bool
 }
 
 func terminalRunMutationFromRequest(request runtimerunlifecycle.TerminalRequest) (terminalRunMutation, error) {
@@ -45,6 +46,7 @@ func terminalRunMutationFromForkSource(request runtimerunlifecycle.ForkSourceReq
 	return terminalRunMutation{
 		RunID: request.RunID, State: runtimerunlifecycle.StateForked,
 		ContinuedAsRunID: request.ContinuedAsRunID, EndedAt: request.EndedAt,
+		IncludeCommittedDecisionCards: true,
 	}, nil
 }
 
@@ -333,17 +335,7 @@ func (s *RunLifecyclePostgresOwner) markForkSourceTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	snapshot, disposition, err := s.markRunTerminalStateTx(ctx, tx, story, mutation)
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, request.RunID, "run_"+string(runtimerunlifecycle.StateForked),
-		request.EndedAt.UTC(), true,
-	); err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	return snapshot, disposition, nil
+	return s.markRunTerminalStateTx(ctx, tx, story, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) completeRunTx(
@@ -397,6 +389,11 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
+	if err := s.decisionCards.SupersedeRunTx(
+		ctx, tx, story, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
+	); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	failureJSON, err := marshalRunLifecycleFailure(request.Failure)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -418,11 +415,6 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 		return runtimerunlifecycle.Snapshot{}, "", rowsErr
 	} else if rows != 1 {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle lost locked transition")
-	}
-	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), false,
-	); err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, tx, request.RunID, false)
 	if err != nil {
@@ -484,6 +476,11 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
+	if err := s.decisionCards.SupersedeRunTx(
+		ctx, tx, story, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
+	); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	failureJSON, err := marshalRunLifecycleFailure(request.Failure)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
@@ -505,11 +502,6 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 		return runtimerunlifecycle.Snapshot{}, "", rowsErr
 	} else if rows != 1 {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle lost locked transition")
-	}
-	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), false,
-	); err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	snapshot, err := loadSQLiteRunLifecycleSnapshot(ctx, tx, request.RunID)
 	if err != nil {

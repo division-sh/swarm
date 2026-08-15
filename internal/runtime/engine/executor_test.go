@@ -6210,12 +6210,18 @@ func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 	}, map[string]map[string]any{
 		"bucket": {"in_memory_only": "frame-write"},
 	})
+	baseline.StateCarrier.Bookkeeping = map[string]any{
+		"in_memory_only": "frame-write",
+	}
 	projected := testStateSnapshot("ready", map[string]any{
 		"same":          "unchanged",
 		"action_output": "persisted-output",
 	}, nil, map[string]map[string]any{
 		"bucket": {"action_output": "persisted-output"},
 	})
+	projected.StateCarrier.Bookkeeping = map[string]any{
+		"action_output": "persisted-output",
+	}
 	exec := &Executor{}
 	frame := &executionFrame{
 		ctx: context.Background(),
@@ -6235,6 +6241,12 @@ func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 	}
 	if got := frame.state.State.StateCarrier.Fields["action_output"]; got != "persisted-output" {
 		t.Fatalf("action_output = %#v, want persisted-output", got)
+	}
+	if got := frame.state.State.StateCarrier.Bookkeeping["in_memory_only"]; got != "frame-write" {
+		t.Fatalf("bookkeeping in_memory_only = %#v, want preserved frame-write", got)
+	}
+	if got := frame.state.State.StateCarrier.Bookkeeping["action_output"]; got != "persisted-output" {
+		t.Fatalf("bookkeeping action_output = %#v, want persisted-output", got)
 	}
 	if got := frame.state.State.StateCarrier.StateBuckets["bucket"]["in_memory_only"]; got != "frame-write" {
 		t.Fatalf("bucket in_memory_only = %#v, want preserved frame-write", got)

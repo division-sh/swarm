@@ -85,6 +85,20 @@ accounts:
 			"priority": 3,
 		},
 	})
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
+		UPDATE entity_state
+		SET bookkeeping = '{"private_fact":"must-not-leak"}'
+		WHERE run_id = ? AND entity_id = ?
+	`, entityToolTestRunID, entityID); err != nil {
+		t.Fatalf("inject sqlite hostile bookkeeping: %v", err)
+	}
+	getOut, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("sqlite get_entity: %v", err)
+	}
+	if _, exists := getOut.(map[string]any)["bookkeeping"]; exists {
+		t.Fatalf("sqlite get_entity exposed platform bookkeeping: %#v", getOut)
+	}
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "status",
@@ -104,6 +118,9 @@ accounts:
 	if got := len(searchResult["results"].([]map[string]any)); got != 1 {
 		t.Fatalf("sqlite search result count = %d, want 1", got)
 	}
+	if _, exists := searchResult["results"].([]map[string]any)[0]["bookkeeping"]; exists {
+		t.Fatalf("sqlite search_entities exposed platform bookkeeping: %#v", searchResult)
+	}
 	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"filter": `status == "closed"`,
 		"select": []string{"status"},
@@ -113,6 +130,19 @@ accounts:
 	}
 	if got := len(queryOut.(map[string]any)["results"].([]map[string]any)); got != 1 {
 		t.Fatalf("sqlite query result count = %d, want 1", got)
+	}
+	wholeQueryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter": `status == "closed"`,
+	})
+	if err != nil {
+		t.Fatalf("sqlite whole-row query_entities: %v", err)
+	}
+	wholeRows := wholeQueryOut.(map[string]any)["results"].([]map[string]any)
+	if len(wholeRows) != 1 {
+		t.Fatalf("sqlite whole query results = %#v", wholeRows)
+	}
+	if _, exists := wholeRows[0]["bookkeeping"]; exists {
+		t.Fatalf("sqlite query_entities exposed platform bookkeeping: %#v", wholeRows[0])
 	}
 	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
 		"metric": "sum",
@@ -200,6 +230,13 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed sqlite role-scoped entity: %v", err)
 	}
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
+		UPDATE entity_state
+		SET bookkeeping = '{"private_fact":"must-not-leak"}'
+		WHERE run_id = ? AND entity_id = ?
+	`, entityToolTestRunID, entityID); err != nil {
+		t.Fatalf("inject sqlite role-scoped hostile bookkeeping: %v", err)
+	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:       sqliteStore,
 		WorkflowSource:    semanticview.Wrap(bundle),
@@ -226,6 +263,13 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		"value": map[string]any{"summary": "after", "confidence": 9},
 	}); err != nil {
 		t.Fatalf("sqlite save_validation_case_business_brief: %v", err)
+	}
+	whole, err := exec.Execute(currentCtx, "read_validation_case", map[string]any{})
+	if err != nil {
+		t.Fatalf("sqlite read_validation_case with hostile bookkeeping: %v", err)
+	}
+	if _, exists := whole.(map[string]any)["bookkeeping"]; exists {
+		t.Fatalf("sqlite role-scoped read exposed platform bookkeeping: %#v", whole)
 	}
 	got, err := exec.Execute(currentCtx, "read_validation_case_business_brief", map[string]any{})
 	if err != nil {

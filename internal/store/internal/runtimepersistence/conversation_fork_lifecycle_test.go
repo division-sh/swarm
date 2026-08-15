@@ -226,9 +226,17 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 				($1::uuid, $2::uuid, 'bookkeeping', 'activation', NULL, '"standing"'::jsonb, 'platform', 'test', $5),
 				($1::uuid, $2::uuid, 'gate', 'review', NULL, 'true'::jsonb, 'platform', 'test', $5),
 				($1::uuid, $2::uuid, 'accumulator', 'total', NULL, '7'::jsonb, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'authored_field', 'removed', NULL, '"temporary"'::jsonb, 'platform', 'test', $6),
+				($1::uuid, $2::uuid, 'authored_field', 'removed', '"temporary"'::jsonb, NULL, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'accumulator', 'removed', NULL, '9'::jsonb, 'platform', 'test', $6),
+				($1::uuid, $2::uuid, 'accumulator', 'removed', '9'::jsonb, NULL, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'bookkeeping', 'removed', NULL, '"temporary"'::jsonb, 'platform', 'test', $6),
+				($1::uuid, $2::uuid, 'bookkeeping', 'removed', '"temporary"'::jsonb, NULL, 'platform', 'test', $5),
+				($1::uuid, $2::uuid, 'gate', 'removed', NULL, 'true'::jsonb, 'platform', 'test', $6),
+				($1::uuid, $2::uuid, 'gate', 'removed', 'true'::jsonb, NULL, 'platform', 'test', $5),
 				($1::uuid, $2::uuid, 'lifecycle_state', '', '"draft"'::jsonb, '"after"'::jsonb, 'platform', 'test', $4),
 				($1::uuid, $2::uuid, 'authored_field', 'name', '"Before"'::jsonb, '"After"'::jsonb, 'platform', 'test', $4)
-	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(10*time.Second), source.turn1At.Add(-20*time.Second)); err != nil {
+	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(10*time.Second), source.turn1At.Add(-20*time.Second), source.turn1At.Add(-25*time.Second)); err != nil {
 		t.Fatalf("seed source entity mutations: %v", err)
 	}
 	var mutationsBefore int
@@ -333,6 +341,18 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	}
 	if entity.Bookkeeping["activation"] != "standing" || entity.Gates["review"] != true || entity.Accumulator["total"] != float64(7) {
 		t.Fatalf("conversation fork typed semantic domains = bookkeeping:%#v gates:%#v accumulator:%#v", entity.Bookkeeping, entity.Gates, entity.Accumulator)
+	}
+	if _, ok := entity.Fields["removed"]; ok {
+		t.Fatalf("deleted authored field survived fork reconstruction: %#v", entity.Fields)
+	}
+	if _, ok := entity.Accumulator["removed"]; ok {
+		t.Fatalf("deleted accumulator field survived fork reconstruction: %#v", entity.Accumulator)
+	}
+	if _, ok := entity.Bookkeeping["removed"]; ok {
+		t.Fatalf("deleted bookkeeping fact survived fork reconstruction: %#v", entity.Bookkeeping)
+	}
+	if _, ok := entity.Gates["removed"]; ok {
+		t.Fatalf("deleted gate survived fork reconstruction: %#v", entity.Gates)
 	}
 	readCall := requireConversationForkToolCall(t, result.Turn.ToolCalls, "fork_snapshot_read_entities")
 	readArgs := conversationForkToolCallMap(t, readCall.Arguments)

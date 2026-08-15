@@ -77,7 +77,13 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	workflowAppendEvidence(evidence, bucketID, payload)
 	buckets["evidence"] = evidence
 	mutation := &runtimeengine.StateMutation{
-		StateCarrier:     runtimeengine.NewStateCarrier(metadata, execCtx.Request.State.StateCarrier.Gates, buckets),
+		StateCarrier: runtimeengine.NewStateCarrierWithOwners(
+			metadata,
+			execCtx.Request.State.StateCarrier.Bookkeeping,
+			execCtx.Request.State.StateCarrier.Control,
+			execCtx.Request.State.StateCarrier.Gates,
+			buckets,
+		),
 		TriggerEventID:   strings.TrimSpace(event.ID()),
 		TriggerEventType: strings.TrimSpace(string(event.Type())),
 		TriggeredAt:      event.CreatedAt(),

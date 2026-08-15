@@ -13,12 +13,84 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores(t *testing.T) {
+	setups := []struct {
+		name string
+		open func(*testing.T) (*workflowInstanceStore, context.Context)
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) (*workflowInstanceStore, context.Context) {
+				db := newSQLiteWorkflowInstanceStoreTestDB(t)
+				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) (*workflowInstanceStore, context.Context) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				store := newPostgresWorkflowInstanceStoreForTest(db)
+				return store, testWorkflowStoreRunContext(t, store)
+			},
+		},
+	}
+	for _, setup := range setups {
+		setup := setup
+		t.Run(setup.name, func(t *testing.T) {
+			store, ctx := setup.open(t)
+			entityID := uuid.NewString()
+			route := testWorkflowInstanceRoute("bookkeeping/root")
+			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: "root", StorageRef: "bookkeeping/root", EntityID: entityID,
+				WorkflowName: "bookkeeping", WorkflowVersion: "v1", CurrentState: "ready",
+				EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"status": "before"},
+				Bookkeeping: map[string]any{}, Gates: map[string]bool{"ready": true},
+				StateBuckets: map[string]any{"join": map[string]any{"count": float64(1)}},
+			})
+			if err := store.create(ctx, instance); err != nil {
+				t.Fatalf("create workflow instance: %v", err)
+			}
+			update := `UPDATE entity_state SET bookkeeping = '{"platform_fact":"preserve"}' WHERE flow_instance = ?`
+			if setup.name == "postgres" {
+				update = `UPDATE entity_state SET bookkeeping = '{"platform_fact":"preserve"}'::jsonb WHERE flow_instance = $1`
+			}
+			if _, err := store.testDB().ExecContext(ctx, update, route.InstancePath); err != nil {
+				t.Fatalf("seed existing platform bookkeeping: %v", err)
+			}
+			created, ok, err := store.Load(ctx, route)
+			if err != nil || !ok || created.Bookkeeping["platform_fact"] != "preserve" {
+				t.Fatalf("seeded workflow bookkeeping = %#v found=%v err=%v", created.Bookkeeping, ok, err)
+			}
+			if err := store.mutateE(ctx, route, func(current *WorkflowInstance) error {
+				carrier, err := runtimeengine.StateCarrierFromPersisted(
+					map[string]any{"status": "after"}, current.Bookkeeping, current.Gates, current.StateBuckets,
+				)
+				if err != nil {
+					return err
+				}
+				return applyEngineStateMutation(current, runtimeengine.StateMutation{StateCarrier: carrier}, nil, nil, "")
+			}); err != nil {
+				t.Fatalf("commit workflow engine mutation: %v", err)
+			}
+			loaded, ok, err := store.Load(ctx, route)
+			if err != nil || !ok {
+				t.Fatalf("reload workflow instance found=%v err=%v", ok, err)
+			}
+			if loaded.Fields["status"] != "after" || loaded.Bookkeeping["platform_fact"] != "preserve" || !loaded.Gates["ready"] {
+				t.Fatalf("reloaded workflow state = %#v", loaded)
+			}
+		})
+	}
+}
 
 func TestWorkflowInstanceStoreMutateE_RollsBackCallbackFailure(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)

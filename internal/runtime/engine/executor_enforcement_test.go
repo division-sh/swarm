@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -41,8 +42,10 @@ func (r *persistentStateRepo) LoadState(context.Context, StateAddress) (StateSna
 	return StateSnapshot{
 		EntityID:     r.snapshot.EntityID,
 		CurrentState: r.snapshot.CurrentState,
-		StateCarrier: NewStateCarrier(
+		StateCarrier: NewStateCarrierWithOwners(
 			r.snapshot.StateCarrier.Fields,
+			r.snapshot.StateCarrier.Bookkeeping,
+			r.snapshot.StateCarrier.Control,
 			r.snapshot.StateCarrier.Gates,
 			r.snapshot.StateCarrier.StateBuckets,
 		),
@@ -67,6 +70,8 @@ func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress,
 	if mutation.StateCarrier.Fields != nil {
 		r.snapshot.StateCarrier.Fields = cloneStringAnyMap(mutation.StateCarrier.Fields)
 	}
+	r.snapshot.StateCarrier.Bookkeeping = cloneStringAnyMap(mutation.StateCarrier.Bookkeeping)
+	r.snapshot.StateCarrier.Control = mutation.StateCarrier.Control
 	if mutation.StateCarrier.StateBuckets != nil {
 		r.snapshot.StateCarrier.StateBuckets = cloneStateBucketSet(mutation.StateCarrier.StateBuckets)
 	}
@@ -86,6 +91,122 @@ type terminalGuardRunner struct{}
 
 func (terminalGuardRunner) EvaluateGuard(context.Context, identity.GuardKey, runtimeregistry.GuardInstruction, ExecutionContext) (bool, bool, error) {
 	return false, true, nil
+}
+
+func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
+	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
+	cases := []struct {
+		name            string
+		mutation        StateMutation
+		prepare         func(*StateSnapshot)
+		wantAuthored    any
+		wantApproved    bool
+		wantCurrent     string
+		wantBucketCount any
+		wantActionFact  any
+	}{
+		{
+			name: "authored_only", mutation: StateMutation{StateCarrier: NewStateCarrier(map[string]any{"authored": "changed"}, nil, nil)},
+			prepare: func(state *StateSnapshot) { state.StateCarrier.Fields["authored"] = "changed" }, wantAuthored: "changed",
+		},
+		{
+			name: "gate_only", mutation: StateMutation{StateCarrier: NewStateCarrier(nil, map[string]bool{"approved": true}, nil)},
+			prepare: func(state *StateSnapshot) { state.StateCarrier.Gates["approved"] = true }, wantAuthored: "value", wantApproved: true,
+		},
+		{
+			name: "lifecycle_only", mutation: StateMutation{NextState: "done"},
+			prepare: func(state *StateSnapshot) { state.CurrentState = "done" }, wantAuthored: "value", wantCurrent: "done",
+		},
+		{
+			name: "clear", mutation: StateMutation{StateCarrier: NewStateCarrier(map[string]any{}, nil, nil)},
+			prepare: func(state *StateSnapshot) { state.StateCarrier.Fields = map[string]any{} },
+		},
+		{
+			name: "fan_out_or_accumulation", mutation: StateMutation{StateCarrier: NewStateCarrier(nil, nil, map[string]map[string]any{"join": {"count": 3}})},
+			prepare: func(state *StateSnapshot) { state.StateCarrier.StateBuckets["join"]["count"] = 3 }, wantAuthored: "value", wantBucketCount: 3,
+		},
+		{
+			name: "action",
+			mutation: StateMutation{StateCarrier: NewStateCarrierWithOwners(
+				map[string]any{"action": "result"}, map[string]any{"action": "recorded"}, StateControl{}, nil, nil,
+			)},
+			prepare: func(state *StateSnapshot) {
+				state.StateCarrier.Fields["action"] = "result"
+				state.StateCarrier.Bookkeeping["action"] = "recorded"
+			},
+			wantAuthored: "value", wantActionFact: "recorded",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &persistentStateRepo{}
+			exec := &Executor{deps: RuntimeDependencies{MutationOwner: stubMutationOwner{state: repo}}}
+			state := StateSnapshot{
+				EntityID: entityID, CurrentState: "ready",
+				StateCarrier: NewStateCarrierWithOwners(
+					map[string]any{"authored": "value"},
+					map[string]any{"platform": "fact"},
+					StateControl{FlowPath: "root"},
+					map[string]bool{"ready": true},
+					map[string]map[string]any{"join": {"count": 2}},
+				),
+			}
+			tc.prepare(&state)
+			repo.snapshot = state
+			repo.found = true
+			frame := executionFrame{
+				ctx: context.Background(),
+				req: ExecutionRequest{
+					EntityID: entityID,
+					Event: eventtest.RunCreatingRootIngress(
+						"11111111-1111-1111-1111-111111111112", "state.changed", "", "", nil, 0,
+						"11111111-1111-1111-1111-111111111113", "", events.EventEnvelope{}, time.Now().UTC(),
+					),
+				},
+				state:  ExecutionState{State: state},
+				result: ExecutionResult{StateMutation: tc.mutation},
+			}
+			if _, err := exec.persist(context.Background(), frame); err != nil {
+				t.Fatalf("persist: %v", err)
+			}
+			loaded, found, err := repo.LoadState(context.Background(), StateAddress{EntityID: entityID})
+			if err != nil || !found {
+				t.Fatalf("LoadState found=%v err=%v", found, err)
+			}
+			if got := loaded.StateCarrier.Bookkeeping["platform"]; got != "fact" {
+				t.Fatalf("bookkeeping = %#v, want platform fact", loaded.StateCarrier.Bookkeeping)
+			}
+			if got := loaded.StateCarrier.Fields["authored"]; !reflect.DeepEqual(got, tc.wantAuthored) {
+				t.Fatalf("authored field = %#v, want %#v", got, tc.wantAuthored)
+			}
+			if loaded.StateCarrier.Control.FlowPath != "root" || !loaded.StateCarrier.Gates["ready"] {
+				t.Fatalf("committed control/gates = %#v", loaded.StateCarrier)
+			}
+			if loaded.StateCarrier.Gates["approved"] != tc.wantApproved {
+				t.Fatalf("approved gate = %v, want %v", loaded.StateCarrier.Gates["approved"], tc.wantApproved)
+			}
+			wantCurrent := tc.wantCurrent
+			if wantCurrent == "" {
+				wantCurrent = "ready"
+			}
+			if loaded.CurrentState != wantCurrent {
+				t.Fatalf("current state = %q, want %q", loaded.CurrentState, wantCurrent)
+			}
+			wantBucketCount := tc.wantBucketCount
+			if wantBucketCount == nil {
+				wantBucketCount = 2
+			}
+			if !reflect.DeepEqual(loaded.StateCarrier.StateBuckets["join"]["count"], wantBucketCount) {
+				t.Fatalf("join count = %#v, want %#v", loaded.StateCarrier.StateBuckets["join"]["count"], wantBucketCount)
+			}
+			if !reflect.DeepEqual(loaded.StateCarrier.Bookkeeping["action"], tc.wantActionFact) {
+				t.Fatalf("action bookkeeping = %#v, want %#v", loaded.StateCarrier.Bookkeeping["action"], tc.wantActionFact)
+			}
+			if tc.name == "action" && loaded.StateCarrier.Fields["action"] != "result" {
+				t.Fatalf("committed carrier = %#v", loaded.StateCarrier)
+			}
+		})
+	}
 }
 
 func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *testing.T) {

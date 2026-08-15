@@ -738,8 +738,10 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 			return nil, fmt.Errorf("scan conversation fork entity mutation: %w", err)
 		}
 		var value any
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return nil, fmt.Errorf("decode conversation fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return nil, fmt.Errorf("decode conversation fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
+			}
 		}
 		entityID = strings.TrimSpace(entityID)
 		if _, ok := seen[entityID]; !ok {
