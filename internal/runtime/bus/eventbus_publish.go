@@ -818,9 +818,25 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	if err != nil {
 		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
 	}
+	targetFailureInput := evt
+	resolved, changed, err := resolveRoutePlanEventProjection(evt, plan)
+	if err != nil {
+		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
+	}
+	if changed {
+		admitted, err = events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			return PreparedPublish{}, errors.Join(fmt.Errorf("admit selected-fork event route facts: %w", err), publicationClaim.Release(preparedCtx))
+		}
+		evt = admitted.Event()
+	}
+	if err := validateRoutePlanEventProjection(evt, plan); err != nil {
+		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
+	}
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: plan,
-		publicationClaim: publicationClaim,
+		publicationClaim:   publicationClaim,
+		targetFailureInput: targetFailureInput,
 	}
 	prepared.settlement, err = eb.routeSettlementForPlan(evt, plan, events.EventWriteSelectedForkPublication)
 	if err != nil {

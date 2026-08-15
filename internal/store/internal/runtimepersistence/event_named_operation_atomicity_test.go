@@ -49,6 +49,17 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 					},
 				},
 				{
+					name: "target_projection",
+					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
+						req.Commit.DeliveryRoutes = []events.DeliveryRoute{{
+							Recipient: events.MustNodeDeliveryRecipient("worker"),
+							Target: events.MustExistingEntityTarget(events.RouteIdentity{
+								FlowID: "worker", FlowInstance: "worker/one", EntityID: uuid.NewString(),
+							}),
+						}}
+					},
+				},
+				{
 					name: "replay_scope",
 					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						req.Commit.ReplayScope = "unsupported"

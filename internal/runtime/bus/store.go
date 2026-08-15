@@ -131,7 +131,7 @@ func (c PublicationCommand) Validate() error {
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
-	if err := c.Commit.ValidateRouteSettlement(); err != nil {
+	if err := c.Commit.ValidatePreparedEvent(); err != nil {
 		return err
 	}
 	if c.Commit.RouteSettlement.WriteClass() != events.EventWriteNormalPublication {
@@ -305,7 +305,7 @@ func (p preparedEventTargetProjection) Validate(event events.Event) error {
 			return fmt.Errorf("one targeted durable route requires singular target %#v", p.target)
 		}
 	case preparedEventTargetProjectionSet:
-		if !envelope.Target.Empty() || !sameRouteIdentitySet(envelope.TargetSet, p.targets) {
+		if !envelope.Target.Empty() || !sameRouteIdentities(envelope.TargetSet, p.targets) {
 			return fmt.Errorf("mixed or multiple targeted durable routes require exact target_set %#v", p.targets)
 		}
 	default:
@@ -343,24 +343,6 @@ func ResolvePreparedPublishEventTargetProjection(
 	return resolved, !sameEventTargetProjection(event, resolved), nil
 }
 
-func sameRouteIdentitySet(left, right []events.RouteIdentity) bool {
-	left = uniqueRouteIdentities(left)
-	right = uniqueRouteIdentities(right)
-	if len(left) != len(right) {
-		return false
-	}
-	want := make(map[events.RouteIdentity]struct{}, len(right))
-	for _, route := range right {
-		want[route.Normalized()] = struct{}{}
-	}
-	for _, route := range left {
-		if _, ok := want[route.Normalized()]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 type EventAppendOutcome uint8
 
 const (
@@ -385,8 +367,12 @@ type CommitPublishRequest struct {
 	ReplyClaims       []runtimereplycontext.ClaimCommand
 }
 
-func (r CommitPublishRequest) ValidateRouteSettlement() error {
-	return r.RouteSettlement.Validate(r.DeliveryRoutes)
+func (r CommitPublishRequest) ValidatePreparedEvent() error {
+	return (PreparedPublishEvent{
+		Event:          r.Event,
+		Settlement:     r.RouteSettlement,
+		DeliveryRoutes: r.DeliveryRoutes,
+	}).Validate()
 }
 
 type CommitSelectedForkEventRequest struct {
