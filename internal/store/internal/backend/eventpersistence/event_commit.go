@@ -76,7 +76,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	if err := req.ValidateRouteSettlement(); err != nil {
+	if err := req.ValidatePreparedEvent(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
 	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event, req.RouteSettlement)
@@ -151,7 +151,7 @@ func validateSelectedForkCommitRequest(req runtimebus.CommitSelectedForkEventReq
 	if req.Commit.RouteSettlement.WriteClass() != events.EventWriteSelectedForkPublication {
 		return fmt.Errorf("selected-fork operation requires selected-fork publication settlement")
 	}
-	if err := req.Commit.ValidateRouteSettlement(); err != nil {
+	if err := req.Commit.ValidatePreparedEvent(); err != nil {
 		return err
 	}
 	event := req.Commit.Event.Event()

@@ -11,7 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -260,6 +262,7 @@ func TestPreparedPublishEventRejectsTargetProjectionShapeDrift(t *testing.T) {
 		{name: "mixed_encoded_as_singular", routes: []events.DeliveryRoute{firstRoute, targetless}, envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, first)},
 		{name: "multiple_wrong_cardinality", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first})},
 		{name: "multiple_wrong_identity", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first, foreign})},
+		{name: "multiple_noncanonical_order", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{second, first})},
 		{name: "multiple_encoded_as_singular", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, first)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -269,6 +272,66 @@ func TestPreparedPublishEventRejectsTargetProjectionShapeDrift(t *testing.T) {
 				t.Fatalf("hostile projection error = %v, want aggregate target projection rejection", err)
 			}
 		})
+	}
+}
+
+func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
+	const eventType = "worker/work.started"
+	target := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/inst-1", EntityID: uuid.NewString(),
+	}.Normalized()
+	targetHandler := runtimepipeline.MustDeliveryTargetHandler("worker", "target-node")
+	routeTable := newRouteTable(nil)
+	routeTable.eventPath[eventType] = struct{}{}
+	routeTable.routes[eventType] = []Subscriber{{
+		Recipient:      events.MustNodeDeliveryRecipient("target-node"),
+		Path:           "worker",
+		LocalizedEvent: "work.started",
+		handlerFlowID:  "worker",
+		handlerNodeID:  "target-node",
+		targetHandler:  targetHandler,
+		routeSource:    subscriberRouteSourceSubscription,
+	}}
+	store := newTargetRouteMemoryStore()
+	store.setTargetOwnerRoutes(target)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
+			"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+		)),
+		RouteTable: routeTable,
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+			return []DeliveryRouteBlueprint{{
+				Recipient: events.MustNodeDeliveryRecipient("target-node"),
+				Target:    target,
+				Handler:   targetHandler.ForEvent("work.started"),
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("create selected-fork EventBus: %v", err)
+	}
+	lineage, err := events.NewSelectedForkLineage(
+		uuid.NewString(), uuid.NewString(), uuid.NewString(), "selection:target-projection", "fork-task", "live",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := eventtest.SelectedForkReplay(
+		uuid.NewString(), eventType, eventtest.Producer(events.EventProducerNode, "selected-node"), "fork-task",
+		[]byte(`{"selected":true}`), 0, lineage, events.EventEnvelope{}, time.Now().UTC(),
+	)
+	prepared, err := eb.PrepareSelectedForkPublish(testAuthorActivityContext(context.Background()), evt)
+	if err != nil {
+		t.Fatalf("prepare selected-fork publication: %v", err)
+	}
+	t.Cleanup(func() { _ = eb.AbandonPreparedPublish(context.Background(), prepared) })
+
+	request := prepared.CommitRequest()
+	if got := request.Event.Event().TargetRoute().Normalized(); got != target {
+		t.Fatalf("selected-fork event target = %#v, want %#v", got, target)
+	}
+	if err := request.ValidatePreparedEvent(); err != nil {
+		t.Fatalf("validate selected-fork prepared aggregate: %v", err)
 	}
 }
 
