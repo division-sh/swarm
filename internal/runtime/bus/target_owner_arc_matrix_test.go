@@ -155,7 +155,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 }
 
 func TestNestedChildToRootReceiverUsesSelectedOwner(t *testing.T) {
-	source := connectRoutePlanSingletonProducerRootReceiverSource()
+	source := connectRoutePlanSingletonProducerRootReceiverSource(t)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("root-return source does not expose its semantic bundle")
@@ -519,57 +519,21 @@ func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemai
 		pingEvent = "work.ping"
 		pongEvent = "work.pong"
 	)
-	childHandler := existingOwnerHandlerFixture()
-	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
-		id: "boomerang", path: "left/worker", mode: runtimecontracts.FlowModeSingleton,
-		inputs:  []runtimecontracts.FlowInputEventPin{{Name: "ping", Event: pingEvent}},
-		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "pong", Event: pongEvent}},
-		nodes: map[string]runtimecontracts.SystemNodeContract{
-			"boomerang-worker": {
-				ID: "boomerang-worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{pingEvent: childHandler},
-			},
-		},
-	}}, []runtimecontracts.FlowPackageConnect{
-		{From: ".ping", To: "boomerang.ping"},
-		{From: "boomerang.pong", To: ".pong"},
-	})
-	bundle.Semantics.Name = "boomerang-root"
-	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
-		Inputs: runtimecontracts.FlowInputPins{
-			Events: []string{pongEvent}, EventPins: []runtimecontracts.FlowInputEventPin{{Name: "pong", Event: pongEvent}},
-		},
-		Outputs: runtimecontracts.FlowOutputPins{
-			Events: []string{pingEvent}, EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "ping", Event: pingEvent}},
-		},
-	}}
-	rootHandler := existingOwnerHandlerFixture()
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"root-boomerang": {
-			ID: "root-boomerang", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{pongEvent: rootHandler},
-		},
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{pingEvent: {}, pongEvent: {}}
-	bundle.FlowTree.Root.Schema = *bundle.RootSchema
-	bundle.FlowTree.Root.Nodes = bundle.Nodes
-	bundle.Semantics.FlowInputs[""] = []string{pongEvent}
-	bundle.Semantics.FlowOutputs[""] = []string{pingEvent}
-	bundle.Semantics.FlowInputEventPins[""] = append([]runtimecontracts.FlowInputEventPin(nil), bundle.RootSchema.Pins.Inputs.EventPins...)
-	bundle.Semantics.FlowOutputEventPins[""] = append([]runtimecontracts.FlowOutputEventPin(nil), bundle.RootSchema.Pins.Outputs.EventPins...)
-	bundle.Semantics.NodeHandlers["root-boomerang"] = map[string]runtimecontracts.SystemNodeEventHandler{pongEvent: rootHandler}
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyRootSingletonBoomerang(t))
 
 	runID := uuid.NewString()
 	rootRoute := events.RouteIdentity{
-		FlowID: bundle.Semantics.Name, FlowInstance: runID, EntityID: eventtest.UUID("boomerang-root-owner"),
+		FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("boomerang-root-owner"),
 	}.Normalized()
 	childRoute := events.RouteIdentity{
-		FlowID: "boomerang", FlowInstance: "left/worker", EntityID: eventtest.UUID("boomerang-child-owner"),
+		FlowID: "boomerang", FlowInstance: "boomerang", EntityID: eventtest.UUID("boomerang-child-owner"),
 	}.Normalized()
 	if rootRoute.EntityID == childRoute.EntityID {
 		t.Fatal("boomerang root and child owners must remain distinguishable")
 	}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(rootRoute, childRoute)
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("create boomerang EventBus: %v", err)
 	}
@@ -604,7 +568,7 @@ func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemai
 
 	pongID := uuid.NewString()
 	pong := eventtest.ChildForProducerWithRoutingSource(
-		pongID, events.EventType("left/worker/"+pongEvent), eventtest.Producer(events.EventProducerNode, "boomerang-worker"), "",
+		pongID, events.EventType("boomerang/"+pongEvent), eventtest.Producer(events.EventProducerNode, "boomerang-worker"), "",
 		[]byte(`{"turn":1}`), 0, events.EventLineage{RunID: runID, ParentEventID: firstID, ExecutionMode: executionmode.Live},
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, childRoute), childSource, time.Now().UTC(),
 	)

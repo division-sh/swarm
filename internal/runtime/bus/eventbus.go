@@ -113,7 +113,6 @@ type DurableDependencies struct {
 	ActiveAgents          ActiveAgentDescriptorLister
 	ActiveFlows           ActiveFlowInstanceDescriptorLister
 	TargetOwners          SelectedRunTargetOwnerLister
-	DeliveryTargets       EventDeliveryTargetReader
 	DeliveryRouteSets     EventDeliveryRouteSetReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
@@ -134,7 +133,6 @@ func (d DurableDependencies) validate() error {
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
 		{"selected-run target owner reader", d.TargetOwners},
-		{"delivery target reader", d.DeliveryTargets},
 		{"delivery route reader", d.DeliveryRouteSets},
 		{"target failure recorder", d.TargetFailureRecorder},
 		{"run origin reader", d.RunOrigins},

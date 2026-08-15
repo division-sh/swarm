@@ -160,7 +160,6 @@ type conformanceDurableEventBusStore interface {
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
-	runtimebus.EventDeliveryTargetReader
 	runtimebus.EventDeliveryRouteSetReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -177,7 +176,7 @@ func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStor
 	return runtimebus.DurableDependencies{
 		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, DeliveryTargets: store, DeliveryRouteSets: store,
+		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, DeliveryRouteSets: store,
 		TargetFailureRecorder: store, RunOrigins: store,
 	}
 }

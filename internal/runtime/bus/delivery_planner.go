@@ -58,7 +58,26 @@ type deliveryRouteResolver struct {
 }
 
 func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
+	return r.resolve(evt, nil)
+}
+
+func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event) deliveryRoutingResult {
+	return r.resolve(evt, func(subscriber Subscriber) bool {
+		return subscriber.routeSource != subscriberRouteSourceConnectRoutePlan
+	})
+}
+
+func (r deliveryRouteResolver) resolve(evt events.Event, include func(Subscriber) bool) deliveryRoutingResult {
 	routedRecipients := r.resolveRoutedSubscribers(evt)
+	if include != nil {
+		filtered := make([]Subscriber, 0, len(routedRecipients))
+		for _, subscriber := range routedRecipients {
+			if include(subscriber) {
+				filtered = append(filtered, subscriber)
+			}
+		}
+		routedRecipients = filtered
+	}
 	subscribedRecipients := make([]deliveryRecipientCandidate, 0, 8)
 	for _, eventKey := range routedEventKeysForPlan(evt) {
 		subscribedRecipients = append(subscribedRecipients, r.resolveSubscribedRecipients(eventKey)...)
@@ -91,7 +110,6 @@ type deliveryRecipientManifest struct {
 	LiveRecipients      []deliveryRecipientCandidate
 	Recipients          []string
 	PersistedRecipients []string
-	DeliveryTargets     map[string]events.RouteIdentity
 	DeliveryRoutes      []events.DeliveryRoute
 	TargetFailure       runtimepinrouting.TargetFailure
 }
@@ -119,13 +137,11 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 	if !ok {
 		liveRecipients := normalizeDeliveryRecipientCandidates(recipients)
 		persistedRecipients := persistedDeliveryRecipientCandidates(liveRecipients)
-		targets := deliveryTargetsForManifest(evt, deliveryRecipientIDs(persistedRecipients), nil)
 		manifest := deliveryRecipientManifest{
 			LiveRecipients:      liveRecipients,
 			Recipients:          deliveryRecipientIDs(recipients),
 			PersistedRecipients: deliveryRecipientIDs(persistedRecipients),
-			DeliveryTargets:     targets,
-			DeliveryRoutes:      agentDeliveryRoutesForCandidates(persistedRecipients, targets),
+			DeliveryRoutes:      agentDeliveryRoutesForCandidates(evt, persistedRecipients),
 		}
 		if targetDescriptorsOK && len(eventDeliveryTargetRoutes(evt)) > 0 && len(manifest.Recipients) == 0 {
 			manifest.TargetFailure = targetDeliveryFailure(evt, targetDescriptors)
@@ -214,20 +230,56 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 		if err != nil {
 			return RoutePlan{}, err
 		}
-		return projection.resolveRoutePlan(routePlanFromConnectRouteDispatch(evt, connectPlan))
+		routePlan = routePlanFromConnectRouteDispatch(evt, connectPlan)
+		if routePlan.AuthorityState == RoutePlanAuthorityCanonicalFailedClosed {
+			localPlan, localErr := p.planIndependentPubsubBranch(ctx, evt, true)
+			if localErr != nil {
+				return RoutePlan{}, localErr
+			}
+			if len(localPlan.LiveRecipients) > 0 || len(localPlan.DeliveryIntents) > 0 {
+				return RoutePlan{}, mixedPubsubConnectCompositionFailure{failure: routePlan.TargetFailure}
+			}
+			return projection.resolveRoutePlan(routePlan)
+		}
+		localPlan, err := p.planIndependentPubsubBranch(ctx, evt, true)
+		if err != nil {
+			return RoutePlan{}, err
+		}
+		routePlan = composeIndependentPubsubBranch(routePlan, localPlan)
+		return projection.resolveRoutePlan(routePlan)
 	}
-	routing := p.routeResolver.Resolve(evt)
-	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, routing.Recipients)
+	routePlan, err = p.planIndependentPubsubBranch(ctx, evt, false)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	routePlan = routePlanFromManifest(evt, manifest, routeIntentProducerAgentPolicy)
 	routePlan.ConnectEvaluation = connectPlan.Evaluation
-	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients, p.rootFlowID)...)
-	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt, routing.RoutedRecipients)...)
+	return projection.resolveRoutePlan(routePlan)
+}
+
+type mixedPubsubConnectCompositionFailure struct {
+	failure runtimepinrouting.TargetFailure
+}
+
+func (e mixedPubsubConnectCompositionFailure) Error() string {
+	return fmt.Sprintf("mixed pubsub/connect routing failed closed: %s", e.failure.Code())
+}
+
+func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt events.Event, clearConnectProjection bool) (RoutePlan, error) {
+	localEvent, err := independentPubsubEvent(evt, clearConnectProjection)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	routing := p.routeResolver.ResolveIndependentPubsub(localEvent)
+	manifest, err := p.recipientPolicy.Evaluate(ctx, localEvent, routing.Recipients)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	routePlan := routePlanFromManifest(localEvent, manifest, routeIntentProducerAgentPolicy)
+	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients, p.rootFlowID)...)
+	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, evt, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(localEvent, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
@@ -236,7 +288,37 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	routePlan.RoutedRecipients = routing.RoutedRecipients
 	routePlan.SubscribedRecipients = routing.SubscribedRecipients
 	routePlan.ExtraDetail = extraDetail
-	return projection.resolveRoutePlan(routePlan)
+	return routePlan.Normalized(), nil
+}
+
+func independentPubsubEvent(evt events.Event, clearConnectProjection bool) (events.Event, error) {
+	if !clearConnectProjection || len(eventDeliveryTargetRoutes(evt)) == 0 {
+		return evt, nil
+	}
+	localEvent, err := events.ResolveEnvelope(evt, events.EnvelopeForBroadcast(evt.NormalizedEnvelope()))
+	if err != nil {
+		return evt, fmt.Errorf("resolve independent pubsub source projection: %w", err)
+	}
+	return localEvent, nil
+}
+
+func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan {
+	connectPlan = connectPlan.Normalized()
+	localPlan = localPlan.Normalized()
+	if connectPlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || connectPlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		return connectPlan
+	}
+	connectPlan.AddLiveRecipients(localPlan.LiveRecipients...)
+	connectPlan.AddDeliveryIntents(localPlan.DeliveryIntents...)
+	connectPlan.RoutedRecipients = dedupeSubscribers(append(connectPlan.RoutedRecipients, localPlan.RoutedRecipients...))
+	connectPlan.SubscribedRecipients = uniqueStrings(append(connectPlan.SubscribedRecipients, localPlan.SubscribedRecipients...))
+	if len(localPlan.ExtraDetail) > 0 {
+		if connectPlan.ExtraDetail == nil {
+			connectPlan.ExtraDetail = map[string]any{}
+		}
+		connectPlan.ExtraDetail["independent_pubsub_branch"] = cloneAnyMap(localPlan.ExtraDetail)
+	}
+	return connectPlan.Normalized()
 }
 
 func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) RoutePlan {
@@ -321,11 +403,7 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	ctx = withSelectedRunTargetOwnerProjection(ctx, projection)
-	manifest, err := p.recipientPolicy.Evaluate(ctx, evt, candidates)
-	if err != nil {
-		return RoutePlan{}, err
-	}
+	manifest := exactDirectRecipientManifest(candidates, projection.agents, projection.agentsAvailable)
 	available := make(map[agentidentity.Identity]struct{}, len(manifest.LiveRecipients))
 	for _, recipient := range manifest.LiveRecipients {
 		if !recipient.AgentIdentity.IsZero() {
@@ -350,6 +428,34 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 		"requested_route_count": len(routes),
 	}
 	return projection.resolveRoutePlan(routePlan)
+}
+
+// Exact direct delivery consumes caller-supplied routes as its sole route and
+// target authority. Current policy may prove the exact agent identity exists,
+// but must not reinterpret a committed target through current descriptors.
+func exactDirectRecipientManifest(
+	recipients []deliveryRecipientCandidate,
+	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
+	descriptorsAvailable bool,
+) deliveryRecipientManifest {
+	recipients = normalizeDeliveryRecipientCandidates(recipients)
+	if descriptorsAvailable {
+		available := make([]deliveryRecipientCandidate, 0, len(recipients))
+		for _, recipient := range recipients {
+			identity := recipient.AgentIdentity.Normalize()
+			if descriptor, ok := descriptors[identity]; !ok || descriptor.Normalized().Identity != identity {
+				continue
+			}
+			available = append(available, recipient)
+		}
+		recipients = normalizeDeliveryRecipientCandidates(available)
+	}
+	persisted := persistedDeliveryRecipientCandidates(recipients)
+	return deliveryRecipientManifest{
+		LiveRecipients:      recipients,
+		Recipients:          deliveryRecipientIDs(recipients),
+		PersistedRecipients: deliveryRecipientIDs(persisted),
+	}
 }
 
 func rejectAmbiguousDirectManifest(recipients []string, liveRecipients []deliveryRecipientCandidate) error {
@@ -578,9 +684,6 @@ func concreteFlowInstanceEventKey(evt events.Event) string {
 }
 
 func exactEventFlowInstance(evt events.Event) string {
-	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
-		return flowInstance
-	}
 	source := evt.RoutingSource()
 	switch source.Kind() {
 	case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance, events.RoutingSourceFlowOwnedControl:
@@ -671,7 +774,6 @@ func filterDeliveryRecipientCandidates(
 	allowed := make([]string, 0, len(recipients))
 	allowedCandidates := make([]deliveryRecipientCandidate, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
-	deliveryTargets := map[string]events.RouteIdentity{}
 	deliveryRoutes := make([]events.DeliveryRoute, 0, len(recipients))
 	for _, recipient := range recipients {
 		if !recipient.PersistAsDelivery {
@@ -697,9 +799,6 @@ func filterDeliveryRecipientCandidates(
 			allowed = append(allowed, scoped.ID)
 			allowedCandidates = append(allowedCandidates, scoped)
 			persisted = append(persisted, scoped.ID)
-			if !target.Empty() {
-				deliveryTargets[scoped.ID] = target
-			}
 			owner := events.DeliveryTargetOwnership{}
 			if !target.Empty() {
 				owner = events.MustExistingEntityTarget(target)
@@ -716,7 +815,6 @@ func filterDeliveryRecipientCandidates(
 		LiveRecipients:      normalizeDeliveryRecipientCandidates(allowedCandidates),
 		Recipients:          uniqueStrings(allowed),
 		PersistedRecipients: persisted,
-		DeliveryTargets:     deliveryTargetsForManifest(evt, persisted, deliveryTargets),
 		DeliveryRoutes:      events.NormalizeDeliveryRoutes(deliveryRoutes),
 	}
 	if len(targets) > 0 && len(manifest.LiveRecipients) == 0 {
@@ -751,19 +849,19 @@ func matchingAgentDescriptors(
 }
 
 func agentDeliveryRoutesForCandidates(
+	evt events.Event,
 	recipients []deliveryRecipientCandidate,
-	deliveryTargets map[string]events.RouteIdentity,
 ) []events.DeliveryRoute {
 	recipients = persistedDeliveryRecipientCandidates(recipients)
 	if len(recipients) == 0 {
 		return nil
 	}
 	out := make([]events.DeliveryRoute, 0, len(recipients))
+	target := evt.TargetRoute().Normalized()
 	for _, recipient := range recipients {
 		if err := recipient.AgentIdentity.Validate(); err != nil {
 			continue
 		}
-		target := deliveryTargets[strings.TrimSpace(recipient.ID)]
 		owner := events.DeliveryTargetOwnership{}
 		if !target.Empty() {
 			owner = events.MustExistingEntityTarget(target)
@@ -989,7 +1087,7 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Su
 	}
 	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber) {
+		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber, rootFlowID) {
 			continue
 		}
 		out = append(out, plannedDeliveryRoute{
@@ -1098,11 +1196,14 @@ func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Su
 	return eventType != "" && eventType == matchPattern
 }
 
-func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
+func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber, rootFlowID string) bool {
 	if !subscriber.Recipient.IsNode() {
 		return false
 	}
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {
+		return false
+	}
+	if strings.TrimSpace(subscriber.handlerFlowID) != strings.TrimSpace(rootFlowID) {
 		return false
 	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
@@ -1374,26 +1475,4 @@ func routeMatchesTargetDescriptor(route events.RouteIdentity, descriptor ActiveT
 		matched = true
 	}
 	return matched
-}
-
-func deliveryTargetsForManifest(evt events.Event, recipients []string, existing map[string]events.RouteIdentity) map[string]events.RouteIdentity {
-	out := map[string]events.RouteIdentity{}
-	for recipient, target := range existing {
-		if target = target.Normalized(); !target.Empty() {
-			out[strings.TrimSpace(recipient)] = target
-		}
-	}
-	if singular := evt.TargetRoute(); !singular.Empty() {
-		for _, recipient := range recipients {
-			recipient = strings.TrimSpace(recipient)
-			if recipient == "" {
-				continue
-			}
-			out[recipient] = singular
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

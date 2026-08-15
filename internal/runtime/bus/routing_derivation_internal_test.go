@@ -8,6 +8,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey(t *testing.T) {
@@ -101,6 +104,212 @@ func TestRouteTableResolve_ExactAndWildcardMatchesDeduplicateSameSubscriber(t *t
 		if ids[want] != 1 {
 			t.Fatalf("subscriber %q count = %d in %#v, want 1", want, ids[want], got)
 		}
+	}
+}
+
+func TestRouteTableMixedRolesPreserveFullSubscriberIdentity(t *testing.T) {
+	base := Subscriber{
+		Recipient:      events.MustNodeDeliveryRecipient("shared-node"),
+		Path:           "receiver/instance-a",
+		MatchPattern:   "receiver/instance-a/work.ready",
+		routeSource:    subscriberRouteSourceSubscription,
+		LocalizedEvent: "work.ready",
+		handlerFlowID:  "receiver",
+		handlerNodeID:  "shared-node",
+		targetHandler:  runtimepipeline.MustDeliveryTargetHandler("receiver", "shared-node"),
+	}
+	variants := []Subscriber{base}
+
+	differentSource := base
+	differentSource.routeSource = subscriberRouteSourceRootInputFlow
+	variants = append(variants, differentSource)
+
+	differentEvent := base
+	differentEvent.LocalizedEvent = "work.audited"
+	variants = append(variants, differentEvent)
+
+	differentHandler := base
+	differentHandler.handlerNodeID = "other-node"
+	differentHandler.targetHandler = runtimepipeline.MustDeliveryTargetHandler("receiver", "other-node")
+	variants = append(variants, differentHandler)
+
+	differentConnectHandler := base
+	differentConnectHandler.connectHandler = runtimepinrouting.MustConnectReceiverHandler("receiver", "shared-node")
+	variants = append(variants, differentConnectHandler)
+
+	var got []Subscriber
+	for _, subscriber := range variants {
+		got = appendUniqueSubscriber(got, subscriber)
+	}
+	if len(got) != len(variants) {
+		t.Fatalf("appendUniqueSubscriber retained %d roles, want %d: %#v", len(got), len(variants), got)
+	}
+	if deduped := dedupeSubscribers(variants); len(deduped) != len(variants) {
+		t.Fatalf("dedupeSubscribers retained %d roles, want %d: %#v", len(deduped), len(variants), deduped)
+	}
+}
+
+func TestRouteTableMixedRolesExactWildcardConstruction(t *testing.T) {
+	const (
+		exact    = "receiver/instance-a/work.ready"
+		wildcard = "receiver/*/work.ready"
+	)
+	base := Subscriber{
+		Recipient:      events.MustNodeDeliveryRecipient("shared-node"),
+		Path:           "receiver/instance-a",
+		routeSource:    subscriberRouteSourceSubscription,
+		LocalizedEvent: "work.ready",
+		handlerFlowID:  "receiver",
+		handlerNodeID:  "shared-node",
+		targetHandler:  runtimepipeline.MustDeliveryTargetHandler("receiver", "shared-node"),
+	}
+	for _, tc := range []struct {
+		name  string
+		first string
+		last  string
+	}{
+		{name: "exact then wildcard", first: exact, last: wildcard},
+		{name: "wildcard then exact", first: wildcard, last: exact},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first := base
+			first.MatchPattern = tc.first
+			last := base
+			last.MatchPattern = tc.last
+			got := appendUniqueSubscriber(appendUniqueSubscriber(nil, first), last)
+			if len(got) != 1 {
+				t.Fatalf("roles = %#v, want one behavioral role", got)
+			}
+			if got[0].MatchPattern != exact {
+				t.Fatalf("retained match evidence = %q, want strongest exact %q", got[0].MatchPattern, exact)
+			}
+
+			rt := newRouteTable(nil)
+			rt.eventPath[exact] = struct{}{}
+			rt.patterns = []routePattern{
+				{EventPattern: tc.first, Subscriber: base},
+				{EventPattern: tc.last, Subscriber: base},
+			}
+			rt.rebuildLocked()
+			resolved := rt.Resolve(exact)
+			if len(resolved) != 1 || resolved[0].MatchPattern != exact {
+				t.Fatalf("Resolve(%s) = %#v, want one role with exact evidence", exact, resolved)
+			}
+		})
+	}
+}
+
+func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t *testing.T) {
+	const (
+		templatePath = "workers"
+		instancePath = "workers/worker-a"
+		localEvent   = "work.ready"
+	)
+	for _, reverse := range []bool{false, true} {
+		name := "forward"
+		if reverse {
+			name = "reverse"
+		}
+		t.Run(name, func(t *testing.T) {
+			rt := newRouteTable(nil)
+			rt.eventPath[instancePath+"/"+localEvent] = struct{}{}
+			roles := []Subscriber{
+				{
+					Recipient: events.MustNodeDeliveryRecipient("shared-node"), Path: "observer",
+					routeSource: subscriberRouteSourceSubscription, LocalizedEvent: localEvent,
+					handlerFlowID: "observer", handlerNodeID: "first-handler",
+					targetHandler: runtimepipeline.MustDeliveryTargetHandler("observer", "first-handler"),
+				},
+				{
+					Recipient: events.MustNodeDeliveryRecipient("shared-node"), Path: "observer",
+					routeSource: subscriberRouteSourceSubscription, LocalizedEvent: localEvent,
+					handlerFlowID: "observer", handlerNodeID: "second-handler",
+					targetHandler: runtimepipeline.MustDeliveryTargetHandler("observer", "second-handler"),
+				},
+			}
+			if reverse {
+				roles[0], roles[1] = roles[1], roles[0]
+			}
+			for _, role := range roles {
+				observer := routeTemplateSourceObserver{
+					SourceTemplatePath: templatePath, SourceLocalEvent: localEvent,
+					Subscriber: role, SubscriberInstancePath: "observer",
+				}
+				rt.addTemplateSourceObserverLocked(observer)
+				rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+			}
+			if got := len(rt.templateObservers[templatePath]); got != 2 {
+				t.Fatalf("template observer roles = %d, want 2", got)
+			}
+			if got := len(rt.patterns); got != 2 {
+				t.Fatalf("materialized pattern roles = %d, want 2: %#v", got, rt.patterns)
+			}
+
+			// Reinstalling exact equal roles must be idempotent across a rebuild.
+			for _, observer := range append([]routeTemplateSourceObserver(nil), rt.templateObservers[templatePath]...) {
+				rt.addTemplateSourceObserverLocked(observer)
+				rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+			}
+			if got := len(rt.templateObservers[templatePath]); got != 2 {
+				t.Fatalf("reinstalled observer roles = %d, want 2", got)
+			}
+			if got := len(rt.patterns); got != 2 {
+				t.Fatalf("reinstalled materialized roles = %d, want 2", got)
+			}
+
+			rt.patterns = rt.patterns[:1]
+			for _, observer := range rt.templateObservers[templatePath] {
+				rt.materializeTemplateSourceObserverLocked(observer, instancePath)
+			}
+			rt.rebuildLocked()
+			resolved := rt.Resolve(instancePath + "/" + localEvent)
+			if len(resolved) != 2 {
+				t.Fatalf("remove/reinstall/rebuild roles = %#v, want 2", resolved)
+			}
+		})
+	}
+}
+
+func TestRouteTableTemplateObserverPreservesDistinctAgentIdentities(t *testing.T) {
+	name, err := agentidentity.DeclaredName("shared-agent", "test-owner")
+	if err != nil {
+		t.Fatalf("declared agent name: %v", err)
+	}
+	firstRoute, err := agentidentity.PresentRoute("workers", "worker-a", "workers/worker-a")
+	if err != nil {
+		t.Fatalf("first route: %v", err)
+	}
+	secondRoute, err := agentidentity.PresentRoute("workers", "worker-b", "workers/worker-b")
+	if err != nil {
+		t.Fatalf("second route: %v", err)
+	}
+	firstIdentity, err := agentidentity.New(name, firstRoute)
+	if err != nil {
+		t.Fatalf("first identity: %v", err)
+	}
+	secondIdentity, err := agentidentity.New(name, secondRoute)
+	if err != nil {
+		t.Fatalf("second identity: %v", err)
+	}
+	rt := newRouteTable(nil)
+	rt.eventPath["sources/source-a/work.ready"] = struct{}{}
+	for _, identity := range []agentidentity.Identity{firstIdentity, secondIdentity} {
+		observer := routeTemplateSourceObserver{
+			SourceTemplatePath: "sources", SourceLocalEvent: "work.ready",
+			Subscriber: Subscriber{
+				Recipient: events.MustAgentDeliveryRecipient("shared-agent"), Path: "workers",
+				routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "work.ready", AgentIdentity: identity,
+			},
+			SubscriberInstancePath: "workers",
+		}
+		rt.addTemplateSourceObserverLocked(observer)
+		rt.materializeTemplateSourceObserverLocked(observer, "sources/source-a")
+	}
+	if got := len(rt.templateObservers["sources"]); got != 2 {
+		t.Fatalf("template agent observer roles = %d, want 2", got)
+	}
+	if got := len(rt.patterns); got != 2 {
+		t.Fatalf("materialized template agent roles = %d, want 2", got)
 	}
 }
 

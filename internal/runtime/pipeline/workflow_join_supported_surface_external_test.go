@@ -21,6 +21,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -78,7 +79,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				source := exactExternalWorkflowJoinSource(flowID)
+				source := exactExternalWorkflowJoinSource(t, flowID)
 				path := runID
 				workflowName := source.WorkflowName()
 				instanceID := runID
@@ -252,7 +253,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				runID := uuid.NewString()
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				source := exactExternalWorkflowJoinSource(flowID)
+				source := exactExternalWorkflowJoinSource(t, flowID)
 				path := runID
 				workflowName := source.WorkflowName()
 				instanceID := runID
@@ -376,10 +377,18 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 	}
 }
 
-func exactExternalWorkflowJoinSource(flowID string) semanticview.Source {
-	stages := runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-		{ID: "awaiting", Initial: true}, {ID: "ready", Terminal: true}, {ID: "attention", Terminal: true},
-	}}
+func exactExternalWorkflowJoinSource(t *testing.T, flowID string) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	fixtureRoot := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load exact join EventBus fixture: %v", err)
+	}
 	spec := runtimecontracts.JoinSpec{
 		ID: "awaiting", Stage: "awaiting",
 		Members: runtimecontracts.JoinMembersSpec{
@@ -392,63 +401,12 @@ func exactExternalWorkflowJoinSource(flowID string) semanticview.Source {
 			After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"},
 		},
 	}
-	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
-	node := runtimecontracts.SystemNodeContract{ID: "join-node", ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-		"item.completed": handler,
+	plans := []runtimecontracts.WorkflowJoinPlan{{
+		FlowID: flowID, NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec,
+		ResultType: runtimecontracts.CatalogTypeReference{Type: "jsonb"},
 	}}
-	catalog := map[string]runtimecontracts.EventCatalogEntry{
-		"item.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-			"member_id": {Type: "text"}, "result": {Type: "jsonb"},
-		}}},
-	}
-	const rootFlowID = "join-eventbus-proof"
-	root := runtimecontracts.FlowContractView{
-		Path: rootFlowID, Paths: runtimecontracts.FlowContractPaths{ID: rootFlowID, Flow: rootFlowID, Mode: runtimecontracts.FlowModeStatic},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: rootFlowID, Mode: runtimecontracts.FlowModeStatic, StageDeclarations: stages},
-		Events: catalog,
-	}
-	flowSchemas := map[string]runtimecontracts.FlowSchemaDocument{rootFlowID: root.Schema}
-	flowInitial := map[string]string{}
-	flowTerminal := map[string][]string{}
-	if flowID == "" {
-		root.Nodes = map[string]runtimecontracts.SystemNodeContract{"join-node": node}
-	} else {
-		flow := runtimecontracts.FlowContractView{
-			Path: flowID, Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID},
-			Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, StageDeclarations: stages},
-			Nodes:  map[string]runtimecontracts.SystemNodeContract{"join-node": node}, Events: catalog,
-		}
-		root.Children = []runtimecontracts.FlowContractView{flow}
-		flowSchemas[flowID] = flow.Schema
-		flowInitial[flowID] = "awaiting"
-		flowTerminal[flowID] = []string{"ready", "attention"}
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: stages},
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{rootFlowID: &root},
-		}, FlowSchemas: flowSchemas,
-		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": node}, Events: catalog,
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "join-eventbus-proof", Version: "1.0.0", InitialStage: "awaiting",
-			Stages:         []runtimecontracts.WorkflowStageContract{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}},
-			TerminalStages: []string{"ready", "attention"}, FlowInitial: flowInitial, FlowTerminal: flowTerminal,
-			Joins: []runtimecontracts.WorkflowJoinPlan{{
-				FlowID: flowID, NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec,
-				ResultType: runtimecontracts.CatalogTypeReference{Type: "jsonb"},
-			}},
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"join-node": {ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"join-node": node.EventHandlers},
-			EventOwners:  map[string][]string{"item.completed": {"join-node"}},
-		},
-	}
-	if flowID != "" {
-		bundle.FlowTree.ByID[flowID] = &bundle.FlowTree.Root.Children[0]
-	}
-	base := semanticview.Wrap(bundle)
-	return exactExternalJoinSource{Source: base, flowID: flowID, plans: bundle.Semantics.Joins}
+	bundle.Semantics.Joins = plans
+	return exactExternalJoinSource{Source: semanticview.Wrap(bundle), flowID: flowID, plans: plans}
 }
 
 func assertExactJoinDeliveryStatus(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, want string) {

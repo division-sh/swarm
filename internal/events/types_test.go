@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -197,6 +198,51 @@ func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
 	}
 }
 
+func TestDeliveryEventTargetlessRouteDoesNotConsumeJournalTargetSetProjection(t *testing.T) {
+	source := RouteIdentity{FlowID: "producer", FlowInstance: "producer/one", EntityID: "source-entity"}
+	target := RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "target-entity"}
+	routingSource, err := NewStaticFlowRoutingSource(source)
+	if err != nil {
+		t.Fatalf("NewStaticFlowRoutingSource: %v", err)
+	}
+	event, err := NewChildEvent(ChildEventInput{
+		Facts: EventFacts{
+			ID: "11111111-2222-3333-4444-555555555555", Type: "work.ready",
+			Producer:      ProducerClaim{Type: EventProducerNode, ID: "producer-node"},
+			Envelope:      EnvelopeForTargetSet(EnvelopeForSourceRoute(EventEnvelope{}, source), []RouteIdentity{target}),
+			RoutingSource: routingSource, ExecutionMode: executionmode.Live,
+		},
+		Lineage: EventLineage{RunID: "run-one", ParentEventID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", ExecutionMode: executionmode.Live},
+	})
+	if err != nil {
+		t.Fatalf("NewChildEvent: %v", err)
+	}
+	name, err := agentidentity.DeclaredName("observer", "fixture")
+	if err != nil {
+		t.Fatalf("DeclaredName: %v", err)
+	}
+	identity, err := agentidentity.New(name, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatalf("agentidentity.New: %v", err)
+	}
+	delivery, err := NewDeliveryEvent(event, DeliveryRoute{
+		Recipient:     MustAgentDeliveryRecipient("observer"),
+		AgentIdentity: identity,
+	})
+	if err != nil {
+		t.Fatalf("NewDeliveryEvent: %v", err)
+	}
+	if got := delivery.Event().TargetRoute(); !got.Empty() {
+		t.Fatalf("targetless delivery target = %#v, want empty", got)
+	}
+	if got := delivery.Event().EntityID(); got != source.EntityID {
+		t.Fatalf("targetless delivery entity = %q, want source %q", got, source.EntityID)
+	}
+	if got := delivery.JournalEvent().TargetRoutes(); len(got) != 1 || got[0] != target {
+		t.Fatalf("journal target_set = %#v, want immutable projection %#v", got, target)
+	}
+}
+
 func TestValidateEventContextReferenceRejectsLegacyReceiverProjections(t *testing.T) {
 	for _, ref := range []string{"entity_id", "flow_instance"} {
 		if err := ValidateEventContextReference(ref); err == nil || !strings.Contains(err.Error(), "_entity.") {
@@ -239,6 +285,66 @@ func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
 	if err := ValidateDeliveryRouteProjections([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {
 		t.Fatalf("ValidateDeliveryRouteProjections error = %v", err)
 	}
+}
+
+func TestValidateDeliveryRoutesRejectsContradictoryTargetOwnershipForExactSlot(t *testing.T) {
+	route := RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: "entity-one"}
+	left := DeliveryRoute{
+		Recipient: MustNodeDeliveryRecipient("validator"),
+		Target:    MustExistingEntityTarget(route),
+	}
+	right := left
+	right.Target = MustMaterializingEntityTarget(route)
+
+	err := ValidateDeliveryRoutes([]DeliveryRoute{left, right})
+	if err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
+		t.Fatalf("ValidateDeliveryRoutes error = %v, want exact ownership contradiction", err)
+	}
+}
+
+func TestValidateDeliveryRouteProjectionsPreservesDistinctExactAgentIdentities(t *testing.T) {
+	firstProjection, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
+	secondProjection, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
+	firstIdentity := testDeliveryAgentIdentity(t, "worker", "review", "one", "review/one")
+	secondIdentity := testDeliveryAgentIdentity(t, "worker", "review", "two", "review/two")
+
+	routes := []DeliveryRoute{
+		{Recipient: MustAgentDeliveryRecipient("worker"), AgentIdentity: firstIdentity, PayloadProjection: firstProjection},
+		{Recipient: MustAgentDeliveryRecipient("worker"), AgentIdentity: secondIdentity, PayloadProjection: secondProjection},
+	}
+	if err := ValidateDeliveryRoutes(routes); err != nil {
+		t.Fatalf("ValidateDeliveryRoutes distinct exact agents: %v", err)
+	}
+}
+
+func TestValidateDeliveryRouteProjectionsRejectsSameExactAgentIdentityConflict(t *testing.T) {
+	firstProjection, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
+	secondProjection, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
+	identity := testDeliveryAgentIdentity(t, "worker", "review", "one", "review/one")
+	left := DeliveryRoute{Recipient: MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, PayloadProjection: firstProjection}
+	right := DeliveryRoute{Recipient: MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, PayloadProjection: secondProjection}
+
+	err := ValidateDeliveryRoutes([]DeliveryRoute{left, right})
+	if err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {
+		t.Fatalf("ValidateDeliveryRoutes error = %v, want exact agent projection conflict", err)
+	}
+}
+
+func testDeliveryAgentIdentity(t testing.TB, agentID, scopeKey, instanceID, instancePath string) agentidentity.Identity {
+	t.Helper()
+	name, err := agentidentity.DeclaredName(agentID, "test://delivery-route")
+	if err != nil {
+		t.Fatalf("agentidentity.DeclaredName: %v", err)
+	}
+	route, err := agentidentity.PresentRoute(scopeKey, instanceID, instancePath)
+	if err != nil {
+		t.Fatalf("agentidentity.PresentRoute: %v", err)
+	}
+	identity, err := agentidentity.New(name, route)
+	if err != nil {
+		t.Fatalf("agentidentity.New: %v", err)
+	}
+	return identity
 }
 
 func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {

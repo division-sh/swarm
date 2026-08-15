@@ -485,10 +485,6 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	return s.eventPostgresOwner.ListEventDeliveryRoutes(ctx, eventID)
 }
 
-func (s *PostgresStore) ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error) {
-	return s.eventPostgresOwner.ListEventDeliveryTargets(ctx, eventID)
-}
-
 func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route) ([]bus.FlowInstanceRouteRecord, error) {
 	return s.pipelinePostgresOwner.ListFlowInstanceRouteRecords(ctx, identity)
 }

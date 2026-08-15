@@ -12,6 +12,7 @@ const (
 	ImportBoundaryAliasBindOnly ImportBoundaryAliasVariant = iota + 1
 	ImportBoundaryAliasBindOnlyWildcardOutput
 	ImportBoundaryAliasConnected
+	ImportBoundaryAliasConnectedWithLocalOutputObserver
 	ImportBoundaryAliasTemplateBindOnly
 )
 
@@ -33,6 +34,8 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	case ImportBoundaryAliasBindOnlyWildcardOutput:
 		parentSubscription = "parent.*"
 	case ImportBoundaryAliasConnected:
+		connected = true
+	case ImportBoundaryAliasConnectedWithLocalOutputObserver:
 		connected = true
 	case ImportBoundaryAliasTemplateBindOnly:
 		mode = "template"
@@ -116,7 +119,7 @@ pins:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "work.completed: {}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
+	workerNodes := `
 worker-node:
   id: worker-node
   execution_type: system_node
@@ -125,7 +128,18 @@ worker-node:
   event_handlers:
     work.requested:
       emit: work.completed
-`)
+`
+	if variant == ImportBoundaryAliasConnectedWithLocalOutputObserver {
+		workerNodes += `
+worker-output-observer:
+  id: worker-output-observer
+  execution_type: system_node
+  subscribes_to: [work.completed]
+  event_handlers:
+    work.completed: {}
+`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), workerNodes)
 	return root
 }
 

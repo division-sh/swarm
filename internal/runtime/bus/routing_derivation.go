@@ -769,7 +769,11 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 		return nil
 	}
 	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil || len(bundle.Nodes) == 0 {
+	if !ok || bundle == nil {
+		return nil
+	}
+	rootProjects := bundle.RootProjectViews()
+	if len(rootProjects) == 0 {
 		return nil
 	}
 	rootInputs := routeRootInputEventSet(source)
@@ -777,36 +781,38 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 		return nil
 	}
 	for _, eventType := range sortedStringKeys(rootInputs) {
-		for _, key := range sortedStringKeys(bundle.Nodes) {
-			entry := bundle.Nodes[key]
-			semanticNodeID := strings.TrimSpace(key)
-			subscriberID := strings.TrimSpace(entry.ID)
-			if subscriberID == "" {
-				subscriberID = semanticNodeID
+		for _, project := range rootProjects {
+			for _, key := range sortedStringKeys(project.Nodes) {
+				entry := project.Nodes[key]
+				semanticNodeID := strings.TrimSpace(key)
+				subscriberID := strings.TrimSpace(entry.ID)
+				if subscriberID == "" {
+					subscriberID = semanticNodeID
+				}
+				if semanticNodeID == "" || !routeNodeSubscribesToLocalExact(source, semanticNodeID, eventType) {
+					continue
+				}
+				if rootInputFlowOwnsNodeRoute(source, semanticNodeID, eventType) {
+					continue
+				}
+				subscriber := Subscriber{
+					Recipient:     events.MustNodeDeliveryRecipient(subscriberID),
+					MatchPattern:  eventType,
+					routeSource:   subscriberRouteSourceRootInputProject,
+					handlerFlowID: strings.TrimSpace(source.WorkflowName()), handlerNodeID: semanticNodeID,
+				}
+				targetHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(
+					source, subscriber.handlerFlowID, subscriber.handlerNodeID,
+				)
+				if err != nil {
+					return fmt.Errorf("admit root target handler %s for %s: %w", semanticNodeID, eventType, err)
+				}
+				subscriber.targetHandler = targetHandler
+				if err := rt.addConnectRecipientLocked("", nil, eventType, subscriber, ""); err != nil {
+					return fmt.Errorf("admit root connect recipient %s for %s: %w", subscriberID, eventType, err)
+				}
+				rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], subscriber)
 			}
-			if semanticNodeID == "" || !routeNodeSubscribesToLocalExact(source, semanticNodeID, eventType) {
-				continue
-			}
-			if rootInputFlowOwnsNodeRoute(source, semanticNodeID, eventType) {
-				continue
-			}
-			subscriber := Subscriber{
-				Recipient:     events.MustNodeDeliveryRecipient(subscriberID),
-				MatchPattern:  eventType,
-				routeSource:   subscriberRouteSourceRootInputProject,
-				handlerFlowID: strings.TrimSpace(source.WorkflowName()), handlerNodeID: semanticNodeID,
-			}
-			targetHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(
-				source, subscriber.handlerFlowID, subscriber.handlerNodeID,
-			)
-			if err != nil {
-				return fmt.Errorf("admit root target handler %s for %s: %w", semanticNodeID, eventType, err)
-			}
-			subscriber.targetHandler = targetHandler
-			if err := rt.addConnectRecipientLocked("", nil, eventType, subscriber, ""); err != nil {
-				return fmt.Errorf("admit root connect recipient %s for %s: %w", subscriberID, eventType, err)
-			}
-			rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], subscriber)
 		}
 	}
 	return nil
@@ -1280,10 +1286,7 @@ func (rt *RouteTable) materializeTemplateSourceObserverLocked(observer routeTemp
 type routeTemplateSourceObserverIdentity struct {
 	sourceTemplatePath     string
 	sourceLocalEvent       string
-	recipient              events.DeliveryRecipient
-	subscriberPath         string
-	routeSource            subscriberRouteSource
-	localizedEvent         string
+	subscriberRole         resolvedSubscriberRoleIdentity
 	subscriberInstancePath string
 }
 
@@ -1291,20 +1294,14 @@ func routeTemplateSourceObserverKey(observer routeTemplateSourceObserver) routeT
 	return routeTemplateSourceObserverIdentity{
 		sourceTemplatePath:     eventidentity.Normalize(observer.SourceTemplatePath),
 		sourceLocalEvent:       eventidentity.Normalize(observer.SourceLocalEvent),
-		recipient:              observer.Subscriber.Recipient,
-		subscriberPath:         strings.TrimSpace(observer.Subscriber.Path),
-		routeSource:            observer.Subscriber.routeSource,
-		localizedEvent:         eventidentity.Normalize(observer.Subscriber.LocalizedEvent),
+		subscriberRole:         resolvedSubscriberRoleKey(observer.Subscriber),
 		subscriberInstancePath: strings.Trim(strings.TrimSpace(observer.SubscriberInstancePath), "/"),
 	}
 }
 
 type routePatternIdentityKey struct {
 	eventPattern       string
-	recipient          events.DeliveryRecipient
-	subscriberPath     string
-	routeSource        subscriberRouteSource
-	localizedEvent     string
+	subscriberRole     resolvedSubscriberRoleIdentity
 	instancePath       string
 	sourceInstancePath string
 }
@@ -1312,10 +1309,7 @@ type routePatternIdentityKey struct {
 func routePatternIdentity(pattern routePattern) routePatternIdentityKey {
 	return routePatternIdentityKey{
 		eventPattern:       eventidentity.Normalize(pattern.EventPattern),
-		recipient:          pattern.Subscriber.Recipient,
-		subscriberPath:     strings.TrimSpace(pattern.Subscriber.Path),
-		routeSource:        pattern.Subscriber.routeSource,
-		localizedEvent:     eventidentity.Normalize(pattern.Subscriber.LocalizedEvent),
+		subscriberRole:     resolvedSubscriberRoleKey(pattern.Subscriber),
 		instancePath:       strings.Trim(strings.TrimSpace(pattern.InstancePath), "/"),
 		sourceInstancePath: strings.Trim(strings.TrimSpace(pattern.SourceInstancePath), "/"),
 	}
@@ -1714,28 +1708,77 @@ func normalizedStringListContains(values []string, needle string) bool {
 	return false
 }
 
+type resolvedSubscriberRoleIdentity struct {
+	recipient      events.DeliveryRecipient
+	path           string
+	agentIdentity  agentidentity.Identity
+	routeSource    subscriberRouteSource
+	localizedEvent string
+	handlerFlowID  string
+	handlerNodeID  string
+	connectHandler runtimepinrouting.ConnectReceiverHandler
+	targetHandler  runtimepipeline.DeliveryTargetHandler
+}
+
+func resolvedSubscriberRoleKey(subscriber Subscriber) resolvedSubscriberRoleIdentity {
+	return resolvedSubscriberRoleIdentity{
+		recipient:      subscriber.Recipient,
+		path:           eventidentity.Normalize(subscriber.Path),
+		agentIdentity:  subscriber.AgentIdentity.Normalize(),
+		routeSource:    subscriber.routeSource,
+		localizedEvent: eventidentity.Normalize(subscriber.LocalizedEvent),
+		handlerFlowID:  strings.TrimSpace(subscriber.handlerFlowID),
+		handlerNodeID:  strings.TrimSpace(subscriber.handlerNodeID),
+		connectHandler: subscriber.connectHandler,
+		targetHandler:  subscriber.targetHandler,
+	}
+}
+
 func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
-	for _, existing := range in {
-		if existing.Recipient == subscriber.Recipient && existing.Path == subscriber.Path &&
-			existing.AgentIdentity == subscriber.AgentIdentity {
-			return in
+	key := resolvedSubscriberRoleKey(subscriber)
+	for idx := range in {
+		if resolvedSubscriberRoleKey(in[idx]) != key {
+			continue
 		}
+		in[idx].MatchPattern = strongestSubscriberMatchEvidence(in[idx].MatchPattern, subscriber.MatchPattern)
+		return in
 	}
 	return append(in, subscriber)
 }
 
 func appendUniqueRootInputSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
-	for idx, existing := range in {
-		if existing.Recipient == subscriber.Recipient && existing.Path == subscriber.Path &&
-			existing.AgentIdentity == subscriber.AgentIdentity {
-			if subscriber.routeSource == subscriberRouteSourceRootInputFlow {
-				in[idx].MatchPattern = subscriber.MatchPattern
-				in[idx].routeSource = subscriber.routeSource
-			}
-			return in
-		}
+	return appendUniqueSubscriber(in, subscriber)
+}
+
+func strongestSubscriberMatchEvidence(left, right string) string {
+	left = eventidentity.Normalize(left)
+	right = eventidentity.Normalize(right)
+	leftRank := subscriberMatchEvidenceRank(left)
+	rightRank := subscriberMatchEvidenceRank(right)
+	switch {
+	case rightRank > leftRank:
+		return right
+	case leftRank > rightRank:
+		return left
+	case left == "":
+		return right
+	case right == "":
+		return left
+	case right < left:
+		return right
+	default:
+		return left
 	}
-	return append(in, subscriber)
+}
+
+func subscriberMatchEvidenceRank(pattern string) int {
+	if pattern == "" {
+		return 0
+	}
+	if strings.Contains(pattern, "*") {
+		return 1
+	}
+	return 2
 }
 
 func cloneSubscribers(in []Subscriber) []Subscriber {

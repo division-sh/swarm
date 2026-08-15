@@ -30,6 +30,11 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 	if err := validateStructuralTargetOwnerProofAgreement(plan.DeliveryIntents); err != nil {
 		return RoutePlan{}, err
 	}
+	var err error
+	p, err = p.resolveNodeTargetOwners(&plan)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	for index := range plan.DeliveryIntents {
 		intent := &plan.DeliveryIntents[index]
 		if !intent.TargetOwnership.Empty() {
@@ -46,7 +51,14 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 				return RoutePlan{}, fmt.Errorf("validate agent delivery owner for %s: %w", intent.Recipient.ID(), err)
 			}
 			if intent.TargetBlueprint.Empty() {
-				continue
+				blueprint, targeted, err := p.sameFlowAgentTargetBlueprint(plan.Event, *intent)
+				if err != nil {
+					return RoutePlan{}, fmt.Errorf("resolve same-flow agent delivery target for %s: %w", intent.Recipient.ID(), err)
+				}
+				if !targeted {
+					continue
+				}
+				intent.TargetBlueprint = blueprint
 			}
 			if p.agentsAvailable {
 				descriptor, ok := p.agents[intent.AgentIdentity.Normalize()]
@@ -75,13 +87,23 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 					err   error
 				)
 				if descriptor.EntityID == "" {
-					owner, err = events.NewEntitylessReceiverTarget(ownerRoute)
+					owner, err = p.resolveSelectedRoute(ownerRoute, intent.StructuralOwnerProof)
 				} else {
+					if ownerRoute.EntityID != "" && ownerRoute.EntityID != descriptor.EntityID {
+						return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: target entity %q disagrees with exact active agent entity %q", intent.Recipient.ID(), ownerRoute.EntityID, descriptor.EntityID)
+					}
 					ownerRoute.EntityID = descriptor.EntityID
-					owner, err = events.NewExistingEntityTarget(ownerRoute)
+					if p.targetsAvailable {
+						owner, err = p.resolveSelectedRoute(ownerRoute, intent.StructuralOwnerProof)
+					} else {
+						owner, err = events.NewExistingEntityTarget(ownerRoute)
+					}
 				}
 				if err != nil {
 					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s from exact agent identity: %w", intent.Recipient.ID(), err)
+				}
+				if !owner.ExistingEntity() && !owner.MaterializingEntity() {
+					return RoutePlan{}, fmt.Errorf("resolve delivery target for %s from exact agent identity: targeted agent requires entity ownership", intent.Recipient.ID())
 				}
 				intent.TargetOwnership = owner
 				intent.TargetBlueprint = owner.Route()
@@ -101,15 +123,7 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 		if handler.Empty() {
 			return RoutePlan{}, fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
 		}
-		owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
-			Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-			Handler: handler, Candidates: p.targetOwnerCandidates(), StructuralOwnerProof: intent.StructuralOwnerProof,
-		})
-		if err != nil {
-			return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
-		}
-		intent.TargetOwnership = owner
-		intent.TargetBlueprint = owner.Route()
+		return RoutePlan{}, fmt.Errorf("resolve delivery target for %s: node intent escaped canonical preclassification", intent.Recipient.ID())
 	}
 	ledger, err := p.resolveConnectEvaluation(plan.ConnectEvaluation, plan.DeliveryIntents)
 	if err != nil {
@@ -117,6 +131,94 @@ func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (Rout
 	}
 	plan.ConnectEvaluation = ledger
 	return plan.Normalized(), nil
+}
+
+func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePlan) (selectedRunTargetOwnerProjection, error) {
+	selectedRun := p
+	resolved := make([]ActiveTargetDescriptor, 0, len(plan.DeliveryIntents))
+	for index := range plan.DeliveryIntents {
+		intent := &plan.DeliveryIntents[index]
+		if intent.Recipient.IsAgent() {
+			continue
+		}
+		if intent.TargetOwnership.Empty() {
+			handler := intent.Handler
+			if handler.Empty() {
+				return selectedRunTargetOwnerProjection{}, fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
+			}
+			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
+				Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
+				Handler: handler, Candidates: selectedRun.targetOwnerCandidates(), StructuralOwnerProof: intent.StructuralOwnerProof,
+			})
+			if err != nil {
+				return selectedRunTargetOwnerProjection{}, fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
+			}
+			intent.TargetOwnership = owner
+			intent.TargetBlueprint = owner.Route()
+		} else {
+			if err := intent.TargetOwnership.Validate(); err != nil {
+				return selectedRunTargetOwnerProjection{}, fmt.Errorf("validate admitted delivery target for %s: %w", intent.Recipient.ID(), err)
+			}
+			if intent.TargetBlueprint.Normalized() != intent.TargetOwnership.Route() {
+				return selectedRunTargetOwnerProjection{}, fmt.Errorf("validate admitted delivery target for %s: blueprint and typed owner disagree: blueprint=%#v owner=%s %#v", intent.Recipient.ID(), intent.TargetBlueprint.Normalized(), intent.TargetOwnership.Code(), intent.TargetOwnership.Route())
+			}
+		}
+		owner := intent.TargetOwnership
+		if owner.ExistingEntity() || owner.MaterializingEntity() {
+			route := owner.Route()
+			resolved = appendActiveTargetDescriptor(resolved, ActiveTargetDescriptor{
+				ID: route.FlowInstance, FlowInstance: route.FlowInstance, EntityID: route.EntityID,
+				Materializing: owner.MaterializingEntity(),
+			})
+		}
+	}
+	for _, descriptor := range resolved {
+		p.descriptors = appendActiveTargetDescriptor(p.descriptors, descriptor)
+		p.targetsAvailable = true
+	}
+	return p, nil
+}
+
+func (p selectedRunTargetOwnerProjection) sameFlowAgentTargetBlueprint(evt events.Event, intent RoutePlanDeliveryIntent) (events.RouteIdentity, bool, error) {
+	if intent.Producer != routeIntentProducerAgentPolicy {
+		return events.RouteIdentity{}, false, nil
+	}
+	identity := intent.AgentIdentity.Normalize()
+	if identity.Name.Source != agentidentity.NameSourceDeclared {
+		return events.RouteIdentity{}, false, nil
+	}
+	descriptor, ok := p.agents[identity]
+	if !ok {
+		return events.RouteIdentity{}, false, nil
+	}
+	instance := identity.FlowInstance()
+	flowID := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(instance)
+	if instance == "" {
+		instance = strings.TrimSpace(evt.RunID())
+		if instance == "" {
+			return events.RouteIdentity{}, false, nil
+		}
+		if p.source == nil {
+			return events.RouteIdentity{}, false, nil
+		}
+		flowID = strings.TrimSpace(p.source.WorkflowName())
+	}
+	if flowID == "" {
+		return events.RouteIdentity{}, false, nil
+	}
+	blueprint := events.RouteIdentity{FlowID: flowID, FlowInstance: instance}.Normalized()
+	activeEntityID := descriptor.Normalized().EntityID
+	for _, selected := range p.descriptors {
+		selected = selected.Normalized()
+		if selected.FlowInstance != blueprint.FlowInstance {
+			continue
+		}
+		if activeEntityID != "" && selected.EntityID != activeEntityID {
+			return events.RouteIdentity{}, false, fmt.Errorf("active agent entity %q disagrees with selected owner %q for flow instance %q", activeEntityID, selected.EntityID, blueprint.FlowInstance)
+		}
+		return blueprint, true, nil
+	}
+	return events.RouteIdentity{}, false, nil
 }
 
 func validateStructuralTargetOwnerProofAgreement(intents []RoutePlanDeliveryIntent) error {

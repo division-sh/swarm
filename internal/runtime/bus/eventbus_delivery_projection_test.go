@@ -36,7 +36,7 @@ func TestSyntheticCarryProjectionIsRouteScopedForMixedDeliveries(t *testing.T) {
 	}
 }
 
-func TestDeliveryRouteProjectionPreservesUntargetedLiveRecipientEnvelope(t *testing.T) {
+func TestDeliveryRouteProjectionClearsJournalTargetForUntargetedLiveRecipient(t *testing.T) {
 	want := events.RouteIdentity{FlowInstance: "validation/one", EntityID: "entity-1"}
 	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{want}), time.Now().UTC())
 
@@ -44,9 +44,86 @@ func TestDeliveryRouteProjectionPreservesUntargetedLiveRecipientEnvelope(t *test
 	if err != nil {
 		t.Fatalf("project untargeted live route: %v", err)
 	}
-	routes := projected.Event().TargetRoutes()
-	if len(routes) != 1 || routes[0] != want {
-		t.Fatalf("projected target routes = %#v, want original envelope route %#v", routes, want)
+	if routes := projected.Event().TargetRoutes(); len(routes) != 0 {
+		t.Fatalf("projected target routes = %#v, want targetless recipient view", routes)
+	}
+	if got := projected.JournalEvent().TargetRoutes(); len(got) != 1 || got[0] != want {
+		t.Fatalf("journal target routes = %#v, want immutable projection %#v", got, want)
+	}
+}
+
+func TestMixedRoutePlanUsesTargetSetForSingleTargetAndTargetlessDelivery(t *testing.T) {
+	target := events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/one", EntityID: "entity-1"}
+	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	plan := newRoutePlan(evt)
+	plan.AddDeliveryIntents(
+		RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("worker"), TargetOwnership: events.MustExistingEntityTarget(target), Persist: true},
+		RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient("observer"), AgentIdentity: testAgentRouteIdentity(t, "observer", ""), Persist: true},
+	)
+
+	projected, changed, err := resolveRoutePlanEventProjection(evt, plan)
+	if err != nil {
+		t.Fatalf("resolve mixed route projection: %v", err)
+	}
+	if !changed || !projected.TargetRoute().Empty() {
+		t.Fatalf("mixed projection target = %#v changed=%t, want explicit target_set", projected.TargetRoute(), changed)
+	}
+	if routes := projected.TargetRoutes(); len(routes) != 1 || !events.SameRouteIdentity(routes[0], target) {
+		t.Fatalf("mixed projection target_set = %#v, want %#v", routes, target)
+	}
+	untargeted, err := projectEventForDeliveryRoute(projected, plan.DeliveryRoutes()[1])
+	if err != nil {
+		t.Fatalf("project targetless mixed delivery: %v", err)
+	}
+	if untargeted.Event().HasTargetRoute() {
+		t.Fatalf("targetless mixed delivery retained journal target: %#v", untargeted.Event().NormalizedEnvelope())
+	}
+}
+
+func TestDeliveryRouteProjectionPreservesHistoricalSingularTargetForTargetlessRoute(t *testing.T) {
+	target := events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/one", EntityID: "entity-1"}
+	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
+
+	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{
+		Recipient:     events.MustAgentDeliveryRecipient("historical-agent"),
+		AgentIdentity: testAgentRouteIdentity(t, "historical-agent", ""),
+	})
+	if err != nil {
+		t.Fatalf("project historical targetless route: %v", err)
+	}
+	if !events.SameRouteIdentity(projected.Event().TargetRoute(), target) || len(projected.Event().TargetRoutes()) != 0 {
+		t.Fatalf("historical target projection = %#v, want immutable singular target %#v", projected.Event().NormalizedEnvelope(), target)
+	}
+}
+
+func TestRoutePlanTargetProjectionPreservesExplicitlyAbsentIngressSource(t *testing.T) {
+	source, err := events.NewExternalIngressRoutingSource(
+		"telegram-ingress", uuid.NewString(), events.RoutingSourceAuthorityProviderAdmissionPlan,
+	)
+	if err != nil {
+		t.Fatalf("NewExternalIngressRoutingSource: %v", err)
+	}
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
+		uuid.NewString(), events.EventType("inbound.telegram"), "telegram", "",
+		json.RawMessage(`{"message":"hello"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, source, time.Now().UTC(),
+	)
+	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver"}
+	plan := newRoutePlan(evt)
+	plan.AddDeliveryIntents(RoutePlanDeliveryIntent{
+		Recipient:       events.MustNodeDeliveryRecipient("receiver"),
+		TargetOwnership: events.MustEntitylessReceiverTarget(target),
+		Persist:         true,
+	})
+
+	projected, changed, err := resolveRoutePlanEventProjection(evt, plan)
+	if err != nil {
+		t.Fatalf("resolveRoutePlanEventProjection: %v", err)
+	}
+	if !changed || !events.SameRouteIdentity(projected.TargetRoute(), target) {
+		t.Fatalf("projected target = %#v changed=%t, want %#v", projected.TargetRoute(), changed, target)
+	}
+	if !projected.SourceRoute().Empty() || projected.RoutingSource() != source {
+		t.Fatalf("projected source = envelope:%#v typed:%#v, want absent envelope and immutable typed source %#v", projected.SourceRoute(), projected.RoutingSource(), source)
 	}
 }
 

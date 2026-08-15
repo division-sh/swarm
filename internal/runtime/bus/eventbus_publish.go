@@ -435,7 +435,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			return releaseFailure(fmt.Errorf("load durable event identity: %w", err))
 		}
 		if found {
-			if !publication.direct && len(eb.connectRoutePlanner.matchedPlans(ctx, evt)) > 0 {
+			if !publication.direct {
 				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
 				if err != nil {
 					return releaseFailure(err)
@@ -496,7 +496,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		return releaseFailure(err)
 	}
 	if replayScope == runtimepipelineobligation.ScopeSubscribed {
-		resolved, changed, err := resolveCanonicalConnectRouteEvent(evt, routePlan)
+		resolved, changed, err := resolveRoutePlanEventProjection(evt, routePlan)
 		if err != nil {
 			return releaseFailure(err)
 		}
@@ -507,7 +507,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			}
 			evt = admitted.Event()
 		}
-		if err := validateCanonicalConnectRouteEvent(evt, routePlan); err != nil {
+		if err := validateRoutePlanEventProjection(evt, routePlan); err != nil {
 			return releaseFailure(err)
 		}
 	}
@@ -889,7 +889,7 @@ func reuseDurableSubscribedEventRouteFacts(admitted, durable events.AdmittedEven
 		return admitted, evt, nil
 	}
 	envelope := evt.NormalizedEnvelope()
-	if len(durableTargets) == 1 {
+	if len(durableEvent.TargetRoutes()) == 0 && len(durableTargets) == 1 {
 		envelope = events.EnvelopeForTargetRoute(envelope, durableTargets[0])
 	} else {
 		envelope = events.EnvelopeForTargetSet(envelope, durableTargets)
@@ -905,25 +905,25 @@ func reuseDurableSubscribedEventRouteFacts(admitted, durable events.AdmittedEven
 	return resolvedAdmission, resolvedAdmission.Event(), nil
 }
 
-func validateCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) error {
-	resolved, _, err := resolveCanonicalConnectRouteEvent(evt, plan)
+func validateRoutePlanEventProjection(evt events.Event, plan RoutePlan) error {
+	resolved, _, err := resolveRoutePlanEventProjection(evt, plan)
 	if err != nil {
 		return err
 	}
-	if !sameEventTargetFacts(evt, resolved) {
-		return errors.New("connect route facts changed after event admission")
+	if !sameEventTargetProjection(evt, resolved) {
+		return errors.New("delivery route projection changed after event admission")
 	}
 	return nil
 }
 
-func resolveCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) (events.Event, bool, error) {
+func resolveRoutePlanEventProjection(evt events.Event, plan RoutePlan) (events.Event, bool, error) {
 	plan = plan.Normalized()
-	if plan.AuthorityState != RoutePlanAuthorityCanonicalMatched || plan.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		return evt, false, nil
-	}
 	targets := make([]events.RouteIdentity, 0, len(plan.DeliveryIntents))
+	hasTargetlessDelivery := false
 	for _, route := range plan.DeliveryRoutes() {
-		if target := route.Target.Route(); !target.Empty() {
+		if target := route.Target.Route(); target.Empty() {
+			hasTargetlessDelivery = true
+		} else {
 			targets = append(targets, target)
 		}
 	}
@@ -933,19 +933,26 @@ func resolveCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) (events
 	}
 	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
 	if len(existing) > 0 && !sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
-		return evt, false, fmt.Errorf("connect route facts conflict with the admitted event target: admitted=%#v planned=%#v", existing, targets)
+		return evt, false, fmt.Errorf("delivery route projection conflicts with the admitted event target: admitted=%#v planned=%#v", existing, targets)
 	}
 	envelope := evt.NormalizedEnvelope()
-	if len(targets) == 1 {
+	if len(targets) == 1 && !hasTargetlessDelivery {
 		envelope = events.EnvelopeForTargetRoute(envelope, targets[0])
 	} else {
 		envelope = events.EnvelopeForTargetSet(envelope, targets)
 	}
 	resolved, err := events.ResolveEnvelope(evt, envelope)
 	if err != nil {
-		return evt, false, fmt.Errorf("resolve canonical connect route facts: %w", err)
+		return evt, false, fmt.Errorf("resolve delivery route projection: %w", err)
 	}
-	return resolved, !sameEventTargetFacts(evt, resolved), nil
+	return resolved, !sameEventTargetProjection(evt, resolved), nil
+}
+
+func sameEventTargetProjection(left, right events.Event) bool {
+	leftEnvelope := left.NormalizedEnvelope()
+	rightEnvelope := right.NormalizedEnvelope()
+	return events.SameRouteIdentity(leftEnvelope.Target, rightEnvelope.Target) &&
+		sameRouteIdentities(leftEnvelope.TargetSet, rightEnvelope.TargetSet)
 }
 
 func sameEventTargetFacts(left, right events.Event) bool {
@@ -973,34 +980,43 @@ func routeIdentitiesCanBeExactlyCompleted(existing, canonical []events.RouteIden
 		return false
 	}
 	canonicalRoutes := make(map[events.RouteIdentity]struct{}, len(canonical))
-	byEntity := make(map[string]events.RouteIdentity, len(canonical))
-	ambiguousEntities := make(map[string]struct{})
 	for _, route := range canonical {
 		route = route.Normalized()
 		if route.EntityID == "" || route.FlowID == "" || route.FlowInstance == "" {
 			return false
 		}
 		canonicalRoutes[route] = struct{}{}
-		if _, duplicate := byEntity[route.EntityID]; duplicate {
-			delete(byEntity, route.EntityID)
-			ambiguousEntities[route.EntityID] = struct{}{}
-			continue
-		}
-		if _, ambiguous := ambiguousEntities[route.EntityID]; !ambiguous {
-			byEntity[route.EntityID] = route
-		}
 	}
+	matchedCanonical := make(map[events.RouteIdentity]struct{}, len(existing))
 	for _, route := range existing {
 		route = route.Normalized()
 		if _, exact := canonicalRoutes[route]; exact {
+			matchedCanonical[route] = struct{}{}
 			continue
 		}
-		if route.EntityID == "" || route.FlowID != "" || route.FlowInstance != "" {
+		if route.Empty() {
 			return false
 		}
-		if _, ok := byEntity[route.EntityID]; !ok {
+		matches := make([]events.RouteIdentity, 0, 1)
+		for candidate := range canonicalRoutes {
+			if route.FlowID != "" && route.FlowID != candidate.FlowID {
+				continue
+			}
+			if route.FlowInstance != "" && route.FlowInstance != candidate.FlowInstance {
+				continue
+			}
+			if route.EntityID != "" && route.EntityID != candidate.EntityID {
+				continue
+			}
+			matches = append(matches, candidate)
+		}
+		if len(matches) != 1 {
 			return false
 		}
+		if _, duplicate := matchedCanonical[matches[0]]; duplicate {
+			return false
+		}
+		matchedCanonical[matches[0]] = struct{}{}
 	}
 	return true
 }
@@ -2171,18 +2187,6 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	return runtimepipelineobligation.Continue(), nil
 }
 
-func (eb *EventBus) deliveryTargetsForEvent(ctx context.Context, eventID string) map[string]events.RouteIdentity {
-	reader := eb.durable.DeliveryTargets
-	if reader == nil {
-		return nil
-	}
-	targets, err := reader.ListEventDeliveryTargets(ctx, eventID)
-	if err != nil {
-		return nil
-	}
-	return targets
-}
-
 func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) []events.DeliveryRoute {
 	reader := eb.durable.DeliveryRouteSets
 	if reader != nil {
@@ -2222,7 +2226,6 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		"target_set":           targetSet,
 		"recipients":           plan.RecipientIDs(),
 		"persisted_recipients": plan.PersistedRecipientIDs(),
-		"delivery_targets":     cloneRouteTargetMap(plan.DeliveryTargets()),
 		"delivery_routes":      plan.DeliveryRoutes(),
 	}
 	canonical := canonicalTargetDeliveryFailure(failure, detail)
@@ -2259,24 +2262,6 @@ func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, det
 		err = runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", detail)
 	}
 	return runtimefailures.FromError(err, "eventbus", "resolve_delivery_target")
-}
-
-func cloneRouteTargetMap(in map[string]events.RouteIdentity) map[string]events.RouteIdentity {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]events.RouteIdentity, len(in))
-	for recipient, target := range in {
-		recipient = strings.TrimSpace(recipient)
-		if recipient == "" {
-			continue
-		}
-		out[recipient] = target.Normalized()
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func firstNonEmptyString(vals ...string) string {

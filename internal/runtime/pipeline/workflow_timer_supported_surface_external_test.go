@@ -374,43 +374,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			entityID := uuid.NewString()
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			bundle := workflowTimerServedLifecycleBundle(true)
-			bundle.Semantics.Timers[0].AdvancesTo = ""
-			cancelHandler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
-			flowNodes := map[string]runtimecontracts.SystemNodeContract{
-				"controller": {
-					ID: "controller", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					SubscribesTo: []string{"timer.cancel"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-						"timer.cancel": cancelHandler,
-					},
-				},
-			}
-			bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"controller": {"timer.cancel": cancelHandler},
-			}
-			bundle.Semantics.EventOwners = map[string][]string{"timer.cancel": {"controller"}}
-			bundle.Semantics.EffectiveNodes = map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"controller": {
-					ID: "controller", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"timer.cancel"},
-				},
-			}
-			flow := runtimecontracts.FlowContractView{
-				Path: "timer-proof",
-				Paths: runtimecontracts.FlowContractPaths{
-					ID: "timer-proof", Flow: "timer-proof", Mode: runtimecontracts.FlowModeStatic,
-				},
-				Schema: runtimecontracts.FlowSchemaDocument{Name: "timer-proof", Mode: runtimecontracts.FlowModeStatic},
-				Nodes:  flowNodes, Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
-			}
-			bundle.FlowTree = runtimecontracts.FlowTree{
-				Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{"timer-proof": &flow},
-			}
-			bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{
-				"timer-proof": {Mode: runtimecontracts.FlowModeStatic},
-			}
-			source := semanticview.Wrap(bundle)
+			source := workflowTimerRecurringCancellationSource(t)
 			lifecycleProbe := runtimelifecycleprobe.New()
 			module := proposedEffectProofModule{
 				source: source,
@@ -935,6 +899,24 @@ func workflowTimerServedLifecycleBundle(recurring bool) *runtimecontracts.Workfl
 			StartOn: "state:waiting", Delay: "40ms", Recurring: recurring,
 		}},
 	}}
+}
+
+func workflowTimerRecurringCancellationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	fixtureRoot := canonicalrouting.CopyRecurringTimerCancellation(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load recurring timer cancellation fixture: %v", err)
+	}
+	timerBundle := workflowTimerServedLifecycleBundle(true)
+	timerBundle.Semantics.Timers[0].AdvancesTo = ""
+	bundle.Semantics.Timers = timerBundle.Semantics.Timers
+	return semanticview.Wrap(bundle)
 }
 
 func assertWorkflowTimerServedRows(t *testing.T, selected gateRecoveryStoreCase, runID, entityID, status string, want int) {

@@ -438,24 +438,6 @@ func (p RoutePlan) PersistedRecipientIDs() []string {
 	return uniqueStrings(out)
 }
 
-func (p RoutePlan) DeliveryTargets() map[string]events.RouteIdentity {
-	p = p.Normalized()
-	out := map[string]events.RouteIdentity{}
-	for _, intent := range p.DeliveryIntents {
-		if !intent.Recipient.IsAgent() {
-			continue
-		}
-		if intent.TargetOwnership.Empty() {
-			continue
-		}
-		out[intent.Recipient.ID()] = intent.TargetOwnership.Route()
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 	p = p.Normalized()
 	out := make([]events.DeliveryRoute, 0, len(p.DeliveryIntents))

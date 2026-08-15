@@ -71,6 +71,23 @@ func TestDeliveryTargetOwnershipRejectsContradictoryVariants(t *testing.T) {
 	}
 }
 
+func TestDeliveryTargetOwnershipExactEqualityIncludesKindAndNormalizedRoute(t *testing.T) {
+	route := RouteIdentity{FlowID: " review ", FlowInstance: "/review/one/", EntityID: " entity-one "}
+	existing := MustExistingEntityTarget(route)
+	normalizedExisting := MustExistingEntityTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: "entity-one"})
+	materializing := MustMaterializingEntityTarget(route)
+
+	if !SameDeliveryTargetOwnership(existing, normalizedExisting) {
+		t.Fatalf("normalized ownership facts should be equal: %#v %#v", existing, normalizedExisting)
+	}
+	if SameDeliveryTargetOwnership(existing, materializing) {
+		t.Fatalf("different ownership kinds must not be equal: %#v %#v", existing, materializing)
+	}
+	if !SameRouteIdentity(existing.Route(), materializing.Route()) {
+		t.Fatalf("ownership variants should retain the same normalized receiver route")
+	}
+}
+
 func TestDeliveryTargetOwnershipDecodeFailsClosed(t *testing.T) {
 	entityID := "33333333-3333-3333-3333-333333333333"
 	tests := []struct {

@@ -99,7 +99,6 @@ type claudeAttemptProofStore interface {
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
-	runtimebus.EventDeliveryTargetReader
 	runtimebus.EventDeliveryRouteSetReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -651,7 +650,7 @@ func newClaudeAttemptProofEventBus(
 			ReplyContext: backend.store, RunLifecycle: backend.store,
 			DeliveryLifecycle: backend.store, FlowRoutes: backend.store, FlowRouteRecords: backend.store,
 			FlowRouteSets: backend.store, FlowRouteTopology: backend.store, FlowRouteRollback: backend.store, ActiveAgents: backend.store,
-			ActiveFlows: backend.store, TargetOwners: backend.store, DeliveryTargets: backend.store, DeliveryRouteSets: backend.store,
+			ActiveFlows: backend.store, TargetOwners: backend.store, DeliveryRouteSets: backend.store,
 			TargetFailureRecorder: backend.store, RunOrigins: backend.store,
 		},
 	})

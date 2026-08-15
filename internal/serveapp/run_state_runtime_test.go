@@ -79,7 +79,7 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		Durable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, DeliveryRouteSets: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})

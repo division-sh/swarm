@@ -1483,7 +1483,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("operating/inst-1/opco.product_initialization_requested"),
 		"",
@@ -1493,6 +1493,7 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-operating")), "operating/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", eventtest.UUID("ent-operating")),
 		time.Now().UTC(),
 	)
 
@@ -1551,7 +1552,7 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("operating/opco.product_initialization_requested"),
 		"",
@@ -1561,6 +1562,7 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-operating")), "operating/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", eventtest.UUID("ent-operating")),
 		time.Now().UTC(),
 	)
 
@@ -1625,7 +1627,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
 			ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(concreteEventType))
 			defer unsubscribeTestAgent(eb, "workflow-runtime")
-			evt := eventtest.RunCreatingRootIngress(
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 				eventID,
 				events.EventType(tc.eventType),
 				"workflow-runtime",
@@ -1635,6 +1637,7 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 				"",
 				"",
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-repo")), "repo-scaffold/inst-1"),
+				eventtest.ConcreteTemplateRoutingSource("repo-scaffold", "repo-scaffold/inst-1", eventtest.UUID("ent-repo")),
 				time.Now().UTC(),
 			)
 
@@ -1680,7 +1683,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("validation/thing.reviewed"))
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("validation/thing.reviewed"),
 		"",
@@ -1690,6 +1693,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", eventtest.UUID("ent-validation")),
 		time.Now().UTC(),
 	)
 
@@ -1736,7 +1740,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("validation/thing.reviewed"),
 		"",
@@ -1746,6 +1750,7 @@ func TestEventBusCheckPublishRecipientPlan_SemanticScopeFlowInstanceMaterializes
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-validation")), "validation/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", eventtest.UUID("ent-validation")),
 		time.Now().UTC(),
 	)
 
@@ -1890,7 +1895,7 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		eventID,
 		events.EventType(eventType),
 		"",
@@ -1900,6 +1905,7 @@ func TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersisten
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-component")), "component-scaffold/component-a"),
+		eventtest.ConcreteTemplateRoutingSource("component-scaffold", "component-scaffold/component-a", eventtest.UUID("ent-component")),
 		time.Now().UTC(),
 	)
 
@@ -2016,14 +2022,23 @@ func TestRouteTableQualifiedRootInputFlowUsesSemanticLocalizationOwner(t *testin
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	got := rt.Resolve("worker/task.assigned")
-	if len(got) != 1 {
-		t.Fatalf("Resolve(worker/task.assigned) = %#v, want one exact worker input route", got)
+	if len(got) != 2 {
+		t.Fatalf("Resolve(worker/task.assigned) = %#v, want exact subscription and root-input roles", got)
 	}
-	if got[0].Recipient.ID() != "intake" || got[0].Path != "worker" || got[0].MatchPattern != "worker/task.assigned" {
-		t.Fatalf("resolved subscriber = %#v, want worker/intake exact root input", got[0])
+	wantSources := map[string]bool{"subscription": false, "root_input_flow": false}
+	for _, subscriber := range got {
+		if subscriber.Recipient.ID() != "intake" || subscriber.Path != "worker" || subscriber.MatchPattern != "worker/task.assigned" || subscriber.LocalizedEvent != "task.assigned" {
+			t.Fatalf("resolved subscriber = %#v, want worker/intake exact localized role", subscriber)
+		}
+		if _, ok := wantSources[subscriber.RouteSourceCode()]; !ok {
+			t.Fatalf("resolved semantic authority = %#v, want subscription or root_input_flow", subscriber)
+		}
+		wantSources[subscriber.RouteSourceCode()] = true
 	}
-	if got[0].RouteSourceCode() != "root_input_flow" || got[0].LocalizedEvent != "task.assigned" {
-		t.Fatalf("resolved semantic authority = %#v, want root_input_flow localized to task.assigned", got[0])
+	for source, found := range wantSources {
+		if !found {
+			t.Fatalf("missing %s role in %#v", source, got)
+		}
 	}
 }
 
@@ -2445,10 +2460,8 @@ func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
 			if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Recipient.ID() != "entity-writer" || routes[0].Target != want {
 				t.Fatalf("persisted operator API routes = %#v, want only exact selected validation receiver %#v", routes, want)
 			}
-			if got := store.events[eventID].TargetRoute().Normalized(); explicitTarget && got != wantRoute {
-				t.Fatalf("persisted explicitly targeted operator API event target = %#v, want %#v", got, wantRoute)
-			} else if !explicitTarget && !got.Empty() {
-				t.Fatalf("persisted target-free operator API event target = %#v, want immutable target-free payload", got)
+			if got := store.events[eventID].TargetRoute().Normalized(); got != wantRoute {
+				t.Fatalf("persisted operator API event target projection = %#v, want exact route projection %#v", got, wantRoute)
 			}
 		})
 	}
@@ -2574,8 +2587,18 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	resolved := rt.Resolve("item.received")
-	if len(resolved) != 1 || resolved[0].Recipient.ID() != "item-handler" || resolved[0].Path != "" || resolved[0].RouteSourceCode() != "subscription" {
-		t.Fatalf("resolved subscribers = %#v, want canonical same-flow item-handler subscription", resolved)
+	if len(resolved) != 2 {
+		t.Fatalf("resolved subscribers = %#v, want independent subscription and root-input-project roles", resolved)
+	}
+	wantSources := map[string]bool{"subscription": false, "root_input_project": false}
+	for _, subscriber := range resolved {
+		if subscriber.Recipient.ID() != "item-handler" || subscriber.Path != "" {
+			t.Fatalf("resolved subscriber = %#v, want root item-handler", subscriber)
+		}
+		if _, ok := wantSources[subscriber.RouteSourceCode()]; !ok {
+			t.Fatalf("resolved subscriber = %#v, want subscription or root_input_project", subscriber)
+		}
+		wantSources[subscriber.RouteSourceCode()] = true
 	}
 
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -2611,8 +2634,20 @@ func TestEventBusPublish_LoadedRootInputProjectEventPersistsRouteBeforeDispatch(
 	if len(plan.PersistedRecipients) != 0 {
 		t.Fatalf("persisted recipients = %#v, want none for internal root-input node carrier", plan.PersistedRecipients)
 	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "item-handler" || plan.RoutedRecipients[0].Path != "" || plan.RoutedRecipients[0].RouteSource != "subscription" {
-		t.Fatalf("routed recipients = %#v, want canonical same-flow item-handler", plan.RoutedRecipients)
+	if len(plan.RoutedRecipients) != 2 {
+		t.Fatalf("routed recipients = %#v, want subscription and root-input-project roles", plan.RoutedRecipients)
+	}
+	routedSources := map[string]bool{"subscription": false, "root_input_project": false}
+	for _, recipient := range plan.RoutedRecipients {
+		if recipient.ID != "item-handler" || recipient.Path != "" {
+			t.Fatalf("routed recipient = %#v, want root item-handler", recipient)
+		}
+		routedSources[recipient.RouteSource] = true
+	}
+	for source, found := range routedSources {
+		if !found {
+			t.Fatalf("routed recipients = %#v, missing %s role", plan.RoutedRecipients, source)
+		}
 	}
 	if got := plan.DeliveryRoutes; len(got) != 1 || !deliveryRoutesContain(got, want) {
 		t.Fatalf("delivery routes = %#v, want empty-target node/item-handler route", got)
@@ -2664,12 +2699,22 @@ func TestRouteTableIntrinsicExternalFlowInputsCarryTypedIngressAuthority(t *test
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
 			resolved := routes.Resolve(tc.eventType)
-			if len(resolved) != 1 {
-				t.Fatalf("Resolve(%s) = %#v, want one exact receiver", tc.eventType, resolved)
+			wantCount := 1
+			if tc.wantRouteCode == "root_input_flow" {
+				wantCount = 2
 			}
-			got := resolved[0]
-			if got.Recipient.ID() != tc.recipient || got.Path != tc.wantPath || got.RouteSourceCode() != tc.wantRouteCode {
-				t.Fatalf("Resolve(%s) = %#v, want recipient=%s path=%s authority=%s", tc.eventType, got, tc.recipient, tc.wantPath, tc.wantRouteCode)
+			if len(resolved) != wantCount {
+				t.Fatalf("Resolve(%s) = %#v, want %d exact roles", tc.eventType, resolved, wantCount)
+			}
+			found := false
+			for _, got := range resolved {
+				if got.Recipient.ID() != tc.recipient || got.Path != tc.wantPath {
+					t.Fatalf("Resolve(%s) = %#v, want recipient=%s path=%s", tc.eventType, got, tc.recipient, tc.wantPath)
+				}
+				found = found || got.RouteSourceCode() == tc.wantRouteCode
+			}
+			if !found {
+				t.Fatalf("Resolve(%s) = %#v, missing authority=%s", tc.eventType, resolved, tc.wantRouteCode)
 			}
 		})
 	}
@@ -2921,16 +2966,19 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 }
 
 func TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute(t *testing.T) {
-	rt, err := DeriveRouteTable(semanticview.Wrap(routedTopLevelProjectNodeBundle()))
+	rt, err := DeriveRouteTable(semanticview.Wrap(routedTopLevelProjectNodeBundle(t)))
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	got := rt.Resolve("thing.created")
-	if len(got) != 1 {
-		t.Fatalf("Resolve(thing.created) = %#v, want one top-level project node route", got)
+	rootInput := 0
+	for _, subscriber := range got {
+		if subscriber.Recipient.ID() == "reviewer" && subscriber.Recipient.IsNode() && subscriber.Path == "" && subscriber.MatchPattern == "thing.created" && subscriber.RouteSourceCode() == "root_input_project" {
+			rootInput++
+		}
 	}
-	if got[0].Recipient.ID() != "reviewer" || !got[0].Recipient.IsNode() || got[0].Path != "" || got[0].MatchPattern != "thing.created" || got[0].RouteSourceCode() != "root_input_project" {
-		t.Fatalf("resolved subscriber = %#v, want root input project reviewer route", got[0])
+	if rootInput != 1 {
+		t.Fatalf("Resolve(thing.created) = %#v, want exactly one compiler-owned root input project reviewer route", got)
 	}
 }
 
@@ -2938,7 +2986,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	source := semanticview.Wrap(routedTopLevelProjectNodeBundle())
+	source := semanticview.Wrap(routedTopLevelProjectNodeBundle(t))
 	reviewerOwner := events.RouteIdentity{FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("reviewer-root-owner")}
 	store.setTargetOwnerRoutes(reviewerOwner)
 	reviewerRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("reviewer"), Target: events.MustExistingEntityTarget(reviewerOwner)}
@@ -2965,7 +3013,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		workflowRuntimeIdentity,
 		"",
 	)
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		eventID,
 		events.EventType("thing.created"),
 		"",
@@ -2975,6 +3023,7 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 		runID,
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("project-source-owner")),
+		eventtest.RootRoutingSource(eventtest.UUID("project-source-owner")),
 		time.Now().UTC(),
 	)
 
@@ -3002,19 +3051,32 @@ func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *te
 }
 
 func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testing.T) {
-	eb, err := newScopedTestEventBus(rejectingDeliveryRouteStore{}, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle()),
+	runID := uuid.NewString()
+	owner := events.RouteIdentity{FlowID: "top-level-project-node", FlowInstance: runID, EntityID: eventtest.UUID("rejecting-store-owner")}
+	store := rejectingDeliveryRouteStore{owners: []ActiveTargetDescriptor{{
+		ID: "rejecting-store-owner", FlowInstance: runID, EntityID: owner.EntityID,
+	}}}
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: semanticview.Wrap(routedTopLevelProjectNodeBundle(t)),
+		Durable:        DurableTestDependencyProjection(store),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("thing.created"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
+	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(),
+		events.EventType("thing.created"), "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{},
+		eventtest.RootRoutingSource(eventtest.UUID("rejecting-store-source")), time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "typed delivery route persistence") {
 		t.Fatalf("Publish error = %v, want typed delivery route persistence failure", err)
 	}
 }
 
-type rejectingDeliveryRouteStore struct{}
+type rejectingDeliveryRouteStore struct {
+	owners []ActiveTargetDescriptor
+}
+
+func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
+	return append([]ActiveTargetDescriptor(nil), s.owners...), nil
+}
 
 func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
 	if len(command.Commit.DeliveryRoutes) > 0 {
@@ -3138,39 +3200,23 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 	}
 }
 
-func routedTopLevelProjectNodeBundle() *runtimecontracts.WorkflowContractBundle {
-	handler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
-	return &runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{
-			Name:    "top-level-project-node",
-			Version: "1.0.0",
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "top-level-project-node",
-			Version: "1.0.0",
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"reviewer": {"thing.created": handler},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"thing.created": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"reviewer": {
-				ID:            "reviewer",
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.created"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.created": handler,
-				},
-			},
-		},
-	}
+func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return loadTargetRouteTempBundle(t, map[string]string{
+		"package.yaml": "name: top-level-project-node\nversion: 1.0.0\n",
+		"schema.yaml":  "name: top-level-project-node\npins:\n  inputs:\n    events: [thing.created]\n",
+		"events.yaml":  "thing.created:\n  entity_id: string\n",
+		"nodes.yaml": `reviewer:
+  id: reviewer
+  execution_type: system_node
+  subscribes_to: [thing.created]
+  event_handlers:
+    thing.created:
+      guard:
+        id: selected_owner
+        check: '_entity.id != ""'
+`,
+	})
 }
 
 func routedNodeTemplateBundle() *runtimecontracts.WorkflowContractBundle {

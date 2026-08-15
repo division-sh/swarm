@@ -1819,6 +1819,12 @@ func (r RouteIdentity) Empty() bool {
 	return r.FlowInstance == "" && r.EntityID == "" && r.FlowID == ""
 }
 
+// SameRouteIdentity compares two normalized route facts. It deliberately does
+// not infer or complete missing fields.
+func SameRouteIdentity(left, right RouteIdentity) bool {
+	return left.Normalized() == right.Normalized()
+}
+
 func (r DeliveryRoute) Normalized() DeliveryRoute {
 	return DeliveryRoute{
 		Recipient:         r.Recipient,
@@ -1861,6 +1867,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 // complete persisted identity for exactly the supported agent and node
 // execution classes.
 func ValidateDeliveryRoutes(in []DeliveryRoute) error {
+	owners := make(map[deliveryExecutionSlotKey]DeliveryTargetOwnership, len(in))
 	for index, route := range in {
 		route = route.Normalized()
 		if !route.Recipient.IsAgent() && !route.Recipient.IsNode() {
@@ -1869,6 +1876,17 @@ func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 		if _, err := route.Identity(); err != nil {
 			return fmt.Errorf("delivery route %d: %w", index, err)
 		}
+		if route.Target.Empty() {
+			continue
+		}
+		key := exactDeliveryExecutionSlotKey(route)
+		if previous, exists := owners[key]; exists && !SameDeliveryTargetOwnership(previous, route.Target) {
+			return fmt.Errorf(
+				"delivery route %s=%s has conflicting target ownership kinds %s and %s for one exact execution slot",
+				route.Recipient.Code(), route.Recipient.ID(), previous.Code(), route.Target.Code(),
+			)
+		}
+		owners[key] = route.Target
 	}
 	return ValidateDeliveryRouteProjections(in)
 }
@@ -1897,20 +1915,14 @@ func SameDeliveryRecipientIdentity(left, right DeliveryRoute) bool {
 }
 
 func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {
-	type projectionRouteKey struct {
-		recipient      DeliveryRecipient
-		target         RouteIdentity
-		replyContextID string
-	}
-	seen := make(map[projectionRouteKey]string, len(in))
+	seen := make(map[deliveryExecutionSlotKey]string, len(in))
 	for _, route := range in {
 		route = route.Normalized()
 		projection, err := route.PayloadProjection.Canonical()
 		if err != nil {
 			return fmt.Errorf("delivery route %s=%s has invalid payload projection: %w", route.Recipient.Code(), route.Recipient.ID(), err)
 		}
-		target := route.Target.Route()
-		key := projectionRouteKey{recipient: route.Recipient, target: target, replyContextID: route.Context.ReplyContextID()}
+		key := exactDeliveryExecutionSlotKey(route)
 		fingerprint := projection.Fingerprint()
 		if previous, exists := seen[key]; exists && previous != fingerprint {
 			return fmt.Errorf("delivery route %s=%s has conflicting synthetic payload projections", route.Recipient.Code(), route.Recipient.ID())
@@ -1918,6 +1930,26 @@ func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {
 		seen[key] = fingerprint
 	}
 	return nil
+}
+
+// deliveryExecutionSlotKey identifies one concrete receiver execution while
+// excluding route payload and connect-edge projections that must agree for the
+// same slot.
+type deliveryExecutionSlotKey struct {
+	recipient      DeliveryRecipient
+	agentIdentity  agentidentity.Identity
+	targetRoute    RouteIdentity
+	replyContextID string
+}
+
+func exactDeliveryExecutionSlotKey(route DeliveryRoute) deliveryExecutionSlotKey {
+	route = route.Normalized()
+	return deliveryExecutionSlotKey{
+		recipient:      route.Recipient,
+		agentIdentity:  route.AgentIdentity,
+		targetRoute:    route.Target.Route(),
+		replyContextID: route.Context.ReplyContextID(),
+	}
 }
 
 func normalizeRouteIdentities(in []RouteIdentity) []RouteIdentity {
