@@ -135,11 +135,8 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				createdAt := time.Now().UTC()
 				if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-					CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Metadata: map[string]any{
-						"run_id": runID, "entity_id": entityID, "flow_path": path, "instance_id": route.InstanceID,
-						"expected": []any{"a", "b"},
-					},
+					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields: map[string]any{"expected": []any{"a", "b"}},
 				}, createdAt); err != nil {
 					t.Fatalf("materialize exact join owner: %v", err)
 				}
@@ -195,7 +192,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				if err != nil || !found || instance.CurrentState != "ready" {
 					t.Fatalf("closed workflow = found:%v state:%q err:%v", found, instance.CurrentState, err)
 				}
-				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -317,11 +314,8 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				createdAt := time.Now().UTC()
 				if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-					CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Metadata: map[string]any{
-						"run_id": runID, "entity_id": entityID, "flow_path": path, "instance_id": route.InstanceID,
-						"expected": []any{},
-					},
+					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+					Fields: map[string]any{"expected": []any{}},
 				}, createdAt); err != nil {
 					t.Fatalf("materialize immediate join owner: %v", err)
 				}
@@ -340,7 +334,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				cancel()
 				assertExactJoinDeliveryStatus(t, selected, ctx, eventID, "delivered")
 				instance := waitForExactJoinState(t, ctx, coordinator, route, "ready")
-				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 				if err != nil {
 					t.Fatal(err)
 				}
