@@ -37,8 +37,14 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	if got := len(inventory.PublicCompanions()); got != 87 {
 		t.Fatalf("public companion count = %d, want 87", got)
 	}
-	if got := len(inventory.Claims); got != 12 {
-		t.Fatalf("canonical claim count = %d, want 12", got)
+	if got := len(inventory.Claims); got != 16 {
+		t.Fatalf("canonical claim count = %d, want 16", got)
+	}
+	if inventory.ExternalProof == nil ||
+		inventory.ExternalProof.Source != externalCompiledProcessSource ||
+		inventory.ExternalProof.Executor != externalCompiledProcessExecutor ||
+		!equalCatalogStrings(inventory.ExternalProof.Proves, externalCompiledProcessClaims) {
+		t.Fatalf("external compiled-process proof = %#v", inventory.ExternalProof)
 	}
 }
 
@@ -66,6 +72,52 @@ func TestCatalogInventoryFailsClosed(t *testing.T) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCatalogExternalCompiledProcessProofFailsClosed(t *testing.T) {
+	validProof := externalProofSpec(
+		externalCompiledProcessSource,
+		externalCompiledProcessExecutor,
+		externalCompiledProcessClaims,
+	)
+	tests := []struct {
+		name     string
+		proof    string
+		expected string
+		want     string
+	}{
+		{name: "missing record", want: "require external_compiled_process_proof"},
+		{name: "duplicate record", proof: validProof + validProof, want: "duplicate top-level external_compiled_process_proof"},
+		{name: "missing claim", proof: externalProofSpec(externalCompiledProcessSource, externalCompiledProcessExecutor, externalCompiledProcessClaims[:3]), want: "omits claim"},
+		{name: "duplicate claim", proof: externalProofSpec(externalCompiledProcessSource, externalCompiledProcessExecutor, append(append([]string{}, externalCompiledProcessClaims...), externalCompiledProcessClaims[0])), want: "repeats claim"},
+		{name: "unknown claim", proof: externalProofSpec(externalCompiledProcessSource, externalCompiledProcessExecutor, append(append([]string{}, externalCompiledProcessClaims...), "catalog.runtime.unknown")), want: "references unknown claim"},
+		{name: "nonexistent source", proof: externalProofSpec("internal/releasee2e/testdata/missing", externalCompiledProcessExecutor, externalCompiledProcessClaims), want: "proof source"},
+		{name: "invalid executor", proof: externalProofSpec(externalCompiledProcessSource, "github.com/division-sh/swarm/internal/runtime/cataloge2e", externalCompiledProcessClaims), want: "want sole executor"},
+		{
+			name:     "multiply credited",
+			proof:    validProof,
+			expected: fixtureMetadata("runtime", "pass", externalCompiledProcessClaims[0]),
+			want:     "multiple runtime-credit owners",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeExternalProofInventory(t, test.proof, test.expected)
+			_, err := Load(root)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load error = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	root := writeExternalProofInventory(t, validProof, "")
+	inventory, err := Load(root)
+	if err != nil {
+		t.Fatalf("load valid external proof: %v", err)
+	}
+	if inventory.ExternalProof == nil || !equalCatalogStrings(inventory.ExternalProof.Proves, externalCompiledProcessClaims) {
+		t.Fatalf("valid external proof = %#v", inventory.ExternalProof)
 	}
 }
 
@@ -126,6 +178,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatalf("load proof policy: %v", err)
 	}
 	const cliappPackage = "github.com/division-sh/swarm/internal/cliapp"
+	const releasePackage = "github.com/division-sh/swarm/internal/releasee2e"
 	cliappUnit, ok := policy.Units["catalog-required-verify"]
 	if !ok {
 		t.Fatal("proof policy omits catalog-required-verify")
@@ -137,6 +190,19 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatalf("catalog-required-verify run filter = %q, want unfiltered full package", cliappUnit.Run)
 	}
 	requiredUnits := []string{"catalog-required-inventory", "catalog-required-verify"}
+	for unitID, run := range map[string]string{
+		"golden-agent-process-smoke":    "^TestGoldenAgentWorkloadSQLiteSmoke$",
+		"golden-agent-process-recovery": "^TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends$",
+	} {
+		unit, ok := policy.Units[unitID]
+		if !ok {
+			t.Errorf("proof policy omits %s", unitID)
+			continue
+		}
+		if len(unit.Packages) != 1 || unit.Packages[0] != releasePackage || unit.Run != run {
+			t.Errorf("%s = packages:%v run:%q", unitID, unit.Packages, unit.Run)
+		}
+	}
 	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
 	model := testplanning.WeightModel{Version: 1, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
 	for _, profileName := range []string{
@@ -157,6 +223,13 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		}
 		if !containsString(profile.Units, catalogUnit) {
 			t.Errorf("profile %s omits %s", profileName, catalogUnit)
+		}
+		if !containsString(profile.Units, "golden-agent-process-smoke") {
+			t.Errorf("profile %s omits golden-agent-process-smoke", profileName)
+		}
+		wantRecovery := profileName == testplanning.ProfileFull || profileName == testplanning.ProfileNightly
+		if containsString(profile.Units, "golden-agent-process-recovery") != wantRecovery {
+			t.Errorf("profile %s recovery selection = %t, want %t", profileName, containsString(profile.Units, "golden-agent-process-recovery"), wantRecovery)
 		}
 		plan, err := testplanning.BuildPlan(policy, model, planPackages, profileName, "catalog CI owner guard", "issue-2143")
 		if err != nil {
@@ -181,6 +254,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	for _, changedPath := range []string{
 		"internal/runtime/engine.go",
 		"internal/testcatalog/inventory.go",
+		"internal/releasee2e/golden_agent_workload_test.go",
 		"tests/tier1-primitives/test-advances-to/expected.yaml",
 		"platform-spec.yaml",
 	} {
@@ -251,6 +325,18 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func equalCatalogStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func catalogRepoRoot(t testing.TB) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -274,6 +360,37 @@ func writeInventoryFixture(t *testing.T, claims, expected string, companion bool
 		writeCatalogTestFile(t, filepath.Join(fixtureRoot, "tests", "visible-smoke.yaml"), "name: smoke\n")
 	}
 	return root
+}
+
+func writeExternalProofInventory(t *testing.T, proof, expected string) string {
+	t.Helper()
+	root := t.TempDir()
+	claims := claimSpec("claim.runtime", "runtime")
+	for _, claimID := range externalCompiledProcessClaims {
+		claims += claimSpec(claimID, "runtime")
+	}
+	spec := "test_specification:\n  internal_catalog_conformance:\n    claims:\n" + claims + proof
+	writeCatalogTestFile(t, filepath.Join(root, "platform-spec.yaml"), spec)
+	if expected == "" {
+		expected = fixtureMetadata("runtime", "pass", "claim.runtime")
+	}
+	writeCatalogTestFile(t, filepath.Join(root, "tests", "tier1", "test-case", "expected.yaml"), expected)
+	if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(externalCompiledProcessSource)), 0o755); err != nil {
+		t.Fatalf("create external proof source: %v", err)
+	}
+	return root
+}
+
+func externalProofSpec(source, executor string, proves []string) string {
+	var out strings.Builder
+	out.WriteString("    external_compiled_process_proof:\n")
+	out.WriteString("      source: " + source + "\n")
+	out.WriteString("      executor: " + executor + "\n")
+	out.WriteString("      proves:\n")
+	for _, claimID := range proves {
+		out.WriteString("      - " + claimID + "\n")
+	}
+	return out.String()
 }
 
 func claimSpec(id, disposition string) string {

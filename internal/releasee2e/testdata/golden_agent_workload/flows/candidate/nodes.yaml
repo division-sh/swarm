@@ -1,0 +1,32 @@
+candidate-intake:
+  id: candidate-intake
+  execution_type: system_node
+  subscribes_to: [candidate.requested]
+  produces: [candidate.work.requested]
+  event_handlers:
+    candidate.requested:
+      advances_to: active
+      data_accumulation:
+        writes:
+          - source_field: candidate_id
+            target_field: candidate_id
+      emit:
+        event: candidate.work.requested
+        fields:
+          batch_id: payload.batch_id
+          candidate_id: payload.candidate_id
+
+candidate-completion:
+  id: candidate-completion
+  execution_type: system_node
+  subscribes_to: [candidate.analyzed]
+  produces: [candidate.completed]
+  event_handlers:
+    candidate.analyzed:
+      advances_to: complete
+      emit:
+        event: candidate.completed
+        fields:
+          batch_id: payload.batch_id
+          candidate_id: payload.candidate_id
+          summary: payload.summary

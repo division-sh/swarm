@@ -19641,20 +19641,24 @@ test_specification:
   internal_catalog_conformance:
     id: testing.internal_catalog_claim_inventory
     promoted_by: '#2143'
-    implementation_status: implemented_current_corpus_replay_clean
+    implementation_status: implemented_current_corpus_replay_clean_and_external_process_proof
     owner: platform-spec.yaml#test_specification.internal_catalog_conformance
     purpose: >
       Define the claim-indexed proof contract for the private tests/tier*
-      conformance corpus while it remains transitional internal evidence.
-      Claim identity and governing semantics live here; fixture metadata only
-      declares which canonical claims a discovered fixture is intended to prove.
+      conformance corpus and the one compiled-process golden workload.
+      Claim identity and governing semantics live here; fixture metadata and the
+      bounded external record only declare which canonical claims their sole
+      executor is intended to prove.
     inventory:
       discovery: Every directory matching tests/tier*/* is a fixture.
       metadata_owner: Each fixture's expected.yaml top-level conformance block.
       fail_closed: >
         A missing expected.yaml or conformance block, an invalid disposition,
         an unknown or duplicate claim, an unproved active claim, or companion
-        metadata that disagrees with the filesystem is a test failure.
+        metadata that disagrees with the filesystem is a test failure. The
+        external compiled-process record additionally fails on a missing or
+        duplicate claim, unknown or multiply credited claim, nonexistent source,
+        or executor other than its named sole owner.
       dispositions:
         runtime: >
           The fixture must pass supported swarm verify and execute its exact
@@ -19690,10 +19694,17 @@ test_specification:
         The direct tool row and boot-only row retain separate supported proofs
         and receive no empty-journal replay credit.
       parent_tail: >
-        Finite grammar matrices, adoption by the separately owned compiled-process
-        golden workload, and convergence on the public deterministic scenario
-        format remain the catalog_convergence tail. They do not weaken or duplicate
-        the current-corpus replay-clean owner.
+        Finite grammar matrices and convergence on the public deterministic
+        scenario format remain the catalog_convergence tail. They do not weaken
+        or duplicate the current-corpus replay-clean or compiled-process owners.
+    external_compiled_process_proof:
+      source: internal/releasee2e/testdata/golden_agent_workload
+      executor: github.com/division-sh/swarm/internal/releasee2e
+      proves:
+      - catalog.runtime.agent_instance_materialization
+      - catalog.runtime.agent_turn_completion
+      - catalog.runtime.agent_emission_delivery
+      - catalog.runtime.agent_terminal_teardown
     replay_clean:
       promoted_by: '#2143'
       transcript:
@@ -19854,6 +19865,22 @@ test_specification:
         status: active
         required_disposition: runtime
         scope: Declared flow-data tool exposure, reads, and fail-closed isolation.
+      catalog.runtime.agent_instance_materialization:
+        status: active
+        required_disposition: runtime
+        scope: Compiled-process materialization of each authored logical agent into its exact concrete flow instance.
+      catalog.runtime.agent_turn_completion:
+        status: active
+        required_disposition: runtime
+        scope: Compiled-process completion and persistence of one deterministic mock turn for every materialized agent.
+      catalog.runtime.agent_emission_delivery:
+        status: active
+        required_disposition: runtime
+        scope: Compiled-process delivery of each agent emission to its exact same-instance authored consumer.
+      catalog.runtime.agent_terminal_teardown:
+        status: active
+        required_disposition: runtime
+        scope: Compiled-process terminal convergence and teardown after all agent-owned work settles.
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'

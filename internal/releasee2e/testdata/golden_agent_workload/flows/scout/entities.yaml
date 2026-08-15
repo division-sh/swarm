@@ -1,0 +1,4 @@
+scout_task:
+  candidate_ids:
+    type: "[text]"
+    _unused_reason: persisted singleton coordinator result

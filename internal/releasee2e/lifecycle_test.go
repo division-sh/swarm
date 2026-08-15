@@ -22,12 +22,7 @@ import (
 func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	repo := releaseE2ERepoRoot(t)
 	releaseRoot := t.TempDir()
-	binaryPath := filepath.Join(releaseRoot, "swarm")
-	build := exec.Command("go", "build", "-o", binaryPath, "./cmd/swarm")
-	build.Dir = repo
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build release binary: %v\n%s", err, output)
-	}
+	binaryPath := buildReleaseBinary(t, releaseRoot)
 
 	writeReleaseFile(t, filepath.Join(releaseRoot, "go.mod"), "module release-e2e-project\n\ngo 1.23.0\n")
 	copyReleaseTree(t,
