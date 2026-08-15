@@ -918,9 +918,10 @@ func validateRoutePlanEventProjection(evt events.Event, plan RoutePlan) error {
 
 func resolveRoutePlanEventProjection(evt events.Event, plan RoutePlan) (events.Event, bool, error) {
 	plan = plan.Normalized()
+	routes := plan.DeliveryRoutes()
 	targets := make([]events.RouteIdentity, 0, len(plan.DeliveryIntents))
 	hasTargetlessDelivery := false
-	for _, route := range plan.DeliveryRoutes() {
+	for _, route := range routes {
 		if target := route.Target.Route(); target.Empty() {
 			hasTargetlessDelivery = true
 		} else {
@@ -929,7 +930,15 @@ func resolveRoutePlanEventProjection(evt events.Event, plan RoutePlan) (events.E
 	}
 	targets = uniqueRouteIdentities(targets)
 	if len(targets) == 0 {
-		return evt, false, nil
+		if len(routes) == 0 {
+			return evt, false, nil
+		}
+		envelope := events.EnvelopeForBroadcast(evt.NormalizedEnvelope())
+		resolved, err := events.ResolveEnvelope(evt, envelope)
+		if err != nil {
+			return evt, false, fmt.Errorf("clear all-targetless delivery route projection: %w", err)
+		}
+		return resolved, !sameEventTargetProjection(evt, resolved), nil
 	}
 	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
 	if len(existing) > 0 && !sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
@@ -2187,15 +2196,27 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	return runtimepipelineobligation.Continue(), nil
 }
 
-func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) []events.DeliveryRoute {
-	reader := eb.durable.DeliveryRouteSets
-	if reader != nil {
-		routes, err := reader.ListEventDeliveryRoutes(ctx, eventID)
-		if err == nil && len(routes) > 0 {
-			return events.NormalizeDeliveryRoutes(routes)
-		}
+func (eb *EventBus) preparedEventForReplay(ctx context.Context, eventID string) (PreparedPublishEvent, error) {
+	reader := eb.durable.PreparedEvents
+	if reader == nil {
+		return PreparedPublishEvent{}, errors.New("prepared event settlement reader is required")
 	}
-	return nil
+	eventID = strings.TrimSpace(eventID)
+	prepared, found, err := reader.LoadPreparedPublishEvent(ctx, eventID)
+	if err != nil {
+		return PreparedPublishEvent{}, fmt.Errorf("load prepared event %s: %w", eventID, err)
+	}
+	if !found {
+		return PreparedPublishEvent{}, fmt.Errorf("prepared event %s is missing", eventID)
+	}
+	if err := prepared.Validate(); err != nil {
+		return PreparedPublishEvent{}, fmt.Errorf("validate prepared event %s: %w", eventID, err)
+	}
+	if prepared.Event.ID() != eventID {
+		return PreparedPublishEvent{}, fmt.Errorf("prepared event identity %s does not match requested event %s", prepared.Event.ID(), eventID)
+	}
+	prepared.DeliveryRoutes = events.NormalizeDeliveryRoutes(prepared.DeliveryRoutes)
+	return prepared, nil
 }
 
 func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan RoutePlan) {

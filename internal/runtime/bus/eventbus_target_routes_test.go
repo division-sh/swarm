@@ -1091,9 +1091,10 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("custom.node_only_outbox"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("custom.node_only_outbox"), "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 
 	store.events[evt.ID()] = evt
+	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 	store.routes[evt.ID()] = []events.DeliveryRoute{{
 		Recipient: events.MustNodeDeliveryRecipient("workflow-node"),
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root"}),
@@ -1115,6 +1116,7 @@ func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *tes
 		events.EventType("custom.node_only_sweep"), "", "", []byte(`{}`), 0, eventtest.UUID("run:"+eventID), events.EventEnvelope{}, time.Now().UTC())
 
 	store.events[evt.ID()] = evt
+	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 	store.routes[evt.ID()] = []events.DeliveryRoute{{
 		Recipient: events.MustNodeDeliveryRecipient("workflow-node"),
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root"}),

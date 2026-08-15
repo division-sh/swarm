@@ -55,6 +55,51 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 				assertDeliveryRouteEqualityCommitCounts(t, ctx, fixture, event.ID(), 0, 0)
 			})
 
+			for _, contradiction := range []struct {
+				name   string
+				first  events.DeliveryTargetOwnership
+				second events.DeliveryTargetOwnership
+			}{
+				{
+					name: "same_exact_agent_different_target_routes_roll_back",
+					first: events.MustExistingEntityTarget(events.RouteIdentity{
+						FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString(),
+					}),
+					second: events.MustExistingEntityTarget(events.RouteIdentity{
+						FlowID: "review", FlowInstance: "review/two", EntityID: uuid.NewString(),
+					}),
+				},
+				{
+					name: "same_exact_agent_targeted_and_targetless_roll_back",
+					first: events.MustExistingEntityTarget(events.RouteIdentity{
+						FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString(),
+					}),
+				},
+				{
+					name: "same_exact_agent_ownership_kinds_roll_back",
+					first: events.MustExistingEntityTarget(events.RouteIdentity{
+						FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("same-agent-kind-owner"),
+					}),
+					second: events.MustMaterializingEntityTarget(events.RouteIdentity{
+						FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("same-agent-kind-owner"),
+					}),
+				},
+			} {
+				t.Run(contradiction.name, func(t *testing.T) {
+					event := deliveryRouteEqualityEvent(runID, contradiction.name)
+					identity := testAgentIdentity(t, "worker", "review/one")
+					routes := []events.DeliveryRoute{
+						{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, Target: contradiction.first},
+						{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: identity, Target: contradiction.second},
+					}
+					err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes)
+					if err == nil || !strings.Contains(err.Error(), "conflicting target ownership") {
+						t.Fatalf("commit exact agent ownership conflict error = %v", err)
+					}
+					assertDeliveryRouteEqualityCommitCounts(t, ctx, fixture, event.ID(), 0, 0)
+				})
+			}
+
 			t.Run("distinct_exact_agents_preserve_independent_projections", func(t *testing.T) {
 				event := deliveryRouteEqualityEvent(runID, "agent-siblings")
 				firstIdentity := testAgentIdentity(t, "worker", "review/one")

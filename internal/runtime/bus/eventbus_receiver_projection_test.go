@@ -90,11 +90,13 @@ func TestEventBusEventInterceptorReceiverProjectionRejectsPublisherState(t *test
 
 func TestPersistedReplayUsesClosedReceiverProjection(t *testing.T) {
 	interceptor := &receiverProjectionInterceptor{}
-	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
+	store := newTargetRouteMemoryStore()
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
 	evt := receiverProjectionEvent("persisted-replay")
+	seedCommittedNoDeliveryForTest(t, store, evt)
 	if _, err := eventBus.publishPersistedRecipientsWithScope(
 		hostilePublisherContext(t), evt, runtimepipelineobligation.ScopeSubscribed, nil, true, false,
 	); err != nil {
@@ -107,11 +109,13 @@ func TestPersistedReplayUsesClosedReceiverProjection(t *testing.T) {
 
 func TestEngineOutboxUsesClosedReceiverProjection(t *testing.T) {
 	interceptor := &receiverProjectionInterceptor{}
-	eventBus, err := newScopedTestEventBus(receiverProjectionStore{}, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
+	store := newTargetRouteMemoryStore()
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
 	evt := receiverProjectionEvent("engine-outbox")
+	seedCommittedNoDeliveryForTest(t, store, evt)
 	if err := eventBus.EngineDispatcher().DispatchPostCommit(hostilePublisherContext(t), []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
 		t.Fatalf("dispatch engine outbox receiver: %v", err)
 	}

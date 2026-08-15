@@ -1040,9 +1040,10 @@ seam_families:
       - internal/runtime/bus/eventbus.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/eventbus_delivery_projection_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-    search_dimensions: [workflow_runtime_carrier, internal_subscriptions]
+    search_dimensions: [workflow_runtime_carrier, internal_subscriptions, live_agent_subscription_route_authority]
     invalid_authority:
       - workflow-runtime carrier row
       - live internal subscription state

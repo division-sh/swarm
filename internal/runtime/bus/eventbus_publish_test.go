@@ -1646,12 +1646,12 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	}
 
 	evt := requireBusEvent(t, controlCh, "explicit metadata delivery to control-plane")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("control event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless control event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, matchCh, "explicit metadata delivery to entity-scoped reviewer")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("matched event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "explicit metadata delivery to filtered entity-scoped reviewer")
 
@@ -1689,8 +1689,8 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	}
 
 	evt := requireBusEvent(t, matchCh, "typed-envelope delivery to entity-scoped reviewer")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("matched event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "typed-envelope delivery to filtered entity-scoped reviewer")
 	assertSortedStringsEqual(t, store.persistedDeliveries(), []string{"reviewer-ent-1"})
@@ -1761,16 +1761,16 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 	}
 
 	evt := requireBusEvent(t, workflowCh, "internal workflow-runtime descriptor delivery")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless workflow-runtime event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, nodeCh, "internal system-node descriptor delivery")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("system node event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless system node event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, agentCh, "agent descriptor delivery")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("agent event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless agent event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, missingCh, "descriptor delivery to missing agent")
 
@@ -1810,12 +1810,12 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	}
 
 	evt := requireBusEvent(t, workflowCh, "deferred delivery to workflow-runtime")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("workflow-runtime event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless workflow-runtime event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, agentCh, "deferred delivery to agent")
-	if got := evt.EntityID(); got != eventtest.UUID(eventtest.UUID("ent-1")) {
-		t.Fatalf("agent event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless agent event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "deferred delivery to filtered agent")
 

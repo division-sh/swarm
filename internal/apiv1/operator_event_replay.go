@@ -555,11 +555,13 @@ func eventReplayAuditPayload(
 		"replay_event_id":     replayEventID,
 		"audit_event_id":      auditEventID,
 		"run_id":              original.RunID,
-		"entity_id":           original.EntityID,
 		"subscribers":         append([]string(nil), selectedSubscribers...),
 		"triggered_by":        eventReplayActorSource(req),
 		"actor_token_id":      strings.TrimSpace(req.ActorTokenID),
 		"original_deliveries": originalDeliveries,
+	}
+	if entityID := strings.TrimSpace(original.EntityID); entityID != "" {
+		payload["entity_id"] = entityID
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

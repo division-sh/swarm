@@ -176,8 +176,8 @@ func TestRunHubStartRunPublishesTypedEntityEnvelope(t *testing.T) {
 		case delivery := <-channel:
 			event := delivery.Event()
 			_ = delivery.Complete()
-			if got := event.EntityID(); got != entityIDs[eventType] {
-				t.Fatalf("%s dispatched entity_id = %q, want %q", eventType, got, entityIDs[eventType])
+			if got := event.EntityID(); got != "" {
+				t.Fatalf("%s targetless receiver entity_id = %q, want empty route-local target", eventType, got)
 			}
 		case <-time.After(250 * time.Millisecond):
 			t.Fatalf("expected %s run input event to be published", eventType)

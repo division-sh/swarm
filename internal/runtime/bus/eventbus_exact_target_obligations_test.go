@@ -89,6 +89,7 @@ func TestEventBusExactTargetObligationMatrix(t *testing.T) {
 				evt := exactSiblingObligationEvent(dispatchMode + "/" + scenario.name)
 				if store != nil {
 					store.events[evt.ID()] = evt
+					store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 					store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
 					store.routes[evt.ID()] = append([]events.DeliveryRoute(nil), routes...)
 				}
@@ -175,11 +176,24 @@ func exactSiblingObligationEvent(label string) events.Event {
 		"",
 		[]byte(`{}`),
 		0,
-		"",
+		eventtest.UUID("exact-target-obligation-run-"+label),
 		"",
 		events.EventEnvelope{},
 		time.Now(),
 	)
+}
+
+func exactSiblingDeliverySettlement(t testing.TB) events.RouteSettlement {
+	t.Helper()
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatalf("admit exact sibling evaluation ledger: %v", err)
+	}
+	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		t.Fatalf("admit exact sibling delivery settlement: %v", err)
+	}
+	return settlement
 }
 
 func failureDetailStrings(attributes map[string]any, key string) []string {

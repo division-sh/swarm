@@ -1335,10 +1335,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	continuationOwner := runtimebustest.NewDeliveryContinuationOwner(false)
+	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
 	proof, err := pg.ProveHandoff(
 		ctx,
 		forkEventID,
-		events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity},
+		replayRoute,
 	)
 	if err != nil {
 		t.Fatalf("prove fork replay delivery handoff: %v", err)
@@ -1389,7 +1390,11 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	case delivery := <-ch:
 		evt := delivery.Event()
 		_ = delivery.Complete()
-		assertRunForkCompleteEventSnapshot(t, evt, forkEvent)
+		wantDelivery, err := events.NewDeliveryEvent(forkEvent, replayRoute)
+		if err != nil {
+			t.Fatalf("project fork replay delivery view: %v", err)
+		}
+		assertRunForkCompleteEventSnapshot(t, evt, wantDelivery.Event())
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for fork replay event delivery")
 	}

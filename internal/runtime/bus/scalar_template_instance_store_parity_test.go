@@ -58,7 +58,8 @@ type scalarTemplateInstanceParityStore interface {
 	runtimebus.EventStore
 	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.PreparedPublishEventReader
+	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor)
 	setScalarTemplateInstanceDescriptorError(error)
 	resetScalarTemplateInstanceDescriptorCalls()

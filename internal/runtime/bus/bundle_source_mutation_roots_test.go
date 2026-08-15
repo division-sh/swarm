@@ -790,15 +790,18 @@ func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *test
 func TestPostCommitDispatchIgnoresAmbientSQLContextAndPreservesBusOwnedSourceFact(t *testing.T) {
 	owned := sourceMutationFact(t, "4")
 	owner := newSourceMutationProbeOwner()
-	bus := newSourceMutationProbeBusWithStore(t, newTargetRouteMemoryStore(), owned, owner)
+	store := newTargetRouteMemoryStore()
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner)
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := context.Background()
 	ctx = runtimepipelinefixture.WithSQLTx(ctx, &sql.Tx{})
 	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
 	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
+	event := sourceMutationEvent()
+	seedCommittedNoDeliveryForTest(t, store, event)
 
-	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{Event: sourceMutationEvent()}}); err != nil {
+	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{Event: event}}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
 	if len(postCommit) != 0 || len(rollback) != 0 {

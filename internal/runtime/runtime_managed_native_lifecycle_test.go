@@ -125,6 +125,9 @@ func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context) ([
 func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
 	return nil, nil
 }
+func (managedNativeDurableRoles) LoadPreparedPublishEvent(context.Context, string) (runtimebus.PreparedPublishEvent, bool, error) {
+	return runtimebus.PreparedPublishEvent{}, false, nil
+}
 func (managedNativeDurableRoles) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
 	return nil
 }
@@ -138,7 +141,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
 		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
 		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
-		DeliveryRouteSets:     roles,
+		PreparedEvents:        roles,
 		TargetFailureRecorder: roles, RunOrigins: roles,
 	}
 }

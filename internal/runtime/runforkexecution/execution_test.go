@@ -845,7 +845,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		Durable: bus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, DeliveryRouteSets: pg,
+			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg,
 		},
 		InterceptorProvider: func() []bus.EventInterceptor {

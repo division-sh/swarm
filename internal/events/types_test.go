@@ -330,6 +330,63 @@ func TestValidateDeliveryRouteProjectionsRejectsSameExactAgentIdentityConflict(t
 	}
 }
 
+func TestValidateDeliveryRoutesRejectsSameAgentSlotOwnershipDisagreementAcrossTargets(t *testing.T) {
+	identity := testDeliveryAgentIdentity(t, "worker", "review", "one", "review/one")
+	base := DeliveryRoute{
+		Recipient:     MustAgentDeliveryRecipient("worker"),
+		AgentIdentity: identity,
+		Target: MustExistingEntityTarget(RouteIdentity{
+			FlowID: "review", FlowInstance: "review/one", EntityID: "entity-one",
+		}),
+	}
+
+	tests := []struct {
+		name  string
+		other DeliveryTargetOwnership
+	}{
+		{
+			name: "different target route",
+			other: MustExistingEntityTarget(RouteIdentity{
+				FlowID: "review", FlowInstance: "review/two", EntityID: "entity-two",
+			}),
+		},
+		{name: "targetless versus targeted", other: DeliveryTargetOwnership{}},
+		{
+			name: "different ownership kind",
+			other: MustMaterializingEntityTarget(RouteIdentity{
+				FlowID: "review", FlowInstance: "review/one", EntityID: "entity-one",
+			}),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			other := base
+			other.Target = test.other
+			if err := ValidateDeliveryRoutes([]DeliveryRoute{base, other}); err == nil || !strings.Contains(err.Error(), "conflicting target ownership") {
+				t.Fatalf("ValidateDeliveryRoutes error = %v, want exact agent-slot ownership contradiction", err)
+			}
+		})
+	}
+}
+
+func TestValidateDeliveryRouteProjectionsRejectsSameAgentSlotConflictAcrossTargets(t *testing.T) {
+	firstProjection, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
+	secondProjection, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
+	identity := testDeliveryAgentIdentity(t, "worker", "review", "one", "review/one")
+	left := DeliveryRoute{
+		Recipient: MustAgentDeliveryRecipient("worker"), AgentIdentity: identity,
+		Target:            MustExistingEntityTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: "entity-one"}),
+		PayloadProjection: firstProjection,
+	}
+	right := left
+	right.Target = MustExistingEntityTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/two", EntityID: "entity-two"})
+	right.PayloadProjection = secondProjection
+
+	if err := ValidateDeliveryRoutes([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting") {
+		t.Fatalf("ValidateDeliveryRoutes error = %v, want same-agent-slot contradiction", err)
+	}
+}
+
 func testDeliveryAgentIdentity(t testing.TB, agentID, scopeKey, instanceID, instancePath string) agentidentity.Identity {
 	t.Helper()
 	name, err := agentidentity.DeclaredName(agentID, "test://delivery-route")

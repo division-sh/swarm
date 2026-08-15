@@ -145,7 +145,7 @@ func NewDeliveryEvent(event Event, route DeliveryRoute) (DeliveryEvent, error) {
 	view.payload = clonePayload(payload)
 	view.deliveryContext = route.Context.Normalized()
 	target := route.Target.Route()
-	if target.Empty() && len(event.TargetRoutes()) > 0 {
+	if target.Empty() {
 		view.setEnvelopeClaim(EnvelopeForBroadcast(view.NormalizedEnvelope()))
 	} else if !target.Empty() {
 		view.setEnvelopeClaim(EnvelopeForTargetRoute(view.NormalizedEnvelope(), target))

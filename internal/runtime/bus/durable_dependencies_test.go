@@ -110,8 +110,8 @@ func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Cont
 func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
-func (unexpectedDurableTestRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
-	return nil, nil
+func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error) {
+	return PreparedPublishEvent{}, false, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
 	return errUnexpectedDurableTestRole
@@ -159,8 +159,8 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.TargetOwners == nil {
 		deps.TargetOwners = defaults
 	}
-	if deps.DeliveryRouteSets == nil {
-		deps.DeliveryRouteSets = defaults
+	if deps.PreparedEvents == nil {
+		deps.PreparedEvents = defaults
 	}
 	if deps.TargetFailureRecorder == nil {
 		deps.TargetFailureRecorder = defaults
@@ -208,8 +208,8 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(SelectedRunTargetOwnerLister); ok {
 		deps.TargetOwners = role
 	}
-	if role, ok := selected.(EventDeliveryRouteSetReader); ok {
-		deps.DeliveryRouteSets = role
+	if role, ok := selected.(PreparedPublishEventReader); ok {
+		deps.PreparedEvents = role
 	}
 	if role, ok := selected.(TargetFailureDeadLetterRecorder); ok {
 		deps.TargetFailureRecorder = role

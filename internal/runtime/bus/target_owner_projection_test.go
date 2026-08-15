@@ -395,6 +395,43 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 	}
 }
 
+func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testing.T) {
+	rootIdentity := agentidentitytest.RootDeclared(t, "root-reviewer", "same-flow-entityless-root")
+	nestedIdentity := agentidentitytest.Declared(t, "nested-reviewer", "same-flow-entityless-nested", "review", "one", "review/one")
+	runID := eventtest.UUID("same-flow-entityless-run")
+	projection := selectedRunTargetOwnerProjection{
+		agentsAvailable: true,
+		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
+			rootIdentity:   {Identity: rootIdentity},
+			nestedIdentity: {Identity: nestedIdentity},
+		},
+		descriptors: []ActiveTargetDescriptor{
+			{ID: "root", FlowInstance: runID, EntityID: eventtest.UUID("same-flow-root-node-owner")},
+			{ID: "review-one", FlowInstance: "review/one", EntityID: eventtest.UUID("same-flow-nested-node-owner")},
+		},
+		targetsAvailable: true,
+		required:         true,
+		source:           connectRoutePlanRootProducerSingletonSource(),
+	}
+	plan := RoutePlan{
+		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		DeliveryIntents: []RoutePlanDeliveryIntent{
+			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
+		},
+	}
+
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("resolve entityless declared agents: %v", err)
+	}
+	for _, route := range resolved.DeliveryRoutes() {
+		if !route.Target.Empty() {
+			t.Fatalf("entityless declared agent route = %#v, want explicit target absence", route)
+		}
+	}
+}
+
 func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 	identity := agentidentitytest.RootDeclared(t, "reviewer", "same-flow-agent-contradiction")
 	runID := eventtest.UUID("same-flow-agent-contradiction-run")

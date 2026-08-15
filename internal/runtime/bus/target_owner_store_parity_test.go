@@ -26,7 +26,8 @@ import (
 
 type targetOwnerParityStore interface {
 	runtimebus.EventStore
-	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.PreparedPublishEventReader
+	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 

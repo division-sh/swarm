@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
@@ -80,7 +81,7 @@ func TestMixedRoutePlanUsesTargetSetForSingleTargetAndTargetlessDelivery(t *test
 	}
 }
 
-func TestDeliveryRouteProjectionPreservesHistoricalSingularTargetForTargetlessRoute(t *testing.T) {
+func TestDeliveryRouteProjectionClearsJournalSingularTargetForTargetlessRoute(t *testing.T) {
 	target := events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/one", EntityID: "entity-1"}
 	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 
@@ -91,8 +92,94 @@ func TestDeliveryRouteProjectionPreservesHistoricalSingularTargetForTargetlessRo
 	if err != nil {
 		t.Fatalf("project historical targetless route: %v", err)
 	}
-	if !events.SameRouteIdentity(projected.Event().TargetRoute(), target) || len(projected.Event().TargetRoutes()) != 0 {
-		t.Fatalf("historical target projection = %#v, want immutable singular target %#v", projected.Event().NormalizedEnvelope(), target)
+	if projected.Event().HasTargetRoute() {
+		t.Fatalf("targetless delivery projection = %#v, want no receiver target", projected.Event().NormalizedEnvelope())
+	}
+	if !events.SameRouteIdentity(projected.JournalEvent().TargetRoute(), target) {
+		t.Fatalf("journal target = %#v, want immutable singular target %#v", projected.JournalEvent().TargetRoute(), target)
+	}
+}
+
+func TestAllTargetlessRoutePlanClearsStaleEventTargets(t *testing.T) {
+	targets := []events.RouteIdentity{
+		{FlowID: "worker", FlowInstance: "worker/one", EntityID: "entity-1"},
+		{FlowID: "worker", FlowInstance: "worker/two", EntityID: "entity-2"},
+	}
+	for _, test := range []struct {
+		name     string
+		envelope events.EventEnvelope
+	}{
+		{name: "singular target", envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, targets[0])},
+		{name: "target set", envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, targets)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", test.envelope, time.Now().UTC())
+			plan := newRoutePlan(evt)
+			plan.AddDeliveryIntents(RoutePlanDeliveryIntent{
+				Recipient: events.MustAgentDeliveryRecipient("observer"), AgentIdentity: testAgentRouteIdentity(t, "observer", ""), Persist: true,
+			})
+
+			projected, changed, err := resolveRoutePlanEventProjection(evt, plan)
+			if err != nil {
+				t.Fatalf("resolve all-targetless route projection: %v", err)
+			}
+			if !changed || projected.HasTargetRoute() {
+				t.Fatalf("all-targetless projection = %#v changed=%t, want cleared target facts", projected.NormalizedEnvelope(), changed)
+			}
+		})
+	}
+}
+
+func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing.T) {
+	for _, mode := range []string{"direct", "subscribed_post_commit"} {
+		t.Run(mode, func(t *testing.T) {
+			var store *targetRouteMemoryStore
+			if mode == "subscribed_post_commit" {
+				store = newTargetRouteMemoryStore()
+			}
+			bus, err := newScopedTestEventBus(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token := testAgentLifecycleToken(t, "observer", "", 1, 1)
+			deliveries := bus.ReplaceAgentRoute(
+				token,
+				testAgentSubscriptionAdmission(t, "observer", events.EventType("validation.requested")),
+			)
+			target := events.RouteIdentity{
+				FlowID: "worker", FlowInstance: "worker/one", EntityID: uuid.NewString(),
+			}
+			evt := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0,
+				uuid.NewString(), "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC(),
+			)
+			route := exactAgentDeliveryRoute(token.Identity)
+
+			switch mode {
+			case "direct":
+				err = bus.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"observer"}, []events.DeliveryRoute{route})
+			case "subscribed_post_commit":
+				store.events[evt.ID()] = evt
+				store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
+				store.routes[evt.ID()] = []events.DeliveryRoute{route}
+				_, _, err = (engineDispatcher{bus: bus}).dispatchIntent(
+					context.Background(), runtimeengine.EmitIntent{Event: evt},
+				)
+			}
+			if err != nil {
+				t.Fatalf("%s delivery: %v", mode, err)
+			}
+			delivery := <-deliveries
+			if delivery.Event().HasTargetRoute() {
+				t.Fatalf("%s receiver target = %#v, want targetless route-local view", mode, delivery.Event().NormalizedEnvelope())
+			}
+			if err := delivery.Complete(); err != nil {
+				t.Fatalf("complete %s delivery: %v", mode, err)
+			}
+			if !events.SameRouteIdentity(evt.TargetRoute(), target) {
+				t.Fatalf("%s journal target = %#v, want immutable %#v", mode, evt.TargetRoute(), target)
+			}
+		})
 	}
 }
 

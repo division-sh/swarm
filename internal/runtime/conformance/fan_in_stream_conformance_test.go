@@ -43,7 +43,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		Durable: bus.DurableDependencies{
-			TargetOwners: store, DeliveryRouteSets: store,
+			TargetOwners: store, PreparedEvents: store,
 		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
@@ -198,7 +198,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		Durable: bus.DurableDependencies{
-			TargetOwners: store, DeliveryRouteSets: store,
+			TargetOwners: store, PreparedEvents: store,
 		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
@@ -239,8 +239,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
 	}
 
-	sameEventDifferentPayloadKey := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/b", "report-2", "2026-Q1", 200)
-	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, sameEventDifferentPayloadKey, target)
+	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
 		t.Fatalf("Q1 accumulator items after same event id = %d, want 1", got)
 	}
@@ -255,6 +254,7 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 type fanInStreamMemoryStore struct {
 	bus.InMemoryEventStore
 	events         map[string]events.Event
+	settlements    map[string]events.RouteSettlement
 	deliveryRoutes map[string][]events.DeliveryRoute
 	scopes         map[string]runtimepipelineobligation.CommittedScope
 }
@@ -270,7 +270,12 @@ func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context) ([
 }
 
 func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
-	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+	return runtimebustest.CommitPublish(ctx, command, func(_ context.Context, admitted events.AdmittedEvent) (bus.EventAppendOutcome, error) {
+		if _, exists := s.events[admitted.ID()]; exists {
+			return bus.EventAppendExactDuplicate, nil
+		}
+		return bus.EventAppendInserted, nil
+	}, func(_ context.Context, req bus.CommitPublishRequest) error {
 		event := req.Event.Event()
 		if s.events == nil {
 			s.events = map[string]events.Event{}
@@ -278,14 +283,35 @@ func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command 
 		if s.deliveryRoutes == nil {
 			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
 		}
+		if s.settlements == nil {
+			s.settlements = map[string]events.RouteSettlement{}
+		}
 		if s.scopes == nil {
 			s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
 		}
 		s.events[event.ID()] = event
+		s.settlements[event.ID()] = req.RouteSettlement
 		s.deliveryRoutes[event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 		s.scopes[event.ID()] = req.ReplayScope
 		return nil
 	})
+}
+
+func (s *fanInStreamMemoryStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
+	event, ok := s.events[strings.TrimSpace(eventID)]
+	if !ok {
+		return bus.PreparedPublishEvent{}, false, nil
+	}
+	admitted, err := events.RevalidatePersistedEvent(event)
+	if err != nil {
+		return bus.PreparedPublishEvent{}, false, err
+	}
+	routes := append([]events.DeliveryRoute(nil), s.deliveryRoutes[event.ID()]...)
+	settlement := s.settlements[event.ID()]
+	if err := settlement.Validate(routes); err != nil {
+		return bus.PreparedPublishEvent{}, false, err
+	}
+	return bus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
 }
 
 func (s *fanInStreamMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
