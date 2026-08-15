@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -234,7 +235,130 @@ func (p PreparedPublishEvent) Validate() error {
 	if err := p.Settlement.Validate(p.DeliveryRoutes); err != nil {
 		return fmt.Errorf("prepared publication route settlement: %w", err)
 	}
+	if err := preparedEventTargetProjectionForRoutes(p.DeliveryRoutes).Validate(p.Event.Event()); err != nil {
+		return fmt.Errorf("prepared publication event target projection: %w", err)
+	}
 	return nil
+}
+
+type preparedEventTargetProjectionKind uint8
+
+const (
+	preparedEventTargetProjectionNone preparedEventTargetProjectionKind = iota
+	preparedEventTargetProjectionSingular
+	preparedEventTargetProjectionSet
+)
+
+type preparedEventTargetProjection struct {
+	kind    preparedEventTargetProjectionKind
+	target  events.RouteIdentity
+	targets []events.RouteIdentity
+}
+
+func preparedEventTargetProjectionForRoutes(routes []events.DeliveryRoute) preparedEventTargetProjection {
+	targets := make([]events.RouteIdentity, 0, len(routes))
+	hasTargetlessRoute := false
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		target := route.Target.Route()
+		if target.Empty() {
+			hasTargetlessRoute = true
+			continue
+		}
+		targets = append(targets, target)
+	}
+	targets = canonicalPreparedEventTargetSet(targets)
+	switch {
+	case len(targets) == 0:
+		return preparedEventTargetProjection{kind: preparedEventTargetProjectionNone}
+	case len(targets) == 1 && !hasTargetlessRoute:
+		return preparedEventTargetProjection{kind: preparedEventTargetProjectionSingular, target: targets[0]}
+	default:
+		return preparedEventTargetProjection{kind: preparedEventTargetProjectionSet, targets: targets}
+	}
+}
+
+func canonicalPreparedEventTargetSet(targets []events.RouteIdentity) []events.RouteIdentity {
+	targets = uniqueRouteIdentities(targets)
+	slices.SortFunc(targets, func(left, right events.RouteIdentity) int {
+		left = left.Normalized()
+		right = right.Normalized()
+		if order := strings.Compare(left.FlowInstance, right.FlowInstance); order != 0 {
+			return order
+		}
+		if order := strings.Compare(left.FlowID, right.FlowID); order != 0 {
+			return order
+		}
+		return strings.Compare(left.EntityID, right.EntityID)
+	})
+	return targets
+}
+
+func (p preparedEventTargetProjection) Validate(event events.Event) error {
+	envelope := event.NormalizedEnvelope()
+	switch p.kind {
+	case preparedEventTargetProjectionNone:
+		if !envelope.Target.Empty() || len(envelope.TargetSet) != 0 {
+			return fmt.Errorf("targetless durable routes require absent target and target_set")
+		}
+	case preparedEventTargetProjectionSingular:
+		if !events.SameRouteIdentity(envelope.Target, p.target) || len(envelope.TargetSet) != 0 {
+			return fmt.Errorf("one targeted durable route requires singular target %#v", p.target)
+		}
+	case preparedEventTargetProjectionSet:
+		if !envelope.Target.Empty() || !sameRouteIdentitySet(envelope.TargetSet, p.targets) {
+			return fmt.Errorf("mixed or multiple targeted durable routes require exact target_set %#v", p.targets)
+		}
+	default:
+		return fmt.Errorf("target projection kind %d is invalid", p.kind)
+	}
+	return nil
+}
+
+func (p preparedEventTargetProjection) Envelope(base events.EventEnvelope) events.EventEnvelope {
+	switch p.kind {
+	case preparedEventTargetProjectionSingular:
+		return events.EnvelopeForTargetRoute(base, p.target)
+	case preparedEventTargetProjectionSet:
+		return events.EnvelopeForTargetSet(base, p.targets)
+	default:
+		base = base.Normalized()
+		base.Target = events.RouteIdentity{}
+		base.TargetSet = nil
+		return base.Normalized()
+	}
+}
+
+// ResolvePreparedPublishEventTargetProjection applies the one-way event
+// projection owned by exact durable routes. Durable producers outside EventBus
+// use it before admitting their event record; consumers still call Validate.
+func ResolvePreparedPublishEventTargetProjection(
+	event events.Event,
+	routes []events.DeliveryRoute,
+) (events.Event, bool, error) {
+	projection := preparedEventTargetProjectionForRoutes(routes)
+	resolved, err := events.ResolveEnvelope(event, projection.Envelope(event.NormalizedEnvelope()))
+	if err != nil {
+		return event, false, fmt.Errorf("resolve prepared publication event target projection: %w", err)
+	}
+	return resolved, !sameEventTargetProjection(event, resolved), nil
+}
+
+func sameRouteIdentitySet(left, right []events.RouteIdentity) bool {
+	left = uniqueRouteIdentities(left)
+	right = uniqueRouteIdentities(right)
+	if len(left) != len(right) {
+		return false
+	}
+	want := make(map[events.RouteIdentity]struct{}, len(right))
+	for _, route := range right {
+		want[route.Normalized()] = struct{}{}
+	}
+	for _, route := range left {
+		if _, ok := want[route.Normalized()]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 type EventAppendOutcome uint8

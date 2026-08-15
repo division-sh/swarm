@@ -1090,14 +1090,15 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	target := events.RouteIdentity{FlowID: "root", FlowInstance: "root"}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-		events.EventType("custom.node_only_outbox"), "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("custom.node_only_outbox"), "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 
 	store.events[evt.ID()] = evt
 	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 	store.routes[evt.ID()] = []events.DeliveryRoute{{
 		Recipient: events.MustNodeDeliveryRecipient("workflow-node"),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(target),
 	}}
 	store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
 
@@ -1112,14 +1113,15 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
+	target := events.RouteIdentity{FlowID: "root", FlowInstance: "root"}
 	evt := eventtest.ExistingRunRootIngress(eventID,
-		events.EventType("custom.node_only_sweep"), "", "", []byte(`{}`), 0, eventtest.UUID("run:"+eventID), events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("custom.node_only_sweep"), "", "", []byte(`{}`), 0, eventtest.UUID("run:"+eventID), events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 
 	store.events[evt.ID()] = evt
 	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 	store.routes[evt.ID()] = []events.DeliveryRoute{{
 		Recipient: events.MustNodeDeliveryRecipient("workflow-node"),
-		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root"}),
+		Target:    events.MustEntitylessReceiverTarget(target),
 	}}
 	store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
 	store.missing = []events.PersistedReplayEvent{{Event: evt}}

@@ -369,7 +369,7 @@ func (eb *EventBus) requireExistingRunActive(ctx context.Context, event events.E
 		return nil
 	}
 	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
-		_, found, err := reader.LoadPreparedPublishEvent(ctx, event.ID())
+		_, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())
 		if err != nil {
 			return fmt.Errorf("load publication event before run preflight: %w", err)
 		}
@@ -430,7 +430,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}
 	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(ctx)
 	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
-		durable, found, err := reader.LoadPreparedPublishEvent(ctx, admitted.ID())
+		durable, found, err := loadValidatedPreparedPublishEvent(ctx, reader, admitted.ID())
 		if err != nil {
 			return releaseFailure(fmt.Errorf("load durable event identity: %w", err))
 		}
@@ -492,32 +492,32 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if err != nil {
 		return releaseFailure(err)
 	}
+	targetFailureInput := evt
 	if err := requirePublicInputRoutePlan(ctx, routePlan); err != nil {
 		return releaseFailure(err)
 	}
-	if replayScope == runtimepipelineobligation.ScopeSubscribed {
-		resolved, changed, err := resolveRoutePlanEventProjection(evt, routePlan)
+	resolved, changed, err := resolveRoutePlanEventProjection(evt, routePlan)
+	if err != nil {
+		return releaseFailure(err)
+	}
+	if changed {
+		admitted, err = events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 		if err != nil {
-			return releaseFailure(err)
+			return releaseFailure(fmt.Errorf("admit resolved event route facts: %w", err))
 		}
-		if changed {
-			admitted, err = events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-			if err != nil {
-				return releaseFailure(fmt.Errorf("admit resolved event route facts: %w", err))
-			}
-			evt = admitted.Event()
-		}
-		if err := validateRoutePlanEventProjection(evt, routePlan); err != nil {
-			return releaseFailure(err)
-		}
+		evt = admitted.Event()
+	}
+	if err := validateRoutePlanEventProjection(evt, routePlan); err != nil {
+		return releaseFailure(err)
 	}
 	if err := routePlan.ValidatePersistentDeliveries(); err != nil {
 		return releaseFailure(fmt.Errorf("validate durable route plan: %w", err))
 	}
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: routePlan,
-		direct:           replayScope == runtimepipelineobligation.ScopeDirect,
-		publicationClaim: claim,
+		direct:             replayScope == runtimepipelineobligation.ScopeDirect,
+		publicationClaim:   claim,
+		targetFailureInput: targetFailureInput,
 	}
 	prepared.settlement, err = eb.routeSettlementForPlan(evt, routePlan, events.EventWriteNormalPublication)
 	if err != nil {
@@ -646,18 +646,19 @@ func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtime
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
-	Event             events.Event
-	admitted          events.AdmittedEvent
-	plan              RoutePlan
-	settlement        events.RouteSettlement
-	exactDuplicate    bool
-	targetFailure     bool
-	dispatchQueued    bool
-	queueReason       string
-	direct            bool
-	publicationClaim  *pipelinePublicationClaim
-	receiver          receiverDispatchProjection
-	committedHandoffs []runtimedelivery.DurableHandoffProof
+	Event              events.Event
+	admitted           events.AdmittedEvent
+	plan               RoutePlan
+	settlement         events.RouteSettlement
+	exactDuplicate     bool
+	targetFailure      bool
+	dispatchQueued     bool
+	queueReason        string
+	direct             bool
+	publicationClaim   *pipelinePublicationClaim
+	targetFailureInput events.Event
+	receiver           receiverDispatchProjection
+	committedHandoffs  []runtimedelivery.DurableHandoffProof
 }
 
 func validateEventAppendOutcome(outcome EventAppendOutcome) error {
@@ -693,7 +694,11 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	if failure := p.plan.TargetFailure; !failure.Empty() {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))
 		request.Disposition = &disposition
-		_, _, record := targetDeliveryFailureRecord(p.Event, p.plan, failure, time.Now().UTC())
+		failureEvent := p.targetFailureInput
+		if strings.TrimSpace(failureEvent.ID()) == "" {
+			failureEvent = p.Event
+		}
+		_, _, record := targetDeliveryFailureRecord(failureEvent, p.plan, failure, time.Now().UTC())
 		request.DeadLetter = &record
 	}
 	return request
@@ -919,42 +924,21 @@ func validateRoutePlanEventProjection(evt events.Event, plan RoutePlan) error {
 func resolveRoutePlanEventProjection(evt events.Event, plan RoutePlan) (events.Event, bool, error) {
 	plan = plan.Normalized()
 	routes := plan.DeliveryRoutes()
-	targets := make([]events.RouteIdentity, 0, len(plan.DeliveryIntents))
-	hasTargetlessDelivery := false
-	for _, route := range routes {
-		if target := route.Target.Route(); target.Empty() {
-			hasTargetlessDelivery = true
-		} else {
-			targets = append(targets, target)
-		}
-	}
-	targets = uniqueRouteIdentities(targets)
-	if len(targets) == 0 {
-		if len(routes) == 0 {
-			return evt, false, nil
-		}
-		envelope := events.EnvelopeForBroadcast(evt.NormalizedEnvelope())
-		resolved, err := events.ResolveEnvelope(evt, envelope)
-		if err != nil {
-			return evt, false, fmt.Errorf("clear all-targetless delivery route projection: %w", err)
-		}
-		return resolved, !sameEventTargetProjection(evt, resolved), nil
+	projection := preparedEventTargetProjectionForRoutes(routes)
+	targets := projection.targets
+	if projection.kind == preparedEventTargetProjectionSingular {
+		targets = []events.RouteIdentity{projection.target}
 	}
 	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
-	if len(existing) > 0 && !sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
+	if projection.kind != preparedEventTargetProjectionNone && len(existing) > 0 &&
+		!sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
 		return evt, false, fmt.Errorf("delivery route projection conflicts with the admitted event target: admitted=%#v planned=%#v", existing, targets)
 	}
-	envelope := evt.NormalizedEnvelope()
-	if len(targets) == 1 && !hasTargetlessDelivery {
-		envelope = events.EnvelopeForTargetRoute(envelope, targets[0])
-	} else {
-		envelope = events.EnvelopeForTargetSet(envelope, targets)
-	}
-	resolved, err := events.ResolveEnvelope(evt, envelope)
+	resolved, changed, err := ResolvePreparedPublishEventTargetProjection(evt, routes)
 	if err != nil {
 		return evt, false, fmt.Errorf("resolve delivery route projection: %w", err)
 	}
-	return resolved, !sameEventTargetProjection(evt, resolved), nil
+	return resolved, changed, nil
 }
 
 func sameEventTargetProjection(left, right events.Event) bool {
@@ -2202,21 +2186,37 @@ func (eb *EventBus) preparedEventForReplay(ctx context.Context, eventID string) 
 		return PreparedPublishEvent{}, errors.New("prepared event settlement reader is required")
 	}
 	eventID = strings.TrimSpace(eventID)
-	prepared, found, err := reader.LoadPreparedPublishEvent(ctx, eventID)
+	prepared, found, err := loadValidatedPreparedPublishEvent(ctx, reader, eventID)
 	if err != nil {
 		return PreparedPublishEvent{}, fmt.Errorf("load prepared event %s: %w", eventID, err)
 	}
 	if !found {
 		return PreparedPublishEvent{}, fmt.Errorf("prepared event %s is missing", eventID)
 	}
+	return prepared, nil
+}
+
+func loadValidatedPreparedPublishEvent(
+	ctx context.Context,
+	reader PreparedPublishEventReader,
+	eventID string,
+) (PreparedPublishEvent, bool, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return PreparedPublishEvent{}, false, errors.New("prepared event identity is required")
+	}
+	prepared, found, err := reader.LoadPreparedPublishEvent(ctx, eventID)
+	if err != nil || !found {
+		return PreparedPublishEvent{}, found, err
+	}
 	if err := prepared.Validate(); err != nil {
-		return PreparedPublishEvent{}, fmt.Errorf("validate prepared event %s: %w", eventID, err)
+		return PreparedPublishEvent{}, false, fmt.Errorf("validate prepared event %s: %w", eventID, err)
 	}
 	if prepared.Event.ID() != eventID {
-		return PreparedPublishEvent{}, fmt.Errorf("prepared event identity %s does not match requested event %s", prepared.Event.ID(), eventID)
+		return PreparedPublishEvent{}, false, fmt.Errorf("prepared event identity %s does not match requested event %s", prepared.Event.ID(), eventID)
 	}
 	prepared.DeliveryRoutes = events.NormalizeDeliveryRoutes(prepared.DeliveryRoutes)
-	return prepared, nil
+	return prepared, true, nil
 }
 
 func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan RoutePlan) {

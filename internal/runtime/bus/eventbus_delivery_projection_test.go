@@ -130,6 +130,186 @@ func TestAllTargetlessRoutePlanClearsStaleEventTargets(t *testing.T) {
 	}
 }
 
+func TestRouteLessPlanClearsStaleEventTargets(t *testing.T) {
+	target := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/one", EntityID: eventtest.UUID("route-less-stale-target"),
+	}
+	for _, test := range []struct {
+		name     string
+		envelope events.EventEnvelope
+	}{
+		{name: "singular", envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, target)},
+		{name: "set", envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{target})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			evt := preparedProjectionEvent(test.name, test.envelope)
+			projected, changed, err := resolveRoutePlanEventProjection(evt, newRoutePlan(evt))
+			if err != nil {
+				t.Fatalf("resolve route-less projection: %v", err)
+			}
+			if !changed || projected.HasTargetRoute() {
+				t.Fatalf("route-less projection = %#v changed=%t, want absent target facts", projected.NormalizedEnvelope(), changed)
+			}
+		})
+	}
+}
+
+func TestPreparedPublishEventValidateCanonicalTargetProjectionShapes(t *testing.T) {
+	first := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/one", EntityID: eventtest.UUID("prepared-projection-first"),
+	}.Normalized()
+	second := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/two", EntityID: eventtest.UUID("prepared-projection-second"),
+	}.Normalized()
+	firstRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("worker-one"),
+		Target:    events.MustExistingEntityTarget(first),
+	}
+	secondRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("worker-two"),
+		Target:    events.MustExistingEntityTarget(second),
+	}
+	targetless := exactAgentDeliveryRoute(testAgentRouteIdentity(t, "observer", ""))
+
+	for _, test := range []struct {
+		name       string
+		routes     []events.DeliveryRoute
+		envelope   events.EventEnvelope
+		noDelivery bool
+	}{
+		{name: "zero", noDelivery: true},
+		{name: "all_targetless", routes: []events.DeliveryRoute{targetless}},
+		{name: "singular", routes: []events.DeliveryRoute{firstRoute}, envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, first)},
+		{name: "mixed_targetless", routes: []events.DeliveryRoute{firstRoute, targetless}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first})},
+		{name: "multiple", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first, second})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			prepared := preparedProjectionAggregate(t, test.name, test.envelope, test.routes, test.noDelivery)
+			if err := prepared.Validate(); err != nil {
+				t.Fatalf("validate canonical %s projection: %v", test.name, err)
+			}
+		})
+	}
+}
+
+func TestPreparedPublishEventTargetSetProjectionIsDeterministicAcrossRouteOrder(t *testing.T) {
+	first := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/a", EntityID: eventtest.UUID("prepared-order-first"),
+	}.Normalized()
+	second := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/z", EntityID: eventtest.UUID("prepared-order-second"),
+	}.Normalized()
+	firstRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("worker-a"),
+		Target:    events.MustExistingEntityTarget(first),
+	}
+	secondRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("worker-z"),
+		Target:    events.MustExistingEntityTarget(second),
+	}
+
+	var projections [][]events.RouteIdentity
+	for _, routes := range [][]events.DeliveryRoute{
+		{firstRoute, secondRoute},
+		{secondRoute, firstRoute},
+	} {
+		projected, _, err := ResolvePreparedPublishEventTargetProjection(preparedProjectionEvent("deterministic", events.EventEnvelope{}), routes)
+		if err != nil {
+			t.Fatalf("resolve deterministic target set: %v", err)
+		}
+		projections = append(projections, projected.TargetRoutes())
+	}
+	for index, projection := range projections {
+		if len(projection) != 2 || projection[0] != first || projection[1] != second {
+			t.Fatalf("projection %d = %#v, want stable structured order [%#v %#v]", index, projection, first, second)
+		}
+	}
+}
+
+func TestPreparedPublishEventRejectsTargetProjectionShapeDrift(t *testing.T) {
+	first := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/one", EntityID: eventtest.UUID("prepared-hostile-first"),
+	}.Normalized()
+	second := events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker/two", EntityID: eventtest.UUID("prepared-hostile-second"),
+	}.Normalized()
+	foreign := events.RouteIdentity{
+		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("prepared-hostile-foreign"),
+	}.Normalized()
+	firstRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("worker-one"),
+		Target:    events.MustExistingEntityTarget(first),
+	}
+	secondRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("worker-two"),
+		Target:    events.MustExistingEntityTarget(second),
+	}
+	targetless := exactAgentDeliveryRoute(testAgentRouteIdentity(t, "observer", ""))
+
+	for _, test := range []struct {
+		name       string
+		routes     []events.DeliveryRoute
+		envelope   events.EventEnvelope
+		noDelivery bool
+	}{
+		{name: "zero_with_singular", envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, first), noDelivery: true},
+		{name: "all_targetless_with_set", routes: []events.DeliveryRoute{targetless}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first})},
+		{name: "singular_missing", routes: []events.DeliveryRoute{firstRoute}},
+		{name: "singular_wrong_identity", routes: []events.DeliveryRoute{firstRoute}, envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, foreign)},
+		{name: "singular_encoded_as_set", routes: []events.DeliveryRoute{firstRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first})},
+		{name: "mixed_encoded_as_singular", routes: []events.DeliveryRoute{firstRoute, targetless}, envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, first)},
+		{name: "multiple_wrong_cardinality", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first})},
+		{name: "multiple_wrong_identity", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{first, foreign})},
+		{name: "multiple_encoded_as_singular", routes: []events.DeliveryRoute{firstRoute, secondRoute}, envelope: events.EnvelopeForTargetRoute(events.EventEnvelope{}, first)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			prepared := preparedProjectionAggregate(t, test.name, test.envelope, test.routes, test.noDelivery)
+			err := prepared.Validate()
+			if err == nil || !strings.Contains(err.Error(), "event target projection") {
+				t.Fatalf("hostile projection error = %v, want aggregate target projection rejection", err)
+			}
+		})
+	}
+}
+
+func preparedProjectionAggregate(
+	t testing.TB,
+	label string,
+	envelope events.EventEnvelope,
+	routes []events.DeliveryRoute,
+	noDelivery bool,
+) PreparedPublishEvent {
+	t.Helper()
+	evt := preparedProjectionEvent(label, envelope)
+	admitted, err := events.RevalidatePersistedEvent(evt)
+	if err != nil {
+		t.Fatalf("admit prepared projection event: %v", err)
+	}
+	settlement := exactSiblingDeliverySettlement(t)
+	if noDelivery {
+		ledger, err := events.NewConnectEvaluationLedger(nil)
+		if err != nil {
+			t.Fatalf("admit no-delivery ledger: %v", err)
+		}
+		settlement, err = events.NewNoDeliverySettlement(
+			events.EventWriteNormalPublication,
+			events.NoDeliveryDeclaredConsumerNoPlan,
+			ledger,
+		)
+		if err != nil {
+			t.Fatalf("admit no-delivery settlement: %v", err)
+		}
+	}
+	return PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}
+}
+
+func preparedProjectionEvent(label string, envelope events.EventEnvelope) events.Event {
+	return eventtest.RunCreatingRootIngress(
+		uuid.NewString(), events.EventType("prepared.projection."+strings.ReplaceAll(label, "_", ".")), "fixture", "", json.RawMessage(`{}`), 0,
+		uuid.NewString(), "", envelope, time.Now().UTC(),
+	)
+}
+
 func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing.T) {
 	for _, mode := range []string{"direct", "subscribed_post_commit"} {
 		t.Run(mode, func(t *testing.T) {
@@ -154,16 +334,21 @@ func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing
 				uuid.NewString(), "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC(),
 			)
 			route := exactAgentDeliveryRoute(token.Identity)
+			dispatchEvent := evt
 
 			switch mode {
 			case "direct":
 				err = bus.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"observer"}, []events.DeliveryRoute{route})
 			case "subscribed_post_commit":
-				store.events[evt.ID()] = evt
+				dispatchEvent, err = events.ResolveEnvelope(evt, events.EnvelopeForBroadcast(evt.NormalizedEnvelope()))
+				if err != nil {
+					t.Fatalf("resolve canonical targetless journal event: %v", err)
+				}
+				store.events[evt.ID()] = dispatchEvent
 				store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 				store.routes[evt.ID()] = []events.DeliveryRoute{route}
 				_, _, err = (engineDispatcher{bus: bus}).dispatchIntent(
-					context.Background(), runtimeengine.EmitIntent{Event: evt},
+					context.Background(), runtimeengine.EmitIntent{Event: dispatchEvent},
 				)
 			}
 			if err != nil {
@@ -176,8 +361,11 @@ func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing
 			if err := delivery.Complete(); err != nil {
 				t.Fatalf("complete %s delivery: %v", mode, err)
 			}
-			if !events.SameRouteIdentity(evt.TargetRoute(), target) {
-				t.Fatalf("%s journal target = %#v, want immutable %#v", mode, evt.TargetRoute(), target)
+			if mode == "direct" && !events.SameRouteIdentity(evt.TargetRoute(), target) {
+				t.Fatalf("direct journal target = %#v, want immutable %#v", evt.TargetRoute(), target)
+			}
+			if mode == "subscribed_post_commit" && dispatchEvent.HasTargetRoute() {
+				t.Fatalf("subscribed canonical journal target = %#v, want absent", dispatchEvent.NormalizedEnvelope())
 			}
 		})
 	}

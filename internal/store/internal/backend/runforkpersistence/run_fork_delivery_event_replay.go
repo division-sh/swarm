@@ -114,6 +114,21 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		if err := settlement.Validate(routes); err != nil {
 			return result, err
 		}
+		admitted := preparedEvents[forkEventID]
+		projected, changed, err := runtimebus.ResolvePreparedPublishEventTargetProjection(admitted.Event(), routes)
+		if err != nil {
+			return result, fmt.Errorf("project fork replay event %s from exact delivery routes: %w", forkEventID, err)
+		}
+		if changed {
+			admitted, err = admitRunForkReplayEventTargetProjection(projected)
+			if err != nil {
+				return result, fmt.Errorf("admit fork replay event %s target projection: %w", forkEventID, err)
+			}
+			preparedEvents[forkEventID] = admitted
+		}
+		if err := (runtimebus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}).Validate(); err != nil {
+			return result, fmt.Errorf("validate fork replay event %s aggregate: %w", forkEventID, err)
+		}
 		outcome, err := store.events.AppendAdmittedEventTxOutcome(ctx, tx, story, preparedEvents[forkEventID], settlement)
 		if err != nil {
 			return result, err
@@ -138,6 +153,10 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		return result, err
 	}
 	return result, nil
+}
+
+func admitRunForkReplayEventTargetProjection(projected events.Event) (events.AdmittedEvent, error) {
+	return events.AdmitForPersistence(projected, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 }
 
 func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []runfork.RunForkPendingWork, work []runfork.RunForkHistoricalReplayExecutableWork) error {

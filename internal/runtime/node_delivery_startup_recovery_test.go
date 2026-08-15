@@ -206,12 +206,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			module := newRuntimeTestWorkflowModule(t, source)
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
-			entityID := eventtest.UUID("startup-order-node-entity-" + backend.name)
+			nodeRoute := startupRecoveryNodeRoute("complete-task")
 			event := eventtest.ExistingRunRootIngress(
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
-				templateInstanceDeliveryRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+				templateInstanceDeliveryRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, nodeRoute.Target.Route()), time.Now().UTC(),
 			)
-			nodeRoute := startupRecoveryNodeRoute("complete-task")
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			processOwner := worklifetime.NewProcess()
@@ -504,13 +503,13 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
 			ctx := startupRecoverySourceContext(source, runID)
 			seedStartupRecoverySourceRun(t, ctx, db, backend, source, runID)
+			route := startupRecoveryNodeRoute("complete-task")
 			event := eventtest.ExistingRunRootIngress(
 				eventtest.UUID("pipeline-handoff-cleanup-event-"+backend),
 				"task.requested", "test", "", []byte(`{}`), 0, runID,
-				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("pipeline-handoff-cleanup-entity-"+backend)),
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, route.Target.Route()),
 				time.Now().UTC(),
 			)
-			route := startupRecoveryNodeRoute("complete-task")
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, nil,
