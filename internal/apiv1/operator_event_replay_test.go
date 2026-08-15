@@ -851,7 +851,42 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 	if audit["entity_id"] != "canonical-entity" {
 		t.Fatalf("audit entity_id = %#v, want canonical-entity", audit["entity_id"])
 	}
+}
 
+func TestEventReplayAuditPayloadOmitsAbsentTargetlessEntity(t *testing.T) {
+	originalEvent := eventtest.ExistingRunRootIngress(
+		eventtest.UUID("targetless-replay-original"),
+		events.EventType("item.processed"),
+		"operator",
+		"",
+		json.RawMessage(`{"item_id":"hold"}`),
+		0,
+		eventtest.UUID("targetless-replay-run"),
+		events.EventEnvelope{},
+		time.Unix(1700001200, 0).UTC(),
+	)
+	original, err := operatorread.NewOperatorEventFull(originalEvent)
+	if err != nil {
+		t.Fatalf("NewOperatorEventFull: %v", err)
+	}
+	raw, err := eventReplayAuditPayload(
+		Request{ActorTokenID: "actor-1"},
+		original,
+		eventtest.UUID("targetless-replay-event"),
+		eventtest.UUID("targetless-replay-audit"),
+		[]string{"load-agent"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("eventReplayAuditPayload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal audit payload: %v", err)
+	}
+	if entityID, present := payload["entity_id"]; present {
+		t.Fatalf("targetless audit entity_id = %#v, want field absent", entityID)
+	}
 }
 
 func seedCompleteReplayRun(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID string, startedAt time.Time) {

@@ -186,6 +186,7 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 type routePersistenceTestStore struct {
 	routes           map[string]runtimebus.FlowInstanceRouteRecord
 	flowInstances    []runtimebus.ActiveFlowInstanceDescriptor
+	targetOwners     []runtimebus.ActiveTargetDescriptor
 	stagedRoutes     []runtimebus.FlowInstanceRouteRecord
 	deliveries       map[string][]string
 	upsertErr        error
@@ -195,6 +196,10 @@ type routePersistenceTestStore struct {
 	replaceCalls     []runtimeflowidentity.Route
 	upsertCalls      int
 	upsertAfterWrite bool
+}
+
+func (s *routePersistenceTestStore) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
+	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
 func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
@@ -323,6 +328,9 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	identity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: "operating-owner", FlowInstance: identity.InstancePath, EntityID: runtimeflowidentity.EntityID(identity.InstancePath),
+	}}
 	req := runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: identity,
 		ActivationVariables: map[string]string{
@@ -727,6 +735,9 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	identity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
+	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
+		ID: "operating-owner", FlowInstance: identity.InstancePath, EntityID: runtimeflowidentity.EntityID(identity.InstancePath),
+	}}
 	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: identity,
 		ActivationVariables: map[string]string{

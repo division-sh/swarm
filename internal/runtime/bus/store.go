@@ -224,6 +224,19 @@ type PreparedPublishEvent struct {
 	DeliveryRoutes []events.DeliveryRoute
 }
 
+func (p PreparedPublishEvent) Validate() error {
+	if strings.TrimSpace(p.Event.ID()) == "" {
+		return errors.New("prepared publication event identity is required")
+	}
+	if err := events.ValidateDeliveryRoutes(p.DeliveryRoutes); err != nil {
+		return fmt.Errorf("prepared publication delivery routes: %w", err)
+	}
+	if err := p.Settlement.Validate(p.DeliveryRoutes); err != nil {
+		return fmt.Errorf("prepared publication route settlement: %w", err)
+	}
+	return nil
+}
+
 type EventAppendOutcome uint8
 
 const (
@@ -478,10 +491,6 @@ type RunLifecycleSnapshot struct {
 
 type RunLifecycleReadPersistence interface {
 	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (RunLifecycleSnapshot, error)
-}
-
-type EventDeliveryRouteSetReader interface {
-	ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error)
 }
 
 type InMemoryEventStore struct{}

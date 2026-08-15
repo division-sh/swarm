@@ -191,6 +191,10 @@ func (p selectedRunTargetOwnerProjection) sameFlowAgentTargetBlueprint(evt event
 	if !ok {
 		return events.RouteIdentity{}, false, nil
 	}
+	activeEntityID := descriptor.Normalized().EntityID
+	if activeEntityID == "" {
+		return events.RouteIdentity{}, false, nil
+	}
 	instance := identity.FlowInstance()
 	flowID := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(instance)
 	if instance == "" {
@@ -206,19 +210,22 @@ func (p selectedRunTargetOwnerProjection) sameFlowAgentTargetBlueprint(evt event
 	if flowID == "" {
 		return events.RouteIdentity{}, false, nil
 	}
-	blueprint := events.RouteIdentity{FlowID: flowID, FlowInstance: instance}.Normalized()
-	activeEntityID := descriptor.Normalized().EntityID
+	blueprint := events.RouteIdentity{FlowID: flowID, FlowInstance: instance, EntityID: activeEntityID}.Normalized()
+	foundFlowOwner := false
 	for _, selected := range p.descriptors {
 		selected = selected.Normalized()
 		if selected.FlowInstance != blueprint.FlowInstance {
 			continue
 		}
-		if activeEntityID != "" && selected.EntityID != activeEntityID {
-			return events.RouteIdentity{}, false, fmt.Errorf("active agent entity %q disagrees with selected owner %q for flow instance %q", activeEntityID, selected.EntityID, blueprint.FlowInstance)
+		foundFlowOwner = true
+		if selected.EntityID == activeEntityID {
+			return blueprint, true, nil
 		}
-		return blueprint, true, nil
 	}
-	return events.RouteIdentity{}, false, nil
+	if foundFlowOwner {
+		return events.RouteIdentity{}, false, fmt.Errorf("active agent entity %q disagrees with every selected owner for flow instance %q", activeEntityID, blueprint.FlowInstance)
+	}
+	return events.RouteIdentity{}, false, fmt.Errorf("active agent entity %q has no exact selected owner for flow instance %q", activeEntityID, blueprint.FlowInstance)
 }
 
 func validateStructuralTargetOwnerProofAgreement(intents []RoutePlanDeliveryIntent) error {

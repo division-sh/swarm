@@ -31,6 +31,7 @@ import (
 
 type closedReceiverE2EStore interface {
 	startupRecoveryOrderStore
+	swarmruntime.RuntimeLogPersistence
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
@@ -102,6 +103,7 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				EventPayloadValidationBinder: selected, InboundPayloadValidationBinder: selected,
 				AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates:   selected, WorkflowPersistence: workflowPersistence,
+				RuntimeLogStore:          selected,
 				ManagerStore:             selected,
 				ManagerLifecycleStore:    selected,
 				ManagerPersistenceRoles:  externalRuntimeTestSelectedManagerRoles(selected),
@@ -145,9 +147,10 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			}, startedAt); err != nil {
 				t.Fatalf("materialize receiver authority workflow: %v", err)
 			}
-			root := eventtest.ExistingRunRootIngress(
+			rootSource := eventtest.RootRoutingSource(entityID)
+			root := eventtest.ExistingRunRootIngressWithRoutingSource(
 				uuid.NewString(), "task.assigned", "receiver-authority-e2e", "", []byte(`{}`), 0, runID,
-				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), rootSource, time.Now().UTC(),
 			)
 			publishCtx, cancelPublish := context.WithTimeout(ctx, 10*time.Second)
 			defer cancelPublish()
@@ -371,6 +374,104 @@ func closedReceiverEvidenceDiagnostic(t testing.TB, ctx context.Context, db *sql
 	}
 	if err := rows.Err(); err != nil {
 		return "iterate diagnostic: " + err.Error()
+	}
+	receiptQuery := `
+		SELECT e.event_name, r.subscriber_type, r.subscriber_id, r.outcome,
+		       COALESCE(r.reason_code, ''), COALESCE(CAST(r.failure AS TEXT), '')
+		FROM event_receipts r
+		JOIN events e ON e.event_id = r.event_id
+		WHERE e.run_id = ?
+		ORDER BY e.created_at, r.subscriber_type, r.subscriber_id`
+	if backend == "postgres" {
+		receiptQuery = strings.Replace(receiptQuery, "e.run_id = ?", "e.run_id = $1::uuid", 1)
+	}
+	receipts, err := db.QueryContext(ctx, receiptQuery, runID)
+	if err != nil {
+		return strings.Join(facts, ", ") + "; query receipts: " + err.Error()
+	}
+	defer receipts.Close()
+	for receipts.Next() {
+		var eventName, subscriberType, subscriberID, outcome, reason, failure string
+		if err := receipts.Scan(&eventName, &subscriberType, &subscriberID, &outcome, &reason, &failure); err != nil {
+			return strings.Join(facts, ", ") + "; scan receipts: " + err.Error()
+		}
+		facts = append(facts, fmt.Sprintf("receipt:%s:%s/%s:%s:%s:%s", eventName, subscriberType, subscriberID, outcome, reason, failure))
+	}
+	if err := receipts.Err(); err != nil {
+		return strings.Join(facts, ", ") + "; iterate receipts: " + err.Error()
+	}
+	agents, err := db.QueryContext(ctx, `
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance, COALESCE(CAST(entity_id AS TEXT), ''),
+		       lifecycle_phase, lifecycle_generation, lifecycle_run_mode, status
+		FROM agents
+		WHERE agent_id IN ('upstream-agent', 'downstream-agent')
+		ORDER BY agent_id`)
+	if err != nil {
+		return strings.Join(facts, ", ") + "; query agents: " + err.Error()
+	}
+	defer agents.Close()
+	for agents.Next() {
+		var agentID, nameOwner, nameSource, routePresence, scope, instanceID, flowInstance, entityID, phase, runMode, status string
+		var generation int64
+		if err := agents.Scan(&agentID, &nameOwner, &nameSource, &routePresence, &scope, &instanceID, &flowInstance, &entityID, &phase, &generation, &runMode, &status); err != nil {
+			return strings.Join(facts, ", ") + "; scan agents: " + err.Error()
+		}
+		facts = append(facts, fmt.Sprintf("agent:%s:%s/%s/%s/%s/%s/%s/%s:%s/%d/%s/%s", agentID, nameOwner, nameSource, routePresence, scope, instanceID, flowInstance, entityID, phase, generation, runMode, status))
+	}
+	if err := agents.Err(); err != nil {
+		return strings.Join(facts, ", ") + "; iterate agents: " + err.Error()
+	}
+	routeRows, err := db.QueryContext(ctx, `
+		SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+		       d.agent_route_presence, d.agent_flow_scope_key,
+		       d.agent_flow_instance_id, d.agent_flow_instance_path
+		FROM event_deliveries d
+		JOIN events e ON e.event_id = d.event_id
+		WHERE e.run_id = ? AND d.subscriber_type = 'agent'
+		ORDER BY d.subscriber_id`, runID)
+	if backend == "postgres" {
+		routeRows, err = db.QueryContext(ctx, `
+			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			       d.agent_route_presence, d.agent_flow_scope_key,
+			       d.agent_flow_instance_id, d.agent_flow_instance_path
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			WHERE e.run_id = $1::uuid AND d.subscriber_type = 'agent'
+			ORDER BY d.subscriber_id`, runID)
+	}
+	if err != nil {
+		return strings.Join(facts, ", ") + "; query agent routes: " + err.Error()
+	}
+	defer routeRows.Close()
+	for routeRows.Next() {
+		var agentID, owner, source, presence, scope, instanceID, instancePath string
+		if err := routeRows.Scan(&agentID, &owner, &source, &presence, &scope, &instanceID, &instancePath); err != nil {
+			return strings.Join(facts, ", ") + "; scan agent routes: " + err.Error()
+		}
+		facts = append(facts, fmt.Sprintf("agent-route:%s:%s/%s/%s/%s/%s/%s", agentID, owner, source, presence, scope, instanceID, instancePath))
+	}
+	if err := routeRows.Err(); err != nil {
+		return strings.Join(facts, ", ") + "; iterate agent routes: " + err.Error()
+	}
+	logQuery := `SELECT CAST(payload AS TEXT) FROM events WHERE run_id = ? AND event_name = 'platform.runtime_log' ORDER BY created_at`
+	if backend == "postgres" {
+		logQuery = `SELECT payload::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.runtime_log' ORDER BY created_at`
+	}
+	logs, err := db.QueryContext(ctx, logQuery, runID)
+	if err != nil {
+		return strings.Join(facts, ", ") + "; query runtime logs: " + err.Error()
+	}
+	defer logs.Close()
+	for logs.Next() {
+		var payload string
+		if err := logs.Scan(&payload); err != nil {
+			return strings.Join(facts, ", ") + "; scan runtime logs: " + err.Error()
+		}
+		facts = append(facts, "runtime-log:"+payload)
+	}
+	if err := logs.Err(); err != nil {
+		return strings.Join(facts, ", ") + "; iterate runtime logs: " + err.Error()
 	}
 	return strings.Join(facts, ", ")
 }

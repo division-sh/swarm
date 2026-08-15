@@ -25,8 +25,9 @@ import (
 )
 
 type recordingEventStore struct {
-	mu     sync.Mutex
-	events []events.Event
+	mu       sync.Mutex
+	events   []events.Event
+	prepared map[string]runtimebus.PreparedPublishEvent
 }
 
 type directRecipientTransactionalStore struct {
@@ -198,7 +199,38 @@ func (s *recordingEventStore) CommitPublication(_ context.Context, command runti
 func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
 }
+
+func (s *recordingEventStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prepared, ok := s.prepared[strings.TrimSpace(eventID)]
+	return prepared, ok, nil
+}
+
 func (*recordingEventStore) SupportsPersistedReplay() bool { return false }
+
+func seedRecordingNoDelivery(t testing.TB, store *recordingEventStore, event events.Event) {
+	t.Helper()
+	admitted, err := events.RevalidatePersistedEvent(event)
+	if err != nil {
+		t.Fatalf("admit recording event: %v", err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatalf("admit recording evaluation ledger: %v", err)
+	}
+	settlement, err := events.NewNoDeliverySettlement(
+		events.EventWriteNormalPublication,
+		events.NoDeliveryDeclaredConsumerNoPlan,
+		ledger,
+	)
+	if err != nil {
+		t.Fatalf("admit recording no-delivery settlement: %v", err)
+	}
+	store.prepared = map[string]runtimebus.PreparedPublishEvent{
+		event.ID(): {Event: admitted, Settlement: settlement},
+	}
+}
 
 func (s *recordingEventStore) eventTypes() []string {
 	s.mu.Lock()
@@ -444,9 +476,10 @@ func TestEngineDispatcherDispatchesCommittedIntentWithoutHiddenCollector(t *test
 	}
 	eb.SetInterceptors(interceptingTestHandler{})
 	intent := runtimeengine.EmitIntent{
-		Event:      eventtest.RunCreatingRootIngress("", events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("custom.emitted"), "", "", nil, 0, eventtest.UUID("committed-intent-run"), "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Now().UTC()),
 		ChainDepth: 3,
 	}
+	seedRecordingNoDelivery(t, store, intent.Event)
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
@@ -660,9 +693,9 @@ func TestEngineDispatcherAmbientSQLContextDoesNotBypassDurableManifest(t *testin
 		_ = tx.Rollback()
 		t.Fatal("expected DispatchPostCommit to fail closed without post-commit queue")
 	}
-	if !strings.Contains(err.Error(), "authoritative delivery recipient manifest is unavailable") {
+	if !strings.Contains(err.Error(), "prepared event settlement reader is required") {
 		_ = tx.Rollback()
-		t.Fatalf("DispatchPostCommit error = %q, want durable manifest failure", err)
+		t.Fatalf("DispatchPostCommit error = %q, want prepared event authority failure", err)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
@@ -1268,8 +1301,8 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	}
 	_ = requireBusEvent(t, controlCh, "direct intent delivery to control-plane")
 	evt := requireBusEvent(t, matchCh, "direct intent delivery to matching entity-scoped agent")
-	if got := evt.EntityID(); got != eventtest.UUID("ent-1") {
-		t.Fatalf("matched event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "direct intent delivery to filtered recipient")
 
@@ -1386,12 +1419,12 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
 	evt := requireBusEvent(t, internalCh, "outbox event delivery to internal subscriber")
-	if got := evt.EntityID(); got != eventtest.UUID("ent-1") {
-		t.Fatalf("internal event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless internal event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, agentCh, "outbox event delivery to agent subscriber")
-	if got := evt.EntityID(); got != eventtest.UUID("ent-1") {
-		t.Fatalf("agent event entity_id = %q, want ent-1", got)
+	if got := evt.EntityID(); got != "" {
+		t.Fatalf("targetless agent event entity_id = %q, want empty route-local target", got)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -1475,12 +1508,13 @@ func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			eventtest.UUID("persisted-interceptor-run"),
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
 		),
 	}
+	seedRecordingNoDelivery(t, store, intent.Event)
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
@@ -1490,7 +1524,7 @@ func TestEngineDispatcherRunsInterceptorsForPersistedEmitIntents(t *testing.T) {
 	}
 }
 
-func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMemoryBus(t *testing.T) {
+func TestEngineDispatcherFailsClosedWithoutPreparedEventAuthority(t *testing.T) {
 	eb, err := newScopedTestEventBus(nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -1513,18 +1547,14 @@ func TestEngineDispatcher_FailsClosedWithoutAuthoritativeRecipientManifestOnInMe
 
 	err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})
 	if err == nil {
-		t.Fatal("expected DispatchPostCommit to fail without authoritative recipient manifest")
+		t.Fatal("expected DispatchPostCommit to fail without prepared event authority")
 	}
-	if got := err.Error(); !strings.Contains(got, "authoritative delivery recipient manifest is unavailable") {
-		t.Fatalf("DispatchPostCommit error = %q, want missing authoritative manifest failure", got)
+	if got := err.Error(); !strings.Contains(got, "prepared event settlement reader is required") {
+		t.Fatalf("DispatchPostCommit error = %q, want missing prepared event authority", got)
 	}
 }
 
 func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *testing.T) {
-	eb, err := newScopedTestEventBus(nil)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-direct-no-tx"),
@@ -1533,13 +1563,36 @@ func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *
 			"",
 			[]byte(`{"entity_id":"ent-1"}`),
 			0,
-			"",
+			eventtest.UUID("direct-intent-missing-route-run"),
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
 			time.Now().UTC(),
 		),
 
 		Recipients: []string{"agent-a"},
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatalf("admit direct intent evaluation ledger: %v", err)
+	}
+	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		t.Fatalf("admit direct intent settlement: %v", err)
+	}
+	store := &directRecipientTransactionalStore{
+		events:      []events.Event{intent.Event},
+		settlements: map[string]events.RouteSettlement{intent.Event.ID(): settlement},
+		deliveries:  map[string][]string{intent.Event.ID(): {"agent-a"}},
+		routes: map[string][]events.DeliveryRoute{intent.Event.ID(): {{
+			Recipient: events.MustNodeDeliveryRecipient("node-only"),
+			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+				FlowID: "root", FlowInstance: "root",
+			}),
+		}}},
+	}
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{Durable: runtimebus.ExactDurableTestDependencies(store)})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
 	}
 
 	err = eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent})

@@ -1876,14 +1876,11 @@ func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 		if _, err := route.Identity(); err != nil {
 			return fmt.Errorf("delivery route %d: %w", index, err)
 		}
-		if route.Target.Empty() {
-			continue
-		}
 		key := exactDeliveryExecutionSlotKey(route)
 		if previous, exists := owners[key]; exists && !SameDeliveryTargetOwnership(previous, route.Target) {
 			return fmt.Errorf(
-				"delivery route %s=%s has conflicting target ownership kinds %s and %s for one exact execution slot",
-				route.Recipient.Code(), route.Recipient.ID(), previous.Code(), route.Target.Code(),
+				"delivery route %s=%s has conflicting target ownership kinds/routes %s and %s for one exact execution slot",
+				route.Recipient.Code(), route.Recipient.ID(), deliveryTargetOwnershipLabel(previous), deliveryTargetOwnershipLabel(route.Target),
 			)
 		}
 		owners[key] = route.Target
@@ -1944,12 +1941,22 @@ type deliveryExecutionSlotKey struct {
 
 func exactDeliveryExecutionSlotKey(route DeliveryRoute) deliveryExecutionSlotKey {
 	route = route.Normalized()
-	return deliveryExecutionSlotKey{
+	key := deliveryExecutionSlotKey{
 		recipient:      route.Recipient,
 		agentIdentity:  route.AgentIdentity,
-		targetRoute:    route.Target.Route(),
 		replyContextID: route.Context.ReplyContextID(),
 	}
+	if route.Recipient.IsNode() {
+		key.targetRoute = route.Target.Route()
+	}
+	return key
+}
+
+func deliveryTargetOwnershipLabel(owner DeliveryTargetOwnership) string {
+	if owner.Empty() {
+		return "targetless"
+	}
+	return fmt.Sprintf("%s:%#v", owner.Code(), owner.Route())
 }
 
 func normalizeRouteIdentities(in []RouteIdentity) []RouteIdentity {

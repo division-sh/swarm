@@ -171,7 +171,7 @@ func (eb *EventBus) FinalizeEnginePublications(ctx context.Context, evidence []r
 		if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
 			eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 		}
-		eb.setPendingInternalDelivery(prepared.Event.ID(), prepared.plan.InternalRecipientIDs(), prepared.plan.InternalDeliveryRoutes())
+		eb.setPendingInternalDelivery(prepared.Event.ID(), prepared.plan.InternalRecipientIDs())
 		eb.stageCommittedOutboxOperation(committed.plan.intent, committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs)
 	}
 	return nil
@@ -340,6 +340,10 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		d.bus.logDispatchQueued(ctx, reason, intent.Event, len(intent.Recipients), len(intent.Recipients) > 0, false)
 		return true, runtimepipelineobligation.Continue(), nil
 	}
+	deliveryRoutes, err := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())
+	if err != nil {
+		return false, runtimepipelineobligation.Continue(), err
+	}
 	projection, err := d.bus.receiverProjection(ctx, intent.Context)
 	if err != nil {
 		return false, runtimepipelineobligation.Continue(), err
@@ -350,7 +354,6 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
-	deliveryRoutes := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())
 	if intent.Recipients == nil {
 		passthrough, deferred, outcome, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
 		if err != nil {
@@ -413,10 +416,12 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	return false, runtimepipelineobligation.Continue(), nil
 }
 
-func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, eventID string) []events.DeliveryRoute {
-	persistedRoutes := eb.deliveryRoutesForEvent(ctx, eventID)
-	pendingInternalRoutes := eb.pendingInternalDeliveryForEvent(eventID).routes
-	return events.NormalizeDeliveryRoutes(append(persistedRoutes, pendingInternalRoutes...))
+func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, eventID string) ([]events.DeliveryRoute, error) {
+	prepared, err := eb.preparedEventForReplay(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	return prepared.DeliveryRoutes, nil
 }
 
 func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimepipelineobligation.CommittedScope {
@@ -428,25 +433,22 @@ func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimepipelineob
 
 type pendingInternalDelivery struct {
 	recipients []string
-	routes     []events.DeliveryRoute
 }
 
-func (eb *EventBus) setPendingInternalDelivery(eventID string, recipients []string, deliveryRoutes []events.DeliveryRoute) {
+func (eb *EventBus) setPendingInternalDelivery(eventID string, recipients []string) {
 	if eb == nil {
 		return
 	}
 	eventID = strings.TrimSpace(eventID)
 	recipients = uniqueStrings(recipients)
-	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
-	if eventID == "" || (len(recipients) == 0 && len(deliveryRoutes) == 0) {
+	if eventID == "" || len(recipients) == 0 {
 		delete(eb.pendingInternalByID, eventID)
 		return
 	}
 	eb.pendingInternalByID[eventID] = pendingInternalDelivery{
 		recipients: append([]string(nil), recipients...),
-		routes:     append([]events.DeliveryRoute(nil), deliveryRoutes...),
 	}
 }
 
@@ -463,7 +465,6 @@ func (eb *EventBus) pendingInternalDeliveryForEvent(eventID string) pendingInter
 	pending := eb.pendingInternalByID[eventID]
 	return pendingInternalDelivery{
 		recipients: append([]string(nil), pending.recipients...),
-		routes:     append([]events.DeliveryRoute(nil), pending.routes...),
 	}
 }
 

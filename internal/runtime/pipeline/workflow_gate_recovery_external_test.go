@@ -406,7 +406,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
-			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, "support")
+			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, "support", entityID)
 			if !sourceRoute.Target.ExistingEntity() || sourceRoute.Target.Route().EntityID != entityID {
 				t.Fatalf("approval execution target = %#v, want exact existing owner %s", sourceRoute.Target, entityID)
 			}
@@ -563,7 +563,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
-				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, "support")
+				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, "support", entityID)
 				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
 				proposalDelivery, deliveryErr := events.NewDeliveryEvent(proposal, proposalRoute)
 				if deliveryErr != nil {
@@ -830,7 +830,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID,
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-			route := seedProposedEffectProofDelivery(t, selected, bus, event, "support")
+			route := seedProposedEffectProofDelivery(t, selected, bus, event, "support", entityID)
 			delivery, deliveryErr := events.NewDeliveryEvent(event, route)
 			if deliveryErr != nil {
 				t.Fatalf("construct proposal failure delivery: %v", deliveryErr)
@@ -1536,12 +1536,12 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 	}
 }
 
-func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, nodeID string) events.DeliveryRoute {
+func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, nodeID, entityID string) events.DeliveryRoute {
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: "support", FlowInstance: evt.RunID(), EntityID: evt.EntityID(),
-	})}
+	target := events.RouteIdentity{FlowID: "support", FlowInstance: evt.RunID(), EntityID: entityID}
+	owner := events.MustExistingEntityTarget(target)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: owner}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := selected.events.ProveHandoff(ctx, evt.ID(), route)
 	if err != nil {

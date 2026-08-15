@@ -5547,7 +5547,8 @@ func runServedEventPublishActiveLoadProof(
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	requireServedEventReadback(t, endpoint, followUp.EventID, runID, entityID, "item.processed", "item-observer")
+	requireServedEventPublishDeliveryTargetRoute(t, db, backend, followUp.EventID, "node", "item-observer", runID, entityID)
+	requireServedEventReadback(t, endpoint, followUp.EventID, runID, "", "item.processed", "item-observer")
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)

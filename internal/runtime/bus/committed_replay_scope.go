@@ -9,14 +9,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
-func (eb *EventBus) currentInternalRecipientsForCommittedEvent(ctx context.Context, evt events.Event) ([]string, error) {
-	plan, err := eb.deliveryPlanner.Plan(ctx, evt)
-	if err != nil {
-		return nil, err
-	}
-	return filterOutAgentIDs(plan.RecipientIDs(), plan.PersistedRecipientIDs()), nil
-}
-
 func (eb *EventBus) replayRecipientsForCommittedEvent(
 	ctx context.Context,
 	evt events.Event,
@@ -24,47 +16,34 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	scope runtimepipelineobligation.CommittedScope,
 ) ([]string, []string, []events.DeliveryRoute, error) {
 	persisted = uniqueStrings(persisted)
-	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID())
-	persisted = uniqueStrings(append(persisted, deliveryRouteAgentRecipientIDs(persistedRoutes)...))
-	if scope == runtimepipelineobligation.ScopeDirect && len(persistedRoutes) > 0 {
-		internal := []string(nil)
-		live := deliveryRouteAgentRecipientIDs(persistedRoutes)
-		if len(live) > 0 {
-			return live, internal, persistedRoutes, nil
-		}
+	prepared, err := eb.preparedEventForReplay(ctx, evt.ID())
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	if scope == runtimepipelineobligation.ScopeSubscribed && hasNodeDeliveryRoute(persistedRoutes) {
+	persistedRoutes := prepared.DeliveryRoutes
+	persisted = uniqueStrings(append(persisted, deliveryRouteAgentRecipientIDs(persistedRoutes)...))
+	if prepared.Settlement.NoDelivery() {
+		if len(persisted) > 0 {
+			return nil, nil, nil, fmt.Errorf("replay event %s has no-delivery settlement with persisted recipients", evt.ID())
+		}
+		return nil, nil, nil, nil
+	}
+	if !deliveryRoutesCoverAgentRecipients(persistedRoutes, persisted) {
+		return nil, nil, nil, fmt.Errorf("replay event %s has persisted agent recipients without exact identity-bearing delivery routes", evt.ID())
+	}
+	switch scope {
+	case runtimepipelineobligation.ScopeDirect:
+		if hasNodeDeliveryRoute(persistedRoutes) {
+			return nil, nil, nil, fmt.Errorf("direct replay event %s cannot carry node delivery routes", evt.ID())
+		}
+		return deliveryRouteAgentRecipientIDs(persistedRoutes), nil, persistedRoutes, nil
+	case runtimepipelineobligation.ScopeSubscribed:
 		internal, err := eb.replayNodeCarriersForCommittedEvent(ctx, evt, persistedRoutes)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		live := uniqueStrings(append(deliveryRouteAgentRecipientIDs(persistedRoutes), internal...))
 		return live, internal, persistedRoutes, nil
-	}
-	switch scope {
-	case runtimepipelineobligation.ScopeDirect:
-		if len(persisted) > 0 {
-			return nil, nil, nil, fmt.Errorf("replay event %s has persisted agent recipients without exact identity-bearing delivery routes", evt.ID())
-		}
-		return nil, nil, nil, nil
-	case runtimepipelineobligation.ScopeSubscribed:
-		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		live := uniqueStrings(append(append([]string(nil), persisted...), internal...))
-		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
-		if len(persisted) > 0 && !deliveryRoutesCoverAgentRecipients(routes, persisted) {
-			return nil, nil, nil, fmt.Errorf("replay event %s has persisted agent recipients without exact identity-bearing delivery routes", evt.ID())
-		}
-		for _, recipient := range internal {
-			typedRecipient := events.MustNodeDeliveryRecipient(recipient)
-			if hasDeliveryRouteRecipient(routes, typedRecipient) {
-				continue
-			}
-			routes = append(routes, events.DeliveryRoute{Recipient: typedRecipient})
-		}
-		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 	default:
 		return nil, nil, nil, fmt.Errorf("replay recipients: unsupported scope %q", strings.TrimSpace(string(scope)))
 	}
