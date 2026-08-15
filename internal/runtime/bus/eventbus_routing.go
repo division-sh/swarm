@@ -1196,21 +1196,18 @@ func dedupeSubscribers(in []Subscriber) []Subscriber {
 	if len(in) == 0 {
 		return nil
 	}
-	type subscriberKey struct {
-		recipient events.DeliveryRecipient
-		path      string
-	}
 	out := make([]Subscriber, 0, len(in))
-	seen := make(map[subscriberKey]struct{}, len(in))
+	indexByRole := make(map[resolvedSubscriberRoleIdentity]int, len(in))
 	for _, subscriber := range in {
 		if subscriber.Recipient.Empty() {
 			continue
 		}
-		key := subscriberKey{recipient: subscriber.Recipient, path: strings.TrimSpace(subscriber.Path)}
-		if _, ok := seen[key]; ok {
+		key := resolvedSubscriberRoleKey(subscriber)
+		if index, ok := indexByRole[key]; ok {
+			out[index].MatchPattern = strongestSubscriberMatchEvidence(out[index].MatchPattern, subscriber.MatchPattern)
 			continue
 		}
-		seen[key] = struct{}{}
+		indexByRole[key] = len(out)
 		out = append(out, subscriber)
 	}
 	return out

@@ -266,18 +266,18 @@ func TestExplicitAgentTargetConsumesExactTargetOwner(t *testing.T) {
 
 	untargeted := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: agentIdentity,
-		Producer: routeIntentProducerAgentPolicy, Persist: true,
+		Producer: routeIntentProducerDirectPolicy, Persist: true,
 	}}}.Normalized()
 	resolved, err = projection.resolveRoutePlan(untargeted)
 	if err != nil {
-		t.Fatalf("resolve identity-owned untargeted agent route: %v", err)
+		t.Fatalf("resolve direct untargeted agent route: %v", err)
 	}
 	if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].AgentIdentity != agentIdentity || !routes[0].Target.Empty() {
-		t.Fatalf("untargeted agent routes = %#v, want exact AgentIdentity with explicit target absence", routes)
+		t.Fatalf("untargeted direct agent routes = %#v, want exact AgentIdentity with explicit target absence", routes)
 	}
 }
 
-func TestEntitylessAgentTargetConsumesExactActiveIdentity(t *testing.T) {
+func TestExplicitAgentTargetRequiresSelectedEntityOwner(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "reviewer", "entityless-target-proof", "review", "one", "review/one")
 	plan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
 		Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
@@ -291,13 +291,20 @@ func TestEntitylessAgentTargetConsumesExactActiveIdentity(t *testing.T) {
 		required: true,
 	}
 
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+		t.Fatalf("missing selected agent target error = %v, want target owner rejection", err)
+	}
+
+	selectedOwner := eventtest.UUID("review-one-selected-owner")
+	projection.descriptors = []ActiveTargetDescriptor{{ID: "review-one", FlowInstance: "review/one", EntityID: selectedOwner}}
+	projection.targetsAvailable = true
 	resolved, err := projection.resolveRoutePlan(plan)
 	if err != nil {
-		t.Fatalf("resolve entityless agent target: %v", err)
+		t.Fatalf("resolve selected agent target: %v", err)
 	}
 	routes := resolved.DeliveryRoutes()
-	if len(routes) != 1 || !routes[0].Target.EntitylessReceiver() || routes[0].Target.Route().FlowInstance != "review/one" {
-		t.Fatalf("resolved routes = %#v, want exact entityless agent target", routes)
+	if len(routes) != 1 || !routes[0].Target.ExistingEntity() || routes[0].Target.Route().EntityID != selectedOwner {
+		t.Fatalf("resolved routes = %#v, want exact selected existing agent target", routes)
 	}
 
 	contradictory := plan
@@ -305,6 +312,115 @@ func TestEntitylessAgentTargetConsumesExactActiveIdentity(t *testing.T) {
 	contradictory.DeliveryIntents[0].TargetBlueprint.FlowInstance = "review/other"
 	if _, err := projection.resolveRoutePlan(contradictory); err == nil || !strings.Contains(err.Error(), "disagrees with exact agent identity") {
 		t.Fatalf("contradictory agent target error = %v, want exact identity disagreement", err)
+	}
+}
+
+func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
+	rootIdentity := agentidentitytest.RootDeclared(t, "root-reviewer", "same-flow-agent-root")
+	nestedIdentity := agentidentitytest.Declared(t, "nested-reviewer", "same-flow-agent-nested", "review", "one", "review/one")
+	runID := eventtest.UUID("same-flow-agent-run")
+	rootOwner := eventtest.UUID("same-flow-agent-root-owner")
+	nestedOwner := eventtest.UUID("same-flow-agent-nested-owner")
+	source := connectRoutePlanRootProducerSingletonSource()
+	projection := selectedRunTargetOwnerProjection{
+		agentsAvailable: true,
+		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
+			rootIdentity:   {Identity: rootIdentity, EntityID: rootOwner},
+			nestedIdentity: {Identity: nestedIdentity, EntityID: nestedOwner},
+		},
+		descriptors: []ActiveTargetDescriptor{
+			{ID: "root", FlowInstance: runID, EntityID: rootOwner},
+			{ID: "review-one", FlowInstance: "review/one", EntityID: nestedOwner},
+		},
+		targetsAvailable: true,
+		required:         true,
+		source:           source,
+	}
+	plan := RoutePlan{
+		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		DeliveryIntents: []RoutePlanDeliveryIntent{
+			{Recipient: events.MustAgentDeliveryRecipient("root-reviewer"), AgentIdentity: rootIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
+			{Recipient: events.MustAgentDeliveryRecipient("nested-reviewer"), AgentIdentity: nestedIdentity, Producer: routeIntentProducerAgentPolicy, Persist: true},
+		},
+	}
+
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("resolve same-flow agent targets: %v", err)
+	}
+	routes := resolved.DeliveryRoutes()
+	if len(routes) != 2 {
+		t.Fatalf("resolved routes = %#v, want root and nested agents", routes)
+	}
+	want := map[agentidentity.Identity]events.RouteIdentity{
+		rootIdentity:   {FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: rootOwner},
+		nestedIdentity: {FlowID: "review", FlowInstance: "review/one", EntityID: nestedOwner},
+	}
+	for _, route := range routes {
+		if !route.Target.ExistingEntity() || route.Target.Route() != want[route.AgentIdentity].Normalized() {
+			t.Fatalf("route = %#v, want exact selected owner %#v", route, want[route.AgentIdentity].Normalized())
+		}
+	}
+}
+
+func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
+	identity := agentidentitytest.RootRuntime(t, "workflow-runtime", "same-flow-runtime-carrier")
+	runID := eventtest.UUID("same-flow-runtime-carrier-run")
+	ownerID := eventtest.UUID("same-flow-runtime-carrier-owner")
+	projection := selectedRunTargetOwnerProjection{
+		agentsAvailable: true,
+		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
+			identity: {Identity: identity},
+		},
+		descriptors:      []ActiveTargetDescriptor{{ID: "root", FlowInstance: runID, EntityID: ownerID, Materializing: true}},
+		targetsAvailable: true,
+		required:         true,
+		source:           connectRoutePlanRootProducerSingletonSource(),
+	}
+	plan := RoutePlan{
+		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		DeliveryIntents: []RoutePlanDeliveryIntent{{
+			Recipient: events.MustAgentDeliveryRecipient("workflow-runtime"), AgentIdentity: identity,
+			Producer: routeIntentProducerAgentPolicy, Persist: true,
+		}},
+	}
+
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatalf("resolve runtime-created carrier: %v", err)
+	}
+	routes := resolved.DeliveryRoutes()
+	if len(routes) != 1 || routes[0].AgentIdentity != identity || !routes[0].Target.Empty() {
+		t.Fatalf("runtime-created carrier routes = %#v, want exact identity with explicit target absence", routes)
+	}
+}
+
+func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
+	identity := agentidentitytest.RootDeclared(t, "reviewer", "same-flow-agent-contradiction")
+	runID := eventtest.UUID("same-flow-agent-contradiction-run")
+	source := connectRoutePlanRootProducerSingletonSource()
+	activeOwner := eventtest.UUID("root-active-owner")
+	projection := selectedRunTargetOwnerProjection{
+		agentsAvailable: true,
+		agents:          map[agentidentity.Identity]ActiveAgentDescriptor{identity: {Identity: identity, EntityID: activeOwner}},
+		descriptors: []ActiveTargetDescriptor{
+			{ID: "root-a", FlowInstance: runID, EntityID: eventtest.UUID("root-owner-a")},
+			{ID: "root-b", FlowInstance: runID, EntityID: eventtest.UUID("root-owner-b")},
+		},
+		targetsAvailable: true,
+		required:         true,
+		source:           source,
+	}
+	plan := RoutePlan{
+		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
+		DeliveryIntents: []RoutePlanDeliveryIntent{{
+			Recipient: events.MustAgentDeliveryRecipient("reviewer"), AgentIdentity: identity,
+			Producer: routeIntentProducerAgentPolicy, Persist: true,
+		}},
+	}
+
+	if _, err := projection.resolveRoutePlan(plan); err == nil || !strings.Contains(err.Error(), "active agent entity") {
+		t.Fatalf("contradictory same-flow agent owner error = %v, want fail-closed identity disagreement", err)
 	}
 }
 

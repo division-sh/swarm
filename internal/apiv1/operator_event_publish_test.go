@@ -1258,21 +1258,19 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	eventID := stringValue(t, asMap(t, followUp.Result)["event_id"], "event_id")
 	requireAPIV1RuntimeBusEvent(t, ch, "follow-up root/template collision delivery")
 
-	var gotEventName, gotEntityID, gotFlowInstance, gotTargetRoute string
+	var gotEventName, gotEntityID, gotFlowInstance, gotTargetRoute, gotTargetSet string
 	var gotPayload json.RawMessage
 	if err := db.QueryRow(`
-		SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}'), payload
+		SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
 		FROM events
 		WHERE event_id = $1::uuid
-	`, eventID).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &gotTargetRoute, &gotPayload); err != nil {
+	`, eventID).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &gotTargetRoute, &gotTargetSet, &gotPayload); err != nil {
 		t.Fatalf("load root/template collision event row: %v", err)
 	}
 	if gotEventName != "review.requested" || gotEntityID != "" || gotFlowInstance != "" {
-		t.Fatalf("event row = name:%q entity:%q flow:%q, want unscoped review.requested despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
+		t.Fatalf("event row = name:%q entity:%q flow:%q, want mixed root-receiver projection despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
 	}
-	if gotTargetRoute != "{}" {
-		t.Fatalf("event target_route = %s, want empty non-target route", gotTargetRoute)
-	}
+	assertStoredEventTargetProjectionEmpty(t, gotTargetRoute, gotTargetSet)
 	var decoded map[string]any
 	if err := json.Unmarshal(gotPayload, &decoded); err != nil {
 		t.Fatalf("decode root/template collision payload: %v", err)
@@ -2741,18 +2739,16 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
 		t.Fatalf("run row bundle identity = hash:%q source:%q, want %s/%s", bundleHash, bundleSource, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral)
 	}
-	var entityID, gotProducedBy string
+	var entityID, flowInstance, gotProducedBy, targetRoute, targetSet string
 	var payload json.RawMessage
 	if err := db.QueryRow(`
-		SELECT entity_id::text, produced_by, payload
+		SELECT COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), produced_by, COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
 		FROM events
 		WHERE event_id = $1::uuid
-	`, eventID).Scan(&entityID, &gotProducedBy, &payload); err != nil {
+	`, eventID).Scan(&entityID, &flowInstance, &gotProducedBy, &targetRoute, &targetSet, &payload); err != nil {
 		t.Fatalf("load event.publish event row: %v", err)
 	}
-	if entityID != runID {
-		t.Fatalf("event entity_id = %q, want run_id %q", entityID, runID)
-	}
+	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, postgresEventDeliveryTargetRoutes(t, db, eventID))
 	if gotProducedBy != producedBy {
 		t.Fatalf("event produced_by = %q, want %q", gotProducedBy, producedBy)
 	}
@@ -2781,17 +2777,15 @@ func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, even
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("sqlite run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
-	var entityID, gotProducedBy, payloadText string
+	var entityID, flowInstance, gotProducedBy, targetRoute, targetSet, payloadText string
 	if err := db.QueryRow(`
-		SELECT COALESCE(entity_id, ''), COALESCE(produced_by, ''), payload
+		SELECT COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(produced_by, ''), COALESCE(target_route, '{}'), COALESCE(target_set, '[]'), payload
 		FROM events
 		WHERE event_id = ?
-	`, eventID).Scan(&entityID, &gotProducedBy, &payloadText); err != nil {
+	`, eventID).Scan(&entityID, &flowInstance, &gotProducedBy, &targetRoute, &targetSet, &payloadText); err != nil {
 		t.Fatalf("load sqlite event.publish event row: %v", err)
 	}
-	if entityID != runID {
-		t.Fatalf("sqlite event entity_id = %q, want run_id %q", entityID, runID)
-	}
+	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, sqliteEventDeliveryTargetRoutes(t, db, eventID))
 	if gotProducedBy != producedBy {
 		t.Fatalf("sqlite event produced_by = %q, want %q", gotProducedBy, producedBy)
 	}
@@ -2804,6 +2798,128 @@ func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, even
 	}
 	if decoded["topic"] != "medicine" {
 		t.Fatalf("sqlite event.publish payload = %#v", decoded)
+	}
+}
+
+func postgresEventDeliveryTargetRoutes(t *testing.T, db *sql.DB, eventID string) []events.RouteIdentity {
+	t.Helper()
+	rows, err := db.Query(`
+		SELECT COALESCE(delivery_target_route::text, '{}')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		ORDER BY subscriber_type, subscriber_id, delivery_id
+	`, eventID)
+	if err != nil {
+		t.Fatalf("load postgres delivery targets: %v", err)
+	}
+	defer rows.Close()
+	return scanDeliveryTargetRoutes(t, rows)
+}
+
+func sqliteEventDeliveryTargetRoutes(t *testing.T, db *sql.DB, eventID string) []events.RouteIdentity {
+	t.Helper()
+	rows, err := db.Query(`
+		SELECT COALESCE(delivery_target_route, '{}')
+		FROM event_deliveries
+		WHERE event_id = ?
+		ORDER BY subscriber_type, subscriber_id, delivery_id
+	`, eventID)
+	if err != nil {
+		t.Fatalf("load sqlite delivery targets: %v", err)
+	}
+	defer rows.Close()
+	return scanDeliveryTargetRoutes(t, rows)
+}
+
+func scanDeliveryTargetRoutes(t *testing.T, rows *sql.Rows) []events.RouteIdentity {
+	t.Helper()
+	var routes []events.RouteIdentity
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatalf("scan delivery target: %v", err)
+		}
+		var owner events.DeliveryTargetOwnership
+		if err := json.Unmarshal([]byte(raw), &owner); err != nil {
+			t.Fatalf("decode delivery target %s: %v", raw, err)
+		}
+		routes = append(routes, owner.Route())
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate delivery targets: %v", err)
+	}
+	return routes
+}
+
+func assertStoredEventProjectionMatchesDeliveries(t *testing.T, entityID, flowInstance, targetRouteRaw, targetSetRaw, authoredEntityID string, deliveryTargets []events.RouteIdentity) {
+	t.Helper()
+	var target events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetRouteRaw), &target); err != nil {
+		t.Fatalf("decode event target_route: %v", err)
+	}
+	var targetSet []events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetSetRaw), &targetSet); err != nil {
+		t.Fatalf("decode event target_set: %v", err)
+	}
+	nonEmptyTargets := make([]events.RouteIdentity, 0, len(deliveryTargets))
+	for _, route := range deliveryTargets {
+		if !route.Empty() && !containsStoredRoute(nonEmptyTargets, route) {
+			nonEmptyTargets = append(nonEmptyTargets, route)
+		}
+	}
+	switch {
+	case len(nonEmptyTargets) == 0:
+		if !target.Empty() || len(targetSet) != 0 || entityID != authoredEntityID || flowInstance != "" {
+			t.Fatalf("untargeted event projection = entity:%q flow:%q target:%#v set:%#v, want authored entity %q", entityID, flowInstance, target, targetSet, authoredEntityID)
+		}
+	case len(deliveryTargets) == 1 && len(nonEmptyTargets) == 1:
+		want := nonEmptyTargets[0]
+		if !events.SameRouteIdentity(target, want) || len(targetSet) != 0 || entityID != want.EntityID || flowInstance != want.FlowInstance {
+			t.Fatalf("singular event projection = entity:%q flow:%q target:%#v set:%#v, want %#v", entityID, flowInstance, target, targetSet, want)
+		}
+	default:
+		if !target.Empty() || entityID != "" || flowInstance != "" || !sameStoredRouteSet(targetSet, nonEmptyTargets) {
+			t.Fatalf("fan-out/mixed event projection = entity:%q flow:%q target:%#v set:%#v, want set %#v from delivery slots %#v", entityID, flowInstance, target, targetSet, nonEmptyTargets, deliveryTargets)
+		}
+	}
+}
+
+func sameStoredRouteSet(left, right []events.RouteIdentity) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for _, route := range left {
+		if !containsStoredRoute(right, route) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsStoredRoute(routes []events.RouteIdentity, want events.RouteIdentity) bool {
+	for _, route := range routes {
+		if events.SameRouteIdentity(route, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertStoredEventTargetProjectionEmpty(t *testing.T, targetRouteRaw, targetSetRaw string) {
+	t.Helper()
+	var target events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetRouteRaw), &target); err != nil {
+		t.Fatalf("decode event target_route: %v", err)
+	}
+	if !target.Empty() {
+		t.Fatalf("event target_route = %#v, want empty entityless projection", target)
+	}
+	var targetSet []events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetSetRaw), &targetSet); err != nil {
+		t.Fatalf("decode event target_set: %v", err)
+	}
+	if len(targetSet) != 0 {
+		t.Fatalf("event target_set = %#v, want empty entityless projection", targetSet)
 	}
 }
 

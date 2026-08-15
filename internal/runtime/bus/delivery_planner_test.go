@@ -238,7 +238,7 @@ func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *te
 		},
 		describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient { return nil },
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
 		"inbound.github.push",
 		"",
@@ -248,6 +248,7 @@ func TestDeliveryRouteResolver_ResolvesConcreteFlowInstanceSubscriptionKey(t *te
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "support/instance-a"),
+		eventtest.ConcreteTemplateRoutingSource("support", "support/instance-a", eventtest.UUID("support-source")),
 		time.Time{},
 	)
 
@@ -500,6 +501,46 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 	if _, err := planner.PlanDirect(context.Background(), untargeted, []string{"requester"}); err == nil ||
 		!strings.Contains(err.Error(), `direct recipient agent_id "requester" is ambiguous`) {
 		t.Fatalf("untargeted same-slug PlanDirect error = %v, want ambiguity rejection", err)
+	}
+}
+
+func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescriptorReinterpretation(t *testing.T) {
+	descriptor := testActiveAgentDescriptor(t, "replay-agent", "", "")
+	planner := newDeliveryPlannerWithHandlers(t,
+		deliveryRouteResolver{},
+		deliveryRecipientPolicy{
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return testActiveAgentDescriptors(descriptor), true, nil
+			},
+		},
+	)
+	target := events.RouteIdentity{FlowID: "root-flow", FlowInstance: "run-1", EntityID: "run-1"}
+	route := events.DeliveryRoute{
+		Recipient: events.MustAgentDeliveryRecipient("replay-agent"), AgentIdentity: descriptor.Identity,
+		Target: events.MustExistingEntityTarget(target),
+	}
+	evt := eventtest.RunCreatingRootIngress(
+		"", "task.completed", "", "", nil, 0, "", "",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Time{},
+	)
+
+	plan, err := planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{route})
+	if err != nil {
+		t.Fatalf("PlanExactDirect committed target: %v", err)
+	}
+	if got := plan.LiveRecipients; len(got) != 1 || got[0].AgentIdentity != descriptor.Identity {
+		t.Fatalf("exact live recipients = %#v, want exact root agent identity", got)
+	}
+	if got := plan.DeliveryRoutes(); len(got) != 1 || got[0].Normalized() != route.Normalized() {
+		t.Fatalf("exact delivery routes = %#v, want committed route %#v", got, route)
+	}
+
+	missing := testActiveAgentDescriptor(t, "replay-agent", "", "other/instance")
+	missingRoute := route
+	missingRoute.AgentIdentity = missing.Identity
+	_, err = planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{missingRoute})
+	if !errors.Is(err, ErrExactDirectRecipientUnavailable) {
+		t.Fatalf("PlanExactDirect missing exact identity error = %v, want %v", err, ErrExactDirectRecipientUnavailable)
 	}
 }
 
@@ -831,7 +872,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		}),
 	)
 
-	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
+	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
 		"operating/inst-1/opco.product_initialization_requested",
 		"",
@@ -841,6 +882,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating-source"), "operating/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("operating", "operating/inst-1", "ent-operating-source"),
 		time.Time{},
 	))
 	if err != nil {
@@ -875,7 +917,7 @@ func TestDeliveryPlanner_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 }
 
 func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakParentConcreteRoute(t *testing.T) {
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
 		events.EventType("child/grandchild/micro.started"),
 		"",
@@ -885,6 +927,7 @@ func TestRoutedNodeInternalSubscriptionAliases_NestedSemanticScopeDoesNotLeakPar
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "child/grandchild/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("grandchild", "child/grandchild/inst-1", eventtest.UUID("grandchild-source")),
 		time.Time{},
 	)
 
@@ -954,7 +997,12 @@ func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerives
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := routedEventKeysForPlan(eventtest.RunCreatingRootIngress(
+			source := eventtest.RootRoutingSource(eventtest.UUID("root-source"))
+			if strings.Contains(tc.flowInstance, "/") {
+				parts := strings.Split(tc.flowInstance, "/")
+				source = eventtest.ConcreteTemplateRoutingSource(parts[len(parts)-2], tc.flowInstance, eventtest.UUID("concrete-source"))
+			}
+			got := routedEventKeysForPlan(eventtest.RunCreatingRootIngressWithRoutingSource(
 				"",
 				events.EventType(tc.eventType),
 				"",
@@ -964,6 +1012,7 @@ func TestRoutedEventKeysForPlan_RuntimeCallbackLocalEventWithFlowInstanceDerives
 				"",
 				"",
 				events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance),
+				source,
 				time.Time{},
 			))
 			if len(got) != len(tc.want) {
@@ -996,7 +1045,7 @@ func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcr
 	subscribeInternalDeliveriesForTest(t, eb, "parent-carrier", events.EventType("child/inst-1/micro.started"))
 	defer unsubscribeTestAgent(eb, "parent-carrier")
 
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"",
 		events.EventType("child/grandchild/micro.started"),
 		"",
@@ -1006,6 +1055,7 @@ func TestResolveInternalRecipientsForRoutedNodePlanning_DoesNotSelectParentConcr
 		"",
 		"",
 		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "child/grandchild/inst-1"),
+		eventtest.ConcreteTemplateRoutingSource("grandchild", "child/grandchild/inst-1", eventtest.UUID("grandchild-source")),
 		time.Time{},
 	)
 	got := eb.resolveInternalRecipientsForRoutedNodePlanning(evt, []Subscriber{{Recipient: events.MustNodeDeliveryRecipient("grandchild-worker"), Path: "child/grandchild"}})
@@ -1202,9 +1252,10 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 		}),
 	)
 
-	plan, err := planner.Plan(context.Background(), eventtest.ExistingRunRootIngress(
+	plan, err := planner.Plan(context.Background(), eventtest.ExistingRunRootIngressWithRoutingSource(
 		"", "timer.check", "", "", nil, 0, runID,
-		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "root"), time.Time{},
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "root"),
+		eventtest.StaticFlowRoutingSource("root", "root", eventtest.UUID("root-static-source")), time.Time{},
 	))
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
@@ -1476,9 +1527,10 @@ func TestRouteTargetOwnerIgnoresAbsentAndForeignSourceEntity(t *testing.T) {
 			if test.sourceID != "" {
 				envelope = events.EnvelopeForEntityID(envelope, test.sourceID)
 			}
-			plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
+			plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngressWithRoutingSource(
 				"", events.EventType(owner.FlowInstance+"/opco.product_initialization_requested"),
-				"", "", nil, 0, "", "", envelope, time.Time{},
+				"", "", nil, 0, "", "", envelope,
+				eventtest.ConcreteTemplateRoutingSource("operating", owner.FlowInstance, eventtest.UUID("typed-operating-source")), time.Time{},
 			))
 			if err != nil {
 				t.Fatalf("plan no-target owner: %v", err)
@@ -1523,7 +1575,11 @@ func TestRoutedEventKeysForPlan_LocalizesStaticAndMaterializedFlowInstances(t *t
 		{name: "materialized template", flowInstance: "requester/account-a", want: "requester/account-a/mailbox.card_decided"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.RunCreatingRootIngress("", "mailbox.card_decided", "", "", nil, 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance), time.Time{})
+			source := eventtest.StaticFlowRoutingSource("provider", "provider", eventtest.UUID("provider-source"))
+			if strings.Contains(tc.flowInstance, "/") {
+				source = eventtest.ConcreteTemplateRoutingSource("requester", tc.flowInstance, eventtest.UUID("requester-source"))
+			}
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "mailbox.card_decided", "", "", nil, 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance), source, time.Time{})
 			keys := routedEventKeysForPlan(evt)
 			found := false
 			for _, key := range keys {
@@ -1536,5 +1592,33 @@ func TestRoutedEventKeysForPlan_LocalizesStaticAndMaterializedFlowInstances(t *t
 				t.Fatalf("routed keys = %#v, want %q", keys, tc.want)
 			}
 		})
+	}
+}
+
+func TestRoutedRootNodeDeliveryIntentsRejectEmptyPathFromAnotherFlow(t *testing.T) {
+	event := eventtest.RunCreatingRootIngress(
+		"", "step.begin", "", "", nil, 0, "run-one", "", events.EventEnvelope{}, time.Time{},
+	)
+	root := Subscriber{
+		Recipient:      events.MustNodeDeliveryRecipient("root-handler"),
+		MatchPattern:   "step.begin",
+		routeSource:    subscriberRouteSourceSubscription,
+		handlerFlowID:  "root-flow",
+		handlerNodeID:  "root-handler",
+		targetHandler:  runtimepipeline.MustDeliveryTargetHandler("root-flow", "root-handler"),
+		LocalizedEvent: "step.begin",
+	}
+	child := Subscriber{
+		Recipient:      events.MustNodeDeliveryRecipient("child-handler"),
+		MatchPattern:   "step.begin",
+		routeSource:    subscriberRouteSourceSubscription,
+		handlerFlowID:  "child-flow",
+		handlerNodeID:  "child-handler",
+		targetHandler:  runtimepipeline.MustDeliveryTargetHandler("child-flow", "child-handler"),
+		LocalizedEvent: "step.begin",
+	}
+	intents := routedRootNodeDeliveryIntentsForNoTargetEvent(event, []Subscriber{child, root}, "root-flow")
+	if len(intents) != 1 || intents[0].Recipient.ID() != "root-handler" || intents[0].Handler.FlowID() != "root-flow" {
+		t.Fatalf("root intents = %#v, want only exact root-flow handler", intents)
 	}
 }

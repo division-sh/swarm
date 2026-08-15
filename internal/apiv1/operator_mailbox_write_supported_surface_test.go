@@ -879,165 +879,82 @@ func bundleSourceFactForTestBundle(t *testing.T, bundle *runtimecontracts.Workfl
 
 func mailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "amount", Value: runtimecontracts.RefExpression("payload.amount")},
-				{TargetField: "who", Value: runtimecontracts.RefExpression("payload.who")},
-			},
-		},
-		AdvancesTo: "done",
-		Action: runtimecontracts.ActionSpec{
-			ID: "mailbox_write",
-			Mailbox: &runtimecontracts.MailboxWriteSpec{
-				ItemType: runtimecontracts.LiteralExpression("review_request"),
-				Severity: runtimecontracts.LiteralExpression("urgent"),
-				Summary:  runtimecontracts.LiteralExpression("Review validation package"),
-				EntityID: runtimecontracts.RefExpression("_entity.id"),
-				Payload: map[string]runtimecontracts.ExpressionValue{
-					"review_kind": runtimecontracts.LiteralExpression("validation"),
-					"who":         runtimecontracts.RefExpression("payload.who"),
-					"amount":      runtimecontracts.RefExpression("payload.amount"),
-				},
-			},
-		},
-	}
-	return &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "mailbox-write-supported-surface",
-			Version:      "1.0.0",
-			InitialStage: "new",
-			Stages: []runtimecontracts.WorkflowStageContract{
-				{ID: "new"},
-				{ID: "done"},
-			},
-			TerminalStages: []string{"done"},
-			Transitions: []runtimecontracts.WorkflowTransitionContract{{
-				ID:      "reviewer-completes-thing",
-				From:    []string{"new"},
-				To:      "done",
-				Trigger: "thing.created",
-				Node:    "reviewer",
-			}},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"reviewer": {"thing.created": handler},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"thing.created": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"reviewer": {
-				ID:            "reviewer",
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.created"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.created": handler,
-				},
-			},
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Name:           "mailbox-write-supported-surface",
-			InitialState:   "new",
-			TerminalStates: []string{"done"},
-			States:         []string{"new", "done"},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
-			},
-		},
-	}
+	return loadMailboxWriteSupportedSurfaceBundle(t, false)
 }
 
 func conditionalRuleMailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		CreateEntity: true,
-		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
-			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "amount", Value: runtimecontracts.RefExpression("payload.amount")},
-				{TargetField: "who", Value: runtimecontracts.RefExpression("payload.who")},
-			},
-		},
-		Rules: []runtimecontracts.HandlerRuleEntry{
-			{
-				ID:         "auto_approve",
-				Condition:  "payload.amount < 100",
-				AdvancesTo: "approved",
-			},
-			{
-				ID:         "needs_human",
-				Condition:  "payload.amount >= 100",
-				AdvancesTo: "awaiting_human",
-				Action: runtimecontracts.ActionSpec{
-					ID: "mailbox_write",
-					Mailbox: &runtimecontracts.MailboxWriteSpec{
-						ItemType: runtimecontracts.LiteralExpression("approval"),
-						Summary:  runtimecontracts.LiteralExpression("Review refund"),
-						EntityID: runtimecontracts.RefExpression("_entity.id"),
-						Payload: map[string]runtimecontracts.ExpressionValue{
-							"review_kind": runtimecontracts.LiteralExpression("conditional"),
-							"who":         runtimecontracts.RefExpression("payload.who"),
-							"amount":      runtimecontracts.RefExpression("payload.amount"),
-						},
-					},
-				},
-			},
-		},
+	return loadMailboxWriteSupportedSurfaceBundle(t, true)
+}
+
+func loadMailboxWriteSupportedSurfaceBundle(t *testing.T, conditional bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	name := "mailbox-write-supported-surface"
+	states := "  - new\n  - done\n"
+	terminal := "  - done\n"
+	handler := `      create_entity: true
+      data_accumulation:
+        writes:
+          - source_field: amount
+            target_field: amount
+          - source_field: who
+            target_field: who
+      advances_to: done
+      action:
+        id: mailbox_write
+        mailbox:
+          item_type: {literal: review_request}
+          severity: {literal: urgent}
+          summary: {literal: Review validation package}
+          entity_id: {ref: _entity.id}
+          payload:
+            review_kind: {literal: validation}
+            who: {ref: payload.who}
+            amount: {ref: payload.amount}
+`
+	if conditional {
+		name = "rule-mailbox-write-supported-surface"
+		states = "  - new\n  - approved\n  - awaiting_human\n"
+		terminal = "  - approved\n  - awaiting_human\n"
+		handler = `      create_entity: true
+      data_accumulation:
+        writes:
+          - source_field: amount
+            target_field: amount
+          - source_field: who
+            target_field: who
+      rules:
+        auto_approve:
+          condition: payload.amount < 100
+          advances_to: approved
+        needs_human:
+          condition: payload.amount >= 100
+          advances_to: awaiting_human
+          action:
+            id: mailbox_write
+            mailbox:
+              item_type: {literal: approval}
+              summary: {literal: Review refund}
+              entity_id: {ref: _entity.id}
+              payload:
+                review_kind: {literal: conditional}
+                who: {ref: payload.who}
+                amount: {ref: payload.amount}
+`
 	}
-	return &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "rule-mailbox-write-supported-surface",
-			Version:      "1.0.0",
-			InitialStage: "new",
-			Stages: []runtimecontracts.WorkflowStageContract{
-				{ID: "new"},
-				{ID: "approved"},
-				{ID: "awaiting_human"},
-			},
-			TerminalStages: []string{"approved", "awaiting_human"},
-			Transitions: []runtimecontracts.WorkflowTransitionContract{
-				{
-					ID:      "auto-approve",
-					From:    []string{"new"},
-					To:      "approved",
-					Trigger: "thing.created",
-					Node:    "reviewer",
-				},
-				{
-					ID:      "needs-human",
-					From:    []string{"new"},
-					To:      "awaiting_human",
-					Trigger: "thing.created",
-					Node:    "reviewer",
-					Actions: []string{"mailbox_write"},
-				},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"reviewer": {"thing.created": handler},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"thing.created": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"reviewer": {
-				ID:            "reviewer",
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.created"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.created": handler,
-				},
-			},
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Name:           "rule-mailbox-write-supported-surface",
-			InitialState:   "new",
-			TerminalStates: []string{"approved", "awaiting_human"},
-			States:         []string{"new", "approved", "awaiting_human"},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
-			},
-		},
+	writeRunCompletionFixtureFile(t, root+"/package.yaml", "name: "+name+"\nversion: 1.0.0\n")
+	writeRunCompletionFixtureFile(t, root+"/schema.yaml", "name: "+name+"\ninitial_state: new\nterminal_states:\n"+terminal+"states:\n"+states+"pins:\n  inputs:\n    events: [thing.created]\n")
+	writeRunCompletionFixtureFile(t, root+"/events.yaml", "thing.created:\n  amount: integer\n  who: string\n")
+	writeRunCompletionFixtureFile(t, root+"/entities.yaml", "review:\n  amount: integer\n  who: string\n")
+	writeRunCompletionFixtureFile(t, root+"/nodes.yaml", "reviewer:\n  id: reviewer\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n"+handler)
+	for _, file := range []string{"agents.yaml", "policy.yaml", "tools.yaml"} {
+		writeRunCompletionFixtureFile(t, root+"/"+file, "{}\n")
 	}
+	repoRoot := runCompletionRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load mailbox write supported-surface bundle: %v", err)
+	}
+	return bundle
 }

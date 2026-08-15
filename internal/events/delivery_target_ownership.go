@@ -75,6 +75,13 @@ func (o DeliveryTargetOwnership) Route() RouteIdentity {
 	return o.route.Normalized()
 }
 
+// SameDeliveryTargetOwnership compares the complete normalized ownership fact.
+// Callers that only need receiver-route equality must use SameRouteIdentity
+// explicitly so ownership kind cannot be dropped accidentally.
+func SameDeliveryTargetOwnership(left, right DeliveryTargetOwnership) bool {
+	return left.kind == right.kind && SameRouteIdentity(left.Route(), right.Route())
+}
+
 func (o DeliveryTargetOwnership) ExistingEntity() bool {
 	return o.kind == deliveryTargetExistingEntity
 }

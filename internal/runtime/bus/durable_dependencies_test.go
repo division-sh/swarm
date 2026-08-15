@@ -110,9 +110,6 @@ func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Cont
 func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
-func (unexpectedDurableTestRoles) ListEventDeliveryTargets(context.Context, string) (map[string]events.RouteIdentity, error) {
-	return map[string]events.RouteIdentity{}, nil
-}
 func (unexpectedDurableTestRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
 	return nil, nil
 }
@@ -162,9 +159,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.TargetOwners == nil {
 		deps.TargetOwners = defaults
 	}
-	if deps.DeliveryTargets == nil {
-		deps.DeliveryTargets = defaults
-	}
 	if deps.DeliveryRouteSets == nil {
 		deps.DeliveryRouteSets = defaults
 	}
@@ -213,9 +207,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	}
 	if role, ok := selected.(SelectedRunTargetOwnerLister); ok {
 		deps.TargetOwners = role
-	}
-	if role, ok := selected.(EventDeliveryTargetReader); ok {
-		deps.DeliveryTargets = role
 	}
 	if role, ok := selected.(EventDeliveryRouteSetReader); ok {
 		deps.DeliveryRouteSets = role

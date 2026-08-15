@@ -12,23 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
-func (s *SQLiteRuntimeStore) ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error) {
-	routes, err := s.ListEventDeliveryRoutes(ctx, eventID)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]events.RouteIdentity{}
-	for _, route := range routes {
-		if route.Recipient.IsAgent() && !route.Target.Empty() {
-			out[route.Recipient.ID()] = route.Target.Route()
-		}
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
-}
-
 func (s *SQLiteRuntimeStore) ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {

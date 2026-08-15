@@ -259,7 +259,7 @@ search_dimensions:
       - platform-spec.yaml
       - internal/events/types.go
       - internal/runtime/bus/route_plan.go
-      - internal/store/internal/runtimepersistence/sqlite_runtime_delivery_replay.go
+      - internal/store/internal/backend/eventpersistence/events.go
     canonical_layer: event_context
   - id: workflow_runtime_carrier
     pattern: 'workflow-runtime'
@@ -817,6 +817,7 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
+      - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
@@ -987,6 +988,7 @@ seam_families:
       - internal/runtime/bus/eventbus_route_generation_plan_test.go
       - internal/runtime/bus/eventbus_receiver_structure_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/mixed_pubsub_connect_composition_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [route_plan_source_reason, route_plan]
     notes: >

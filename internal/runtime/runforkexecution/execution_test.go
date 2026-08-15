@@ -845,7 +845,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		Durable: bus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, DeliveryRouteSets: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg,
 		},
 		InterceptorProvider: func() []bus.EventInterceptor {
@@ -4554,11 +4554,23 @@ func seedSelectedExecutionRootSourceRun(
 	at time.Time,
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
-	return seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+	agentRoute := selectedExecutionTestAgentRoute(t, "test-agent", "worker")
+	agentRoute.Target = events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: "worker", FlowInstance: "worker", EntityID: entityID,
+	})
+	event := seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
-		selectedExecutionTestAgentRoute(t, "test-agent", "worker"), nil,
+		agentRoute, nil,
 		eventtest.RootRoutingSource(entityID), events.EventEnvelope{Scope: events.EventScopeGlobal}, sourceFacts...,
 	)
+	if _, err := db.ExecContext(runForkTestContext(t), `
+		UPDATE entity_state
+		SET flow_instance = 'worker'
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, sourceRunID, entityID); err != nil {
+		t.Fatalf("bind selected source entity to worker: %v", err)
+	}
+	return event
 }
 
 func seedSelectedExecutionSourceRunWithPrimaryRoute(

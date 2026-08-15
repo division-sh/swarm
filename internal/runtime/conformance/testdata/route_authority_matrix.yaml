@@ -393,7 +393,7 @@ rows:
     proof_refs:
       - {kind: issue, issue: 2114}
       - {kind: go_test, name: TestConnectRecipientEvaluationUsesCompiledReceiverPin}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberPersistsMatchedNoRecipient}
+      - {kind: go_test, name: TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal}
       - {kind: go_test, name: TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority}
       - {kind: go_test, name: TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority}
     notes: >

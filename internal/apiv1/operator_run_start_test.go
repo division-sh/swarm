@@ -454,18 +454,17 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if resp.Error != nil {
 			t.Fatalf("run.start payload entity_id error = %#v", resp.Error)
 		}
-		var eventEntityID string
+		var eventID, eventEntityID, eventFlowInstance, targetRoute, targetSet string
 		var payload json.RawMessage
 		if err := db.QueryRow(`
-				SELECT entity_id::text, payload
+				SELECT event_id::text, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
+				       COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
 				FROM events
 				WHERE run_id = $1::uuid AND event_name = 'scan.requested'
-			`, runID).Scan(&eventEntityID, &payload); err != nil {
+			`, runID).Scan(&eventID, &eventEntityID, &eventFlowInstance, &targetRoute, &targetSet, &payload); err != nil {
 			t.Fatalf("load run.start event row: %v", err)
 		}
-		if eventEntityID != runID {
-			t.Fatalf("event entity_id = %q, want canonical run_id %q", eventEntityID, runID)
-		}
+		assertStoredEventProjectionMatchesDeliveries(t, eventEntityID, eventFlowInstance, targetRoute, targetSet, runID, postgresEventDeliveryTargetRoutes(t, db, eventID))
 		var decoded map[string]any
 		if err := json.Unmarshal(payload, &decoded); err != nil {
 			t.Fatalf("decode persisted payload: %v", err)
@@ -748,18 +747,20 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string
 	if bundleHash != runStartTestBundleHash || bundleSource != storerunlifecycle.BundleSourceEphemeral {
 		t.Fatalf("run row bundle identity = hash:%q source:%q, want %s/%s", bundleHash, bundleSource, runStartTestBundleHash, storerunlifecycle.BundleSourceEphemeral)
 	}
-	var entityID, producedBy string
+	var entityID, flowInstance, producedBy, targetRoute, targetSet string
 	var payload json.RawMessage
 	if err := db.QueryRow(`
-		SELECT entity_id::text, produced_by, payload
+		SELECT COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), produced_by, COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
 		FROM events
 		WHERE run_id = $1::uuid AND event_name = $2
-	`, runID, eventName).Scan(&entityID, &producedBy, &payload); err != nil {
+	`, runID, eventName).Scan(&entityID, &flowInstance, &producedBy, &targetRoute, &targetSet, &payload); err != nil {
 		t.Fatalf("load run.start event row: %v", err)
 	}
-	if entityID != runID {
-		t.Fatalf("event entity_id = %q, want run_id %q", entityID, runID)
+	var eventID string
+	if err := db.QueryRow(`SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`, runID, eventName).Scan(&eventID); err != nil {
+		t.Fatalf("load run.start event identity: %v", err)
 	}
+	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, postgresEventDeliveryTargetRoutes(t, db, eventID))
 	if producedBy != "api.v1" {
 		t.Fatalf("event produced_by = %q, want api.v1", producedBy)
 	}

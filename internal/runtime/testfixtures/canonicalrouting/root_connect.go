@@ -86,6 +86,114 @@ pins:
 	return root
 }
 
+// CopySingletonOutputRootConnect owns the reverse singleton-child-to-root
+// routing proof through the compiler's root project view.
+func CopySingletonOutputRootConnect(t testing.TB) string {
+	t.Helper()
+	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	writeClosedVariantFile(t, root, "package.yaml", `name: singleton-output-root-connect
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: scout
+    flow: scout
+    mode: singleton
+connect:
+  - from: scout.completed
+    to: .scout_completed
+`)
+	writeClosedVariantFile(t, root, "schema.yaml", `name: singleton-output-root-connect
+pins:
+  inputs:
+    events:
+      - name: scout_completed
+        event: scout.completed
+`)
+	writeClosedVariantFile(t, root, "events.yaml", "scout.completed:\n  proof: string\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
+  id: root-collector
+  execution_type: system_node
+  subscribes_to: [scout.completed]
+  event_handlers:
+    scout.completed:
+      guard:
+        id: selected_owner
+        check: '_entity.id != ""'
+`)
+	writeLegacyInstanceFlow(t, root, "scout", `name: scout
+mode: singleton
+pins:
+  outputs:
+    events:
+      - name: completed
+        event: scout.completed
+`, "scout.completed:\n  proof: string\n", "{}\n", "{}\n")
+	return root
+}
+
+// CopyRootSingletonBoomerang owns the reentrant root-to-child-to-root proof.
+func CopyRootSingletonBoomerang(t testing.TB) string {
+	t.Helper()
+	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	writeClosedVariantFile(t, root, "package.yaml", `name: root-singleton-boomerang
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: boomerang
+    flow: boomerang
+    mode: singleton
+connect:
+  - from: .ping
+    to: boomerang.ping
+  - from: boomerang.pong
+    to: .pong
+`)
+	writeClosedVariantFile(t, root, "schema.yaml", `name: root-singleton-boomerang
+pins:
+  inputs:
+    events:
+      - name: pong
+        event: work.pong
+  outputs:
+    events:
+      - name: ping
+        event: work.ping
+`)
+	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\nwork.pong:\n  turn: integer\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:
+  id: root-boomerang
+  execution_type: system_node
+  subscribes_to: [work.pong]
+  event_handlers:
+    work.pong:
+      guard:
+        id: selected_owner
+        check: '_entity.id != ""'
+`)
+	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
+mode: singleton
+pins:
+  inputs:
+    events:
+      - name: ping
+        event: work.ping
+  outputs:
+    events:
+      - name: pong
+        event: work.pong
+`, "work.ping:\n  turn: integer\nwork.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
+  id: boomerang-worker
+  execution_type: system_node
+  subscribes_to: [work.ping]
+  event_handlers:
+    work.ping:
+      guard:
+        id: selected_owner
+        check: '_entity.id != ""'
+`)
+	return root
+}
+
 // CopyRootAutoEmitKeyCarries owns the fixed root output key/carries proof used
 // by boot verification. It is not an open overlay surface.
 func CopyRootAutoEmitKeyCarries(t testing.TB) string {

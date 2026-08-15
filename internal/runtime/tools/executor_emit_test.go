@@ -32,6 +32,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 type publishBusCapture struct {
@@ -1219,7 +1220,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 }
 
 func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *testing.T) {
-	source := emitRoutePlanRootReceiverSource()
+	source := emitRoutePlanRootReceiverSource(t)
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
@@ -1304,7 +1305,7 @@ func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadat
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := emitRoutePlanRootReceiverSource()
+			source := emitRoutePlanRootReceiverSource(t)
 			store := newEmitRoutePlanStore()
 			eb := newEmitRoutePlanEventBus(t, store, source)
 			actor := models.AgentConfig{
@@ -1778,43 +1779,18 @@ func emitRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) sema
 	return emitRoutePlanSource([]runtimecontracts.FlowPackageConnect{connect})
 }
 
-func emitRoutePlanRootReceiverSource() semanticview.Source {
-	bundle := emitRoutePlanTestBundle([]emitRoutePlanTestFlow{
-		{
-			id:   "producer",
-			mode: "template",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "deploy_done",
-				Event: "deploy.done",
-			}},
-		},
-	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done",
-		To:   ".deploy_completed",
-	}})
-	rootHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
+func emitRoutePlanRootReceiverSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	fixtureRoot := canonicalrouting.CopyTemplateOutputRootConnect(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load template-output root-connect fixture: %v", err)
 	}
-	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
-		Pins: runtimecontracts.FlowPins{
-			Inputs: runtimecontracts.FlowInputPins{
-				Events: []string{"deploy.done"},
-				EventPins: []runtimecontracts.FlowInputEventPin{{
-					Name:  "deploy_completed",
-					Event: "deploy.done",
-				}},
-			},
-		},
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"root-receiver": {
-			ID:            "root-receiver",
-			ExecutionType: "system_node",
-			SubscribesTo:  []string{"deploy.done"},
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": rootHandler},
-		},
-	}
-	bundle.Semantics.NodeHandlers["root-receiver"] = map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": rootHandler}
 	return semanticview.Wrap(bundle)
 }
 

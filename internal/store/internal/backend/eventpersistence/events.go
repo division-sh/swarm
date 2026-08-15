@@ -223,35 +223,6 @@ func (s *EventPostgresOwner) ListEventDeliveryRecipients(ctx context.Context, ev
 	return recipients, nil
 }
 
-func (s *EventPostgresOwner) ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
-	}
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return nil, nil
-	}
-	snapshots, err := s.DeliverySnapshotsForEvent(ctx, eventID)
-	if err != nil {
-		return nil, fmt.Errorf("list event delivery targets: %w", err)
-	}
-	out := map[string]events.RouteIdentity{}
-	for _, snapshot := range snapshots {
-		if snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
-			continue
-		}
-		owner := snapshot.Route.Target
-		if owner.Empty() {
-			continue
-		}
-		out[strings.TrimSpace(snapshot.SubscriberID)] = owner.Route()
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
-}
-
 func (s *EventPostgresOwner) ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err

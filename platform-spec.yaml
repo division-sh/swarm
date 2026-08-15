@@ -787,9 +787,9 @@ contract_formats:
           fields:
           - flow_instance
           - entity_id
-          rule: Parent connect fan-out and other explicitly approved topology owners MUST materialize a concrete ordered list of recipient route identities at publish time.
+          rule: Parent connect fan-out and other explicitly approved topology owners MUST materialize a concrete ordered list of recipient route identities at publish time. When one publication has multiple exact delivery routes, target_set is the normalized projection of every unique non-empty route target across all independently admitted delivery branches, not only the connect branch. A mixed publication with one targeted route and one or more explicitly targetless routes uses a one-member target_set rather than collapsing that member into singular target, because the target_set presence records the complete mixed route projection shape.
           not_a_selector: The persisted event.target_set stores resolved route identities, not an authored producer selector.
-          delivery_rule: Each persisted delivery row MUST carry one target_set member as its delivery target. Dispatch exposes that per-recipient target as event.target for the receiver context.
+          delivery_rule: Each persisted delivery row with a non-empty target MUST carry one target_set member as its delivery target. Explicitly targetless agent routes contribute no member. Dispatch exposes the row's per-recipient target as event.target for the receiver context. Planning, selection, retry, replay, and restart MUST consume exact persisted delivery routes and MUST NOT use target_set as route authority.
         receiver_context_order:
         - event.target
         - current_delivery_target_from_event.target_set
@@ -1244,6 +1244,7 @@ contract_formats:
       delivery_rules:
         owning_node: If a system node subscribes_to the event → that node owns it
         dual_delivery: If a node AND agents subscribe → route to both
+        mixed_branch_delivery: If one publication independently satisfies same-flow typed pub/sub and compiled connect topology, preserve and compose both exact branches. A matched connect decision prohibits fallback reconstruction for that connect branch but MUST NOT suppress or retarget the independently admitted same-flow branch.
         consuming: If only a node subscribes → route to node only
         passthrough: If no node subscribes → pure agent delivery
         workflow_node_route_authority: Workflow-node delivery route authority is derived from semantic route topology at publish time and persisted as typed event_deliveries rows before workflow-node execution. Live internal carriers, interceptors, handler lookup, receipts, settlement, replay markers, and API/CLI readback are consumers or evidence only; they MUST NOT be required or used as the authority that creates a workflow-node delivery route.
@@ -1285,6 +1286,14 @@ contract_formats:
             RouteTable contributes only typed registered recipients and direct pub/sub remains a separately named non-connect
             branch. None of those consumers may rebuild receiver event names, rematch subscriber paths or targets, perform a
             shadow HasConsumer/Resolve decision, or flatten the result into free recipient-kind strings before behavior.
+            RouteTable uniqueness uses one normalized resolved subscriber-role equivalence across template observers,
+            materialized patterns, exact/root-input construction, wildcard expansion, and final deduplication. The behavioral
+            role preserves recipient, path/scope, AgentIdentity, route source, localized/effective event, admitted target and
+            connect handlers, and handler flow/node. MatchPattern is authorization evidence rather than an independent delivery
+            role: exact and wildcard declarations resolving to the same behavioral role for one concrete event deduplicate in
+            either order while retaining exact evidence, and distinct behavioral roles cannot collapse.
+            Root-input connect registration consumes only compiler-owned root project views. Flattened bundle node indexes are
+            cross-scope lookup projections and MUST NOT create root receiver roles for child-flow declarations.
             Replay, duplicate recovery, settlement, handler execution, and selected-fork execution consume the persisted
             connect execution claim and MUST NOT rematch current connect topology.
             Exact and wildcard receiver subscriptions are expanded over the receiver flow's finite declared input-event catalog
@@ -1326,7 +1335,13 @@ contract_formats:
             directly; source-event identity, path text, descriptors, singleton fan-in, and missing-row fallback cannot repair
             or reinterpret it. Every explicitly
             targeted agent route resolves to existing_entity or materializing_entity; an untargeted agent route instead records
-            an explicitly empty target because its required typed AgentIdentity is the complete receiver owner. Missing,
+            an explicitly empty target because its required typed AgentIdentity is the complete receiver owner. A same-flow
+            declaration-owned agent-policy route may consume a node/materialization owner from the same admitted plan only
+            when the exact typed active-agent descriptor already carries that entity fact and the selected owner agrees;
+            runtime-created carriers remain targetless. Sharing only a flow instance, handler, recipient spelling, or
+            publication is not ownership evidence. Node intents are classified
+            independently against the selected-run snapshot before their exact owners become eligible evidence for an agent
+            route, so intent order cannot create authority. Missing,
             ambiguous, malformed, stale, foreign, contradictory, or disagreeing owner evidence fails before event, delivery,
             settlement, lifecycle, warning, or reply mutation. A nested static receiver without a distinct selected row may
             consume only the already-admitted current DeliveryRoute target when compiled topology proves shared structural
@@ -1398,9 +1413,16 @@ contract_formats:
             Source, Reason, or prose diagnostics. no_canonical_match means no
             canonical route owner matched the publish operation and lower-
             precedence route production may run. canonical_matched means a
-            canonical route owner matched and produced executable recipients;
+            canonical route owner matched and produced its complete typed decision;
             lower-precedence producers such as legacy recipient materializers
             MUST NOT add, replace, or repair routes afterward.
+            For a mixed same-flow/connect plan, canonical_matched with
+            owner=connect_route_plan records precedence for the connect decision rather than exclusive ownership of every
+            delivery branch. Exact same-flow typed-pubsub intents are independently admitted route authority and MUST be
+            composed before target-owner resolution; they are not lower-precedence repair. A matched connect with zero accepted
+            connect recipients therefore preserves valid same-flow intents and the zero-recipient connect ledger while still
+            prohibiting generic materialization. A failed or contradictory connect decision rejects the complete publication
+            without persisting or executing a same-flow subset.
             canonical_failed_closed means a canonical route owner matched and
             failed closed; the final RoutePlan MUST expose zero executable
             LiveRecipients, DeliveryIntents, DeliveryRoutes, and persisted
@@ -1485,7 +1507,9 @@ contract_formats:
             ambiguity is evaluated; multiple eligible concrete identities after
             filtering still fail closed and require an exact route.
             Public operator replay MUST use PublishDirectRoutes: current direct
-            policy proves only live recipient capability, while every persisted
+            policy proves only the exact AgentIdentity and live route capability;
+            it MUST NOT reinterpret, filter, or replace the committed route target
+            through current agent or target descriptors. Every persisted
             and dispatched target, reply-context, and payload-projection fact is
             copied exactly from the selected original delivery route.
         lowered_connect_route_plan_consumption:
@@ -1521,7 +1545,11 @@ contract_formats:
             fail closed and MUST NOT preserve previously inferred live-subscriber fallback recipients. RouteTable may register
             typed concrete recipients with the compiled evaluator, but it MUST NOT resolve or rematch connect receiver identity.
             A matched lowered ConnectRoutePlan decision, including fail-closed diagnostics, MUST NOT be repaired or augmented
-            by post-planning recipient materialization hooks. #1482 promotes this matched decision into explicit
+            by post-planning recipient materialization hooks. Independently admitted same-flow typed-pubsub intents are composed
+            with a successful or zero-recipient matched connect result and remain exact; they are not connect fallback. One
+            applicable connect failure or contradiction fails the whole publication atomically rather than persisting a local
+            subset. The finalized exact DeliveryRoute set is the only owner of the event target/target_set projection, which is
+            observation and replay-consistency data and cannot re-enter route planning. #1482 promotes this matched decision into explicit
             RoutePlan authority state so materializer eligibility and fail-closed zero-route behavior are structural rather
             than inferred from connect-route metadata.
           compiled_connect_recipient_boundary:
@@ -13400,7 +13428,14 @@ platform_tables:
         Canonical executable event-delivery obligation for agents and system nodes. One row exists per immutable event
         and complete normalized DeliveryRoute identity, including subscriber, target, reply context, and payload projection.
         route_identity is produced only by events.DeliveryRoute and is unique per event. run_id is structurally coupled
-        to the immutable event rather than trusted as an independent fact. Every replay-eligibility, audit, and run-fork
+        to the immutable event rather than trusted as an independent fact. RouteIdentity equality compares all normalized
+        route fields without inferring or completing missing fields. DeliveryTargetOwnership equality additionally includes
+        its closed ownership kind; existing_entity and materializing_entity for the same receiver route are contradictory,
+        not distinct executable obligations. Validation keys cross-route ownership and payload-projection agreement by one
+        exact execution slot: concrete AgentIdentity plus recipient and reply context for agents, or exact receiver route plus
+        recipient and reply context for nodes. Distinct concrete agent identities sharing one authored agent ID remain
+        independent slots, while differing projections or target-ownership kinds for one exact slot fail before persistence.
+        Every replay-eligibility, audit, and run-fork
         revision consumer MUST preserve every route-level
         row even when siblings share a subscriber, and executable dead-letter evidence MUST match only its exact delivery_id;
         event/subscriber grouping is not delivery identity.

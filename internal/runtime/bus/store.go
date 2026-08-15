@@ -480,10 +480,6 @@ type RunLifecycleReadPersistence interface {
 	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (RunLifecycleSnapshot, error)
 }
 
-type EventDeliveryTargetReader interface {
-	ListEventDeliveryTargets(ctx context.Context, eventID string) (map[string]events.RouteIdentity, error)
-}
-
 type EventDeliveryRouteSetReader interface {
 	ListEventDeliveryRoutes(ctx context.Context, eventID string) ([]events.DeliveryRoute, error)
 }

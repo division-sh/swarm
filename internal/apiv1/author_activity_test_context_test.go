@@ -73,7 +73,6 @@ type apiTestDurableEventStore interface {
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
-	runtimebus.EventDeliveryTargetReader
 	runtimebus.EventDeliveryRouteSetReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -153,7 +152,6 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			ActiveAgents:          durable,
 			ActiveFlows:           durable,
 			TargetOwners:          durable,
-			DeliveryTargets:       durable,
 			DeliveryRouteSets:     durable,
 			TargetFailureRecorder: durable,
 			RunOrigins:            durable,
