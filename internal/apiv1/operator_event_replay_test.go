@@ -302,7 +302,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if routeShape.fanOut {
 					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
 					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
-					if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+					if err := storetest.UpsertAgentFixture(ctx, f.store, runtimemanager.PersistedAgent{
 						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
 							FlowID: "audit-flow", FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
