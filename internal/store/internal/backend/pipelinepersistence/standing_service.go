@@ -15,13 +15,16 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	timerobligationstore "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/google/uuid"
@@ -1219,7 +1222,7 @@ func (s *standingServiceAdapter) repairStandingServiceTx(ctx context.Context, tx
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	bundleHash, bundleSource := candidate.Source.StorageValues()
-	if err := s.copyStandingEntityStateTx(ctx, tx, current.RunID, nextRunID, candidate.EntityID); err != nil {
+	if err := s.copyStandingEntityStateTx(ctx, tx, current.RunID, nextRunID, candidate.EntityID, now); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	if s.isSQLite() {
@@ -1472,7 +1475,7 @@ func (s *standingServiceAdapter) setStandingRunCancelledTx(ctx context.Context, 
 	return err
 }
 
-func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string) error {
+func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string, copiedAt time.Time) error {
 	var result sql.Result
 	var err error
 	if s.isSQLite() {
@@ -1480,7 +1483,7 @@ func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, 
 			INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
 			SELECT ?, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, ?
 			FROM entity_state WHERE run_id = ? AND entity_id = ?
-		`, newRunID, time.Now().UTC(), oldRunID, entityID)
+		`, newRunID, copiedAt.UTC(), oldRunID, entityID)
 	} else {
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, slug, name, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
@@ -1498,7 +1501,84 @@ func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, 
 	if count > 1 {
 		return fmt.Errorf("standing repair found multiple current entity rows")
 	}
-	return nil
+	if count == 0 {
+		return nil
+	}
+	projection, err := s.loadStandingEntityStateProjectionTx(ctx, tx, newRunID, entityID)
+	if err != nil {
+		return err
+	}
+	fact, err := s.requireActiveRunSource(ctx, tx, newRunID)
+	if err != nil {
+		return err
+	}
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, fact.BundleHash())
+	if err != nil {
+		return fmt.Errorf("derive standing repair mutation scope: %w", err)
+	}
+	mutationCtx := runtimecorrelation.WithBundleSourceFact(runtimecorrelation.WithRunID(ctx, newRunID), fact)
+	mutationCtx = runtimeauthoractivity.WithScope(mutationCtx, scope)
+	writer := runtimemutationlog.Writer{Type: "platform", ID: "standing_service", HandlerStep: "repair_generation"}
+	if s.postgresStore != nil {
+		return privatemutationlog.InsertEntityStateDiffWithStory(
+			mutationCtx,
+			tx,
+			activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+				return s.postgresStore.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
+			}),
+			s.story,
+			entityID,
+			runtimemutationlog.EntityStateProjection{},
+			projection,
+			writer,
+		)
+	}
+	return storeentity.InsertSQLiteEntityStateDiff(
+		mutationCtx,
+		s.story,
+		tx,
+		newRunID,
+		entityID,
+		runtimemutationlog.EntityStateProjection{},
+		projection,
+		writer,
+		copiedAt,
+	)
+}
+
+func (s *standingServiceAdapter) loadStandingEntityStateProjectionTx(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
+	query := `SELECT current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	if s.postgres {
+		query = `SELECT current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+	}
+	var currentState string
+	var gatesRaw, fieldsRaw, bookkeepingRaw, accumulatorRaw any
+	if err := tx.QueryRowContext(ctx, query, runID, entityID).Scan(&currentState, &gatesRaw, &fieldsRaw, &bookkeepingRaw, &accumulatorRaw); err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("load copied standing entity state: %w", err)
+	}
+	gates, err := storeentity.DecodeJSONMap(gatesRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode copied standing entity gates: %w", err)
+	}
+	fields, err := storeentity.DecodeJSONMap(fieldsRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode copied standing entity fields: %w", err)
+	}
+	bookkeeping, err := storeentity.DecodeJSONMap(bookkeepingRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode copied standing entity bookkeeping: %w", err)
+	}
+	accumulator, err := storeentity.DecodeJSONMap(accumulatorRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode copied standing entity accumulator: %w", err)
+	}
+	return runtimemutationlog.EntityStateProjection{
+		CurrentState: strings.TrimSpace(currentState),
+		Fields:       fields,
+		Bookkeeping:  bookkeeping,
+		Gates:        gates,
+		Accumulator:  accumulator,
+	}, nil
 }
 
 func (s *standingServiceAdapter) insertStandingJournalTx(ctx context.Context, tx *sql.Tx, result runtimepipeline.StandingServiceReconciliation, previousState, actor string, now time.Time) error {

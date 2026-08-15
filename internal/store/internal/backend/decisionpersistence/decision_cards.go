@@ -12,14 +12,18 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
 )
 
@@ -1009,6 +1013,12 @@ func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimea
 	return err == nil, err
 }
 
+type decisionRunSourceOwner func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+
+func (fn decisionRunSourceOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return fn(ctx, runID)
+}
+
 func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	if story == nil {
 		return fmt.Errorf("run decision-card supersession requires private story ownership")
@@ -1025,7 +1035,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := supersedeRunGateActivations(ctx, tx, runID, reason, now, includeCommitted, postgres); err != nil {
+	if err := supersedeRunGateActivations(ctx, tx, story, runID, reason, now, includeCommitted, postgres); err != nil {
 		return err
 	}
 	cardFilter := `c.status = 'pending'`
@@ -1126,7 +1136,8 @@ func (s *DecisionSQLiteOwner) ExpireDecisionCardInputDrafts(ctx context.Context,
 	return count, err
 }
 
-func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+	mutationCtx := runtimecorrelation.WithRunID(ctx, runID)
 	query := `SELECT entity_id, accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
 		query = `SELECT entity_id::text, accumulator FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id FOR UPDATE`
@@ -1137,6 +1148,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 	}
 	type update struct {
 		entityID    string
+		before      map[string]any
 		accumulator map[string]any
 	}
 	updates := []update{}
@@ -1177,7 +1189,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 			}
 		}
 		if changed {
-			updates = append(updates, update{entityID: strings.TrimSpace(entityID), accumulator: carrier.PersistedStateBuckets()})
+			updates = append(updates, update{entityID: strings.TrimSpace(entityID), before: accumulator, accumulator: carrier.PersistedStateBuckets()})
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -1186,6 +1198,19 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if len(updates) == 0 {
+		return nil
+	}
+	var fact runtimecorrelation.BundleSourceFact
+	if postgres {
+		fact, err = storerunstate.RequirePostgresActiveSourceTx(mutationCtx, tx, runID)
+	} else {
+		fact, err = storerunstate.RequireSQLiteActiveSourceTx(mutationCtx, tx, runID)
+	}
+	if err != nil {
+		return err
+	}
+	mutationCtx = runtimecorrelation.WithBundleSourceFact(mutationCtx, fact)
 	for _, item := range updates {
 		raw, err := json.Marshal(item.accumulator)
 		if err != nil {
@@ -1202,6 +1227,27 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, runID, reason 
 		}
 		if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 			return fmt.Errorf("persist run gate activation supersession for entity %s affected %d rows: %w", item.entityID, affected, err)
+		}
+		writer := runtimemutationlog.Writer{Type: "platform", ID: "decision_card", HandlerStep: "run_supersession"}
+		before := runtimemutationlog.EntityStateProjection{Accumulator: item.before}
+		after := runtimemutationlog.EntityStateProjection{Accumulator: item.accumulator}
+		if postgres {
+			if err := privatemutationlog.InsertEntityStateDiffWithStory(
+				mutationCtx,
+				tx,
+				decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+					return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
+				}),
+				story,
+				item.entityID,
+				before,
+				after,
+				writer,
+			); err != nil {
+				return fmt.Errorf("record run gate activation supersession: %w", err)
+			}
+		} else if err := storeentity.InsertSQLiteEntityStateDiff(mutationCtx, story, tx, runID, item.entityID, before, after, writer, now); err != nil {
+			return fmt.Errorf("record run gate activation supersession: %w", err)
 		}
 	}
 	return nil

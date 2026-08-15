@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -173,6 +175,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
 			commitStandingOriginIngress(t, selected, firstHash, reset.RunID, "reset")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
+			seedStandingRepairEntityState(t, ctx, db, backend, reset.RunID, candidate.EntityID)
 
 			if _, err := markRunTerminalStatusForTest(
 				ctx, selected, reset.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC(),
@@ -190,6 +193,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				t.Fatalf("repair transition = %q, want repaired", repaired.Transition)
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, repaired.RunID, serviceID, 3)
+			requireStandingRepairMutationProjection(t, ctx, db, backend, repaired.RunID, candidate.EntityID)
 			commitStandingOriginIngress(t, selected, secondHash, repaired.RunID, "repair")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, repaired.RunID, serviceID, 3)
 
@@ -209,6 +213,135 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func seedStandingRepairEntityState(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID string) {
+	t.Helper()
+	at := time.Date(2026, 7, 29, 18, 0, 0, 0, time.UTC)
+	query := `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, bookkeeping, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		) VALUES (?, ?, 'standing/root', 'standing_service', 'serving',
+			'{"ready":true}', '{"name":"standing"}', '{"generation":2}', '{"metrics":{"requests":3}}', 4,
+			?, ?, ?)
+		ON CONFLICT(run_id, entity_id) DO UPDATE SET
+			current_state = excluded.current_state,
+			gates = excluded.gates,
+			fields = excluded.fields,
+			bookkeeping = excluded.bookkeeping,
+			accumulator = excluded.accumulator,
+			revision = excluded.revision,
+			updated_at = excluded.updated_at`
+	args := []any{runID, entityID, at, at, at}
+	if backend == "postgres" {
+		query = `
+			INSERT INTO entity_state (
+				run_id, entity_id, flow_instance, entity_type, current_state,
+				gates, fields, bookkeeping, accumulator, revision,
+				entered_state_at, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, 'standing/root', 'standing_service', 'serving',
+				'{"ready":true}'::jsonb, '{"name":"standing"}'::jsonb, '{"generation":2}'::jsonb, '{"metrics":{"requests":3}}'::jsonb, 4,
+				$3, $3, $3)
+			ON CONFLICT(run_id, entity_id) DO UPDATE SET
+				current_state = EXCLUDED.current_state,
+				gates = EXCLUDED.gates,
+				fields = EXCLUDED.fields,
+				bookkeeping = EXCLUDED.bookkeeping,
+				accumulator = EXCLUDED.accumulator,
+				revision = EXCLUDED.revision,
+				updated_at = EXCLUDED.updated_at`
+		args = []any{runID, entityID, at}
+	}
+	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+		t.Fatalf("seed standing repair entity state: %v", err)
+	}
+}
+
+func requireStandingRepairMutationProjection(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID string) {
+	t.Helper()
+	postgres := backend == "postgres"
+	stateQuery := `SELECT current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	mutationQuery := `SELECT domain, path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? ORDER BY created_at, mutation_id`
+	if postgres {
+		stateQuery = `SELECT current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+		mutationQuery = `SELECT domain, path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid ORDER BY created_at, mutation_id`
+	}
+	var currentState string
+	var gatesRaw, fieldsRaw, bookkeepingRaw, accumulatorRaw any
+	if err := db.QueryRowContext(ctx, stateQuery, runID, entityID).Scan(&currentState, &gatesRaw, &fieldsRaw, &bookkeepingRaw, &accumulatorRaw); err != nil {
+		t.Fatalf("load repaired standing entity state: %v", err)
+	}
+	live := runtimemutationlog.EntityStateProjection{
+		CurrentState: strings.TrimSpace(currentState),
+		Gates:        decodeMutationProjectionMap(t, gatesRaw),
+		Fields:       decodeMutationProjectionMap(t, fieldsRaw),
+		Bookkeeping:  decodeMutationProjectionMap(t, bookkeepingRaw),
+		Accumulator:  decodeMutationProjectionMap(t, accumulatorRaw),
+	}
+	rows, err := db.QueryContext(ctx, mutationQuery, runID, entityID)
+	if err != nil {
+		t.Fatalf("load repaired standing entity mutations: %v", err)
+	}
+	defer rows.Close()
+	mutations := []runtimemutationlog.ProjectionMutation{}
+	for rows.Next() {
+		var domain, path, writerType, writerID, handlerStep string
+		var raw any
+		if err := rows.Scan(&domain, &path, &raw, &writerType, &writerID, &handlerStep); err != nil {
+			t.Fatal(err)
+		}
+		if writerType != "platform" || writerID != "standing_service" || handlerStep != "repair_generation" {
+			t.Fatalf("standing repair mutation owner = %s/%s/%s", writerType, writerID, handlerStep)
+		}
+		mutations = append(mutations, runtimemutationlog.ProjectionMutation{
+			Domain: runtimemutationlog.Domain(domain), Path: path, NewValue: decodeMutationProjectionValue(t, raw),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(mutations) == 0 {
+		t.Fatal("standing repair recorded no entity mutations")
+	}
+	reconstructed, err := runtimemutationlog.ReconstructEntityStateProjection(mutations)
+	if err != nil {
+		t.Fatalf("reconstruct standing repair mutations: %v", err)
+	}
+	if !reflect.DeepEqual(reconstructed, live) {
+		t.Fatalf("standing repair history = %#v, live state = %#v", reconstructed, live)
+	}
+}
+
+func decodeMutationProjectionMap(t *testing.T, raw any) map[string]any {
+	t.Helper()
+	value := decodeMutationProjectionValue(t, raw)
+	result, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("mutation projection map = %#v", value)
+	}
+	return result
+}
+
+func decodeMutationProjectionValue(t *testing.T, raw any) any {
+	t.Helper()
+	var encoded []byte
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []byte:
+		encoded = typed
+	case string:
+		encoded = []byte(typed)
+	default:
+		t.Fatalf("unexpected mutation projection JSON type %T", raw)
+	}
+	var value any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatalf("decode mutation projection JSON %q: %v", string(encoded), err)
+	}
+	return value
 }
 
 func TestRunOriginStorageConstraintParity(t *testing.T) {

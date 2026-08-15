@@ -9,6 +9,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 )
 
+func TestProjectAgentEntityStateRowUsesClosedTopLevelAllowlist(t *testing.T) {
+	row := map[string]any{
+		"entity_id":   "entity-1",
+		"fields":      map[string]any{"status": "open"},
+		"bookkeeping": map[string]any{"private_fact": "must-not-leak"},
+		"loops":       map[string]any{"private_activation": true},
+		"unknown":     "must-not-leak",
+	}
+	projected := projectAgentEntityStateRow(row)
+	for _, forbidden := range []string{"bookkeeping", "loops", "unknown"} {
+		if _, ok := projected[forbidden]; ok {
+			t.Fatalf("agent projection exposed %q: %#v", forbidden, projected)
+		}
+	}
+	projected["fields"].(map[string]any)["status"] = "changed"
+	if row["fields"].(map[string]any)["status"] != "open" {
+		t.Fatalf("agent projection aliases stored fields: %#v", row["fields"])
+	}
+}
+
 func TestOrderedEntityFieldNamesFromInput_NormalizesSortsAndDedupes(t *testing.T) {
 	got := orderedEntityFieldNamesFromInput([]string{" status ", "", "score", "status", "score", "priority"})
 	want := []string{"priority", "score", "status"}
