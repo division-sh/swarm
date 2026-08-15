@@ -1565,7 +1565,7 @@ func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *
 			0,
 			eventtest.UUID("direct-intent-missing-route-run"),
 			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")),
+			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "root", FlowInstance: "root"}),
 			time.Now().UTC(),
 		),
 

@@ -214,11 +214,12 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 	}
 	routeShapes := []struct {
 		name     string
-		envelope func(string) events.EventEnvelope
+		fanOut   bool
+		envelope func(string, string) events.EventEnvelope
 	}{
 		{
 			name: "singular_target",
-			envelope: func(entityID string) events.EventEnvelope {
+			envelope: func(entityID, _ string) events.EventEnvelope {
 				return events.EventEnvelope{
 					EntityID: entityID, FlowInstance: "target-flow/instance", Scope: events.EventScopeEntity,
 					Source: events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/instance", EntityID: uuid.NewString()},
@@ -227,14 +228,15 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 			},
 		},
 		{
-			name: "fan_out_target_set",
-			envelope: func(entityID string) events.EventEnvelope {
+			name:   "fan_out_target_set",
+			fanOut: true,
+			envelope: func(entityID, auditEntityID string) events.EventEnvelope {
 				return events.EventEnvelope{
 					Scope:  events.EventScopeGlobal,
 					Source: events.RouteIdentity{FlowID: "source-flow", FlowInstance: "source-flow/instance", EntityID: uuid.NewString()},
 					TargetSet: []events.RouteIdentity{
 						{FlowID: "target-flow", FlowInstance: "target-flow/instance", EntityID: entityID},
-						{FlowID: "audit-flow", FlowInstance: "audit-flow/instance", EntityID: uuid.NewString()},
+						{FlowID: "audit-flow", FlowInstance: "audit-flow/instance", EntityID: auditEntityID},
 					},
 				}
 			},
@@ -279,10 +281,12 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				parentID := uuid.NewString()
 				originalID := uuid.NewString()
 				entityID := uuid.NewString()
+				auditEntityID := uuid.NewString()
 				deliveryTarget := events.RouteIdentity{FlowID: "target-flow", FlowInstance: "target-flow/instance", EntityID: entityID}
+				auditTarget := events.RouteIdentity{FlowID: "audit-flow", FlowInstance: "audit-flow/instance", EntityID: auditEntityID}
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
-				envelope := routeShape.envelope(entityID)
+				envelope := routeShape.envelope(entityID, auditEntityID)
 				if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
@@ -293,6 +297,22 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				}); err != nil {
 					t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 				}
+				var auditCh <-chan *runtimebus.LocalDelivery
+				auditIdentity := runtimebustest.Identity(t, "complete-replay-auditor", "audit-flow/instance")
+				if routeShape.fanOut {
+					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
+					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
+					if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
+							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
+							FlowID: "audit-flow", FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
+							Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
+						}),
+						Status: "active", HiredBy: "test", StartedAt: createdAt,
+					}); err != nil {
+						t.Fatalf("UpsertAgent(%s): %v", auditIdentity.AgentID(), err)
+					}
+				}
 				parent := eventtest.InExecutionMode(eventtest.PersistedRuntimeControlForProducer(
 					parentID, events.EventType("filler.event"), eventtest.Producer(events.EventProducerPlatform, "replay-proof"), "parent-task",
 					json.RawMessage(`{"parent":true}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Minute),
@@ -302,11 +322,20 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					json.RawMessage("{\n  \"topic\": \"medicine\", \"score\": 1.0, \"task_id\": \"payload-owned-task\"\n}"), 4, runID, parentID, envelope, createdAt,
 				), "mock")
 				originalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity, Target: events.MustExistingEntityTarget(deliveryTarget)}
+				originalRoutes := []events.DeliveryRoute{originalRoute}
+				if routeShape.fanOut {
+					originalRoutes = append(originalRoutes, events.DeliveryRoute{
+						Recipient: events.MustAgentDeliveryRecipient(auditIdentity.AgentID()), AgentIdentity: auditIdentity,
+						Target: events.MustExistingEntityTarget(auditTarget),
+					})
+				}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
-					[]events.DeliveryRoute{originalRoute},
+					originalRoutes,
 					runtimepipelineobligation.ScopeSubscribed)
-				markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, originalRoute)
+				for _, route := range originalRoutes {
+					markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, route)
+				}
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
 				if err != nil {
 					t.Fatalf("LoadOperatorEvent original: %v", err)
@@ -354,10 +383,14 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("event.replay error = %#v", response.Error)
 				}
 				replayID := stringValue(t, asMap(t, response.Result)["replay_event_id"], "replay_event_id")
+				persistedEnvelope := original.Envelope()
+				if routeShape.fanOut {
+					persistedEnvelope = events.EnvelopeForTargetSet(persistedEnvelope, []events.RouteIdentity{auditTarget, deliveryTarget})
+				}
 				persistedWant := eventtest.Replay(
 					replayID, original.Type(), original.SourceAgent(), original.TaskID(), original.Payload(), original.ChainDepth()+1,
 					events.EventLineage{RunID: runID, ParentEventID: originalID, TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
-					original.Envelope(), replayAt,
+					persistedEnvelope, replayAt,
 				)
 				got := requireAPIV1RuntimeBusEvent(t, ch, "complete operator replay")
 				deliveryWant := eventtest.Replay(
@@ -366,6 +399,15 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					events.EnvelopeForTargetRoute(original.Envelope(), deliveryTarget), replayAt,
 				)
 				assertOperatorReplaySnapshot(t, got, deliveryWant)
+				if routeShape.fanOut {
+					auditGot := requireAPIV1RuntimeBusEvent(t, auditCh, "complete operator replay audit branch")
+					auditWant := eventtest.Replay(
+						replayID, original.Type(), original.SourceAgent(), original.TaskID(), original.Payload(), original.ChainDepth()+1,
+						events.EventLineage{RunID: runID, ParentEventID: originalID, TaskID: original.TaskID(), ExecutionMode: original.ExecutionMode()},
+						events.EnvelopeForTargetRoute(original.Envelope(), auditTarget), replayAt,
+					)
+					assertOperatorReplaySnapshot(t, auditGot, auditWant)
+				}
 				persisted, err := f.store.LoadOperatorEvent(ctx, replayID)
 				if err != nil {
 					t.Fatalf("LoadOperatorEvent replay: %v", err)

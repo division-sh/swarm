@@ -187,12 +187,13 @@ func deliveryRoutesFromSnapshots(snapshots []runtimedelivery.Snapshot) []events.
 }
 
 func preparedPublishEvent(admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute) (runtimebus.PreparedPublishEvent, bool, error) {
-	if err := settlement.Validate(routes); err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("validate persisted route settlement: %w", err)
-	}
-	return runtimebus.PreparedPublishEvent{
+	prepared := runtimebus.PreparedPublishEvent{
 		Event: admitted, Settlement: settlement, DeliveryRoutes: routes,
-	}, true, nil
+	}
+	if err := prepared.Validate(); err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("validate persisted prepared publication: %w", err)
+	}
+	return prepared, true, nil
 }
 
 func loadPostgresEventIdentities(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]persistedEventIdentity, error) {

@@ -2,8 +2,10 @@ package bus_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -149,6 +151,125 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			requireDurableTargetOwnerPublicProjection(t, ctx, selected, eventID, wantOwner)
 		})
 	}
+}
+
+func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDuplicate(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			selected := newTargetOwnerParityStore(t, backend, ctx)
+			db := storetest.Database(selected)
+			runID := uuid.NewString()
+			target := events.RouteIdentity{
+				FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString(),
+			}.Normalized()
+			evt := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), events.EventType("prepared.aggregate.corruption"), "fixture", "", json.RawMessage(`{}`), 0,
+				runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC(),
+			)
+			routes := []events.DeliveryRoute{
+				{Recipient: events.MustNodeDeliveryRecipient("validator-one"), Target: events.MustExistingEntityTarget(target)},
+				{Recipient: events.MustNodeDeliveryRecipient("validator-two"), Target: events.MustExistingEntityTarget(target)},
+			}
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, evt, routes, runtimepipelineobligation.ScopeSubscribed)
+
+			originalIdentity, err := routes[1].Identity()
+			if err != nil {
+				t.Fatalf("derive original route identity: %v", err)
+			}
+			corruptRoute := events.DeliveryRoute{
+				Recipient: routes[0].Recipient,
+				Target:    events.MustMaterializingEntityTarget(target),
+			}
+			corruptIdentity, err := corruptRoute.Identity()
+			if err != nil {
+				t.Fatalf("derive corrupt route identity: %v", err)
+			}
+			corruptTarget, err := json.Marshal(corruptRoute.Target)
+			if err != nil {
+				t.Fatalf("encode corrupt route target: %v", err)
+			}
+			corruptPreparedDeliveryRow(
+				t, ctx, db, backend, evt.ID(),
+				events.EncodeDeliveryRouteIdentity(originalIdentity),
+				corruptRoute.Recipient.ID(),
+				events.EncodeDeliveryRouteIdentity(corruptIdentity),
+				string(corruptTarget),
+			)
+			before := loadPreparedDeliveryCorruption(t, ctx, db, backend, evt.ID(), events.EncodeDeliveryRouteIdentity(corruptIdentity))
+
+			if _, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID()); found || err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
+				t.Fatalf("corrupt prepared readback = found:%v err:%v, want aggregate contradiction", found, err)
+			}
+			restarted, err := newScopedTestEventBus(selected)
+			if err != nil {
+				t.Fatalf("create duplicate EventBus: %v", err)
+			}
+			duplicateCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			if err := restarted.Publish(duplicateCtx, evt); err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
+				t.Fatalf("corrupt exact duplicate error = %v, want aggregate contradiction", err)
+			}
+			after := loadPreparedDeliveryCorruption(t, ctx, db, backend, evt.ID(), events.EncodeDeliveryRouteIdentity(corruptIdentity))
+			if before != after {
+				t.Fatalf("rejected corrupt duplicate mutated durable row: before=%#v after=%#v", before, after)
+			}
+		})
+	}
+}
+
+type preparedDeliveryCorruption struct {
+	count          int
+	subscriberID   string
+	routeIdentity  string
+	targetEncoding string
+}
+
+func corruptPreparedDeliveryRow(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	backend string,
+	eventID string,
+	originalIdentity string,
+	subscriberID string,
+	corruptIdentity string,
+	corruptTarget string,
+) {
+	t.Helper()
+	query := `UPDATE event_deliveries SET subscriber_id=?, route_identity=?, delivery_target_route=? WHERE event_id=? AND route_identity=?`
+	if backend == "postgres" {
+		query = `UPDATE event_deliveries SET subscriber_id=$1, route_identity=$2, delivery_target_route=$3::jsonb WHERE event_id=$4::uuid AND route_identity=$5`
+	}
+	result, err := db.ExecContext(ctx, query, subscriberID, corruptIdentity, corruptTarget, eventID, originalIdentity)
+	if err != nil {
+		t.Fatalf("corrupt prepared delivery row: %v", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		t.Fatalf("corrupt prepared delivery rows = %d err=%v, want one", changed, err)
+	}
+}
+
+func loadPreparedDeliveryCorruption(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	backend string,
+	eventID string,
+	routeIdentity string,
+) preparedDeliveryCorruption {
+	t.Helper()
+	query := `SELECT COUNT(*), MIN(subscriber_id), MIN(route_identity), MIN(delivery_target_route) FROM event_deliveries WHERE event_id=? AND route_identity=?`
+	if backend == "postgres" {
+		query = `SELECT COUNT(*), MIN(subscriber_id), MIN(route_identity), MIN(delivery_target_route::text) FROM event_deliveries WHERE event_id=$1::uuid AND route_identity=$2`
+	}
+	var got preparedDeliveryCorruption
+	if err := db.QueryRowContext(ctx, query, eventID, routeIdentity).Scan(
+		&got.count, &got.subscriberID, &got.routeIdentity, &got.targetEncoding,
+	); err != nil {
+		t.Fatalf("load corrupt prepared delivery row: %v", err)
+	}
+	return got
 }
 
 func newTargetOwnerParityStore(t *testing.T, backend string, ctx context.Context) targetOwnerParityStore {

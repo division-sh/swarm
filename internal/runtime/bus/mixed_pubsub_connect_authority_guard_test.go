@@ -33,7 +33,15 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 			"composeIndependentPubsubBranch": false,
 		},
 		"resolveRoutePlanEventProjection": {
-			"DeliveryRoutes":         false,
+			"DeliveryRoutes":                              false,
+			"preparedEventTargetProjectionForRoutes":      false,
+			"ResolvePreparedPublishEventTargetProjection": false,
+		},
+		"ResolvePreparedPublishEventTargetProjection": {
+			"preparedEventTargetProjectionForRoutes": false,
+			"Envelope":                               false,
+		},
+		"preparedEventTargetProjection.Envelope": {
 			"EnvelopeForTargetRoute": false,
 			"EnvelopeForTargetSet":   false,
 		},

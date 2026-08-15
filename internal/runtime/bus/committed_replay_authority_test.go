@@ -103,6 +103,45 @@ func TestCommittedReplayRejectsCorruptPreparedSettlementAcrossConsumers(t *testi
 	}
 }
 
+func TestExactDuplicateReuseRejectsCorruptPreparedAggregateBeforeRoutePlanDerivation(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	bus, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := exactSiblingObligationEvent("corrupt-exact-duplicate")
+	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: base.RunID()}
+	evt, err := events.ResolveEnvelope(
+		base,
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+	)
+	if err != nil {
+		t.Fatalf("resolve exact duplicate fixture target: %v", err)
+	}
+	routes := []events.DeliveryRoute{
+		{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustExistingEntityTarget(target)},
+		{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustMaterializingEntityTarget(target)},
+	}
+	store.events[evt.ID()] = evt
+	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
+	store.routes[evt.ID()] = routes
+	admitted, err := events.AdmitForPublish(evt, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatalf("admit exact duplicate fixture: %v", err)
+	}
+
+	_, _, err = bus.prepareClosedPublication(
+		testAuthorActivityContext(context.Background()),
+		eventBusCommitPublishPlan{bus: bus, event: evt, admitted: admitted},
+	)
+	if err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
+		t.Fatalf("prepare corrupt exact duplicate error = %v, want aggregate route contradiction", err)
+	}
+	if len(store.events) != 1 || len(store.routes[evt.ID()]) != 2 || len(store.settlements) != 1 {
+		t.Fatalf("rejected duplicate mutated store: events=%#v routes=%#v settlements=%#v", store.events, store.routes, store.settlements)
+	}
+}
+
 func TestCommittedNoDeliveryNeverConsultsCurrentTopology(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store)

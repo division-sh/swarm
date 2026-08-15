@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -1163,7 +1164,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	sourceEvent = sourceAdmitted.Event()
 
 	safeAgentIdentity := runtimebustest.Identity(t, "safe-agent", "")
-	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}, runtimedelivery.StateQueued, nil)
+	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
+	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, replayRoute, runtimedelivery.StateQueued, nil)
 	sourceDeliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -1246,10 +1248,14 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("decode canonical fork replay event: %v", err)
 	}
 	forkEvent := forkAdmitted.Event()
+	wantForkEvent, changed, err := runtimebus.ResolvePreparedPublishEventTargetProjection(sourceEvent, []events.DeliveryRoute{replayRoute})
+	if err != nil || !changed {
+		t.Fatalf("resolve fork replay target projection = changed:%v err:%v", changed, err)
+	}
 	if forkEvent.ID() == sourceEvent.ID() || forkEvent.RunID() != materialized.ForkRunID || forkEvent.Type() != sourceEvent.Type() ||
 		!forkEvent.Producer().Equal(sourceEvent.Producer()) || forkEvent.TaskID() != sourceEvent.TaskID() ||
 		forkEvent.ExecutionMode() != sourceEvent.ExecutionMode() || forkEvent.ChainDepth() != 0 || forkEvent.ParentEventID() != "" ||
-		!bytes.Equal(forkEvent.Payload(), sourceEvent.Payload()) || !reflect.DeepEqual(forkEvent.Envelope(), sourceEvent.Envelope()) {
+		!bytes.Equal(forkEvent.Payload(), sourceEvent.Payload()) || !reflect.DeepEqual(forkEvent.Envelope(), wantForkEvent.Envelope()) {
 		t.Fatalf("complete historical replay projection changed\n source: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s payload=%s envelope=%#v\n replay: id=%s type=%s producer=%s/%s task=%s depth=%d run=%s parent=%s mode=%s payload=%s envelope=%#v",
 			sourceEvent.ID(), sourceEvent.Type(), sourceEvent.ProducerType(), sourceEvent.SourceAgent(), sourceEvent.TaskID(), sourceEvent.ChainDepth(), sourceEvent.RunID(), sourceEvent.ParentEventID(), sourceEvent.ExecutionMode(), sourceEvent.Payload(), sourceEvent.Envelope(),
 			forkEvent.ID(), forkEvent.Type(), forkEvent.ProducerType(), forkEvent.SourceAgent(), forkEvent.TaskID(), forkEvent.ChainDepth(), forkEvent.RunID(), forkEvent.ParentEventID(), forkEvent.ExecutionMode(), forkEvent.Payload(), forkEvent.Envelope())
@@ -1335,7 +1341,6 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	continuationOwner := runtimebustest.NewDeliveryContinuationOwner(false)
-	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}
 	proof, err := pg.ProveHandoff(
 		ctx,
 		forkEventID,
