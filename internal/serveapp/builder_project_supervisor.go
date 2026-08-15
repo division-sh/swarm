@@ -344,6 +344,9 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 	if err := s.completePendingReplacement(); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement before close: %w", err)
 	}
+	if err := s.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set refresh before close: %w", err)
+	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	bundleHash := s.currentBundleSourceFact.BundleHash()
@@ -374,6 +377,9 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	if err := s.completePendingReplacement(); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement: %w", err)
+	}
+	if err := s.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set refresh: %w", err)
 	}
 	if reason := s.sourceReplacementDisabled(); reason != "" {
 		return s.CurrentProject(), fmt.Errorf("project source replacement is disabled: %s", reason)
@@ -815,6 +821,17 @@ func (s *runtimeProjectSupervisor) completePendingSourceSetSurvivors(
 		return true, err
 	}
 	return true, nil
+}
+
+func (s *runtimeProjectSupervisor) completePendingRuntimeSourceSetRefresh(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	manager := s.runtimeContexts
+	s.mu.RUnlock()
+	_, err := s.completePendingSourceSetSurvivors(ctx, manager)
+	return err
 }
 
 func (s *runtimeProjectSupervisor) prepareReplacementSurvivors(
@@ -1262,6 +1279,9 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	if err := s.completePendingSourceSetRollback(ctx); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback before replacement: %w", err)
 	}
+	if err := s.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
+		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set refresh before replacement: %w", err)
+	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
 	oldHash := s.currentBundleSourceFact.BundleHash()
@@ -1377,24 +1397,26 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			}
 			return s.CurrentProject(), errors.Join(err, s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze))
 		}
-		restorePredecessor := func(cause error) error {
-			topologyErr := s.restoreCommittedSourceSet(context.Background(), candidatePlan, previousPlan, topologyAttempt)
-			if survivorTransition != nil {
-				survivorTransitionSettled = true
-				topologyErr = errors.Join(topologyErr, survivorTransition.Abort())
-			}
-			restartErr := s.restoreQuiescedPredecessor(ctx, manager, oldContextDef, oldRT, freeze)
-			return errors.Join(cause, topologyErr, restartErr)
-		}
-		restoreAfterSurvivorCommit := func(cause error) error {
+		retainAndRestorePredecessor := func(cause error, abortPreparedTransition bool) error {
 			retainErr := s.retainPendingSourceSetRollback(
 				manager, oldContextDef, oldRT, candidatePlan, previousPlan, topologyAttempt, false, freeze,
 			)
+			var abortErr error
+			if abortPreparedTransition && survivorTransition != nil {
+				survivorTransitionSettled = true
+				abortErr = survivorTransition.Abort()
+			}
 			if retainErr != nil {
-				return errors.Join(cause, retainErr)
+				return errors.Join(cause, retainErr, abortErr)
 			}
 			recoveryErr := s.completePendingSourceSetRollback(context.Background())
-			return errors.Join(cause, recoveryErr)
+			return errors.Join(cause, abortErr, recoveryErr)
+		}
+		restorePredecessor := func(cause error) error {
+			return retainAndRestorePredecessor(cause, true)
+		}
+		restoreAfterSurvivorCommit := func(cause error) error {
+			return retainAndRestorePredecessor(cause, false)
 		}
 		transitionRetained := false
 		var publication *runtime.PreparedRuntimeContextReplacement
