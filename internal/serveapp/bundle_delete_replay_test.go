@@ -55,7 +55,7 @@ func (c *failOncePostCommitBundleDeleteCapability) IssueGenerationGrant(
 	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
 }
 
-func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T) {
+func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *testing.T) {
 	ctx := context.Background()
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -168,7 +168,7 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 
 	failingCapability := &failOncePostCommitBundleDeleteCapability{ProcessCapability: capability}
 	supervisor := &runtimeProjectSupervisor{
-		currentRT: first.runtime, runtimeContexts: contexts,
+		currentRT: first.runtime, runtimeContexts: contexts, processCapability: failingCapability,
 		replacementShutdown: runtimepkg.DefaultShutdownOptions(),
 	}
 	coordinator := &runtimebundledelete.Coordinator{
@@ -228,6 +228,36 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 	if !replayRecorded {
 		t.Fatal("committed source-set operation omitted final mutation replay record")
 	}
+	currentPlan, exists, err := failingCapability.CurrentSourceSet(ctx)
+	if err != nil || !exists {
+		t.Fatalf("load committed source set before close recovery: exists=%v err=%v", exists, err)
+	}
+	closeFailureCapability := &failSourceSetGrantCapability{
+		ProcessCapability: failingCapability,
+		revision:          currentPlan.Revision,
+	}
+	closeFailureCapability.failuresRemaining.Store(1)
+	supervisor.SetProcessCapability(closeFailureCapability)
+	if _, err := supervisor.CloseProject(ctx); err == nil || !strings.Contains(err.Error(), "injected predecessor survivor grant failure") {
+		t.Fatalf("close with pending survivor recovery failure = %v, want fail-closed grant error", err)
+	}
+	if supervisor.CurrentRuntime() != first.runtime {
+		t.Fatal("close detached the current runtime before pending survivor recovery completed")
+	}
+	for _, bundleHash := range []string{secondHash, thirdHash} {
+		if lookup := contexts.LookupBundleHashStatus(bundleHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
+			t.Fatalf("survivor %s after failed close recovery = %#v, want pending source-set transition", bundleHash, lookup)
+		}
+	}
+	supervisor.SetProcessCapability(failingCapability)
+	if _, err := supervisor.CloseProject(ctx); err != nil {
+		t.Fatalf("close did not complete pending survivor recovery: %v", err)
+	}
+	for _, bundleHash := range []string{secondHash, thirdHash} {
+		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
+			t.Fatalf("survivor %s after close recovery = %#v, want loaded", bundleHash, lookup)
+		}
+	}
 	changedRequest := req
 	changedRequest.OperationID = uuid.NewString()
 	changedRequest.RequestHash = "changed-bundle-delete-request"
@@ -236,8 +266,8 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 		t.Fatalf("changed-request replay error = %v, want stored request hash conflict", err)
 	}
 	for _, bundleHash := range []string{secondHash, thirdHash} {
-		if lookup := contexts.LookupBundleHashStatus(bundleHash); lookup.State != runtimepkg.RuntimeContextStateUnloaded || lookup.Cause != runtimepkg.RuntimeContextCauseSourceSetTransition {
-			t.Fatalf("survivor %s after changed-request replay = %#v, want pending source-set transition", bundleHash, lookup)
+		if lookup := contexts.LookupBundleHashStatus(bundleHash); !lookup.Loaded() {
+			t.Fatalf("survivor %s after changed-request replay = %#v, want recovered loaded context", bundleHash, lookup)
 		}
 	}
 	type survivorProgress struct {
@@ -263,8 +293,8 @@ func TestPostgresBundleDeleteReplayCompletesPendingSurvivorRefresh(t *testing.T)
 			t.Fatalf("survivor progress before replay = %#v, want either committed or untouched", *survivor)
 		}
 	}
-	if progressedBeforeFailure != 1 {
-		t.Fatalf("survivors progressed before injected failure = %d, want 1", progressedBeforeFailure)
+	if progressedBeforeFailure != 2 {
+		t.Fatalf("survivors recovered by close before replay = %d, want 2", progressedBeforeFailure)
 	}
 
 	replayRequest := req

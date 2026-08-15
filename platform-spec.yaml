@@ -10798,8 +10798,10 @@ flow_model:
         before readiness returns. Failure after candidate context publication first withdraws and drains that exact candidate
         through RuntimeContextManager. Recovery then prepares and fences every survivor for the predecessor plan before restoring
         the predecessor source-set head, commits every survivor generation/admission rebind under that restored head, and only
-        then publishes a fresh predecessor runtime. The supervisor installs the typed rollback owner before preparing survivors
-        for the predecessor plan; that owner retains the exact candidate plan, predecessor plan, and idempotent restore operation
+        then publishes a fresh predecessor runtime. Once the candidate source-set head commits, every later candidate failure,
+        including generation installation, runtime startup, standing-target preparation, publication preparation, and survivor
+        commit, enters one typed rollback owner before any restoration attempt. That owner retains the exact candidate plan,
+        predecessor plan, and idempotent restore operation
         through preparation or source-set restoration failure. Preparation failure leaves the candidate head and matching survivor
         authority current until the next serialized recovery boundary resumes that exact rollback; it cannot restore the head
         first, forget the continuation, or reopen candidate-authority survivors under a predecessor head. A survivor
@@ -16641,7 +16643,10 @@ multi_bundle_persistence:
           generation grant and rebind every surviving static lifecycle cell to the committed complete source-set
           revision without changing its execution generation, phase, run mode, or config revision. Survivors remain
           unselectable until the complete set converges; partial rebind failure MUST NOT publish stale runtime authority
-          or report completed deletion. The atomic bundle/source-set mutation MUST retain its exact final result in the
+          or report completed deletion. A committed deletion with an incomplete survivor refresh leaves those contexts fenced
+          under RuntimeContextManager ownership. Reload, replacement, later bundle deletion, and process close MUST adopt and
+          complete that exact pending refresh before context enumeration or shutdown; failed adoption fails closed and MUST NOT
+          detach or stop a pending survivor. The atomic bundle/source-set mutation MUST retain its exact final result in the
           source-set operation ledger together with the exact API request hash. The same final selected-store transaction
           MUST store the complete pre-final coordinator result together with the exact committed final mutation. A retry
           after that commit keeps the same keyed operation identity even when the bundle
@@ -33490,8 +33495,9 @@ agent_topology_authority:
       Runtime replacement uses RuntimeContextManager as the complete-plan compiler because it owns the
       private runtime managers. It fences every untouched loaded context before ReplaceSourceSet, rotates
       each survivor to the committed plan, and republishes the complete survivor set only after convergence.
-      Rollback restores the predecessor source-set head and survivor generations before predecessor publication. Its typed
-      finalizer is retained before predecessor survivor preparation and carries both exact plans plus the idempotent restore
+      Rollback restores the predecessor source-set head and survivor generations before predecessor publication. After the
+      candidate head commits, its typed finalizer is retained for every later candidate failure before predecessor survivor
+      preparation or durable restoration and carries both exact plans plus the idempotent restore
       operation, so preparation or source-set restoration failure remains resumable at every later serialized operation boundary.
       If survivor generation commit fails after head restoration, rollback immediately adopts the exact pending predecessor transition and
       retries it while all survivors remain fenced. Repeated failure retains a typed rollback finalizer that must converge before

@@ -36,6 +36,13 @@ type failSourceSetGrantCapability struct {
 	failures          atomic.Int32
 }
 
+type failEarlyTopologyRollbackCapability struct {
+	runtimestartupownership.ProcessCapability
+	candidateBundleHash      string
+	grantFailuresRemaining   atomic.Int32
+	restoreFailuresRemaining atomic.Int32
+}
+
 type failOnceRuntimeReplacementPublication struct {
 	delegate         runtimeReplacementPublication
 	attempts         atomic.Int32
@@ -203,6 +210,26 @@ func (c *failSourceSetGrantCapability) IssueGenerationGrant(
 	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
 }
 
+func (c *failEarlyTopologyRollbackCapability) IssueGenerationGrant(
+	ctx context.Context,
+	req runtimestartupownership.GrantRequest,
+) (runtimestartupownership.GenerationGrant, error) {
+	if req.BundleHash == c.candidateBundleHash && c.grantFailuresRemaining.CompareAndSwap(1, 0) {
+		return nil, errors.New("injected early candidate generation failure")
+	}
+	return c.ProcessCapability.IssueGenerationGrant(ctx, req)
+}
+
+func (c *failEarlyTopologyRollbackCapability) RestoreSourceSet(
+	ctx context.Context,
+	req runtimeagenttopology.SourceSetCommitRequest,
+) (runtimeagenttopology.SourceSetCommitResult, error) {
+	if c.restoreFailuresRemaining.CompareAndSwap(1, 0) {
+		return runtimeagenttopology.SourceSetCommitResult{}, errors.New("injected early source-set restoration failure")
+	}
+	return c.ProcessCapability.RestoreSourceSet(ctx, req)
+}
+
 func TestRuntimeProjectSupervisorRollbackPendingReplacementUsesExactPublicationPhase(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -329,6 +356,8 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			directFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-direct-failure-candidate", "kappa-worker"), runtimeContextTestHash("3"))
 			directFailureRestored := newRuntime(recoveryCandidate.root, recoveryCandidate.hash)
 			finalCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-final-candidate", "lambda-worker"), runtimeContextTestHash("4"))
+			earlyFailureCandidate := newRuntime(writeServeRuntimeAgentSlugFixture(t, "replacement-early-failure-candidate", "mu-worker"), runtimeContextTestHash("5"))
+			earlyFailureRestored := newRuntime(finalCandidate.root, finalCandidate.hash)
 
 			coordinates := []runtimeagenttopology.SourceCoordinate{
 				{BundleHash: predecessor.hash, BundleSource: "ephemeral"},
@@ -918,6 +947,72 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
 			if err != nil || evidence.SourceSetRevision != finalPlan.Revision {
 				t.Fatalf("survivor authority after direct rollback recovery = %#v head:%s err:%v", evidence, finalPlan.Revision, err)
+			}
+
+			earlyFailureCapability := &failEarlyTopologyRollbackCapability{
+				ProcessCapability:   capability,
+				candidateBundleHash: earlyFailureCandidate.hash,
+			}
+			earlyFailureCapability.grantFailuresRemaining.Store(1)
+			earlyFailureCapability.restoreFailuresRemaining.Store(1)
+			supervisor.SetProcessCapability(earlyFailureCapability)
+			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
+				return earlyFailureRestored.rt, earlyFailureRestored.rt.WorkOccurrence(), nil
+			}
+			_, earlyFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+				ctx, earlyFailureCandidate.root, earlyFailureCandidate.source, earlyFailureCandidate.bundle,
+				earlyFailureCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: earlyFailureCandidate.hash}, earlyFailureCandidate.rt, earlyFailureCandidate.rt.WorkOccurrence(),
+			)
+			if earlyFailureErr == nil || !strings.Contains(earlyFailureErr.Error(), "injected early candidate generation failure") ||
+				!strings.Contains(earlyFailureErr.Error(), "injected early source-set restoration failure") {
+				t.Fatalf("early topology rollback error = %v", earlyFailureErr)
+			}
+			if ready.Load() {
+				t.Fatal("supervisor became ready while early topology rollback remained pending")
+			}
+			supervisor.mu.RLock()
+			earlyRollback := supervisor.pendingSourceSetRollback
+			supervisor.mu.RUnlock()
+			if earlyRollback == nil || earlyRollback.sourceSetRestored {
+				t.Fatalf("early topology rollback owner = %p restored:%v, want retained pre-restore phase", earlyRollback, earlyRollback != nil && earlyRollback.sourceSetRestored)
+			}
+			earlyPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || earlyPlan.Revision == finalPlan.Revision {
+				t.Fatalf("source set during early topology rollback = exists:%v revision:%s previous:%s err:%v", exists, earlyPlan.Revision, finalPlan.Revision, err)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("survivor under retained early candidate head = %#v, want loaded candidate authority", lookup)
+			}
+
+			supervisor.SetProcessCapability(capability)
+			_, boundaryErr = supervisor.replaceCurrentRuntimeWithSource(
+				ctx, earlyFailureCandidate.root, earlyFailureCandidate.source, earlyFailureCandidate.bundle,
+				earlyFailureCandidate.rt.Options.BundleSourceFact,
+				runtimecontracts.BundleIdentity{BundleHash: earlyFailureCandidate.hash}, nil, nil,
+			)
+			if boundaryErr == nil || !strings.Contains(boundaryErr.Error(), "runtime replacement requires a candidate runtime") {
+				t.Fatalf("replacement boundary after early topology rollback = %v, want candidate validation", boundaryErr)
+			}
+			if !ready.Load() || supervisor.CurrentRuntime() != earlyFailureRestored.rt {
+				t.Fatalf("early topology recovery state = ready:%v runtime:%p want:%p", ready.Load(), supervisor.CurrentRuntime(), earlyFailureRestored.rt)
+			}
+			supervisor.mu.RLock()
+			earlyRollback = supervisor.pendingSourceSetRollback
+			supervisor.mu.RUnlock()
+			if earlyRollback != nil {
+				t.Fatal("replacement boundary did not clear early topology rollback")
+			}
+			recoveredEarlyPlan, exists, err := capability.CurrentSourceSet(ctx)
+			if err != nil || !exists || recoveredEarlyPlan.Revision != finalPlan.Revision {
+				t.Fatalf("source set after early topology recovery = exists:%v revision:%s want:%s err:%v", exists, recoveredEarlyPlan.Revision, finalPlan.Revision, err)
+			}
+			if lookup := contexts.LookupBundleHashStatus(survivor.hash); !lookup.Loaded() {
+				t.Fatalf("survivor after early topology recovery = %#v, want loaded", lookup)
+			}
+			evidence, err = survivor.rt.CurrentStartupGrantEvidence()
+			if err != nil || evidence.SourceSetRevision != recoveredEarlyPlan.Revision {
+				t.Fatalf("survivor authority after early topology recovery = %#v head:%s err:%v", evidence, recoveredEarlyPlan.Revision, err)
 			}
 		})
 	}

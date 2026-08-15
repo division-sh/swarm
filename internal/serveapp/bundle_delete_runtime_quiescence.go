@@ -37,6 +37,9 @@ func (q bundleDeleteRuntimeQuiescer) QuiesceBundleRuntime(ctx context.Context, b
 	if err := q.supervisor.completePendingReplacement(); err != nil {
 		return nil, fmt.Errorf("complete pending runtime restoration before bundle delete: %w", err)
 	}
+	if err := q.supervisor.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
+		return nil, fmt.Errorf("finalize pending runtime source-set refresh before bundle delete: %w", err)
+	}
 	bundleHash = strings.TrimSpace(bundleHash)
 	if _, loaded := q.contexts.LookupBundleHash(bundleHash); !loaded {
 		retained = true
