@@ -26,7 +26,7 @@ func TestReconcilerAttemptsEveryCommittedCancellationAfterOneOwnerFails(t *testi
 	generic := &genericWakeupProbe{err: genericErr}
 	workflow := &workflowWakeupProbe{}
 	workflowRef := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: uuid.NewString(), Declaration: "review_timeout", DeclarationRevision: "revision-1",
+		ActivationID: uuid.NewString(), DeclarationKey: "review_timeout", DeclarationRevision: "revision-1",
 		Cause: timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	err := NewReconciler(generic, workflow).Reconcile(context.Background(), []Ref{
@@ -62,7 +62,7 @@ func TestReconcilerDispatchesExactFamilyTypedEvidence(t *testing.T) {
 	generic := &genericWakeupProbe{}
 	workflow := &workflowWakeupProbe{}
 	workflowRef := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: uuid.NewString(), Declaration: "review_timeout", DeclarationRevision: "revision-1",
+		ActivationID: uuid.NewString(), DeclarationKey: "review_timeout", DeclarationRevision: "revision-1",
 		Cause: timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	due := time.Now().UTC().Add(time.Hour)
@@ -81,7 +81,7 @@ func TestReconcilerDispatchesExactFamilyTypedEvidence(t *testing.T) {
 func TestReconcilerRejectsInconsistentWorkflowEvidenceBeforeDispatch(t *testing.T) {
 	workflow := &workflowWakeupProbe{}
 	ref := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: uuid.NewString(), Declaration: "review_timeout", DeclarationRevision: "revision-1",
+		ActivationID: uuid.NewString(), DeclarationKey: "review_timeout", DeclarationRevision: "revision-1",
 		Cause: timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	err := NewReconciler(nil, workflow).Reconcile(context.Background(), []Ref{{

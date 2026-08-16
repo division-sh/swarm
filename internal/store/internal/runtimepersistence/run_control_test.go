@@ -47,6 +47,7 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	}
 
 	var deliveryStatus, reasonCode string
+	nodePending := mustPersistenceRootNode("node-pending").Key()
 	if err := db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason_code, '')
 		FROM event_deliveries
@@ -63,8 +64,8 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'node-pending'
-	`, eventID).Scan(&deliveryStatus, &reasonCode); err != nil {
+		  AND subscriber_id = $2
+	`, eventID, nodePending).Scan(&deliveryStatus, &reasonCode); err != nil {
 		t.Fatalf("load stopped node delivery: %v", err)
 	}
 	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" {
@@ -77,8 +78,8 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = 'node-pending'
-	`, eventID).Scan(&nodeReceiptOutcome, &nodeReceiptReason); err != nil {
+		  AND d.subscriber_id = $2
+	`, eventID, nodePending).Scan(&nodeReceiptOutcome, &nodeReceiptReason); err != nil {
 		t.Fatalf("load stopped node outcome: %v", err)
 	}
 	if nodeReceiptOutcome != "terminalized" || nodeReceiptReason != "run_stopped" {

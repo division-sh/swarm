@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
@@ -29,23 +30,20 @@ type DeliveryTargetOwnerCandidate struct {
 // both route planning and handler execution. An empty handler declaration is a
 // valid entityless handler, so presence is represented separately.
 type DeliveryTargetHandler struct {
-	flowID    string
-	nodeID    string
+	node      runtimeidentity.ExecutableNode
 	eventType events.EventType
 	present   bool
 }
 
-func NewDeliveryTargetHandler(flowID, nodeID string) (DeliveryTargetHandler, error) {
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
-	if flowID == "" || nodeID == "" {
-		return DeliveryTargetHandler{}, fmt.Errorf("delivery target handler requires exact flow and node owners")
+func NewDeliveryTargetHandler(node runtimeidentity.ExecutableNode) (DeliveryTargetHandler, error) {
+	if !node.Valid() {
+		return DeliveryTargetHandler{}, fmt.Errorf("delivery target handler requires exact executable node identity")
 	}
-	return DeliveryTargetHandler{flowID: flowID, nodeID: nodeID, present: true}, nil
+	return DeliveryTargetHandler{node: node, present: true}, nil
 }
 
-func MustDeliveryTargetHandler(flowID, nodeID string) DeliveryTargetHandler {
-	owner, err := NewDeliveryTargetHandler(flowID, nodeID)
+func MustDeliveryTargetHandler(node runtimeidentity.ExecutableNode) DeliveryTargetHandler {
+	owner, err := NewDeliveryTargetHandler(node)
 	if err != nil {
 		panic(err)
 	}
@@ -55,21 +53,41 @@ func MustDeliveryTargetHandler(flowID, nodeID string) DeliveryTargetHandler {
 func (h DeliveryTargetHandler) Empty() bool { return !h.present }
 
 func (h DeliveryTargetHandler) Equal(other DeliveryTargetHandler) bool {
-	return h.present == other.present && h.flowID == other.flowID && h.nodeID == other.nodeID && h.eventType == other.eventType
+	return h.present == other.present && h.node.Equal(other.node) && h.eventType == other.eventType
 }
 
 func (h DeliveryTargetHandler) FlowID() string {
 	if !h.present {
 		return ""
 	}
-	return h.flowID
+	return h.node.FlowID()
 }
 
 func (h DeliveryTargetHandler) NodeID() string {
 	if !h.present {
 		return ""
 	}
-	return h.nodeID
+	return h.node.NodeID()
+}
+
+func (h DeliveryTargetHandler) Node() runtimeidentity.ExecutableNode {
+	if !h.present {
+		return runtimeidentity.ExecutableNode{}
+	}
+	return h.node
+}
+
+// ExecutionFlowID derives the runtime flow scope without changing the
+// declaration coordinate. Root project nodes have an explicitly empty owning
+// flow in ExecutableNode and execute in the bundle's root flow.
+func (h DeliveryTargetHandler) ExecutionFlowID(source semanticview.Source) string {
+	if !h.present {
+		return ""
+	}
+	if flowID := h.node.FlowID(); flowID != "" {
+		return flowID
+	}
+	return semanticview.RootExecutionFlowID(source)
 }
 
 func (h DeliveryTargetHandler) ForEvent(eventType events.EventType) DeliveryTargetHandler {
@@ -87,25 +105,23 @@ func (h DeliveryTargetHandler) resolve(source semanticview.Source, eventType eve
 	if h.eventType != "" {
 		eventType = h.eventType
 	}
-	resolved := semanticview.ResolveFlowNodeSubscriptionHandler(source, h.flowID, h.nodeID, string(eventType))
+	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, h.node, string(eventType))
 	return resolved.Handler, resolved.Matched
 }
 
 // AdmitDeliveryTargetHandler admits one exact authored declaration owner. The
 // concrete event is resolved later so wildcard subscriptions remain bounded by
 // the same owner without freezing a pattern as an executable handler.
-func AdmitDeliveryTargetHandler(source semanticview.Source, flowID, nodeID string) (DeliveryTargetHandler, error) {
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
-	if source == nil || flowID == "" || nodeID == "" {
-		return DeliveryTargetHandler{}, fmt.Errorf("delivery target handler requires source, flow, and node owners")
+func AdmitDeliveryTargetHandler(source semanticview.Source, node runtimeidentity.ExecutableNode) (DeliveryTargetHandler, error) {
+	if source == nil || !node.Valid() {
+		return DeliveryTargetHandler{}, fmt.Errorf("delivery target handler requires source and exact executable node identity")
 	}
-	owner, err := NewDeliveryTargetHandler(flowID, nodeID)
+	owner, err := NewDeliveryTargetHandler(node)
 	if err != nil {
 		return DeliveryTargetHandler{}, err
 	}
-	if _, _, ok := semanticview.ResolveFlowNodeDeclaration(source, flowID, nodeID); !ok {
-		return DeliveryTargetHandler{}, fmt.Errorf("delivery target handler node %s has no declaration in flow %q", nodeID, flowID)
+	if _, ok := source.ExecutableNode(node); !ok {
+		return DeliveryTargetHandler{}, fmt.Errorf("delivery target handler node %s has no exact declaration", node.Key())
 	}
 	return owner, nil
 }
@@ -135,8 +151,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		if !ok {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery requires its exact declaration handle")
 		}
-		if req.Recipient != recipient || (!req.Handler.Empty() &&
-			(req.Handler.FlowID() != handler.FlowID() || req.Handler.NodeID() != handler.NodeID())) {
+		if req.Recipient != recipient || (!req.Handler.Empty() && !req.Handler.Node().Equal(handler.Node())) {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("join lifecycle delivery route contradicts its exact declaration handler")
 		}
 		if blueprint := req.Blueprint.Normalized(); !blueprint.Empty() && blueprint != target {
@@ -150,7 +165,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if !admitted {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver %s requires an exact admitted target handler for event %s", req.Recipient.ID(), req.Event.Type())
 	}
-	flowID := req.Handler.FlowID()
+	flowID := req.Handler.ExecutionFlowID(req.Source)
 	blueprint.FlowID = flowID
 	blueprint = selectedRunRootTargetBlueprint(req.Source, req.Event, flowID, blueprint)
 	if blueprint.FlowInstance == "" {
@@ -259,7 +274,7 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	if handlerFact.Empty() {
 		return fmt.Errorf("receiver %s requires an admitted target handler", recipient.ID())
 	}
-	flowID := handlerFact.FlowID()
+	flowID := handlerFact.ExecutionFlowID(source)
 	if routeFlowID := owner.Route().FlowID; routeFlowID != "" && routeFlowID != flowID {
 		return fmt.Errorf("stamped delivery target flow %q disagrees with handler flow %q", routeFlowID, flowID)
 	}
@@ -294,7 +309,7 @@ func deliveryTargetHandlerAcquisition(source semanticview.Source, handler Delive
 	if handler.eventType != "" {
 		eventType = handler.eventType
 	}
-	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(handler.FlowID(), string(eventType))
+	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(handler.ExecutionFlowID(source), string(eventType))
 	if association.Status == semanticview.EndpointAssociationAmbiguous {
 		return false, false, association.Err()
 	}
@@ -311,7 +326,7 @@ func deliveryTargetHandlerAcquisition(source semanticview.Source, handler Delive
 }
 
 func deliveryTargetEntityRequirement(source semanticview.Source, handlerFact DeliveryTargetHandler, eventType events.EventType, handler SystemNodeEventHandler) (handlerEntityRequirement, error) {
-	requirement := handlerExecutionEntityRequirement(source, handlerFact.FlowID(), handler)
+	requirement := handlerExecutionEntityRequirement(source, handlerFact.ExecutionFlowID(source), handler)
 	usesEntity, materializes, err := deliveryTargetHandlerAcquisition(source, handlerFact, eventType)
 	if err != nil {
 		return handlerEntitylessSafe, err

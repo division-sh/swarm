@@ -25,7 +25,7 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		)
 	}
 	if req.ProducerSource.Empty() {
-		flowID := strings.TrimSpace(req.FlowID.String())
+		flowID := strings.TrimSpace(req.Node.FlowID())
 		entityID := strings.TrimSpace(req.EntityID.String())
 		if entityID == "" {
 			entityID = strings.TrimSpace(req.State.EntityID.String())

@@ -260,9 +260,10 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						t.Fatalf("DeriveRouteTable: %v", err)
 					}
 					if rootReceiver {
+						rootReceiverNode := testRootNode(t, "receiver")
 						for _, localEvent := range []string{"work.accepted", "work.audited"} {
 							identity := agentidentity.Identity{}
-							recipient := events.MustNodeDeliveryRecipient("receiver")
+							recipient := events.MustNodeDeliveryRecipient(rootReceiverNode)
 							if subscriberType == "agent" {
 								identity = connectRoutePlanTestDeclaredAgentIdentity(t, source, "", "receiver", "")
 								recipient = events.MustAgentDeliveryRecipient("receiver")
@@ -274,9 +275,8 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 								AgentIdentity: identity,
 							}
 							if subscriber.Recipient.IsNode() {
-								subscriber.handlerFlowID = source.WorkflowName()
-								subscriber.handlerNodeID = "receiver"
-								subscriber.targetHandler, err = runtimepipeline.AdmitDeliveryTargetHandler(source, subscriber.handlerFlowID, subscriber.handlerNodeID)
+								subscriber.handlerNode = rootReceiverNode
+								subscriber.targetHandler, err = runtimepipeline.AdmitDeliveryTargetHandler(source, rootReceiverNode)
 								if err != nil {
 									t.Fatalf("admit root target handler: %v", err)
 								}
@@ -433,14 +433,14 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 		"consumer-node":  {FlowID: "consumer", FlowInstance: "consumer", EntityID: consumerOwner.EntityID},
 	}
 	for _, route := range routes {
-		want, ok := wantTargets[route.Recipient.ID()]
+		want, ok := wantTargets[route.Recipient.LocalID()]
 		if !ok {
 			t.Fatalf("unexpected route %#v", route)
 		}
 		if got := route.Target.Route(); got != want.Normalized() {
-			t.Fatalf("route %q target = %#v, want %#v", route.Recipient.ID(), got, want.Normalized())
+			t.Fatalf("route %q target = %#v, want %#v", route.Recipient.LocalID(), got, want.Normalized())
 		}
-		delete(wantTargets, route.Recipient.ID())
+		delete(wantTargets, route.Recipient.LocalID())
 	}
 	if len(wantTargets) != 0 {
 		t.Fatalf("missing routes: %#v", wantTargets)
@@ -506,14 +506,14 @@ func TestMixedPubsubConnectCompositionTypedSourceOutranksConnectedEnvelopeTarget
 		t.Fatalf("delivery routes = %#v, want exact typed-source local plus connect routes", routes)
 	}
 	for _, route := range routes {
-		target, ok := want[route.Recipient.ID()]
+		target, ok := want[route.Recipient.LocalID()]
 		if !ok || route.Target != target {
 			t.Fatalf("delivery route = %#v, want target %#v", route, target)
 		}
-		if local := route.Recipient.ID() == "local-observer"; local == !route.ConnectClaim.Empty() {
-			t.Fatalf("delivery route %q connect claim = empty:%t, want claim only on connected route", route.Recipient.ID(), route.ConnectClaim.Empty())
+		if local := route.Recipient.LocalID() == "local-observer"; local == !route.ConnectClaim.Empty() {
+			t.Fatalf("delivery route %q connect claim = empty:%t, want claim only on connected route", route.Recipient.LocalID(), route.ConnectClaim.Empty())
 		}
-		delete(want, route.Recipient.ID())
+		delete(want, route.Recipient.LocalID())
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing delivery routes: %#v", want)
@@ -543,7 +543,7 @@ func TestMixedPubsubConnectCompositionNoConnectMatchPreservesLocal(t *testing.T)
 	if plan.CanonicalRouteOwnerMatched() {
 		t.Fatalf("route authority = %q/%q, want no connect match", plan.AuthorityState, plan.AuthorityOwner)
 	}
-	if routes := plan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.ID() != "local-observer" || routes[0].Target.Route().EntityID != producerOwner.EntityID {
+	if routes := plan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.LocalID() != "local-observer" || routes[0].Target.Route().EntityID != producerOwner.EntityID {
 		t.Fatalf("local routes = %#v, want exact producer owner", routes)
 	}
 }
@@ -763,6 +763,8 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	bundle.Semantics.FlowInputEventPins[""] = inputs
 	bundle.Nodes = consumer.nodes
 	bundle.Agents = consumer.agents
+	bundle.FlowTree.Root.Nodes = consumer.nodes
+	bundle.FlowTree.Root.Agents = consumer.agents
 	for logicalID := range consumer.agents {
 		bundle.URIRegistry.Agents["root/"+logicalID] = runtimecontracts.ContractURIRef{
 			Kind: "agent", LocalID: logicalID, Full: "test://root/" + logicalID,
@@ -965,7 +967,7 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"ignored":"yes"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     connectRoutePlanStaticOwner().EntityID,
@@ -1016,8 +1018,9 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
-	if !containsString(live, "consumer-node") || !containsString(internal, "consumer-node") {
-		t.Fatalf("replay live=%#v internal=%#v, want consumer-node from persisted connect route", live, internal)
+	wantRecipientKey := want.Recipient.ID()
+	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) {
+		t.Fatalf("replay live=%#v internal=%#v, want exact recipient %q from persisted connect route", live, internal, wantRecipientKey)
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
@@ -1114,7 +1117,7 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 	if len(plan.SubscriptionRecipients) != 0 {
 		t.Fatalf("subscription recipients = %#v, want none for carrier-only agent", plan.SubscriptionRecipients)
 	}
-	if len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Recipient.IsAgent() || plan.DeliveryRoutes[0].Recipient.ID() != "consumer-agent" {
+	if len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Recipient.IsAgent() || plan.DeliveryRoutes[0].Recipient.LocalID() != "consumer-agent" {
 		t.Fatalf("delivery routes = %#v, want canonical connect route to agent/consumer-agent", plan.DeliveryRoutes)
 	}
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -1195,7 +1198,7 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "",
 		events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootInstanceID), time.Now().UTC())
 
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     connectRoutePlanStaticOwner().EntityID,
@@ -1252,7 +1255,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("root-dispatcher"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
 		Target:    events.MustExistingEntityTarget(rootTarget),
 	})
 	eventID := uuid.NewString()
@@ -1261,7 +1264,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 		rootTarget.FlowInstance, "", events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootTarget.FlowInstance), rootTarget.EntityID), time.Now().UTC(),
 	)
 	want := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("consumer-node"),
+		Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")),
 		Target: events.MustExistingEntityTarget(events.RouteIdentity{
 			FlowID: "consumer", FlowInstance: "consumer", EntityID: rootTarget.EntityID,
 		}),
@@ -1291,7 +1294,8 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
-	if !containsString(live, "consumer-node") || !containsString(internal, "consumer-node") || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
+	wantRecipientKey := want.Recipient.ID()
+	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want exact persisted structural owner", live, internal, replayRoutes)
 	}
 }
@@ -1311,7 +1315,7 @@ func TestEventBusPublish_RootConnectStructuralOwnerSourceDisagreementFailsBefore
 		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("unrelated-current-owner"),
 	}.Normalized()
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("root-dispatcher"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
 		Target:    events.MustExistingEntityTarget(currentTarget),
 	})
 	evt := connectRoutePlanRootProducerEvent(
@@ -1342,7 +1346,7 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 		FlowID: source.WorkflowName(), FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("root-dispatcher"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
 		Target:    events.MustExistingEntityTarget(rootTarget),
 	})
 	eventID := uuid.NewString()
@@ -1351,7 +1355,7 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 		rootTarget.FlowInstance, "", events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootTarget.FlowInstance), rootTarget.EntityID), time.Now().UTC(),
 	)
 	want := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("scout-node"),
+		Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "scout", "scout-node")),
 		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 			FlowID: "scout", FlowInstance: "scout", EntityID: runtimeflowidentity.EntityID("scout"),
 		}),
@@ -1388,7 +1392,8 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
-	if !containsString(live, "scout-node") || !containsString(internal, "scout-node") || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
+	wantRecipientKey := want.Recipient.ID()
+	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want persisted singleton receiver owner", live, internal, replayRoutes)
 	}
 }
@@ -1433,12 +1438,13 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 		t.Fatalf("materialized connect evaluation = %#v, want one exact root receiver", evaluation)
 	}
 	recipients := evaluation.Recipients()
-	if len(recipients) != 1 || recipients[0].ID() != "parent-listener" || recipients[0].Handler().FlowID() != source.WorkflowName() {
+	wantRootListener := testRootNode(t, "parent-listener")
+	if len(recipients) != 1 || recipients[0].ID() != wantRootListener.Key() || !recipients[0].Handler().Node().Equal(wantRootListener) {
 		t.Fatalf("connect recipients = %#v, want only exact root parent-listener", recipients)
 	}
 
 	local := routeTable.Resolve("worker/work.completed")
-	if len(local) != 1 || local[0].Recipient.ID() != "worker-output-observer" || local[0].handlerFlowID != "worker" {
+	if len(local) != 1 || local[0].Recipient.LocalID() != "worker-output-observer" || local[0].handlerNode.FlowID() != "worker" {
 		t.Fatalf("same-flow recipients = %#v, want only exact child observer", local)
 	}
 }
@@ -1475,7 +1481,7 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 		runID, envelope, routingSource, time.Now().UTC(),
 	)
 	want := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("root-collector"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-collector")),
 		Target: events.MustExistingEntityTarget(events.RouteIdentity{
 			FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: rootEntityID,
 		}),
@@ -1578,7 +1584,7 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 		time.Now().UTC(),
 	)
 
-	forbidden := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	forbidden := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     connectRoutePlanStaticOwner().EntityID,
@@ -1639,7 +1645,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *
 	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
-	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute()) {
+	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute(t)) {
 		t.Fatalf("preflight delivery routes = %#v, want exact selected-owner static connect route", plan.DeliveryRoutes)
 	}
 }
@@ -1652,7 +1658,7 @@ func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
 		t.Fatalf("compiled plans = %d, want 1", len(plans))
 	}
 	plan := plans[0]
-	recipient, err := runtimepinrouting.NewConnectNodeRecipient("consumer-node", "consumer", "consumer", "consumer-node")
+	recipient, err := runtimepinrouting.NewConnectNodeRecipient(testFlowNode(t, "consumer", "consumer-node"), "consumer")
 	if err != nil {
 		t.Fatalf("recipient: %v", err)
 	}
@@ -1662,7 +1668,7 @@ func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
 	}
 	evaluation := graph.EvaluateMaterializedRecipients(plan, nil, registrations)
 	recipients := evaluation.Recipients()
-	if len(recipients) != 1 || recipients[0].ID() != "consumer-node" {
+	if len(recipients) != 1 || recipients[0].ID() != recipient.ID() {
 		t.Fatalf("recipients = %#v, want exact compiled receiver", recipients)
 	}
 	if got := recipients[0].HandlerEvent(); got != "deploy.completed" {
@@ -1679,11 +1685,11 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 	}
 	plan := plans[0]
 	receiver := plan.ReceiverEndpoint().Readback()
-	accepted, err := runtimepinrouting.NewConnectNodeRecipient("consumer-node-v1", "consumer/v-1", "consumer", "consumer-node")
+	accepted, err := runtimepinrouting.NewConnectNodeRecipient(testFlowNode(t, "consumer", "consumer-node"), "consumer/v-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	unrelated, err := runtimepinrouting.NewConnectNodeRecipient("unrelated-node-v1", "validation/v-1", "validation", "unrelated-node")
+	unrelated, err := runtimepinrouting.NewConnectNodeRecipient(testFlowNode(t, "validation", "unrelated-node"), "validation/v-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1694,8 +1700,8 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 	evaluation := graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{{
 		FlowID: receiver.FlowID, FlowInstance: "consumer/v-1", EntityID: eventtest.UUID("consumer-v1"),
 	}}, registrations)
-	if got := evaluation.Recipients(); len(got) != 1 || got[0].ID() != "consumer-node-v1" {
-		t.Fatalf("recipients = %#v, want only consumer-node-v1", got)
+	if got := evaluation.Recipients(); len(got) != 1 || got[0].ID() != accepted.ID() {
+		t.Fatalf("recipients = %#v, want only consumer declaration node", got)
 	}
 	ledger, err := evaluation.Ledger()
 	if err != nil {
@@ -1708,7 +1714,7 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 	for _, candidate := range ledger.Plans()[0].Candidates() {
 		outcomes[candidate.Recipient().ID()] = candidate.Outcome()
 	}
-	if outcomes["consumer-node-v1"] != events.ConnectCandidateAccepted || outcomes["unrelated-node-v1"] != events.ConnectCandidatePathMismatch {
+	if outcomes[accepted.ID()] != events.ConnectCandidateAccepted || outcomes[unrelated.ID()] != events.ConnectCandidatePathMismatch {
 		t.Fatalf("candidate outcomes = %#v", outcomes)
 	}
 }
@@ -1777,7 +1783,7 @@ func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
 			if len(plans) != 1 || plans[0].Resolution() != events.ConnectPlanResolved {
 				t.Fatalf("compiled plan ledger = %#v, want one resolved plan", plans)
 			}
-			if routes := store.routes[event.ID()]; !deliveryRoutesContain(routes, connectRoutePlanStaticDeliveryRoute()) {
+			if routes := store.routes[event.ID()]; !deliveryRoutesContain(routes, connectRoutePlanStaticDeliveryRoute(t)) {
 				t.Fatalf("persisted routes = %#v, want canonical consumer route", routes)
 			}
 		})
@@ -1890,7 +1896,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 	}
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	want := connectRoutePlanStaticDeliveryRoute()
+	want := connectRoutePlanStaticDeliveryRoute(t)
 
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -1952,7 +1958,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := connectRoutePlanStaticDeliveryRoute()
+	want := connectRoutePlanStaticDeliveryRoute(t)
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -1984,7 +1990,7 @@ func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T)
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := connectRoutePlanStaticDeliveryRoute()
+	want := connectRoutePlanStaticDeliveryRoute(t)
 
 	plans, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{{Event: evt}})
 	if err != nil {
@@ -2117,7 +2123,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	wantBeta := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-beta"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/beta", EntityID: betaEntityID})}
+	wantBeta := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/beta", EntityID: betaEntityID})}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -2175,7 +2181,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-one"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -2212,8 +2218,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
-	if !containsString(live, "consumer-node-one") || !containsString(internal, "consumer-node-one") {
-		t.Fatalf("replay live=%#v internal=%#v, want consumer-node-one from persisted connect route", live, internal)
+	wantRecipientKey := want.Recipient.ID()
+	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) {
+		t.Fatalf("replay live=%#v internal=%#v, want exact declared consumer node from persisted connect route", live, internal)
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
@@ -2276,7 +2283,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if activation.Bookkeeping["last_source_event"] != evt.ID() {
 		t.Fatalf("activation bookkeeping = %#v, want last_source_event proof", activation.Bookkeeping)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-" + activation.Instance.InstanceID), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
@@ -2459,17 +2466,17 @@ func TestEventBusPublish_ConnectRoutePlanPreviewCreateFeedsLaterSelect(t *testin
 		t.Fatalf("persisted routes = %#v, want two distinct consumers", routes)
 	}
 	wantSubscribers := map[string]bool{
-		"account-setup-node-" + activation.Instance.InstanceID: false,
-		"account-ready-node-" + activation.Instance.InstanceID: false,
+		"account-setup-node": false,
+		"account-ready-node": false,
 	}
 	for _, route := range routes {
 		if route.Target.Route().Normalized() != wantTarget {
 			t.Fatalf("persisted route target = %#v, want %#v", route.Target, wantTarget)
 		}
-		if _, ok := wantSubscribers[route.Recipient.ID()]; !ok {
-			t.Fatalf("persisted subscriber = %q, want one of %#v", route.Recipient.ID(), wantSubscribers)
+		if _, ok := wantSubscribers[route.Recipient.LocalID()]; !ok {
+			t.Fatalf("persisted subscriber = %q, want one of %#v", route.Recipient.LocalID(), wantSubscribers)
 		}
-		wantSubscribers[route.Recipient.ID()] = true
+		wantSubscribers[route.Recipient.LocalID()] = true
 	}
 	for subscriber, found := range wantSubscribers {
 		if !found {
@@ -2528,7 +2535,7 @@ func TestCommittedReplayReusesPersistedSyntheticCarryWithoutReminting(t *testing
 	if got := activation.Bookkeeping["last_source_event"]; got != eventID {
 		t.Fatalf("last_source_event = %v, want %q", got, eventID)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "validator",
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
@@ -2641,7 +2648,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	if activation.Fields["validation_case_id"] != eventID || activation.Config["validation_case_id"] != eventID {
 		t.Fatalf("activation config/fields = %#v/%#v, want event_id-minted validation_case_id %q", activation.Config, activation.Fields, eventID)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "validator",
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
@@ -2785,7 +2792,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			if err := eb.Publish(context.Background(), evt); err != nil {
 				t.Fatalf("Publish: %v", err)
 			}
-			want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node-authoritative"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 				FlowID: "account", FlowInstance: "account/authoritative", EntityID: eventtest.UUID("ent-authoritative"),
 			}),
 			}
@@ -2884,7 +2891,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node-one"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")})}
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")})}
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -2928,7 +2935,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	if err := restarted.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift) after restart: %v", err)
 	}
-	replayTarget := subscribeInternalDeliveriesForTest(t, restarted, "account-node-one")
+	replayTarget := subscribeInternalDeliveriesForTest(t, restarted, want.Recipient.ID())
 	hostileReplacement := subscribeInternalDeliveriesForTest(t, restarted, "account-node-drift")
 	store.flowInstanceDescriptorCalls = 0
 	if _, err := restarted.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
@@ -3085,7 +3092,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	existingID := uuid.NewString()
 	existing := connectRoutePlanStaticProducerEvent(existingID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	existingWant := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node-one"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")})}
+	existingWant := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: eventtest.UUID("ent-1")})}
 
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), existing)
 	if err != nil {
@@ -3136,7 +3143,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if activation.Config["account_id"] != "acct-2" || activation.Fields["account_id"] != "acct-2" {
 		t.Fatalf("activation config/fields = %#v/%#v, want carried account_id acct-2", activation.Config, activation.Fields)
 	}
-	createdWant := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node-" + activation.Instance.InstanceID), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+	createdWant := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "account",
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
@@ -3161,7 +3168,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		t.Fatalf("retry persisted routes = %#v, want existing reused route %#v", store.routes[retryID], reusedWant)
 	}
 
-	replayTarget := subscribeInternalDeliveriesForTest(t, eb, "account-node-"+activation.Instance.InstanceID)
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, createdWant.Recipient.ID())
 	store.flowInstances = []ActiveFlowInstanceDescriptor{{
 		InstanceID:    "drift",
 		EntityID:      eventtest.UUID("ent-drift"),
@@ -3324,7 +3331,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	if len(descriptors) != 1 {
 		t.Fatalf("descriptors = %#v, want one same-key descriptor", descriptors)
 	}
-	wantRecipient := events.MustNodeDeliveryRecipient("account-node-" + descriptors[0].InstanceID)
+	wantRecipient := events.MustNodeDeliveryRecipient(testFlowNode(t, "account", "account-node"))
 	wantTarget := events.RouteIdentity{
 		FlowID:       "account",
 		FlowInstance: descriptors[0].FlowInstance,
@@ -3604,7 +3611,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 		t.Fatalf("initial activations = %d, want 1", len(store.activations))
 	}
 	activation := store.activations[0]
-	replayTarget := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-"+activation.Instance.InstanceID)
+	replayTarget := subscribeInternalDeliveriesForTest(t, eb, testFlowNode(t, "consumer", "consumer-node").Key())
 	store.flowInstanceDescriptorCalls = 0
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -3655,7 +3662,7 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 	if activation.Config["vertical_id"] != "v-1" || activation.Fields["vertical_id"] != "v-1" {
 		t.Fatalf("renamed activation config/fields = %#v/%#v, want receiver vertical_id from adapter source_vertical_id", activation.Config, activation.Fields)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-" + activation.Instance.InstanceID), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,
@@ -3719,7 +3726,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			materializerCalled = true
 			return []DeliveryRouteBlueprint{{
-				Recipient: events.MustNodeDeliveryRecipient("bogus-node"),
+				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")),
 				Target:    events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus/one", EntityID: "bogus"},
 			}}, nil
 		},
@@ -3769,13 +3776,13 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
-	consumerOne := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-one")
+	consumerOne := subscribeInternalDeliveriesForTest(t, eb, testFlowNode(t, "consumer", "consumer-node").Key(), events.EventType("producer/deploy.done"))
 	consumerTwo := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-two")
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 
-	wantOne := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-one"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
+	wantOne := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -3843,7 +3850,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"source_vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node-one"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: eventtest.UUID("ent-1")})}
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {
@@ -3877,8 +3884,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	if err != nil {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
-	if !containsString(live, "consumer-node-one") || !containsString(internal, "consumer-node-one") {
-		t.Fatalf("replay live=%#v internal=%#v, want consumer-node-one from persisted connect route", live, internal)
+	wantRecipientKey := want.Recipient.ID()
+	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) {
+		t.Fatalf("replay live=%#v internal=%#v, want exact declared consumer node from persisted connect route", live, internal)
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
@@ -4089,7 +4097,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 	if !routePlan.TargetFailure.Empty() {
 		t.Fatalf("target failure = %q, want none for typed no-delivery settlement", routePlan.TargetFailure)
 	}
-	if routes := routePlan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.ID() != "producer-node" {
+	if routes := routePlan.DeliveryRoutes(); len(routes) != 1 || routes[0].Recipient.LocalID() != "producer-node" {
 		t.Fatalf("delivery routes = %#v, want independent local producer-node route", routes)
 	}
 	if routePlan.AllowsLowerPrecedenceRouteProduction() {
@@ -4103,14 +4111,14 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 	if plan.TargetFailure != "" {
 		t.Fatalf("target failure = %q, want none for typed no-delivery settlement", plan.TargetFailure)
 	}
-	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "producer-node" {
+	if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.LocalID() != "producer-node" {
 		t.Fatalf("preflight delivery routes = %#v, want independent local producer-node route", plan.DeliveryRoutes)
 	}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Recipient.ID() != "producer-node" {
+	if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Recipient.LocalID() != "producer-node" {
 		t.Fatalf("persisted delivery routes = %#v, want independent local producer-node route", routes)
 	}
 	settlement := store.settlements[eventID]
@@ -4205,7 +4213,7 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			materializerCalled = true
 			return []DeliveryRouteBlueprint{{
-				Recipient: events.MustNodeDeliveryRecipient("bogus-node"),
+				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")),
 				Target:    events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
 			}}, nil
 		},
@@ -4278,10 +4286,10 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 
 	routePlan := newRoutePlan(evt)
 	routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, runtimepinrouting.FailureTargetNotSubscribed)
-	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient("bogus-node"), PersistAsDelivery: true,
+	routePlan.AddLiveRecipients(RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), PersistAsDelivery: true,
 		Producer: routeIntentProducerRecipientMaterializer,
 	})
-	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("bogus-node"), TargetBlueprint: events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
+	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "bogus-node")), TargetBlueprint: events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus", EntityID: "bogus"},
 		Producer: routeIntentProducerRecipientMaterializer,
 		Persist:  true,
 	})
@@ -4601,7 +4609,7 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 
 	routePlan := newRoutePlan(evt)
 	routePlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
-	staticRoute := connectRoutePlanStaticDeliveryRoute()
+	staticRoute := connectRoutePlanStaticDeliveryRoute(t)
 	routePlan.AddDeliveryIntents(RoutePlanDeliveryIntent{Recipient: staticRoute.Recipient, TargetBlueprint: staticRoute.Target.Route(), TargetOwnership: staticRoute.Target,
 		Producer: routeIntentProducerConnectRoutePlan,
 		Persist:  true,
@@ -4611,7 +4619,7 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	if got.AuthorityState != RoutePlanAuthorityCanonicalMatched || got.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		t.Fatalf("normalized route plan authority = %q/%q, want matched connect route plan", got.AuthorityState, got.AuthorityOwner)
 	}
-	if !deliveryRoutesContain(got.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute()) {
+	if !deliveryRoutesContain(got.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute(t)) {
 		t.Fatalf("normalized route plan delivery routes = %#v, want static connect route", got.DeliveryRoutes())
 	}
 }
@@ -4819,8 +4827,9 @@ func connectRoutePlanSingletonProducerRootReceiverSource(t testing.TB) semanticv
 	return loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopySingletonOutputRootConnect(t))
 }
 
-func connectRoutePlanStaticDeliveryRoute() events.DeliveryRoute {
-	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+func connectRoutePlanStaticDeliveryRoute(t testing.TB) events.DeliveryRoute {
+	t.Helper()
+	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     connectRoutePlanStaticOwner().EntityID,
@@ -4959,7 +4968,7 @@ func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan *LocalDelivery, c
 
 func subscriberListContains(in []Subscriber, id, path string) bool {
 	for _, subscriber := range in {
-		if subscriber.Recipient.ID() == id && subscriber.Path == path {
+		if subscriber.Recipient.LocalID() == id && subscriber.Path == path {
 			return true
 		}
 	}
@@ -4968,7 +4977,7 @@ func subscriberListContains(in []Subscriber, id, path string) bool {
 
 func subscriberListContainsRouteSource(in []Subscriber, id, path, routeSource string) bool {
 	for _, subscriber := range in {
-		if subscriber.Recipient.ID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == routeSource {
+		if subscriber.Recipient.LocalID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == routeSource {
 			return true
 		}
 	}

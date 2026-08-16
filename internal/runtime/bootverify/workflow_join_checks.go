@@ -24,6 +24,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 	for _, record := range wave1ScopedNodeRecords(c.source) {
 		nodeID := strings.TrimSpace(record.LogicalID)
 		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeRef, nodeErr := record.Identity()
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
@@ -33,7 +34,11 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			if err := runtimecontracts.ValidateJoinHandlerIsolation(handler); err != nil {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, err.Error()))
 			}
-			ref, refErr := timeridentity.NewJoinRef(flowID, nodeID, eventType, handler.Join.Stage, handler.Join.EffectiveID(), "")
+			if nodeErr != nil {
+				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has incomplete executable node identity: "+nodeErr.Error()))
+				continue
+			}
+			ref, refErr := timeridentity.NewJoinRef(nodeRef, eventType, handler.Join.Stage, handler.Join.EffectiveID(), "")
 			if refErr != nil {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has incomplete declaration identity: "+refErr.Error()))
 				continue
@@ -52,7 +57,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			if spec.Stage == "" || !containsString(c.source.FlowStates(flowID), spec.Stage) {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("%s references unknown stage %q", prefix, spec.Stage)))
 			}
-			identityKey := strings.Join([]string{flowID, spec.Stage, spec.EffectiveID()}, "|")
+			identityKey := strings.Join([]string{nodeRef.Key(), spec.Stage, spec.EffectiveID()}, "|")
 			location := nodeID + ":" + eventType
 			if prior, duplicate := seenIDs[identityKey]; duplicate {
 				findings = append(findings, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("%s has duplicate effective identity; already declared at %s (add explicit unique id values)", prefix, prior)))

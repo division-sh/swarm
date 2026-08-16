@@ -63,12 +63,8 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	if trigger == "" {
 		return contractHandlerExecutionResult{}, nil
 	}
-	owners := source.RuntimeEventOwners(trigger)
-	if len(owners) == 0 && !isJoinLifecycleEvent(events.EventType(trigger)) {
-		return contractHandlerExecutionResult{}, nil
-	}
 	var (
-		nodeID          string
+		node            identity.ExecutableNode
 		handler         runtimecontracts.SystemNodeEventHandler
 		handlerEventKey string
 		handlerFlowID   string
@@ -80,7 +76,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 			return contractHandlerExecutionResult{}, err
 		}
 		if ok {
-			nodeID = resolution.Ref.NodeID()
+			node = resolution.Ref.Node()
 			handler = resolution.Handler
 			handlerEventKey = resolution.Ref.HandlerEvent()
 			handlerFlowID = resolution.Ref.FlowID()
@@ -90,10 +86,14 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 			matched = true
 		}
 	} else {
-		for _, owner := range owners {
-			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, owner, evt)
+		for _, record := range source.ExecutableNodeRecords() {
+			candidate, identityErr := record.Identity()
+			if identityErr != nil {
+				return contractHandlerExecutionResult{}, identityErr
+			}
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, candidate, evt)
 			if resolved.Failure != "" {
-				return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(owner), resolved.Failure)
+				return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", candidate.Key(), resolved.Failure)
 			}
 			if !resolved.Matched {
 				continue
@@ -101,7 +101,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 			if matched {
 				return contractHandlerExecutionResult{}, nil
 			}
-			nodeID = strings.TrimSpace(owner)
+			node = candidate
 			handler = resolved.Handler
 			handlerEventKey = resolved.HandlerEventKey
 			handlerFlowID = resolved.FlowID
@@ -115,7 +115,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		triggerCtx.HandlerEventKey = handlerEventKey
 	}
 	ctx = withPipelineFlowScope(ctx, handlerFlowID)
-	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false, true)
+	return pc.executeNodeContractHandler(ctx, node, handler, triggerCtx, false, true)
 }
 
 func isJoinLifecycleEvent(eventType events.EventType) bool {
@@ -125,19 +125,19 @@ func isJoinLifecycleEvent(eventType events.EventType) bool {
 
 func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx context.Context,
-	nodeID string,
+	node identity.ExecutableNode,
 	handler runtimecontracts.SystemNodeEventHandler,
 	triggerCtx workflowTriggerContext,
 	preview bool,
 	deferCommittedDispatchOption ...bool,
 ) (contractHandlerExecutionResult, error) {
 	deferCommittedDispatch := len(deferCommittedDispatchOption) > 0 && deferCommittedDispatchOption[0]
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
+	if !node.Valid() {
 		return contractHandlerExecutionResult{}, nil
 	}
 	source := pc.SemanticSource()
-	flowID := workflowNodeFlowID(source, nodeID)
+	handlerFact := MustDeliveryTargetHandler(node)
+	flowID := handlerFact.ExecutionFlowID(source)
 	if handler.Join != nil {
 		if executionFlowID := strings.TrimSpace(pipelineFlowScope(ctx)); executionFlowID != "" {
 			flowID = executionFlowID
@@ -158,7 +158,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		}
 	}
 	if !exactDelivery && handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
-		selected, err := pc.selectHandlerEntityForFlow(ctx, flowID, nodeID, handler, triggerCtx.Event)
+		selected, err := pc.selectHandlerEntityForFlow(ctx, flowID, node.Key(), handler, triggerCtx.Event)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
@@ -167,7 +167,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		triggerCtx.State = selected.State
 	}
 	if !exactDelivery && handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
-		selected, err := pc.selectOrCreateHandlerEntityForFlow(ctx, flowID, nodeID, handler, triggerCtx.Event)
+		selected, err := pc.selectOrCreateHandlerEntityForFlow(ctx, flowID, node.Key(), handler, triggerCtx.Event)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
@@ -213,9 +213,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
 		}
-		plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
+		plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 		return contractHandlerExecutionResult{
-			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
+			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, node, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 			Plan:            plan,
 			Outcome:         outcome,
 			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
@@ -225,14 +225,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
-	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
+	ctx = runtimecorrelation.WithHandlerID(ctx, node.Key()+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
 	initialFieldValues := map[string]any(nil)
 	if handler.CreateEntity {
 		initialFieldValues = workflowEntitySchemaInitialValues(source, flowID)
 	}
 	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
 	if handlerEventKey == "" {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, nodeID, triggerCtx.Event)
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, node, triggerCtx.Event)
 	}
 	deps := coordinatorEngineDependencies(pc)
 	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
@@ -260,18 +260,17 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	producerSource, err := workflowNodeProducerSource(ctx, source, nodeID, flowID, entityID, triggerCtx.Event.RoutingSource())
+	producerSource, err := workflowNodeProducerSource(ctx, source, node, flowID, entityID, triggerCtx.Event.RoutingSource())
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
-	joinDeclaration, err := workflowJoinDeclarationForExecution(source, triggerCtx.Event, flowID, nodeID, handlerEventKey, handler)
+	joinDeclaration, err := workflowJoinDeclarationForExecution(source, triggerCtx.Event, node, handlerEventKey, handler)
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:               identity.NormalizeEntityID(entityID),
-		NodeID:                 identity.NormalizeNodeID(nodeID),
-		FlowID:                 identity.NormalizeFlowID(flowID),
+		Node:                   node,
 		Route:                  stateRoute,
 		Event:                  triggerCtx.Event,
 		ProducerSource:         producerSource,
@@ -285,8 +284,8 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		DeferCommittedDispatch: deferCommittedDispatch,
 	})
 	if !preview {
-		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
-		logLoopExecution(ctx, pc.bus, nodeID, triggerCtx.Event, result.LoopTrace)
+		logComputeModuleReplayEvidence(ctx, pc.bus, node.Key(), triggerCtx.Event, result.ComputeModuleTraces)
+		logLoopExecution(ctx, pc.bus, node.Key(), triggerCtx.Event, result.LoopTrace)
 	}
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
@@ -315,14 +314,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		emissions.appendIntents(activityEmissions)
 	}
 	if !preview {
-		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result), emissionPlanWhen(deferCommittedDispatch, emissions))
+		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, node.Key(), handlerOutcomeFromExecutionResult(result), emissionPlanWhen(deferCommittedDispatch, emissions))
 	}
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{Handled: handled, Emissions: emissions.immutableEvents()}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
-	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
+	plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 	plan.AdvancesTo = firstNonEmptyString(outcome.AdvancesTo, plan.AdvancesTo)
 	if len(outcome.Emits) > 0 {
 		plan.EmitEvents = append([]string{}, outcome.Emits...)
@@ -335,7 +334,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	plan.DataAccumulation = outcome.DataAccumulation
 	return contractHandlerExecutionResult{
-		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
+		Transition:                workflowTransitionFromHandlerOutcome(triggerCtx.State, node, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 		Plan:                      plan,
 		Outcome:                   outcome,
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
@@ -636,17 +635,17 @@ func stageSetContains(stages []string, current string) bool {
 	return false
 }
 
-func workflowTransitionFromHandlerOutcome(state WorkflowState, nodeID, eventType string, outcome *handlerExecutionOutcome) WorkflowTransition {
+func workflowTransitionFromHandlerOutcome(state WorkflowState, node identity.ExecutableNode, eventType string, outcome *handlerExecutionOutcome) WorkflowTransition {
 	target := strings.TrimSpace(string(state.Stage))
 	if outcome != nil && strings.TrimSpace(outcome.AdvancesTo) != "" {
 		target = strings.TrimSpace(outcome.AdvancesTo)
 	}
 	transition := WorkflowTransition{
-		Name:    strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(eventType),
+		Name:    node.Key() + ":" + strings.TrimSpace(eventType),
 		From:    []WorkflowStateID{NormalizeWorkflowStateID(string(state.Stage))},
 		To:      NormalizeWorkflowStateID(target),
 		Trigger: strings.TrimSpace(eventType),
-		Node:    strings.TrimSpace(nodeID),
+		Node:    node,
 	}
 	if outcome != nil {
 		transition.DataAccumulation = outcome.DataAccumulation

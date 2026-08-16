@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -175,8 +176,8 @@ func (s *pipelineTestDeliveryOwner) authorityForRun(ctx context.Context, tx *sql
 	return runtimedelivery.NewNormalExecutionAuthority(source, "pipeline-test-normal-runtime", 1)
 }
 
-func (s *pipelineTestDeliveryOwner) commitNode(ctx context.Context, event events.Event, nodeID string, target events.RouteIdentity) error {
-	return s.commitInitial(ctx, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: events.MustExistingEntityTarget(target.Normalized())})
+func (s *pipelineTestDeliveryOwner) commitNode(ctx context.Context, event events.Event, node runtimeidentity.ExecutableNode, target events.RouteIdentity) error {
+	return s.commitInitial(ctx, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target.Normalized())})
 }
 
 func (s *pipelineTestDeliveryOwner) loadEvent(ctx context.Context, eventID string) (events.Event, error) {
@@ -190,15 +191,15 @@ func (s *pipelineTestDeliveryOwner) loadEvent(ctx context.Context, eventID strin
 func seedPipelineTestNodeDelivery(t interface {
 	Helper()
 	Fatalf(string, ...any)
-}, ctx context.Context, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) *pipelineTestDeliveryOwner {
+}, ctx context.Context, db *sql.DB, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) *pipelineTestDeliveryOwner {
 	t.Helper()
 	owner := newPipelineTestDeliveryOwnerForDB(t, db)
 	event, err := owner.loadEvent(ctx, eventID)
 	if err != nil {
 		t.Fatalf("load pipeline test delivery event %s: %v", eventID, err)
 	}
-	if err := owner.commitNode(ctx, event, nodeID, target); err != nil {
-		t.Fatalf("commit pipeline test delivery %s/%s: %v", eventID, nodeID, err)
+	if err := owner.commitNode(ctx, event, node, target); err != nil {
+		t.Fatalf("commit pipeline test delivery %s/%s: %v", eventID, node.Key(), err)
 	}
 	return owner
 }

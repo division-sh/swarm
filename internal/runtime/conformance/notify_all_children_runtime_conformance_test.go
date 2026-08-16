@@ -899,14 +899,15 @@ func assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t testing.TB,
 		  AND e.produced_by = ?
 		  AND e.flow_instance = ?
 		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = 'account-node'
+		  AND d.subscriber_id = ?
 		  AND d.status = 'delivered'
 		  AND e.route_settlement IS NOT NULL`
-	args := []any{runID, agentID, flowInstance}
+	args := []any{runID, agentID, flowInstance, conformanceNode(t, "account", "account-node").Key()}
 	if backend == "postgres" {
 		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
 		query = strings.Replace(query, "e.produced_by = ?", "e.produced_by = $2", 1)
 		query = strings.Replace(query, "e.flow_instance = ?", "e.flow_instance = $3", 1)
+		query = strings.Replace(query, "d.subscriber_id = ?", "d.subscriber_id = $4", 1)
 	}
 	var count int
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
@@ -1126,7 +1127,7 @@ func assertNotifyAllChildrenExactRoutes(
 		}
 		switch {
 		case route.Recipient.IsNode():
-			nodeFound = route.Recipient.ID() == "account-node"
+			nodeFound = route.Recipient.ID() == conformanceNode(t, "account", "account-node").Key()
 		case route.Recipient.IsAgent():
 			identity := route.AgentIdentity.Normalize()
 			if err := identity.Validate(); err != nil {

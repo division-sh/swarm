@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -67,7 +68,7 @@ type WorkflowTransition struct {
 	To                WorkflowStateID                           `json:"to"`
 	Reason            string                                    `json:"reason,omitempty"`
 	Trigger           string                                    `json:"trigger,omitempty"`
-	Node              string                                    `json:"node,omitempty"`
+	Node              runtimeidentity.ExecutableNode            `json:"node,omitempty"`
 	GuardIDs          []string                                  `json:"guard_ids,omitempty"`
 	AllowTerminalExit bool                                      `json:"allow_terminal_exit,omitempty"`
 	Guard             WorkflowGuard                             `json:"-"`
@@ -365,7 +366,7 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 			To:                WorkflowStateID(to),
 			Reason:            strings.TrimSpace(transition.Trigger),
 			Trigger:           strings.TrimSpace(transition.Trigger),
-			Node:              strings.TrimSpace(transition.Node),
+			Node:              transition.ExecutableNode,
 			GuardIDs:          guardIDs,
 			AllowTerminalExit: transition.AllowTerminalExit,
 			Guard:             alwaysWorkflowGuard,

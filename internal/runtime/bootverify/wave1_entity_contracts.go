@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -294,6 +295,21 @@ func defaultFlowLabel(flowID string) string {
 		return "root"
 	}
 	return flowID
+}
+
+func executableNodeDiagnostic(node runtimeidentity.ExecutableNode) string {
+	if !node.Valid() {
+		return "node <invalid>"
+	}
+	parts := make([]string, 0, 3)
+	if node.PackageKey() != runtimeidentity.RootPackageKey {
+		parts = append(parts, "package "+node.PackageKey())
+	}
+	if node.FlowID() != "" {
+		parts = append(parts, "flow "+node.FlowID())
+	}
+	parts = append(parts, "node "+node.NodeID())
+	return strings.Join(parts, " ")
 }
 
 func wave1EntityEnvelopeField(field string) bool {

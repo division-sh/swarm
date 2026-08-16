@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -75,7 +76,7 @@ func TestGeneratedActivityResultNamesCoverHandlerAndRuleSites(t *testing.T) {
 		Semantics: runtimecontracts.WorkflowSemanticView{NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"activity-node": handlers}},
 	}
 	names := generatedActivityResultEventNamesLocal(semanticview.Wrap(bundle))
-	sites := runtimecontracts.ActivitySitesForNode("", "activity-node", handlers)
+	sites := runtimecontracts.ActivitySitesForNode(identitytest.RootNode(t, "activity-node"), handlers)
 	if len(sites) != 2 {
 		t.Fatalf("activity sites = %#v", sites)
 	}

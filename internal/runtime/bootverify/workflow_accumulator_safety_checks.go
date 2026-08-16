@@ -44,18 +44,18 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 
 	seenHandlers := map[string]struct{}{}
 	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).Consumers() {
-		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.NodeID) == "" || strings.TrimSpace(endpoint.HandlerEvent) == "" {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || !endpoint.Node.Valid() || strings.TrimSpace(endpoint.HandlerEvent) == "" {
 			continue
 		}
-		nodeID := strings.TrimSpace(endpoint.NodeID)
+		nodeID := endpoint.Node.Key()
 		flowID := strings.TrimSpace(endpoint.FlowID)
 		eventType := strings.TrimSpace(endpoint.HandlerEvent)
-		key := flowID + "\x00" + nodeID + "\x00" + eventType
+		key := endpoint.Node.Key() + "\x00" + eventType
 		if _, exists := seenHandlers[key]; exists {
 			continue
 		}
 		seenHandlers[key] = struct{}{}
-		handler, ok := c.source.NodeEventHandler(nodeID, eventType)
+		handler, ok := c.source.ExecutableNodeEventHandler(endpoint.Node, eventType)
 		if !ok || handler.Accumulate == nil {
 			continue
 		}

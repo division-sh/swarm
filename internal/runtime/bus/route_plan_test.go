@@ -12,7 +12,7 @@ import (
 )
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
-	routes := []plannedDeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+	routes := []plannedDeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "consumer-node")), Target: events.RouteIdentity{
 		FlowInstance: "consumer/inst-1",
 		EntityID:     "ent-consumer",
 	},
@@ -72,7 +72,7 @@ func TestRoutePlanPendingLifecycleAuthorityPersistsWithoutLiveDispatch(t *testin
 		EntityID:     "entity-a",
 	}
 	targetOwner := events.MustExistingEntityTarget(targetRoute)
-	nodeRoute := RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("node-a"), TargetBlueprint: targetRoute, TargetOwnership: targetOwner,
+	nodeRoute := RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "node-a")), TargetBlueprint: targetRoute, TargetOwnership: targetOwner,
 		Persist: true,
 	}
 	pendingAgentRoute := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
@@ -111,7 +111,7 @@ func TestRoutePlanRejectsMalformedPendingLifecycleAuthority(t *testing.T) {
 		},
 		{
 			name: "not agent",
-			intent: RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("node-a"), Persist: true,
+			intent: RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "node-a")), Persist: true,
 				PendingAgentLifecycle: true,
 			},
 			want: "must identify one agent",

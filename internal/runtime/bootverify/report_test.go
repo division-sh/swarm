@@ -15,6 +15,8 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -1985,14 +1987,12 @@ func TestRun_MapsConditionPolicyToNamedWarning(t *testing.T) {
 
 func TestRun_AllowsNestedConditionPolicyReferencePresentInResolvedPolicy(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
+	node, eventType, handler, ok := firstBundleHandler(bundle)
 	if !ok {
 		t.Fatal("expected at least one handler")
 	}
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "policy.retry.max_attempts > 0"}
-	node := bundle.Nodes[nodeID]
-	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	writeBundleHandler(t, bundle, node, eventType, handler)
 	bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 		"retry": {
 			Value: map[string]any{
@@ -2000,6 +2000,7 @@ func TestRun_AllowsNestedConditionPolicyReferencePresentInResolvedPolicy(t *test
 			},
 		},
 	}}
+	writeBundlePolicyValue(t, bundle, node, "retry", bundle.Policy.Values["retry"])
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -2210,7 +2211,7 @@ func TestRun_MapsConditionPayloadMismatchToNamedError(t *testing.T) {
 }
 
 func TestRun_MapsUnknownSetsGateToGateSchemaValidationError(t *testing.T) {
-	bundle := gateSchemaValidationBundle(runtimecontracts.NodeGateStateSchema{
+	bundle := gateSchemaValidationBundle(t, runtimecontracts.NodeGateStateSchema{
 		Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
 	}, runtimecontracts.SystemNodeEventHandler{
 		SetsGate: &runtimecontracts.GateSpec{Name: "rejected", Value: true},
@@ -2234,7 +2235,7 @@ func TestRun_MapsMissingOrEmptyGateStateToGateSchemaValidationError(t *testing.T
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := gateSchemaValidationBundle(tc.gateState, runtimecontracts.SystemNodeEventHandler{
+			bundle := gateSchemaValidationBundle(t, tc.gateState, runtimecontracts.SystemNodeEventHandler{
 				SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
 			})
 
@@ -2265,7 +2266,7 @@ func TestRun_AllowsDeclaredSetsGateFromScalarAndStructuredForms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := decodeGateSchemaHandler(t, tc.yaml)
-			bundle := gateSchemaValidationBundle(runtimecontracts.NodeGateStateSchema{
+			bundle := gateSchemaValidationBundle(t, runtimecontracts.NodeGateStateSchema{
 				Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
 			}, handler)
 
@@ -2290,7 +2291,7 @@ func TestRun_ValidatesHandlerSetsGateWhenRulesExist(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := gateSchemaValidationBundle(runtimecontracts.NodeGateStateSchema{
+			bundle := gateSchemaValidationBundle(t, runtimecontracts.NodeGateStateSchema{
 				Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
 			}, runtimecontracts.SystemNodeEventHandler{
 				SetsGate: &runtimecontracts.GateSpec{Name: tc.setsGate, Value: true},
@@ -2451,19 +2452,18 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 
 func TestRun_AllowsNestedConditionPayloadReferenceWithinEventPayloadSchema(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
+	node, eventType, handler, ok := firstBundleHandler(bundle)
 	if !ok {
 		t.Fatal("expected at least one handler")
 	}
 	handler.Guard = &runtimecontracts.GuardSpec{Check: `payload.task.id != ""`}
-	node := bundle.Nodes[nodeID]
-	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	writeBundleHandler(t, bundle, node, eventType, handler)
 	entry := bundle.Events[eventType]
 	entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{
 		"task": {Type: "object"},
 	}
 	bundle.Events[eventType] = entry
+	writeBundleEventEntry(t, bundle, node, eventType, entry)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -2853,15 +2853,13 @@ func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testi
 
 func TestRun_MapsDialectDualToNamedError(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
+	node, eventType, handler, ok := firstBundleHandler(bundle)
 	if !ok {
 		t.Fatal("expected at least one handler")
 	}
 	handler.OnComplete = []runtimecontracts.HandlerRuleEntry{{Condition: "true"}}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{Condition: "true"}}
-	node := bundle.Nodes[nodeID]
-	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	writeBundleHandler(t, bundle, node, eventType, handler)
 	source := semanticview.Wrap(bundle)
 
 	report := Run(context.Background(), source, Options{})
@@ -3090,14 +3088,12 @@ entity-agent:
 
 func TestRun_MapsHandlerFieldComplianceToNamedError(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	nodeID, eventType, handler, ok := firstBundleHandler(bundle)
+	node, eventType, handler, ok := firstBundleHandler(bundle)
 	if !ok {
 		t.Fatal("expected at least one handler")
 	}
-	node := bundle.Nodes[nodeID]
 	handler.Action = runtimecontracts.ActionSpec{ID: "missing.handler.action"}
-	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	writeBundleHandler(t, bundle, node, eventType, handler)
 	source := semanticview.Wrap(bundle)
 
 	report := Run(context.Background(), source, Options{})
@@ -3137,16 +3133,7 @@ func TestRun_MapsSelfEmitToEventCycleDetectionForFlowLocalHandlers(t *testing.T)
 }
 
 func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
-	bundle := loadTier8FixtureBundle(t, "test-boot-self-emit")
-	bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-		"node-a": {
-			"task.a": {Emit: runtimecontracts.EmitSpec{Event: "task.b"}},
-		},
-		"node-b": {
-			"task.b": {Emit: runtimecontracts.EmitSpec{Event: "task.a"}},
-		},
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+	bundle := &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"node-a": {
 			ID:           "node-a",
 			SubscribesTo: []string{"task.a"},
@@ -3163,11 +3150,10 @@ func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 				"task.b": {Emit: runtimecontracts.EmitSpec{Event: "task.a"}},
 			},
 		},
-	}
-	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+	}, Events: map[string]runtimecontracts.EventCatalogEntry{
 		"task.a": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}}}},
 		"task.b": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}}}},
-	}
+	}}
 	source := semanticview.Wrap(bundle)
 
 	report := Run(context.Background(), source, Options{})
@@ -4359,16 +4345,29 @@ func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedField
 }
 
 func setGuardEscalationForBootverifyTest(bundle *runtimecontracts.WorkflowContractBundle, emit runtimecontracts.EmitSpec) {
-	node := bundle.Nodes["test-node"]
-	handler := node.EventHandlers["check.requested"]
+	var owner runtimeidentity.ExecutableNode
+	var handler runtimecontracts.SystemNodeEventHandler
+	for _, record := range bundle.ScopedNodeRecords() {
+		if record.LogicalID != "test-node" {
+			continue
+		}
+		var err error
+		owner, err = record.Identity()
+		if err != nil {
+			panic(err)
+		}
+		handler = record.Entry.EventHandlers["check.requested"]
+		break
+	}
+	if !owner.Valid() || handler.Guard == nil {
+		panic("canonical test-node guard declaration not found")
+	}
 	handler.Guard.OnFail = "escalate:" + emit.Event
 	handler.Guard.OnFailSpec = runtimecontracts.GuardFailureSpec{
 		Action:     runtimecontracts.GuardFailureActionEscalate,
 		Escalation: emit,
 	}
-	node.EventHandlers["check.requested"] = handler
-	bundle.Nodes["test-node"] = node
-	bundle.Semantics.NodeHandlers["test-node"]["check.requested"] = handler
+	writeBundleHandler(nil, bundle, owner, "check.requested", handler)
 }
 
 func TestRun_ReportsInputPinWiringHardInvalidity(t *testing.T) {
@@ -4606,12 +4605,10 @@ func TestRun_DoesNotErrorForRootAgentEmitInputProducerPath(t *testing.T) {
 
 func TestRun_DoesNotErrorForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-	node := bundle.Nodes["dispatcher"]
-	node.EventHandlers["task.requested"] = runtimecontracts.SystemNodeEventHandler{
+	owner := bundleExecutableNodeByLocalID(t, bundle, "dispatcher")
+	writeBundleHandler(t, bundle, owner, "task.requested", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "child/task.feedback"},
-	}
-	bundle.Nodes["dispatcher"] = node
-	bundle.Semantics.NodeHandlers["dispatcher"]["task.requested"] = node.EventHandlers["task.requested"]
+	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4642,17 +4639,15 @@ func TestRun_DoesNotErrorForSameFlowTimerInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	node := bundle.Nodes["worker"]
 	node.Timers = append(node.Timers, runtimecontracts.WorkflowTimerContract{
-		ID:     "feedback-timeout",
-		Event:  "task.feedback",
-		FlowID: "child",
-		NodeID: "worker",
+		ID:    "feedback-timeout",
+		Event: "task.feedback",
+		Node:  identitytest.FlowNode(t, "child", "worker"),
 	})
 	bundle.Nodes["worker"] = node
 	bundle.Semantics.Timers = append(bundle.Semantics.Timers, runtimecontracts.WorkflowTimerContract{
-		ID:     "feedback-timeout",
-		Event:  "task.feedback",
-		FlowID: "child",
-		NodeID: "worker",
+		ID:    "feedback-timeout",
+		Event: "task.feedback",
+		Node:  identitytest.FlowNode(t, "child", "worker"),
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -5020,7 +5015,7 @@ func TestNestedQueryRowsDoNotCreateExecutableWriters(t *testing.T) {
 		t.Fatalf("nested query row created executable writer: %#v", writers)
 	}
 
-	targets := wave1HandlerWriteTargets("flow", "node", "event", handler)
+	targets := wave1HandlerWriteTargets(identitytest.FlowNode(t, "flow", "node"), "event", handler)
 	if len(targets) != 1 || targets[0].Target != "entity.executed_rows" || targets[0].Kind != "handler.query" {
 		t.Fatalf("query write targets = %#v, want only top-level executed writer", targets)
 	}
@@ -6588,10 +6583,8 @@ func TestRun_DoesNotRequireRetiredStaticAcquisitionForBackpropInputPinHandlers(t
 
 func TestRun_RejectsQualifiedNodeBeforeItCanBecomeEquivalentRouteOwnership(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-	rootNode := bundle.Nodes["dispatcher"]
-	rootNode.EventHandlers["child/task.feedback"] = runtimecontracts.SystemNodeEventHandler{}
-	bundle.Nodes["dispatcher"] = rootNode
-	bundle.Semantics.NodeHandlers["dispatcher"]["child/task.feedback"] = runtimecontracts.SystemNodeEventHandler{}
+	owner := bundleExecutableNodeByLocalID(t, bundle, "dispatcher")
+	writeBundleHandler(t, bundle, owner, "child/task.feedback", runtimecontracts.SystemNodeEventHandler{})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -6605,7 +6598,12 @@ func TestRun_RejectsQualifiedNodeBeforeItCanBecomeEquivalentRouteOwnership(t *te
 
 func TestRun_ReportsExactDuplicateSingleNodePerEventOwnership(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
-	handler := bundle.Nodes["complete-task"].EventHandlers["task.requested"]
+	owner := bundleExecutableNodeByLocalID(t, bundle, "complete-task")
+	record, ok := bundle.ExecutableNode(owner)
+	if !ok {
+		t.Fatalf("canonical node %s missing", owner.Key())
+	}
+	handler := record.Entry.EventHandlers["task.requested"]
 	addProjectHandler(t, bundle, "shadow-complete-task", "task.requested", handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -6639,11 +6637,11 @@ func TestRun_ReportsMissingTransitionTriggerEvent(t *testing.T) {
 
 func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	bundle.Semantics.Transitions[0].Node = "projector"
+	bundle.Semantics.Transitions[0].ExecutableNode = identitytest.RootNode(t, "projector")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is projector") {
+	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is node projector") {
 		t.Fatalf("expected transition_ownership_validation error, got %#v", report.Errors())
 	}
 }
@@ -6656,7 +6654,7 @@ func TestRun_ReportsMissingSemanticHandlerForOwnedRuntimeEvent(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "owning_node dispatcher missing semantic event_handler") {
+	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "owning_node node dispatcher missing semantic event_handler") {
 		t.Fatalf("expected event_runtime_wiring_validation error, got %#v", report.Errors())
 	}
 }
@@ -6671,7 +6669,7 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit owning_node idle-owner has no runtime executor") {
+	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit owning_node node idle-owner has no runtime executor") {
 		t.Fatalf("expected handler_field_compliance runtime executor error, got %#v", report.Errors())
 	}
 }
@@ -6775,8 +6773,9 @@ func TestRun_ReportsErrorForTimerOwnerMissingFromParticipants(t *testing.T) {
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
 	bundle.Semantics.Timers[0].Owner = "missing-owner"
+	bundle.Semantics.Timers[0].Node = identitytest.RootNode(t, "missing-owner")
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "timer_validation", "owner missing-owner missing from participants") {
+	if !reportContains(report.Errors(), "timer_validation", "owner node missing-owner missing from executable nodes") {
 		t.Fatalf("expected timer_validation missing participant owner error, got %#v", report.Errors())
 	}
 }
@@ -7929,14 +7928,45 @@ func loadFixtureBundleAt(t *testing.T, repoRoot, fixtureRoot, platformSpec strin
 }
 
 func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{
+	dispatcher, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", "dispatcher")
+	if err != nil {
+		panic(err)
+	}
+	nodes := map[string]runtimecontracts.SystemNodeContract{
+		"dispatcher": {
+			ID:               "dispatcher",
+			OwnedTransitions: []string{"ticket-open"},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"ticket.created": {},
+			},
+		},
+		"projector": {
+			ID: "projector",
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"ticket.opened": {},
+			},
+		},
+	}
+	events := map[string]runtimecontracts.EventCatalogEntry{
+		"ticket.created": {
+			RuntimeHandling: "consuming",
+			OwningNode:      "dispatcher",
+		},
+		"ticket.opened": {
+			RuntimeHandling: "projection",
+			OwningNode:      "projector",
+		},
+		"ticket.audit": {},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Transitions: []runtimecontracts.WorkflowTransitionContract{{
-				ID:      "ticket-open",
-				Trigger: "ticket.created",
-				Node:    "dispatcher",
-				Actions: []string{"emit_opened"},
-				Guards:  []string{"allow_ticket"},
+				ID:             "ticket-open",
+				Trigger:        "ticket.created",
+				Node:           "dispatcher",
+				ExecutableNode: dispatcher,
+				Actions:        []string{"emit_opened"},
+				Guards:         []string{"allow_ticket"},
 			}},
 			ActionByID: map[string]runtimecontracts.GuardActionEntry{
 				"emit_opened": {
@@ -7959,33 +7989,16 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 				},
 			},
 		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"dispatcher": {
-				ID:               "dispatcher",
-				OwnedTransitions: []string{"ticket-open"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"ticket.created": {},
-				},
-			},
-			"projector": {
-				ID: "projector",
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"ticket.opened": {},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"ticket.created": {
-				RuntimeHandling: "consuming",
-				OwningNode:      "dispatcher",
-			},
-			"ticket.opened": {
-				RuntimeHandling: "projection",
-				OwningNode:      "projector",
-			},
-			"ticket.audit": {},
-		},
+		Nodes:  nodes,
+		Events: events,
+		FlowTree: runtimecontracts.FlowTree{Root: &runtimecontracts.FlowContractView{
+			Nodes:  nodes,
+			Events: events,
+		}},
 	}
+	bundle.Platform.Platform.Name = "test"
+	bundle.Platform.Platform.Version = "1.0.0"
+	return bundle
 }
 
 func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle {
@@ -8162,7 +8175,8 @@ func defaultFixtureYAML(contents string) string {
 	return contents + "\n"
 }
 
-func gateSchemaValidationBundle(gateState runtimecontracts.NodeGateStateSchema, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
+func gateSchemaValidationBundle(t testing.TB, gateState runtimecontracts.NodeGateStateSchema, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	const (
 		nodeID    = "validate-task"
 		eventType = "task.requested"
@@ -8188,7 +8202,7 @@ func gateSchemaValidationBundle(gateState runtimecontracts.NodeGateStateSchema, 
 	bundle.Platform.Platform.Version = "test"
 	bundle.Semantics.HandlerTransitions = []runtimecontracts.HandlerTransitionSemantic{{
 		ID:        nodeID + ":" + eventType,
-		NodeID:    nodeID,
+		Node:      identitytest.RootNode(t, nodeID),
 		EventType: eventType,
 		SetsGate:  handler.SetsGate,
 	}}
@@ -8281,13 +8295,166 @@ func runtimeExternalResourceSource(mcpURL string) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
-func firstBundleHandler(bundle *runtimecontracts.WorkflowContractBundle) (string, string, runtimecontracts.SystemNodeEventHandler, bool) {
-	for nodeID, node := range bundle.Nodes {
-		for eventType, handler := range node.EventHandlers {
-			return nodeID, eventType, handler, true
+func firstBundleHandler(bundle *runtimecontracts.WorkflowContractBundle) (runtimeidentity.ExecutableNode, string, runtimecontracts.SystemNodeEventHandler, bool) {
+	for _, record := range bundle.ScopedNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for eventType, handler := range record.Entry.EventHandlers {
+			return node, eventType, handler, true
 		}
 	}
-	return "", "", runtimecontracts.SystemNodeEventHandler{}, false
+	return runtimeidentity.ExecutableNode{}, "", runtimecontracts.SystemNodeEventHandler{}, false
+}
+
+func writeBundleHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
+	mutateBundleExecutableNode(t, bundle, owner, func(view *runtimecontracts.FlowContractView) {
+		node := view.Nodes[owner.NodeID()]
+		if node.EventHandlers == nil {
+			node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
+		}
+		node.EventHandlers[eventType] = handler
+		view.Nodes[owner.NodeID()] = node
+	})
+}
+
+func writeBundleEventEntry(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, eventType string, entry runtimecontracts.EventCatalogEntry) {
+	mutateBundleExecutableNode(t, bundle, owner, func(view *runtimecontracts.FlowContractView) {
+		if view.Events == nil {
+			view.Events = map[string]runtimecontracts.EventCatalogEntry{}
+		}
+		view.Events[eventType] = entry
+	})
+	for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
+		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == owner.PackageKey() && owner.FlowID() == "" {
+			scope.Events[eventType] = entry
+		}
+	}
+	for _, scope := range semanticview.Wrap(bundle).FlowScopes() {
+		packageKey := strings.Trim(strings.TrimSpace(scope.PackageKey), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == owner.PackageKey() && strings.TrimSpace(scope.ID) == owner.FlowID() {
+			scope.Events[eventType] = entry
+		}
+	}
+}
+
+func writeBundlePolicyValue(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, key string, value runtimecontracts.PolicyValue) {
+	if t != nil {
+		t.Helper()
+	}
+	var found bool
+	for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
+		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey != owner.PackageKey() {
+			continue
+		}
+		if scope.Policy.Values == nil {
+			if t != nil {
+				t.Fatalf("canonical package policy map is nil for %s", owner.Key())
+			}
+			panic("canonical package policy map is nil")
+		}
+		scope.Policy.Values[key] = value
+		found = true
+	}
+	if !found {
+		if t != nil {
+			t.Fatalf("canonical package policy not found for %s", owner.Key())
+		}
+		panic("canonical package policy not found")
+	}
+}
+
+func bundleExecutableNodeByLocalID(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID string) runtimeidentity.ExecutableNode {
+	if t != nil {
+		t.Helper()
+	}
+	var matches []runtimeidentity.ExecutableNode
+	for _, record := range bundle.ScopedNodeRecords() {
+		if strings.TrimSpace(record.LogicalID) != strings.TrimSpace(nodeID) {
+			continue
+		}
+		node, err := record.Identity()
+		if err == nil {
+			matches = append(matches, node)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	if t != nil {
+		t.Fatalf("executable node local ID %q resolved to %d declarations", nodeID, len(matches))
+	}
+	panic(fmt.Sprintf("executable node local ID %q resolved to %d declarations", nodeID, len(matches)))
+}
+
+func mutateBundleExecutableNode(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, owner runtimeidentity.ExecutableNode, mutate func(*runtimecontracts.FlowContractView)) {
+	if t != nil {
+		t.Helper()
+	}
+	if bundle == nil || !owner.Valid() {
+		if t != nil {
+			t.Fatalf("invalid executable node mutation owner")
+		}
+		panic("invalid executable node mutation owner")
+	}
+	var found bool
+	var walk func(*runtimecontracts.FlowContractView, string, string)
+	walk = func(view *runtimecontracts.FlowContractView, inheritedPackage, inheritedFlow string) {
+		if view == nil || found {
+			return
+		}
+		packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
+		if packageKey == "" {
+			packageKey = strings.Trim(strings.TrimSpace(inheritedPackage), "/")
+		}
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		flowID := strings.TrimSpace(view.Paths.ID)
+		if flowID == "" {
+			flowID = strings.TrimSpace(inheritedFlow)
+		}
+		if packageKey == owner.PackageKey() && flowID == owner.FlowID() {
+			if _, ok := view.Nodes[owner.NodeID()]; ok {
+				mutate(view)
+				found = true
+				return
+			}
+		}
+		for index := range view.Children {
+			walk(&view.Children[index], packageKey, flowID)
+		}
+	}
+	if bundle.FlowTree.Root != nil {
+		walk(bundle.FlowTree.Root, "", "")
+	} else if owner.PackageKey() == runtimeidentity.RootPackageKey && owner.FlowID() == "" {
+		if _, ok := bundle.Nodes[owner.NodeID()]; ok {
+			view := runtimecontracts.FlowContractView{Nodes: bundle.Nodes, Events: bundle.Events}
+			mutate(&view)
+			bundle.Nodes = view.Nodes
+			bundle.Events = view.Events
+			found = true
+		}
+	}
+	if found {
+		return
+	}
+	if t != nil {
+		t.Fatalf("canonical executable node %s not found", owner.Key())
+	}
+	panic("canonical executable node " + owner.Key() + " not found")
 }
 
 func firstFlowHandlerInFlowView(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) (string, string, string, runtimecontracts.SystemNodeEventHandler) {
@@ -8580,24 +8747,48 @@ func writeFlowEventEntry(t *testing.T, bundle *runtimecontracts.WorkflowContract
 
 func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
 	t.Helper()
-	if bundle.Nodes == nil {
-		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	if bundle.FlowTree.Root == nil {
+		node := runtimecontracts.SystemNodeContract{}
+		node.ID = nodeID
+		node.ExecutionType = "system_node"
+		node.SubscribesTo = []string{eventType}
+		if node.EventHandlers == nil {
+			node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
+		}
+		node.EventHandlers[eventType] = handler
+		for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
+			packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
+			if packageKey == "" {
+				packageKey = runtimeidentity.RootPackageKey
+			}
+			if packageKey == runtimeidentity.RootPackageKey && strings.TrimSpace(scope.OwningFlowID) == "" {
+				scope.Nodes[nodeID] = node
+				return
+			}
+		}
+		t.Fatalf("root project scope missing")
 	}
-	node := bundle.Nodes[nodeID]
+	if bundle.FlowTree.Root.Nodes == nil {
+		bundle.FlowTree.Root.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	}
+	node := bundle.FlowTree.Root.Nodes[nodeID]
 	node.ID = nodeID
 	node.ExecutionType = "system_node"
+	node.SubscribesTo = append(node.SubscribesTo, eventType)
 	if node.EventHandlers == nil {
 		node.EventHandlers = map[string]runtimecontracts.SystemNodeEventHandler{}
 	}
 	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
-	if bundle.Semantics.NodeHandlers == nil {
-		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	bundle.FlowTree.Root.Nodes[nodeID] = node
+	for _, scope := range semanticview.Wrap(bundle).ProjectScopes() {
+		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == runtimeidentity.RootPackageKey && strings.TrimSpace(scope.OwningFlowID) == "" {
+			scope.Nodes[nodeID] = node
+		}
 	}
-	if bundle.Semantics.NodeHandlers[nodeID] == nil {
-		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
 }
 
 func platformEventCatalogTestNode(t *testing.T, raw string) yaml.Node {

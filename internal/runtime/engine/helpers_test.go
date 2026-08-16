@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 
@@ -260,14 +261,15 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 
 func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T) {
 	state := &StateSnapshot{}
+	node := testRootExecutableNode(t, "node-1")
 	acc := &Accumulator{
 		Received: map[string]bool{"a": true},
 		Items:    []map[string]any{{"payload": map[string]any{"score": 8}}},
 	}
 
-	storeAccumulator(state, "node-1", events.EventType("task.completed"), acc)
+	storeAccumulator(state, node, events.EventType("task.completed"), acc)
 
-	nodeBucket, ok := state.StateCarrier.StateBuckets["node-1"]
+	nodeBucket, ok := state.StateCarrier.StateBuckets[node.Key()]
 	if !ok {
 		t.Fatalf("node bucket missing: %#v", state.StateCarrier.StateBuckets)
 	}
@@ -275,11 +277,11 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	if !ok {
 		t.Fatalf("handler accumulator bucket missing: %#v", nodeBucket)
 	}
-	if _, ok := accBuckets["node-1:task.completed"]; !ok {
+	if _, ok := accBuckets[timeridentity.NewAccumulatorBucketRef(node, "task.completed").Key()]; !ok {
 		t.Fatalf("handler key missing: %#v", accBuckets)
 	}
 
-	loaded, ok := loadAccumulator(*state, "node-1", events.EventType("task.completed"))
+	loaded, ok := loadAccumulator(*state, node, events.EventType("task.completed"))
 	if !ok {
 		t.Fatal("expected accumulator to load")
 	}

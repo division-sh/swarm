@@ -160,16 +160,17 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 				})
 			}
 			previewCtx := context.Background()
+			node := conformanceNode(t, tc.flowID, tc.nodeID)
 			if tc.flowID != "" {
 				previewCtx = runtimedelivery.WithRoute(previewCtx, events.DeliveryRoute{
-					Recipient: events.MustNodeDeliveryRecipient(tc.nodeID),
+					Recipient: events.MustNodeDeliveryRecipient(node),
 					Target: events.MustExistingEntityTarget(events.RouteIdentity{
 						FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
 					}),
 				})
 			}
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
-				previewCtx, bundle, tc.nodeID,
+				previewCtx, bundle, node,
 				eventtest.RunCreatingRootIngress(
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-proof", "", payload, 0,
 					"00000000-0000-0000-0000-000000000001", "", envelope, time.Now().UTC(),
@@ -282,8 +283,9 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 				t.Fatal(err)
 			}
 			source := semanticview.Wrap(bundle)
+			node := conformanceNode(t, "", tc.nodeID)
 			previewCtx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient(tc.nodeID),
+				Recipient: events.MustNodeDeliveryRecipient(node),
 				Target: events.MustExistingEntityTarget(events.RouteIdentity{
 					FlowID: source.WorkflowName(), FlowInstance: "00000000-0000-0000-0000-000000000001", EntityID: "fixture-entity",
 				}),
@@ -291,7 +293,7 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
 				previewCtx,
 				bundle,
-				tc.nodeID,
+				node,
 				eventtest.RunCreatingRootIngress(
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-harness", "", payload, 0,
 					"00000000-0000-0000-0000-000000000001", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "fixture-entity"), time.Now().UTC(),

@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const (
@@ -366,7 +367,11 @@ func selectedContractRecoveredRecipientKey(recipient selectedContractRecoveredRe
 	)
 	switch strings.TrimSpace(recipient.SubscriberType) {
 	case "node":
-		typedRecipient, err = events.NewNodeDeliveryRecipient(recipient.SubscriberID)
+		var node runtimeidentity.ExecutableNode
+		node, err = runtimeidentity.ParseExecutableNodeKey(recipient.SubscriberID)
+		if err == nil {
+			typedRecipient, err = events.NewNodeDeliveryRecipient(node)
+		}
 	case "agent":
 		typedRecipient, err = events.NewAgentDeliveryRecipient(recipient.SubscriberID)
 	default:

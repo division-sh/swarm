@@ -20,6 +20,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -1091,7 +1092,7 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 	eventID := emitToolResultString(t, out, "event_id")
 	persisted := store.events[eventID]
 	wantRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("test-node"),
+		Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "test-node")),
 		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 			FlowID: source.WorkflowName(), FlowInstance: persisted.RunID(), EntityID: runtimeflowidentity.EntityID(persisted.RunID()),
 		}),
@@ -1143,7 +1144,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	eventID := emitToolResultString(t, out, "event_id")
 	routes := store.routes[eventID]
 	want := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("review-finalize"),
+		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "review", "review-finalize")),
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: route.InstancePath}),
 	}
 	if !emitDeliveryRoutesContain(routes, want) {
@@ -1195,7 +1196,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 	}),
@@ -1276,7 +1277,7 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 	if got := persisted.TargetRoute(); got != parentRoute {
 		t.Fatalf("persisted target route = %#v, want EventBus-selected root owner %#v", got, parentRoute)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("root-receiver"), Target: events.MustExistingEntityTarget(parentRoute)}
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "root-receiver")), Target: events.MustExistingEntityTarget(parentRoute)}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
 	}

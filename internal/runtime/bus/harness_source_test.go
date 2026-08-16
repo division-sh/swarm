@@ -85,7 +85,7 @@ func loadHarnessRouteSource(t *testing.T, root string) semanticview.Source {
 func subscriberSignature(subscribers []Subscriber) string {
 	parts := make([]string, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		parts = append(parts, strings.Join([]string{subscriber.Recipient.ID(), subscriber.Recipient.Code(), subscriber.Path, subscriber.MatchPattern, subscriber.RouteSourceCode(), subscriber.LocalizedEvent}, "|"))
+		parts = append(parts, strings.Join([]string{subscriber.Recipient.LocalID(), subscriber.Recipient.Code(), subscriber.Path, subscriber.MatchPattern, subscriber.RouteSourceCode(), subscriber.LocalizedEvent}, "|"))
 	}
 	return strings.Join(parts, "\n")
 }

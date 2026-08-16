@@ -159,9 +159,10 @@ func selectedStoreJoinScheduleHostileCases(generation attemptgeneration.Generati
 				t.Fatal(err)
 			}
 		}},
-		{name: "flow_id_runtime_alias", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["flow_id"] = "workflow-runtime-name" })},
-		{name: "flow_id_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join, "flow_id") })},
-		{name: "node_id", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node_id"] = "other-node" })},
+		{name: "package_key_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "package_key") })},
+		{name: "flow_id_runtime_alias", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["flow_id"] = "workflow-runtime-name" })},
+		{name: "flow_id_missing", scope: "root", mutate: payload(func(_, _, join map[string]any) { delete(join["node"].(map[string]any), "flow_id") })},
+		{name: "node_id", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["node_id"] = "other-node" })},
 		{name: "handler_event", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["handler_event"] = "other.completed" })},
 		{name: "stage", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["stage"] = "other-stage" })},
 		{name: "join_id", scope: "root", mutate: payload(func(_, _, join map[string]any) { join["join_id"] = "other-join" })},
@@ -175,8 +176,8 @@ func selectedStoreJoinScheduleHostileCases(generation attemptgeneration.Generati
 		{name: "handle_kind", scope: "root", mutate: payload(func(_, handle, _ map[string]any) { handle["kind"] = "join_complete" })},
 		{name: "revision_pin", scope: "root", mutate: payload(func(payload, _, _ map[string]any) { payload[generation.RevisionField] = "rev-hostile" })},
 		{name: "revision_pin_missing", scope: "root", mutate: payload(func(payload, _, _ map[string]any) { delete(payload, generation.RevisionField) })},
-		{name: "flow_id_root_alias", scope: "flow", mutate: payload(func(_, _, join map[string]any) { join["flow_id"] = "" })},
-		{name: "flow_id_other", scope: "flow", mutate: payload(func(_, _, join map[string]any) { join["flow_id"] = "returns" })},
+		{name: "flow_id_root_alias", scope: "flow", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["flow_id"] = "" })},
+		{name: "flow_id_other", scope: "flow", mutate: payload(func(_, _, join map[string]any) { join["node"].(map[string]any)["flow_id"] = "returns" })},
 		{name: "flow_instance", scope: "flow", mutate: func(_ testing.TB, c *runtimegenericschedule.AdmissionCommand) { c.FlowInstance = "orders/order-2" }},
 		{name: "routing_flow", scope: "flow", mutate: func(t testing.TB, c *runtimegenericschedule.AdmissionCommand) {
 			var err error
@@ -594,7 +595,7 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 func selectedStoreJoinScheduleCommand(t *testing.T, runID, flowID, flowInstance string, generation attemptgeneration.Generation) runtimegenericschedule.AdmissionCommand {
 	t.Helper()
 	entityID := uuid.NewString()
-	ref, err := timeridentity.NewJoinRefForGeneration(flowID, "join-node", "item.completed", "awaiting", "shared", "window-1", generation)
+	ref, err := timeridentity.NewJoinRefForGeneration(mustPersistenceNode(flowID, "join-node"), "item.completed", "awaiting", "shared", "window-1", generation)
 	if err != nil {
 		t.Fatal(err)
 	}

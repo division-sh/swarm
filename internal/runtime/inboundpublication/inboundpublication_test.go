@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
@@ -116,10 +117,10 @@ func TestEvidencePayloadOwnsExactOrderedCommittedBatch(t *testing.T) {
 func TestCanonicalRecipientManifestIsOrderIndependent(t *testing.T) {
 	reply := events.ReplyContextRef{ID: "reply-1"}
 	routes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("worker"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"}),
+		{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "worker")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"}),
 			Context: events.DeliveryContext{Reply: &reply},
 		},
-		{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"})},
+		{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "workflow-runtime")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowInstance: "flow/one", EntityID: "entity-1"})},
 	}
 
 	manifest, fingerprint, count, err := CanonicalRecipientManifest(routes)

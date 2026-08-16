@@ -149,8 +149,8 @@ func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinc
 	}
 	keys := []string{matches[0].SourceScopeKey, matches[1].SourceScopeKey}
 	sort.Strings(keys)
-	if strings.Join(keys, ",") != "extras,flows/support" {
-		t.Fatalf("source scope keys = %v, want extras and flows/support; sites=%#v", keys, authoredEmitSiteSummaries(matches))
+	if strings.Join(keys, ",") != ".,extras" {
+		t.Fatalf("source scope keys = %v, want root package and extras; sites=%#v", keys, authoredEmitSiteSummaries(matches))
 	}
 }
 
@@ -479,8 +479,8 @@ func countAuthoredSitesWithSite(sites []AuthoredEmitSite, site string) int {
 func authoredEmitSitesByFlowNodeEvent(sites []AuthoredEmitSite, flowID, nodeID, eventType string) []AuthoredEmitSite {
 	out := []AuthoredEmitSite{}
 	for _, site := range sites {
-		if strings.TrimSpace(site.FlowID) == flowID &&
-			strings.TrimSpace(site.NodeID) == nodeID &&
+		if strings.TrimSpace(site.FlowID()) == flowID &&
+			strings.TrimSpace(site.NodeID()) == nodeID &&
 			strings.TrimSpace(site.Spec.EventType()) == eventType {
 			out = append(out, site)
 		}
@@ -491,7 +491,7 @@ func authoredEmitSitesByFlowNodeEvent(sites []AuthoredEmitSite, flowID, nodeID, 
 func authoredEmitSiteSummaries(sites []AuthoredEmitSite) []string {
 	out := make([]string, 0, len(sites))
 	for _, site := range sites {
-		out = append(out, strings.Join([]string{site.FlowID, site.SourceScopeKey, site.NodeID, site.HandlerEvent, site.Site, site.Spec.EventType()}, "|"))
+		out = append(out, strings.Join([]string{site.FlowID(), site.SourceScopeKey, site.NodeID(), site.HandlerEvent, site.Site, site.Spec.EventType()}, "|"))
 	}
 	sort.Strings(out)
 	return out

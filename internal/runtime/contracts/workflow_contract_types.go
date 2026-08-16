@@ -8,6 +8,7 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -288,8 +289,7 @@ func (r FlowInputProducerResolution) AutoWireResolution() FlowInputAutoWireResol
 
 type HandlerTransitionSemantic struct {
 	ID                   string
-	NodeID               string
-	FlowID               string
+	Node                 runtimeidentity.ExecutableNode
 	EventType            string
 	CreateEntity         bool
 	Action               ActionSpec
@@ -333,8 +333,7 @@ type HandlerRuleEntry struct {
 }
 
 type WorkflowJoinPlan struct {
-	FlowID       string
-	NodeID       string
+	Node         runtimeidentity.ExecutableNode
 	HandlerEvent string
 	Spec         JoinSpec
 	ResultType   CatalogTypeReference
@@ -398,7 +397,7 @@ type WorkflowStageTopology struct {
 }
 
 type WorkflowHandlerStageScope struct {
-	NodeID    string
+	Node      runtimeidentity.ExecutableNode
 	EventType string
 	Stages    []string
 }
@@ -407,7 +406,8 @@ type WorkflowStageTopologyEdge struct {
 	From          string
 	To            string
 	Source        string
-	NodeID        string
+	Node          runtimeidentity.ExecutableNode
+	InternalOwner string
 	HandlerEvent  string
 	EventType     string
 	LoopID        string
@@ -420,7 +420,7 @@ type WorkflowStageTopologyEdge struct {
 }
 
 type WorkflowLoopOperationPlan struct {
-	NodeID       string
+	Node         runtimeidentity.ExecutableNode
 	HandlerEvent string
 	Kind         LoopOperationKind
 	LoopID       string
@@ -1382,6 +1382,11 @@ type ScopedNodeRecord struct {
 	Entry     SystemNodeContract
 	Source    ContractItemSource
 }
+
+func (r ScopedNodeRecord) Identity() (runtimeidentity.ExecutableNode, error) {
+	return runtimeidentity.AdmitExecutableNodeDeclaration(r.Source.PackageKey, r.Source.FlowID, r.LogicalID)
+}
+
 type FlowSchemaDocument struct {
 	Name                   string                   `yaml:"name"`
 	Mode                   string                   `yaml:"mode"`
@@ -1585,15 +1590,18 @@ type WorkflowStageContract struct {
 	Description string `yaml:"description"`
 }
 type WorkflowTransitionContract struct {
-	ID                string                   `yaml:"id"`
-	From              []string                 `yaml:"from"`
-	To                string                   `yaml:"to"`
-	Trigger           string                   `yaml:"trigger"`
-	Node              string                   `yaml:"node"`
-	Guards            []string                 `yaml:"guards"`
-	Actions           []string                 `yaml:"actions"`
-	DataAccumulation  WorkflowDataAccumulation `yaml:"data_accumulation"`
-	AllowTerminalExit bool                     `yaml:"allow_terminal_exit"`
+	ID                string                         `yaml:"id"`
+	From              []string                       `yaml:"from"`
+	To                string                         `yaml:"to"`
+	Trigger           string                         `yaml:"trigger"`
+	Node              string                         `yaml:"node"`
+	ExecutableNode    runtimeidentity.ExecutableNode `yaml:"-"`
+	FlowID            string                         `yaml:"-"`
+	InternalOwner     string                         `yaml:"-"`
+	Guards            []string                       `yaml:"guards"`
+	Actions           []string                       `yaml:"actions"`
+	DataAccumulation  WorkflowDataAccumulation       `yaml:"data_accumulation"`
+	AllowTerminalExit bool                           `yaml:"allow_terminal_exit"`
 }
 type WorkflowDataAccumulation struct {
 	Writes      []WorkflowDataWrite `yaml:"writes"`
@@ -1673,21 +1681,41 @@ func (a WorkflowDataAccumulation) HasWrites() bool {
 }
 
 type WorkflowTimerContract struct {
-	ID           string `yaml:"id"`
-	Stage        string `yaml:"stage"`
-	Event        string `yaml:"event"`
-	Owner        string `yaml:"owner"`
-	FlowID       string `yaml:"-"`
-	NodeID       string `yaml:"-"`
-	StageOwned   bool   `yaml:"-"`
-	AdvancesTo   string `yaml:"-"`
-	Action       string `yaml:"action"`
-	Cancellation string `yaml:"cancellation"`
-	Delay        string `yaml:"delay"`
-	StartOn      string `yaml:"start_on"`
-	CancelOn     string `yaml:"cancel_on"`
-	Recurring    bool   `yaml:"recurring"`
+	ID           string                         `yaml:"id"`
+	Stage        string                         `yaml:"stage"`
+	Event        string                         `yaml:"event"`
+	Owner        string                         `yaml:"owner"`
+	Node         runtimeidentity.ExecutableNode `yaml:"-"`
+	FlowID       string                         `yaml:"-"`
+	StageOwned   bool                           `yaml:"-"`
+	AdvancesTo   string                         `yaml:"-"`
+	Action       string                         `yaml:"action"`
+	Cancellation string                         `yaml:"cancellation"`
+	Delay        string                         `yaml:"delay"`
+	StartOn      string                         `yaml:"start_on"`
+	CancelOn     string                         `yaml:"cancel_on"`
+	Recurring    bool                           `yaml:"recurring"`
 }
+
+func (t WorkflowTimerContract) OwningFlowID() string {
+	if t.Node.Valid() {
+		return t.Node.FlowID()
+	}
+	return strings.TrimSpace(t.FlowID)
+}
+
+func (t WorkflowTimerContract) SemanticKey() string {
+	if id := strings.TrimSpace(t.ID); id != "" {
+		if t.Node.Valid() && !t.StageOwned {
+			return "node:" + t.Node.Key() + ":" + id
+		}
+		if t.StageOwned && !t.Node.Valid() {
+			return "stage:" + strings.TrimSpace(t.FlowID) + ":" + id
+		}
+	}
+	return ""
+}
+
 type EventEmission struct {
 	Single string   `yaml:"-" json:"single,omitempty"`
 	Many   []string `yaml:"-" json:"many,omitempty"`

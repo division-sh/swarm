@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/google/uuid"
 )
 
@@ -45,7 +46,7 @@ var workflowTimerIdentityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swa
 // timers.timer_name. It is deliberately independent from fire_payload.
 type WorkflowTimerActivationRef struct {
 	ActivationID        string                       `json:"activation_id"`
-	Declaration         string                       `json:"declaration"`
+	DeclarationKey      string                       `json:"declaration_key"`
 	DeclarationRevision string                       `json:"declaration_revision"`
 	Cause               WorkflowTimerActivationCause `json:"cause"`
 	Generation          attemptgeneration.Generation `json:"generation,omitempty"`
@@ -61,7 +62,7 @@ const (
 
 func (r WorkflowTimerActivationRef) Normalize() WorkflowTimerActivationRef {
 	r.ActivationID = strings.TrimSpace(r.ActivationID)
-	r.Declaration = strings.TrimSpace(r.Declaration)
+	r.DeclarationKey = strings.TrimSpace(r.DeclarationKey)
 	r.DeclarationRevision = strings.TrimSpace(r.DeclarationRevision)
 	r.Cause = WorkflowTimerActivationCause(strings.TrimSpace(string(r.Cause)))
 	r.Generation = r.Generation.Normalize()
@@ -70,7 +71,7 @@ func (r WorkflowTimerActivationRef) Normalize() WorkflowTimerActivationRef {
 
 func (r WorkflowTimerActivationRef) Valid() bool {
 	r = r.Normalize()
-	if r.ActivationID == "" || r.Declaration == "" || r.DeclarationRevision == "" {
+	if r.ActivationID == "" || r.DeclarationKey == "" || r.DeclarationRevision == "" {
 		return false
 	}
 	switch r.Cause {
@@ -227,8 +228,7 @@ type TimerHandle struct {
 }
 
 type JoinRef struct {
-	flowID       string
-	nodeID       string
+	node         runtimeidentity.ExecutableNode
 	handlerEvent string
 	stage        string
 	joinID       string
@@ -237,7 +237,7 @@ type JoinRef struct {
 }
 
 type AccumulatorBucketRef struct {
-	NodeID     string
+	Node       runtimeidentity.ExecutableNode
 	EventType  string
 	Window     string
 	Generation attemptgeneration.Generation
@@ -504,14 +504,13 @@ func parseTimerHandleMap(handleMap map[string]any) (TimerHandle, bool) {
 	}
 }
 
-func NewJoinRef(flowID, nodeID, handlerEvent, stage, joinID, window string) (JoinRef, error) {
-	return NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window, attemptgeneration.Generation{})
+func NewJoinRef(node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, window string) (JoinRef, error) {
+	return NewJoinRefForGeneration(node, handlerEvent, stage, joinID, window, attemptgeneration.Generation{})
 }
 
-func NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) (JoinRef, error) {
+func NewJoinRefForGeneration(node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) (JoinRef, error) {
 	ref := JoinRef{
-		flowID:       strings.TrimSpace(flowID),
-		nodeID:       strings.TrimSpace(nodeID),
+		node:         node,
 		handlerEvent: strings.TrimSpace(handlerEvent),
 		stage:        strings.TrimSpace(stage),
 		joinID:       strings.TrimSpace(joinID),
@@ -529,7 +528,7 @@ func NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window
 
 func (r JoinRef) Normalize() JoinRef {
 	return JoinRef{
-		flowID: strings.TrimSpace(r.flowID), nodeID: strings.TrimSpace(r.nodeID),
+		node:         r.node,
 		handlerEvent: strings.TrimSpace(r.handlerEvent), stage: strings.TrimSpace(r.stage),
 		joinID: strings.TrimSpace(r.joinID), window: strings.TrimSpace(r.window),
 		generation: r.generation.Normalize(),
@@ -538,26 +537,28 @@ func (r JoinRef) Normalize() JoinRef {
 
 func (r JoinRef) Valid() bool {
 	r = r.Normalize()
-	return r.nodeID != "" && r.handlerEvent != "" && r.stage != "" && r.joinID != "" &&
+	return r.node.Valid() && r.handlerEvent != "" && r.stage != "" && r.joinID != "" &&
 		(r.generation == (attemptgeneration.Generation{}) || r.generation.Valid())
 }
 
-func (r JoinRef) FlowID() string       { return r.Normalize().flowID }
-func (r JoinRef) NodeID() string       { return r.Normalize().nodeID }
-func (r JoinRef) HandlerEvent() string { return r.Normalize().handlerEvent }
-func (r JoinRef) Stage() string        { return r.Normalize().stage }
-func (r JoinRef) JoinID() string       { return r.Normalize().joinID }
-func (r JoinRef) Window() string       { return r.Normalize().window }
+func (r JoinRef) Node() runtimeidentity.ExecutableNode { return r.Normalize().node }
+func (r JoinRef) PackageKey() string                   { return r.Node().PackageKey() }
+func (r JoinRef) FlowID() string                       { return r.Node().FlowID() }
+func (r JoinRef) NodeID() string                       { return r.Node().NodeID() }
+func (r JoinRef) HandlerEvent() string                 { return r.Normalize().handlerEvent }
+func (r JoinRef) Stage() string                        { return r.Normalize().stage }
+func (r JoinRef) JoinID() string                       { return r.Normalize().joinID }
+func (r JoinRef) Window() string                       { return r.Normalize().window }
 func (r JoinRef) Generation() attemptgeneration.Generation {
 	return r.Normalize().generation
 }
 
 func (r JoinRef) WithGeneration(generation attemptgeneration.Generation) (JoinRef, error) {
-	return NewJoinRefForGeneration(r.FlowID(), r.NodeID(), r.HandlerEvent(), r.Stage(), r.JoinID(), r.Window(), generation)
+	return NewJoinRefForGeneration(r.Node(), r.HandlerEvent(), r.Stage(), r.JoinID(), r.Window(), generation)
 }
 
 func (r JoinRef) Declaration() JoinRef {
-	ref, _ := NewJoinRef(r.FlowID(), r.NodeID(), r.HandlerEvent(), r.Stage(), r.JoinID(), "")
+	ref, _ := NewJoinRef(r.Node(), r.HandlerEvent(), r.Stage(), r.JoinID(), "")
 	return ref
 }
 
@@ -568,7 +569,7 @@ func (r JoinRef) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	parts := []string{r.flowID, r.nodeID, r.handlerEvent, r.stage, r.joinID, r.window}
+	parts := []string{r.node.Key(), r.handlerEvent, r.stage, r.joinID, r.window}
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
 	}
@@ -585,8 +586,11 @@ func (r JoinRef) PayloadValue() map[string]any {
 		return nil
 	}
 	payload := map[string]any{
-		"flow_id":       r.flowID,
-		"node_id":       r.nodeID,
+		"node": map[string]any{
+			"package_key": r.node.PackageKey(),
+			"flow_id":     r.node.FlowID(),
+			"node_id":     r.node.NodeID(),
+		},
 		"handler_event": r.handlerEvent,
 		"stage":         r.stage,
 		"join_id":       r.joinID,
@@ -630,11 +634,15 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	if !ok {
 		return JoinRef{}, false
 	}
-	flowID, hasFlowID := raw["flow_id"].(string)
-	if !hasFlowID {
+	nodeRaw, hasNode := stringAnyMap(raw["node"])
+	if !hasNode || !exactKeys(nodeRaw, "package_key", "flow_id", "node_id") {
 		return JoinRef{}, false
 	}
-	if !onlyKeys(raw, "flow_id", "node_id", "handler_event", "stage", "join_id", "window", attemptgeneration.PayloadKey) {
+	node, err := runtimeidentity.ParseExecutableNode(asExactString(nodeRaw["package_key"]), asExactString(nodeRaw["flow_id"]), asExactString(nodeRaw["node_id"]))
+	if err != nil {
+		return JoinRef{}, false
+	}
+	if !onlyKeys(raw, "node", "handler_event", "stage", "join_id", "window", attemptgeneration.PayloadKey) {
 		return JoinRef{}, false
 	}
 	generation := attemptgeneration.Generation{}
@@ -645,7 +653,7 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 			return JoinRef{}, false
 		}
 	}
-	ref, err := NewJoinRefForGeneration(flowID, asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
+	ref, err := NewJoinRefForGeneration(node, asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
 	return ref, err == nil
 }
 
@@ -686,28 +694,31 @@ func onlyKeys(values map[string]any, allowed ...string) bool {
 	return true
 }
 
-func NewAccumulatorBucketRef(nodeID, eventType string) AccumulatorBucketRef {
+func exactKeys(values map[string]any, required ...string) bool {
+	return len(values) == len(required) && onlyKeys(values, required...)
+}
+
+func NewAccumulatorBucketRef(node runtimeidentity.ExecutableNode, eventType string) AccumulatorBucketRef {
 	return AccumulatorBucketRef{
-		NodeID:    strings.TrimSpace(nodeID),
+		Node:      node,
 		EventType: strings.TrimSpace(eventType),
 	}
 }
 
-func NewAccumulatorWindowBucketRef(nodeID, eventType, window string) AccumulatorBucketRef {
-	ref := NewAccumulatorBucketRef(nodeID, eventType)
+func NewAccumulatorWindowBucketRef(node runtimeidentity.ExecutableNode, eventType, window string) AccumulatorBucketRef {
+	ref := NewAccumulatorBucketRef(node, eventType)
 	ref.Window = strings.TrimSpace(window)
 	return ref
 }
 
-func NewAccumulatorBucketRefForGeneration(nodeID, eventType, window string, generation attemptgeneration.Generation) AccumulatorBucketRef {
-	ref := NewAccumulatorWindowBucketRef(nodeID, eventType, window)
+func NewAccumulatorBucketRefForGeneration(node runtimeidentity.ExecutableNode, eventType, window string, generation attemptgeneration.Generation) AccumulatorBucketRef {
+	ref := NewAccumulatorWindowBucketRef(node, eventType, window)
 	ref.Generation = generation.Normalize()
 	return ref
 }
 
 func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
-	key = strings.TrimSpace(key)
-	if key == "" {
+	if key == "" || key != strings.TrimSpace(key) {
 		return AccumulatorBucketRef{}, false
 	}
 	generation := attemptgeneration.Generation{}
@@ -724,20 +735,24 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 		}
 		window = string(decoded)
 	}
-	nodeID, eventType, ok := strings.Cut(key, ":")
+	nodeKey, eventType, ok := strings.Cut(key, ":")
 	if !ok {
 		return AccumulatorBucketRef{}, false
 	}
-	bucket := NewAccumulatorBucketRefForGeneration(nodeID, eventType, window, generation)
+	node, err := runtimeidentity.ParseExecutableNodeKey(nodeKey)
+	if err != nil {
+		return AccumulatorBucketRef{}, false
+	}
+	bucket := NewAccumulatorBucketRefForGeneration(node, eventType, window, generation)
 	return bucket, bucket.Valid()
 }
 
 func (r AccumulatorBucketRef) Normalize() AccumulatorBucketRef {
-	return NewAccumulatorBucketRefForGeneration(r.NodeID, r.EventType, r.Window, r.Generation)
+	return NewAccumulatorBucketRefForGeneration(r.Node, r.EventType, r.Window, r.Generation)
 }
 
 func (r AccumulatorBucketRef) Valid() bool {
-	return strings.TrimSpace(r.NodeID) != "" && strings.TrimSpace(r.EventType) != ""
+	return r.Node.Valid() && strings.TrimSpace(r.EventType) != ""
 }
 
 func (r AccumulatorBucketRef) Key() string {
@@ -745,7 +760,7 @@ func (r AccumulatorBucketRef) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	key := r.NodeID + ":" + r.EventType
+	key := r.Node.Key() + ":" + r.EventType
 	if r.Window == "" {
 		if suffix := r.Generation.KeySuffix(); suffix != "" {
 			return key + "@generation=" + suffix
@@ -770,4 +785,9 @@ func stringAnyMap(value any) (map[string]any, bool) {
 func asString(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func asExactString(value any) string {
+	text, _ := value.(string)
+	return text
 }

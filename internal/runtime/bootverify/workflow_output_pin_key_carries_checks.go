@@ -134,7 +134,7 @@ func validateOutputPinKeyCarriesNodeEmitSites(source semanticview.Source) []Find
 	var findings []Finding
 	seen := map[string]struct{}{}
 	for _, site := range pinRoutingEmitSites(source) {
-		for _, pin := range outputPinKeyCarriesPinsForEvent(source, site.FlowID, site.Spec.EventType()) {
+		for _, pin := range outputPinKeyCarriesPinsForEvent(source, site.FlowID(), site.Spec.EventType()) {
 			for _, field := range outputPinRequiredFields(pin) {
 				if _, ok := site.Spec.Fields[field]; ok {
 					continue
@@ -144,7 +144,7 @@ func validateOutputPinKeyCarriesNodeEmitSites(source semanticview.Source) []Find
 					continue
 				}
 				seen[key] = struct{}{}
-				findings = append(findings, outputPinKeyCarriesFinding(site.FlowID, pin, "emit_payload_missing_key", fmt.Sprintf("node %s emit site %s emits output pin %s event %s but emit.fields does not statically prove carried field %s", site.NodeID, site.Site, pin.PinName(), pin.EventType(), field)))
+				findings = append(findings, outputPinKeyCarriesFinding(site.FlowID(), pin, "emit_payload_missing_key", fmt.Sprintf("node %s emit site %s emits output pin %s event %s but emit.fields does not statically prove carried field %s", site.Node.Key(), site.Site, pin.PinName(), pin.EventType(), field)))
 			}
 		}
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 func TestWorkflowNodeDeliveryRouteInstallsReplyContext(t *testing.T) {
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("provider-node"), Context: events.DeliveryContext{
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, "", "provider-node")), Context: events.DeliveryContext{
 		Reply: &events.ReplyContextRef{ID: "reply-v1:node-delivery"},
 	},
 	}

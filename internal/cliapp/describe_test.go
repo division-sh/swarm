@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
@@ -497,14 +499,15 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	var foundJoinComplete bool
 	var foundJoinTimeout bool
 	var foundTimedAdvance bool
+	supportNodeID := identitytest.FlowNode(t, "support", "support-node").Key()
 	for _, edge := range graph.Edges {
-		if edge.Source == "handler.advances_to" && edge.NodeID == "support-node" && edge.EventType == "ticket.opened" && edge.To == "active" {
+		if edge.Source == "handler.advances_to" && edge.NodeID == supportNodeID && edge.EventType == "ticket.opened" && edge.To == "active" {
 			foundOpenedAdvance = true
 		}
-		if edge.Source == "handler.join.on_complete" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "review" {
+		if edge.Source == "handler.join.on_complete" && edge.NodeID == supportNodeID && edge.EventType == "ticket.closed" && edge.To == "review" {
 			foundJoinComplete = true
 		}
-		if edge.Source == "handler.join.timeout" && edge.NodeID == "support-node" && edge.EventType == "platform.join_timeout" && edge.TimerID == "active" && edge.After == "1h" && edge.To == "timed_out" {
+		if edge.Source == "handler.join.timeout" && edge.NodeID == supportNodeID && edge.EventType == "platform.join_timeout" && edge.TimerID == "active" && edge.After == "1h" && edge.To == "timed_out" {
 			foundJoinTimeout = true
 		}
 		if edge.Source == "timer" && edge.TimerID == "support.active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
@@ -530,7 +533,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		t.Fatalf("graph fan_outs = %#v, want ticket.opened collection fan-out", graph.FanOuts)
 	}
 	fanOut := graph.FanOuts[0]
-	if fanOut.Emit != "line_item.requested" || fanOut.ItemsFrom != "payload.line_items" || fanOut.ItemAlias != "line_item" || fanOut.Identity != "line_item" {
+	if fanOut.NodeID != supportNodeID || fanOut.EventType != "ticket.opened" || fanOut.Emit != "support/line_item.requested" || fanOut.ItemsFrom != "payload.line_items" || fanOut.ItemAlias != "line_item" || fanOut.Identity != "line_item" {
 		t.Fatalf("graph fan_out = %#v, want line_item multiplicity metadata", fanOut)
 	}
 
@@ -550,13 +553,13 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"flow support (support):",
 		"waiting [initial]",
 		"review [terminal]",
-		"handler.advances_to support-node on ticket.opened",
-		"handler.join.on_complete support-node on ticket.closed",
-		"handler.join.timeout support-node on platform.join_timeout after 1h timer active",
+		fmt.Sprintf("handler.advances_to %s on ticket.opened", supportNodeID),
+		fmt.Sprintf("handler.join.on_complete %s on ticket.closed", supportNodeID),
+		fmt.Sprintf("handler.join.timeout %s on platform.join_timeout after 1h timer active", supportNodeID),
 		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
 		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
 		"active after 72h advances_to timed_out (timer support.active.timed_out)",
-		"waiting ->xN line_item.requested items_from payload.line_items as line_item identity line_item max_items 1000 (handler.fan_out support-node on ticket.opened)",
+		fmt.Sprintf("waiting ->xN support/line_item.requested items_from payload.line_items as line_item identity line_item max_items 1000 (handler.fan_out %s on ticket.opened)", supportNodeID),
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)

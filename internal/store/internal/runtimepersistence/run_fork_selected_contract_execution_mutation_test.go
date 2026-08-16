@@ -775,7 +775,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	sourceTimerID := uuid.NewString()
 	sourceRef := timeridentity.WorkflowTimerActivationRef{
 		ActivationID:        sourceTimerID,
-		Declaration:         "selected-timer",
+		DeclarationKey:      "selected-timer",
 		DeclarationRevision: "sha256:selected-timer",
 		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
@@ -1126,14 +1126,15 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	postForkRouteNode := mustPersistenceNode("flow-a", "post-t-source-route-node").Key()
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO routing_rules (
 			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
 			is_materialized, status, created_at
 		)
-		VALUES ('item.received', 'node', 'post-t-source-route-node', 'flow-a/1', 'flow-a', true, 'active', $1)
-	`, at.Add(time.Minute)); err != nil {
+		VALUES ('item.received', 'node', $1, 'flow-a/1', 'flow-a', true, 'active', $2)
+	`, postForkRouteNode, at.Add(time.Minute)); err != nil {
 		t.Fatalf("seed post-T route: %v", err)
 	}
 
@@ -1184,8 +1185,8 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM routing_rules
-		WHERE subscriber_id = 'post-t-source-route-node'
-	`).Scan(&sourceRouteRows); err != nil {
+		WHERE subscriber_id = $1
+	`, postForkRouteNode).Scan(&sourceRouteRows); err != nil {
 		t.Fatalf("count source route rows: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `

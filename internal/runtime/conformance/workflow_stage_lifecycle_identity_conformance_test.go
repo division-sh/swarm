@@ -496,7 +496,7 @@ func assertStageLifecycleTimerIdentity(t *testing.T, ctx context.Context, select
 
 func loadStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInstance, batchID string) joinruntime.Activation {
 	t.Helper()
-	activation, ok := findStageLifecycleJoin(instance, batchID)
+	activation, ok := findStageLifecycleJoin(t, instance, batchID)
 	if !ok {
 		t.Fatalf("load singleton join %q: activation is missing", batchID)
 	}
@@ -509,7 +509,7 @@ func findStageLifecycleJoin(instance runtimepipeline.WorkflowInstance, batchID s
 		return joinruntime.Activation{}, false
 	}
 	key := joinruntime.ActivationKey("awaiting", "awaiting", batchID)
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, "scout-coordinator", key)
+	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformanceNode(t, "scout", "scout-coordinator"), key)
 	if err != nil || !ok {
 		return joinruntime.Activation{}, false
 	}

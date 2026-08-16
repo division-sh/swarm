@@ -20,11 +20,11 @@ import (
 func TestSyntheticCarryProjectionIsRouteScopedForMixedDeliveries(t *testing.T) {
 	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	projection := mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "case-1"})
-	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), PayloadProjection: projection})
+	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator")), PayloadProjection: projection})
 	if err != nil {
 		t.Fatalf("project synthetic route: %v", err)
 	}
-	unprojected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("auditor")})
+	unprojected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "auditor"))})
 	if err != nil {
 		t.Fatalf("project ordinary route: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestMixedRoutePlanUsesTargetSetForSingleTargetAndTargetlessDelivery(t *test
 	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	plan := newRoutePlan(evt)
 	plan.AddDeliveryIntents(
-		RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("worker"), TargetOwnership: events.MustExistingEntityTarget(target), Persist: true},
+		RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker")), TargetOwnership: events.MustExistingEntityTarget(target), Persist: true},
 		RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient("observer"), AgentIdentity: testAgentRouteIdentity(t, "observer", ""), Persist: true},
 	)
 
@@ -164,11 +164,11 @@ func TestPreparedPublishEventValidateCanonicalTargetProjectionShapes(t *testing.
 		FlowID: "worker", FlowInstance: "worker/two", EntityID: eventtest.UUID("prepared-projection-second"),
 	}.Normalized()
 	firstRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("worker-one"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker-one")),
 		Target:    events.MustExistingEntityTarget(first),
 	}
 	secondRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("worker-two"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker-two")),
 		Target:    events.MustExistingEntityTarget(second),
 	}
 	targetless := exactAgentDeliveryRoute(testAgentRouteIdentity(t, "observer", ""))
@@ -202,11 +202,11 @@ func TestPreparedPublishEventTargetSetProjectionIsDeterministicAcrossRouteOrder(
 		FlowID: "worker", FlowInstance: "worker/z", EntityID: eventtest.UUID("prepared-order-second"),
 	}.Normalized()
 	firstRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("worker-a"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker-a")),
 		Target:    events.MustExistingEntityTarget(first),
 	}
 	secondRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("worker-z"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker-z")),
 		Target:    events.MustExistingEntityTarget(second),
 	}
 
@@ -239,11 +239,11 @@ func TestPreparedPublishEventRejectsTargetProjectionShapeDrift(t *testing.T) {
 		FlowID: "foreign", FlowInstance: "foreign/one", EntityID: eventtest.UUID("prepared-hostile-foreign"),
 	}.Normalized()
 	firstRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("worker-one"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker-one")),
 		Target:    events.MustExistingEntityTarget(first),
 	}
 	secondRoute := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("worker-two"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "worker-two")),
 		Target:    events.MustExistingEntityTarget(second),
 	}
 	targetless := exactAgentDeliveryRoute(testAgentRouteIdentity(t, "observer", ""))
@@ -280,15 +280,15 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	target := events.RouteIdentity{
 		FlowID: "worker", FlowInstance: "worker/inst-1", EntityID: uuid.NewString(),
 	}.Normalized()
-	targetHandler := runtimepipeline.MustDeliveryTargetHandler("worker", "target-node")
+	targetNode := testFlowNode(t, "worker", "target-node")
+	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
 	routeTable := newRouteTable(nil)
 	routeTable.eventPath[eventType] = struct{}{}
 	routeTable.routes[eventType] = []Subscriber{{
-		Recipient:      events.MustNodeDeliveryRecipient("target-node"),
+		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
 		Path:           "worker",
 		LocalizedEvent: "work.started",
-		handlerFlowID:  "worker",
-		handlerNodeID:  "target-node",
+		handlerNode:    targetNode,
 		targetHandler:  targetHandler,
 		routeSource:    subscriberRouteSourceSubscription,
 	}}
@@ -301,7 +301,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 		RouteTable: routeTable,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{{
-				Recipient: events.MustNodeDeliveryRecipient("target-node"),
+				Recipient: events.MustNodeDeliveryRecipient(targetNode),
 				Target:    target,
 				Handler:   targetHandler.ForEvent("work.started"),
 			}}, nil
@@ -448,7 +448,7 @@ func TestRoutePlanTargetProjectionPreservesExplicitlyAbsentIngressSource(t *test
 	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver"}
 	plan := newRoutePlan(evt)
 	plan.AddDeliveryIntents(RoutePlanDeliveryIntent{
-		Recipient:       events.MustNodeDeliveryRecipient("receiver"),
+		Recipient:       events.MustNodeDeliveryRecipient(testRootNode(t, "receiver")),
 		TargetOwnership: events.MustEntitylessReceiverTarget(target),
 		Persist:         true,
 	})
@@ -484,14 +484,15 @@ func TestCreateSyntheticCarryFailsClosedOnDynamicPayloadCollisionBeforeHandler(t
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
+	validator := testRootNode(t, "validator")
+	ch := subscribeInternalDeliveriesForTest(t, eb, validator.Key())
 	evt := eventtest.RunCreatingRootIngress("collision-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"validation_case_id":"producer-value"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{
-		Recipient:         events.MustNodeDeliveryRecipient("validator"),
+		Recipient:         events.MustNodeDeliveryRecipient(validator),
 		Target:            events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"}),
 	}
-	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"validator"}, []events.DeliveryRoute{route})
+	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{validator.Key()}, []events.DeliveryRoute{route})
 	if err == nil || !strings.Contains(err.Error(), "delivery payload projection conflicts with producer field") {
 		t.Fatalf("delivery error = %v, want synthetic carry collision", err)
 	}
@@ -508,15 +509,15 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/one", EntityID: "entity-1"}),
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/one", EntityID: "entity-1"}),
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "case-1"}),
 	}
 	interceptor := &projectionCaptureInterceptor{}
 	if _, _, _, err := eb.runNodeDeliveryRouteInterceptors(context.Background(), evt, []events.DeliveryRoute{route}, []DeliveryRouteInterceptor{interceptor}); err != nil {
 		t.Fatalf("run route interceptor: %v", err)
 	}
-	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
-	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"validator"}, []events.DeliveryRoute{route}); err != nil {
+	ch := subscribeInternalDeliveriesForTest(t, eb, route.Recipient.ID())
+	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{route.Recipient.ID()}, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("deliver live route: %v", err)
 	}
 	live := <-ch

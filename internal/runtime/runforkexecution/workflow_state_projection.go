@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -68,10 +69,11 @@ func selectedContractWorkflowStateProjection(
 			continue
 		}
 		for _, recipient := range event.Recipients {
-			if !recipient.Recipient.IsNode() {
+			node, exact := recipient.Recipient.Node()
+			if !exact {
 				continue
 			}
-			state, err := selectedContractNodeWorkflowState(source, eventID, entityID, recipient.Recipient.ID(), recipient.Path)
+			state, err := selectedContractNodeWorkflowState(source, eventID, entityID, node, recipient.Path)
 			if err != nil {
 				return nil, err
 			}
@@ -155,18 +157,22 @@ func selectedContractPlatformActivityWorkflowState(
 
 func selectedContractNodeWorkflowState(
 	source semanticview.Source,
-	eventID, entityID, nodeID, recipientPath string,
+	eventID, entityID string,
+	node runtimeidentity.ExecutableNode,
+	recipientPath string,
 ) (runfork.RunForkSelectedContractWorkflowState, error) {
-	contractSource, ok := source.NodeContractSource(strings.TrimSpace(nodeID))
-	if !ok {
-		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract node %s has no semantic owner", nodeID)
+	if !node.Valid() {
+		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract recipient has no exact executable node identity")
 	}
-	flowID := strings.TrimSpace(contractSource.FlowID)
-	if flowID == "" && strings.TrimSpace(contractSource.Layer) == "project" {
-		flowID = strings.TrimSpace(source.WorkflowName())
+	if _, ok := source.ExecutableNode(node); !ok {
+		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract node %s has no semantic owner", node.Key())
+	}
+	flowID := node.FlowID()
+	if flowID == "" {
+		flowID = semanticview.RootExecutionFlowID(source)
 	}
 	if flowID == "" {
-		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract node %s has no workflow identity", nodeID)
+		return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract node %s has no workflow identity", node.Key())
 	}
 	state := runfork.RunForkSelectedContractWorkflowState{
 		SourceEventID: eventID, EntityID: entityID, FlowID: flowID,

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -55,8 +56,9 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 		time.Now().UTC(),
 	)
 	seedTemplateFlowPilotPipelineEvent(t, db, ctx, evt)
-	seedTemplateFlowPilotPipelineNodeDelivery(t, db, ctx, evt.ID(), "account-node", target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-node"), Target: events.MustExistingEntityTarget(target)}
+	node := pipelineSourceNode(t, source, "account", "account-node")
+	seedTemplateFlowPilotPipelineNodeDelivery(t, db, ctx, evt.ID(), node, target)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {
@@ -78,7 +80,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	if loaded.Fields["account_id"] != "acct-1" || loaded.Fields["score"] != "91" || loaded.Fields["decision"] != "approved" {
 		t.Fatalf("loaded account fields = %#v, want account_id/score/decision from routed payload", loaded.Fields)
 	}
-	assertTemplateFlowPilotPipelineDeliveryStatus(t, db, evt.ID(), "account-node", "delivered")
+	assertTemplateFlowPilotPipelineDeliveryStatus(t, db, evt.ID(), node.Key(), "delivered")
 }
 
 func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
@@ -116,9 +118,9 @@ func seedTemplateFlowPilotPipelineEvent(t *testing.T, db *sql.DB, ctx context.Co
 	seedPipelineEventRecord(t, ctx, db, evt)
 }
 
-func seedTemplateFlowPilotPipelineNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID, nodeID string, target events.RouteIdentity) {
+func seedTemplateFlowPilotPipelineNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) {
 	t.Helper()
-	seedPipelineTestNodeDelivery(t, ctx, db, eventID, nodeID, target)
+	seedPipelineTestNodeDelivery(t, ctx, db, eventID, node, target)
 }
 
 func assertTemplateFlowPilotPipelineDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {

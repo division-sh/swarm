@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
@@ -15,7 +16,7 @@ type workflowTriggerContext struct {
 }
 
 type handlerExecutionPlan struct {
-	NodeID           string
+	Node             runtimeidentity.ExecutableNode
 	EventType        string
 	Guard            string
 	GuardSpec        *runtimecontracts.GuardSpec
@@ -65,9 +66,9 @@ func gateSpecString(spec *runtimecontracts.GateSpec) string {
 	return strings.TrimSpace(spec.Name)
 }
 
-func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
+func handlerExecutionPlanFromNodeHandler(node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
 	plan := handlerExecutionPlan{
-		NodeID:           strings.TrimSpace(nodeID),
+		Node:             node,
 		EventType:        strings.TrimSpace(eventType),
 		Guard:            handlerGuardID(handler.Guard),
 		GuardSpec:        handler.Guard,

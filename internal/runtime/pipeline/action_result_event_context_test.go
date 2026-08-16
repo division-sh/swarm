@@ -106,8 +106,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			execCtx := runtimeengine.ExecutionContext{
 				Request: runtimeengine.ExecutionRequest{
 					EntityID:   identity.NormalizeEntityID(entityID),
-					FlowID:     identity.NormalizeFlowID("repo-scaffold"),
-					NodeID:     identity.NormalizeNodeID("repo-scaffold-node"),
+					Node:       pipelineNode(t, "repo-scaffold", "repo-scaffold-node"),
 					Event:      parent,
 					ChainDepth: 4,
 					State: runtimeengine.StateSnapshot{

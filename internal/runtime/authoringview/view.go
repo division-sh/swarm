@@ -8,6 +8,7 @@ import (
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -157,6 +158,7 @@ type StageGraphTimerView struct {
 type StageGraphJoinView struct {
 	ID              string `json:"id"`
 	Stage           string `json:"stage"`
+	PackageKey      string `json:"package_key"`
 	NodeID          string `json:"node_id"`
 	HandlerEvent    string `json:"handler_event"`
 	MembersFrom     string `json:"members_from"`
@@ -385,8 +387,8 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) []Appr
 		result := runtimecontracts.ActivityResultEventsForSite(site)
 		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
 		out = append(out, ApprovalPointView{
-			FlowID:       strings.TrimSpace(site.FlowID),
-			NodeID:       strings.TrimSpace(site.NodeID),
+			FlowID:       site.Node.FlowID(),
+			NodeID:       site.Node.Key(),
 			HandlerEvent: strings.TrimSpace(site.HandlerEventKey),
 			Source:       strings.TrimSpace(site.Source),
 			ActivityID:   result.ActivityID,
@@ -579,7 +581,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 		return nil
 	}
 	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
-	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
+	if graph := buildStageGraphForFlow(source, runtimeidentity.RootPackageKey, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 		graphs = append(graphs, graph)
 	}
 	for _, flow := range bundle.FlowViews() {
@@ -588,14 +590,14 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
-		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
+		if graph := buildStageGraphForFlow(source, flow.Paths.PackageKey, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.Joins) > 0 || len(graph.FanOuts) > 0 || len(graph.Gates) > 0 {
 			graphs = append(graphs, graph)
 		}
 	}
 	return graphs
 }
 
-func buildStageGraphForFlow(source semanticview.Source, flowID, label, path string) StageGraphView {
+func buildStageGraphForFlow(source semanticview.Source, packageKey, flowID, label, path string) StageGraphView {
 	initial := strings.TrimSpace(source.FlowInitialStage(flowID))
 	terminalSet := authoringStringSet(source.FlowTerminalStages(flowID))
 	states := source.FlowStates(flowID)
@@ -620,25 +622,26 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		Nodes:    nodes,
 		Edges:    buildStageGraphEdgesForFlow(source, flowID),
 		Timers:   buildStageGraphTimersForFlow(source, flowID),
-		Joins:    buildStageGraphJoinsForFlow(source, flowID),
-		FanOuts:  buildStageGraphFanOutsForFlow(source, flowID, initial, states, terminalSet),
+		Joins:    buildStageGraphJoinsForFlow(source, packageKey, flowID),
+		FanOuts:  buildStageGraphFanOutsForFlow(source, packageKey, flowID, initial, states, terminalSet),
 		Gates:    buildStageGraphGatesForFlow(source, flowID),
 	}
 }
 
-func buildStageGraphJoinsForFlow(source semanticview.Source, flowID string) []StageGraphJoinView {
+func buildStageGraphJoinsForFlow(source semanticview.Source, packageKey, flowID string) []StageGraphJoinView {
 	if source == nil {
 		return nil
 	}
 	out := make([]StageGraphJoinView, 0)
 	for _, plan := range source.WorkflowJoins() {
-		if strings.TrimSpace(plan.FlowID) != strings.TrimSpace(flowID) {
+		if plan.Node.PackageKey() != normalizeAuthoringPackageKey(packageKey) || plan.Node.FlowID() != strings.TrimSpace(flowID) {
 			continue
 		}
 		item := StageGraphJoinView{
 			ID:              strings.TrimSpace(plan.Spec.EffectiveID()),
 			Stage:           strings.TrimSpace(plan.Spec.Stage),
-			NodeID:          strings.TrimSpace(plan.NodeID),
+			PackageKey:      plan.Node.PackageKey(),
+			NodeID:          plan.Node.NodeID(),
 			HandlerEvent:    strings.TrimSpace(plan.HandlerEvent),
 			MembersFrom:     strings.TrimSpace(plan.Spec.Members.From),
 			MembersBy:       strings.TrimSpace(plan.Spec.Members.By),
@@ -709,11 +712,15 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID string) []St
 	}
 	edges := make([]StageGraphEdgeView, 0, len(topology.Edges))
 	for _, edge := range topology.Edges {
+		owner := edge.Node.Key()
+		if owner == "" {
+			owner = strings.TrimSpace(edge.InternalOwner)
+		}
 		edges = append(edges, StageGraphEdgeView{
 			From:          []string{edge.From},
 			To:            edge.To,
 			Source:        edge.Source,
-			NodeID:        edge.NodeID,
+			NodeID:        owner,
 			HandlerEvent:  edge.HandlerEvent,
 			EventType:     edge.EventType,
 			Timed:         edge.Timed,
@@ -797,7 +804,7 @@ func buildStageGraphTimersForFlow(source semanticview.Source, flowID string) []S
 	return out
 }
 
-func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphFanOutView {
+func buildStageGraphFanOutsForFlow(source semanticview.Source, packageKey, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphFanOutView {
 	if source == nil {
 		return nil
 	}
@@ -813,21 +820,21 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 		nonTerminal = append(nonTerminal, state)
 	}
 	out := make([]StageGraphFanOutView, 0)
-	nodes := source.NodeEntries()
-	for _, nodeID := range sortedAuthoringNodeIDs(nodes) {
-		node := nodes[nodeID]
-		if !authoringNodeBelongsToFlow(source, nodeID, flowID) {
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil || node.PackageKey() != normalizeAuthoringPackageKey(packageKey) || node.FlowID() != strings.TrimSpace(flowID) {
 			continue
 		}
-		eventTypes := make([]string, 0, len(node.EventHandlers))
-		for eventType := range node.EventHandlers {
+		handlers := source.ExecutableNodeEventHandlers(node)
+		eventTypes := make([]string, 0, len(handlers))
+		for eventType := range handlers {
 			if eventType = strings.TrimSpace(eventType); eventType != "" {
 				eventTypes = append(eventTypes, eventType)
 			}
 		}
 		sort.Strings(eventTypes)
 		for _, eventType := range eventTypes {
-			handler := node.EventHandlers[eventType]
+			handler := handlers[eventType]
 			from := append([]string{}, nonTerminal...)
 			if handler.CreateEntity {
 				from = nil
@@ -835,7 +842,7 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 					from = []string{strings.TrimSpace(initial)}
 				}
 			}
-			out = append(out, fanOutViewsForHandler(source, flowID, from, strings.TrimSpace(nodeID), eventType, handler)...)
+			out = append(out, fanOutViewsForHandler(source, node, from, eventType, handler)...)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -858,15 +865,7 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 	return out
 }
 
-func authoringNodeBelongsToFlow(source semanticview.Source, nodeID, flowID string) bool {
-	sourceInfo, ok := source.NodeContractSource(nodeID)
-	if ok {
-		return strings.TrimSpace(sourceInfo.FlowID) == strings.TrimSpace(flowID)
-	}
-	return strings.TrimSpace(flowID) == ""
-}
-
-func fanOutViewsForHandler(source semanticview.Source, flowID string, from []string, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []StageGraphFanOutView {
+func fanOutViewsForHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, from []string, eventType string, handler runtimecontracts.SystemNodeEventHandler) []StageGraphFanOutView {
 	out := make([]StageGraphFanOutView, 0, 5)
 	add := func(siteSource string, spec *runtimecontracts.FanOutSpec) {
 		if spec == nil {
@@ -876,7 +875,7 @@ func fanOutViewsForHandler(source semanticview.Source, flowID string, from []str
 		if emit == "" {
 			return
 		}
-		effective, err := source.ResolveFanOutEffectiveSemantics(flowID, eventType, *spec)
+		effective, err := source.ResolveFanOutEffectiveSemantics(node, eventType, *spec)
 		if err != nil {
 			return
 		}
@@ -888,7 +887,7 @@ func fanOutViewsForHandler(source semanticview.Source, flowID string, from []str
 			Identity:  effective.Identity,
 			MaxItems:  effective.MaxItems,
 			Source:    strings.TrimSpace(siteSource),
-			NodeID:    strings.TrimSpace(nodeID),
+			NodeID:    node.Key(),
 			EventType: strings.TrimSpace(eventType),
 		})
 	}
@@ -1141,23 +1140,12 @@ func containedOperationsByFlow(source semanticview.Source, bundle *runtimecontra
 	if source == nil || bundle == nil {
 		return out
 	}
-	for _, project := range bundle.ProjectViews() {
-		for _, nodeID := range sortedNodeIDs(project.Nodes) {
-			flowID := ""
-			sourceFile := strings.TrimSpace(project.Paths.ProjectNodesFile)
-			if sourceRef, ok := source.NodeContractSource(nodeID); ok {
-				flowID = strings.TrimSpace(sourceRef.FlowID)
-				sourceFile = firstNonEmpty(authoredFileForSource(bundle, sourceRef), sourceFile)
-			}
-			appendContainedOperations(out, source, flowID, nodeID, sourceFile, project.Nodes[nodeID])
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
 		}
-	}
-	for _, flow := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(flow.Paths.ID)
-		sourceFile := strings.TrimSpace(flow.Paths.NodesFile)
-		for _, nodeID := range sortedNodeIDs(flow.Nodes) {
-			appendContainedOperations(out, source, flowID, nodeID, sourceFile, flow.Nodes[nodeID])
-		}
+		appendContainedOperations(out, source, node.FlowID(), node.Key(), authoredFileForSource(bundle, record.Source), record.Entry)
 	}
 	return out
 }
@@ -1277,8 +1265,10 @@ func authoredLocationForFinding(bundle *runtimecontracts.WorkflowContractBundle,
 	if location == "" || location == "<root>" || location == "root" {
 		return firstNonEmpty(bundle.Paths.RootSchemaFile, bundle.Paths.ProjectPackageFile)
 	}
-	if source, ok := bundle.NodeContractSource(location); ok {
-		return authoredFileForSource(bundle, source)
+	if node, err := runtimeidentity.ParseExecutableNodeKey(location); err == nil {
+		if record, ok := bundle.ExecutableNode(node); ok {
+			return authoredFileForSource(bundle, record.Source)
+		}
 	}
 	if flow, ok := bundle.FlowViewByID(location); ok {
 		return strings.TrimSpace(flow.Paths.SchemaFile)
@@ -1292,6 +1282,14 @@ func authoredLocationForFinding(bundle *runtimecontracts.WorkflowContractBundle,
 		}
 	}
 	return firstNonEmpty(bundle.Paths.ProjectPackageFile, bundle.Paths.RootSchemaFile)
+}
+
+func normalizeAuthoringPackageKey(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), "/")
+	if value == "" {
+		return runtimeidentity.RootPackageKey
+	}
+	return value
 }
 
 func authoredFileForSource(bundle *runtimecontracts.WorkflowContractBundle, source runtimecontracts.ContractItemSource) string {

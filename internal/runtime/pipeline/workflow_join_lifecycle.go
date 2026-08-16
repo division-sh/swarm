@@ -28,7 +28,7 @@ func workflowJoinPlansForStage(source semanticview.Source, route runtimeflowiden
 	ownerScope := strings.Trim(strings.TrimSpace(route.ScopeKey), "/")
 	hasFlowOwner := false
 	for _, plan := range source.WorkflowJoins() {
-		flowID := strings.TrimSpace(plan.FlowID)
+		flowID := plan.Node.FlowID()
 		if flowID != "" && runtimeflowidentity.ScopeKey(source, flowID) == ownerScope {
 			hasFlowOwner = true
 			break
@@ -36,7 +36,7 @@ func workflowJoinPlansForStage(source semanticview.Source, route runtimeflowiden
 	}
 	out := make([]runtimecontracts.WorkflowJoinPlan, 0, 1)
 	for _, plan := range source.WorkflowJoins() {
-		planFlowID := strings.TrimSpace(plan.FlowID)
+		planFlowID := plan.Node.FlowID()
 		flowMatches := planFlowID == "" && !hasFlowOwner ||
 			planFlowID != "" && runtimeflowidentity.ScopeKey(source, planFlowID) == ownerScope
 		if flowMatches && strings.TrimSpace(plan.Spec.Stage) == stage {

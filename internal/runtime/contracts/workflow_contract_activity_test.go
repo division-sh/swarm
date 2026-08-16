@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,7 +76,7 @@ func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.
 	if _, ok := bundle.ResolvedEventCatalog()[failure]; !ok {
 		t.Fatalf("ResolvedEventCatalog missing generated failure event %q", failure)
 	}
-	produces := bundle.NodeEffectiveProduces("scanner")
+	produces := bundle.GeneratedActivityEventsForExecutableNode(identitytest.RootNode(t, "scanner"))
 	if !stringSliceContains(produces, success) || !stringSliceContains(produces, failure) {
 		t.Fatalf("NodeEffectiveProduces = %#v, want generated activity result events", produces)
 	}

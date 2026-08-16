@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -108,7 +109,8 @@ func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testin
 	})
 	route := events.RouteIdentity{FlowID: "root-workflow", FlowInstance: "run-one"}
 
-	got, err := AdmitNodeExecutionRoutingSource(source, "root-workflow", "root-node", route)
+	node := identitytest.RootNode(t, "root-node")
+	got, err := AdmitNodeExecutionRoutingSource(source, node, "root-workflow", route)
 	if err != nil {
 		t.Fatalf("AdmitNodeExecutionRoutingSource: %v", err)
 	}
@@ -116,7 +118,7 @@ func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testin
 		t.Fatalf("routing source = %s %#v, want entityless static flow %#v", got.Kind().StorageCode(), got.Route(), route)
 	}
 
-	if _, err := AdmitNodeExecutionRoutingSource(source, "root-workflow", "root-node", events.RouteIdentity{FlowID: "root-workflow"}); err == nil || !strings.Contains(err.Error(), "exact selected-run flow route") {
+	if _, err := AdmitNodeExecutionRoutingSource(source, node, "root-workflow", events.RouteIdentity{FlowID: "root-workflow"}); err == nil || !strings.Contains(err.Error(), "exact selected-run flow route") {
 		t.Fatalf("incomplete entityless source error = %v", err)
 	}
 }

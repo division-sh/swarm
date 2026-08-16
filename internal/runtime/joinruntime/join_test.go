@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
@@ -56,7 +57,7 @@ func TestActivationPersistsThroughTypedStateBuckets(t *testing.T) {
 	if err := Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	loaded, ok, err := Load(buckets, "node", activation.Key())
+	loaded, ok, err := Load(buckets, identitytest.RootNode(t, "node"), activation.Key())
 	if err != nil || !ok {
 		t.Fatalf("load = %#v, %v, %v", loaded, ok, err)
 	}
@@ -85,10 +86,11 @@ func TestJoinActivationPersistsTypedDeclarationHandle(t *testing.T) {
 	handle, ok := raw["timer_handle"].(map[string]any)
 	join, joinOK := handle["join"].(map[string]any)
 	persistedGeneration, generationOK := join[attemptgeneration.PayloadKey].(map[string]any)
-	if !ok || !joinOK || !generationOK || join["flow_id"] != "" || join["node_id"] != "join-node" || persistedGeneration["revision_id"] != "rev-2" {
+	persistedNode, nodeOK := join["node"].(map[string]any)
+	if !ok || !joinOK || !nodeOK || !generationOK || persistedNode["package_key"] != "." || persistedNode["flow_id"] != "" || persistedNode["node_id"] != "join-node" || persistedGeneration["revision_id"] != "rev-2" {
 		t.Fatalf("persisted typed handle = %#v", raw["timer_handle"])
 	}
-	loaded, found, err := Load(buckets, "join-node", activation.Key())
+	loaded, found, err := Load(buckets, identitytest.RootNode(t, "join-node"), activation.Key())
 	if err != nil || !found || !loaded.JoinRef().Equal(activation.JoinRef()) || loaded.TimerTaskID() != activation.TimerTaskID() {
 		t.Fatalf("typed activation readback = found:%v activation:%#v err:%v", found, loaded, err)
 	}
@@ -112,7 +114,7 @@ func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
 			}
 			row[retired] = "retired-authority"
 			buckets := map[string]map[string]any{"join-node": {bucketKey: map[string]any{activation.Key(): row}}}
-			if loaded, found, err := Load(buckets, "join-node", activation.Key()); err == nil || found {
+			if loaded, found, err := Load(buckets, identitytest.RootNode(t, "join-node"), activation.Key()); err == nil || found {
 				t.Fatalf("retired row loaded as %#v found=%v err=%v", loaded, found, err)
 			}
 		})
@@ -160,7 +162,11 @@ func TestCompletionSatisfiedUsesOneDefaultAndCustomOwner(t *testing.T) {
 
 func testJoinHandle(t *testing.T, flowID, joinID, stage, nodeID, handlerEvent, window string, generation attemptgeneration.Generation) timeridentity.TimerHandle {
 	t.Helper()
-	ref, err := timeridentity.NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window, generation)
+	node := identitytest.RootNode(t, nodeID)
+	if flowID != "" {
+		node = identitytest.FlowNode(t, flowID, nodeID)
+	}
+	ref, err := timeridentity.NewJoinRefForGeneration(node, handlerEvent, stage, joinID, window, generation)
 	if err != nil {
 		t.Fatal(err)
 	}

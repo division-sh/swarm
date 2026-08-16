@@ -2929,7 +2929,7 @@ func serveStateStoreSummaryAt(summaries []string, index int) string {
 
 func serveBootRegistryDetail(source semanticview.Source) string {
 	availableToolNames := runtimetools.RuntimeAvailableToolNamesForSource(source)
-	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(semanticview.AgentDeclarations(source)), len(source.ResolvedEventCatalog()), len(availableToolNames))
+	return fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.ExecutableNodeRecords()), len(semanticview.AgentDeclarations(source)), len(source.ResolvedEventCatalog()), len(availableToolNames))
 }
 
 func serveBootBundleLoadDetail(fingerprint string, source semanticview.Source) string {

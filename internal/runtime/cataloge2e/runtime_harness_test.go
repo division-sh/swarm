@@ -22,6 +22,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -1218,8 +1219,8 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 	if h == nil || h.bundle == nil {
 		return runtimepipeline.HandlerPreview{}, false
 	}
-	nodeID := firstMatchingNodeHandler(h.bundle, strings.TrimSpace(string(evt.Type())))
-	if nodeID == "" {
+	node := firstMatchingNodeHandler(h.bundle, strings.TrimSpace(string(evt.Type())))
+	if node.Empty() {
 		return runtimepipeline.HandlerPreview{}, false
 	}
 	entityID := strings.TrimSpace(evt.EntityID())
@@ -1232,23 +1233,28 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 			state.Metadata = cloneStringAnyMap(instance.Fields)
 		}
 	}
-	preview, err := runtimepipeline.PreviewContractHandlerExecution(h.ctx, h.bundle, nodeID, evt, state, nil)
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(h.ctx, h.bundle, node, evt, state, nil)
 	if err != nil {
 		return runtimepipeline.HandlerPreview{}, false
 	}
 	return preview, true
 }
 
-func firstMatchingNodeHandler(bundle *runtimecontracts.WorkflowContractBundle, eventType string) string {
+func firstMatchingNodeHandler(bundle *runtimecontracts.WorkflowContractBundle, eventType string) runtimeidentity.ExecutableNode {
 	if bundle == nil || strings.TrimSpace(eventType) == "" {
-		return ""
+		return runtimeidentity.ExecutableNode{}
 	}
-	for nodeID := range bundle.Nodes {
-		if _, ok := bundle.NodeEventHandler(nodeID, eventType); ok {
-			return strings.TrimSpace(nodeID)
+	source := semanticview.Wrap(bundle)
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		if _, ok := source.ExecutableNodeEventHandler(node, eventType); ok {
+			return node
 		}
 	}
-	return ""
+	return runtimeidentity.ExecutableNode{}
 }
 
 func (h *runtimeHarness) seedInitialState(entityID string) {

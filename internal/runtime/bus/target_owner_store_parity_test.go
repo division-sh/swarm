@@ -56,7 +56,7 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			}.Normalized()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient("root-producer"),
+				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-producer")),
 				Target:    events.MustExistingEntityTarget(rootOwner),
 			})
 			routingSource, err := events.NewRootRoutingSource(sourceEntityID)
@@ -99,7 +99,7 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 			if err != nil {
 				t.Fatalf("create restarted EventBus: %v", err)
 			}
-			deliveries := subscribeInternalDeliveriesForTest(t, restarted, "consumer-node")
+			deliveries := subscribeInternalDeliveriesForTest(t, restarted, persisted[0].Recipient.ID())
 			duplicateCtx := runtimedelivery.WithRoute(
 				runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID),
 				events.DeliveryRoute{Target: events.MustExistingEntityTarget(events.RouteIdentity{
@@ -168,8 +168,8 @@ func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDupli
 				runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC(),
 			)
 			routes := []events.DeliveryRoute{
-				{Recipient: events.MustNodeDeliveryRecipient("validator-one"), Target: events.MustExistingEntityTarget(target)},
-				{Recipient: events.MustNodeDeliveryRecipient("validator-two"), Target: events.MustExistingEntityTarget(target)},
+				{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator-one")), Target: events.MustExistingEntityTarget(target)},
+				{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator-two")), Target: events.MustExistingEntityTarget(target)},
 			}
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, evt, routes, runtimepipelineobligation.ScopeSubscribed)
 
@@ -289,7 +289,7 @@ func newTargetOwnerParityStore(t *testing.T, backend string, ctx context.Context
 
 func assertDurableTargetOwnerRoute(t *testing.T, route events.DeliveryRoute, want events.DeliveryTargetOwnership) {
 	t.Helper()
-	if route.Recipient.ID() != "consumer-node" || route.Target != want || route.ConnectClaim.Empty() {
+	if route.Recipient.LocalID() != "consumer-node" || route.Target != want || route.ConnectClaim.Empty() {
 		t.Fatalf("delivery route = %#v, want consumer-node at %s %#v with exact connect claim", route, want.Code(), want.Route())
 	}
 }
@@ -333,7 +333,7 @@ func requireDurableTargetOwnerPublicProjection(
 	}
 	delivery := view.Deliveries[0]
 	route := want.Route().Normalized()
-	if delivery.SubscriberID != "consumer-node" || delivery.Target.Kind != want.Code() ||
+	if delivery.SubscriberID != testFlowNode(t, "consumer", "consumer-node").Key() || delivery.Target.Kind != want.Code() ||
 		delivery.Target.FlowID != route.FlowID || delivery.Target.FlowInstance != route.FlowInstance || delivery.Target.EntityID != route.EntityID {
 		t.Fatalf("public target-owner delivery = %#v, want consumer-node at %s %#v", delivery, want.Code(), route)
 	}

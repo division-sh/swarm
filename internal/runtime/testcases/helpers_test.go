@@ -13,7 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func loadGenericSwarmBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
@@ -39,11 +41,30 @@ func repoRootFromTestcases(t testing.TB) string {
 
 func mustHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string) runtimecontracts.SystemNodeEventHandler {
 	t.Helper()
-	handler, ok := bundle.NodeEventHandler(nodeID, eventType)
+	handler, ok := semanticview.Wrap(bundle).ExecutableNodeEventHandler(genericExecutableNode(t, bundle, nodeID), eventType)
 	if !ok {
 		t.Fatalf("missing handler %s/%s", nodeID, eventType)
 	}
 	return handler
+}
+
+func genericExecutableNode(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID string) runtimeidentity.ExecutableNode {
+	t.Helper()
+	var match runtimeidentity.ExecutableNode
+	for _, record := range semanticview.Wrap(bundle).ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil || node.NodeID() != strings.TrimSpace(nodeID) {
+			continue
+		}
+		if !match.Empty() {
+			t.Fatalf("generic fixture node %q is package/flow ambiguous", nodeID)
+		}
+		match = node
+	}
+	if match.Empty() {
+		t.Fatalf("generic fixture node %q is missing", nodeID)
+	}
+	return match
 }
 
 func gateName(spec *runtimecontracts.GateSpec) string {
@@ -90,7 +111,7 @@ func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundl
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, nodeID, eventtest.RunCreatingRootIngress(
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, genericExecutableNode(t, bundle, nodeID), eventtest.RunCreatingRootIngress(
 		"evt-"+strings.ReplaceAll(eventType, ".", "-"),
 		events.EventType(eventType),
 		"test-driver",

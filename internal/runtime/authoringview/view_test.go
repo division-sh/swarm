@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
@@ -468,7 +469,7 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 			},
 		},
 	}
-	effective, err := bundle.ResolveFanOutEffectiveSemantics("", "order.accepted", *bundle.Nodes["dispatcher"].EventHandlers["order.accepted"].FanOut)
+	effective, err := bundle.ResolveFanOutEffectiveSemantics(identitytest.RootNode(t, "dispatcher"), "order.accepted", *bundle.Nodes["dispatcher"].EventHandlers["order.accepted"].FanOut)
 	if err != nil {
 		t.Fatalf("ResolveFanOutEffectiveSemantics: %v", err)
 	}
@@ -500,6 +501,7 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 }
 
 func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
+	joinNode := identitytest.RootNode(t, "join-node")
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "awaiting", Initial: true}, {ID: "ready"}, {ID: "attention", Terminal: true}}}},
 		Semantics:  runtimecontracts.WorkflowSemanticView{InitialStage: "awaiting"},
@@ -511,7 +513,7 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 	}
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
 		"", "awaiting", []string{"awaiting", "ready", "attention"}, []string{"attention"},
-		[]runtimecontracts.HandlerTransitionSemantic{{ID: "join-node:item.completed", NodeID: "join-node", EventType: "item.completed", Join: bundle.Nodes["join-node"].EventHandlers["item.completed"].Join}}, nil, nil,
+		[]runtimecontracts.HandlerTransitionSemantic{{ID: "join-node:item.completed", Node: joinNode, EventType: "item.completed", Join: bundle.Nodes["join-node"].EventHandlers["item.completed"].Join}}, nil, nil,
 	)}
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {
@@ -539,6 +541,7 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 }
 
 func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
+	loopNode := identitytest.RootNode(t, "loop-node")
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
 			{ID: "queued", Initial: true}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated", Terminal: true},
@@ -547,15 +550,15 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 			ID: "revision", RevisionField: "revision_id", MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3},
 			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"},
 			Operations: []runtimecontracts.WorkflowLoopOperationPlan{
-				{NodeID: "loop-node", HandlerEvent: "work.started", Kind: runtimecontracts.LoopOperationStart, From: "queued", AdvancesTo: "drafting"},
-				{NodeID: "loop-node", HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review", AdvancesTo: "drafting"},
+				{Node: loopNode, HandlerEvent: "work.started", Kind: runtimecontracts.LoopOperationStart, From: "queued", AdvancesTo: "drafting"},
+				{Node: loopNode, HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review", AdvancesTo: "drafting"},
 			},
 		}}},
 	}
 	loopTransitions := []runtimecontracts.HandlerTransitionSemantic{
-		{ID: "loop-node:work.started", NodeID: "loop-node", EventType: "work.started", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "queued"}},
-		{ID: "loop-node:review.revision_requested", NodeID: "loop-node", EventType: "review.revision_requested", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "review"}},
-		{ID: "loop-node:draft.ready", NodeID: "loop-node", EventType: "draft.ready", AdvancesTo: "review", Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}},
+		{ID: "loop-node:work.started", Node: loopNode, EventType: "work.started", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "queued"}},
+		{ID: "loop-node:review.revision_requested", Node: loopNode, EventType: "review.revision_requested", AdvancesTo: "drafting", Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "review"}},
+		{ID: "loop-node:draft.ready", Node: loopNode, EventType: "draft.ready", AdvancesTo: "review", Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}},
 	}
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{"": runtimecontracts.BuildWorkflowStageTopology(
 		"", "queued", []string{"queued", "drafting", "review", "escalated"}, []string{"escalated"}, loopTransitions, nil, bundle.Semantics.Loops,

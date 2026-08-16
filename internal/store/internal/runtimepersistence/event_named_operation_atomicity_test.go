@@ -52,7 +52,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 					name: "target_projection",
 					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						req.Commit.DeliveryRoutes = []events.DeliveryRoute{{
-							Recipient: events.MustNodeDeliveryRecipient("worker"),
+							Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("worker")),
 							Target: events.MustExistingEntityTarget(events.RouteIdentity{
 								FlowID: "worker", FlowInstance: "worker/one", EntityID: uuid.NewString(),
 							}),

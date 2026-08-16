@@ -20,7 +20,7 @@ func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWith
 	rt.eventPath[eventType] = struct{}{}
 	rt.patterns = []routePattern{{
 		EventPattern: pattern,
-		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("operating-accumulator")},
+		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "operating-accumulator"))},
 	}}
 	rt.rebuildLocked()
 	delete(rt.routes, eventType)
@@ -29,7 +29,7 @@ func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWith
 	if len(got) != 1 {
 		t.Fatalf("Resolve concrete child event = %#v, want one wildcard subscriber", got)
 	}
-	if got[0].Recipient.ID() != "operating-accumulator" || !got[0].Recipient.IsNode() {
+	if got[0].Recipient.LocalID() != "operating-accumulator" || !got[0].Recipient.IsNode() {
 		t.Fatalf("resolved subscriber = %#v, want operating-accumulator node", got[0])
 	}
 	if got[0].MatchPattern != pattern {
@@ -53,7 +53,7 @@ func TestRouteTableResolve_WildcardSubscriberDoesNotMatchRemovedConcreteChildEve
 	rt.eventPath[eventType] = struct{}{}
 	rt.patterns = []routePattern{{
 		EventPattern: pattern,
-		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("operating-accumulator")},
+		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "operating-accumulator"))},
 	}}
 	rt.rebuildLocked()
 	if got := rt.Resolve(eventType); len(got) != 1 {
@@ -78,19 +78,19 @@ func TestRouteTableResolve_ExactAndWildcardMatchesDeduplicateSameSubscriber(t *t
 	rt.patterns = []routePattern{
 		{
 			EventPattern: exact,
-			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("dual-listener")},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "dual-listener"))},
 		},
 		{
 			EventPattern: pattern,
-			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("dual-listener")},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "dual-listener"))},
 		},
 		{
 			EventPattern: pattern,
-			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("wildcard-listener")},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "wildcard-listener"))},
 		},
 		{
 			EventPattern: exact,
-			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("exact-listener")},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "exact-listener"))},
 		},
 	}
 	rt.rebuildLocked()
@@ -108,15 +108,15 @@ func TestRouteTableResolve_ExactAndWildcardMatchesDeduplicateSameSubscriber(t *t
 }
 
 func TestRouteTableMixedRolesPreserveFullSubscriberIdentity(t *testing.T) {
+	sharedNode := testFlowNode(t, "receiver", "shared-node")
 	base := Subscriber{
-		Recipient:      events.MustNodeDeliveryRecipient("shared-node"),
+		Recipient:      events.MustNodeDeliveryRecipient(sharedNode),
 		Path:           "receiver/instance-a",
 		MatchPattern:   "receiver/instance-a/work.ready",
 		routeSource:    subscriberRouteSourceSubscription,
 		LocalizedEvent: "work.ready",
-		handlerFlowID:  "receiver",
-		handlerNodeID:  "shared-node",
-		targetHandler:  runtimepipeline.MustDeliveryTargetHandler("receiver", "shared-node"),
+		handlerNode:    sharedNode,
+		targetHandler:  runtimepipeline.MustDeliveryTargetHandler(sharedNode),
 	}
 	variants := []Subscriber{base}
 
@@ -129,12 +129,12 @@ func TestRouteTableMixedRolesPreserveFullSubscriberIdentity(t *testing.T) {
 	variants = append(variants, differentEvent)
 
 	differentHandler := base
-	differentHandler.handlerNodeID = "other-node"
-	differentHandler.targetHandler = runtimepipeline.MustDeliveryTargetHandler("receiver", "other-node")
+	differentHandler.handlerNode = testFlowNode(t, "receiver", "other-node")
+	differentHandler.targetHandler = runtimepipeline.MustDeliveryTargetHandler(differentHandler.handlerNode)
 	variants = append(variants, differentHandler)
 
 	differentConnectHandler := base
-	differentConnectHandler.connectHandler = runtimepinrouting.MustConnectReceiverHandler("receiver", "shared-node")
+	differentConnectHandler.connectHandler = runtimepinrouting.MustConnectReceiverHandler(sharedNode)
 	variants = append(variants, differentConnectHandler)
 
 	var got []Subscriber
@@ -154,14 +154,14 @@ func TestRouteTableMixedRolesExactWildcardConstruction(t *testing.T) {
 		exact    = "receiver/instance-a/work.ready"
 		wildcard = "receiver/*/work.ready"
 	)
+	sharedNode := testFlowNode(t, "receiver", "shared-node")
 	base := Subscriber{
-		Recipient:      events.MustNodeDeliveryRecipient("shared-node"),
+		Recipient:      events.MustNodeDeliveryRecipient(sharedNode),
 		Path:           "receiver/instance-a",
 		routeSource:    subscriberRouteSourceSubscription,
 		LocalizedEvent: "work.ready",
-		handlerFlowID:  "receiver",
-		handlerNodeID:  "shared-node",
-		targetHandler:  runtimepipeline.MustDeliveryTargetHandler("receiver", "shared-node"),
+		handlerNode:    sharedNode,
+		targetHandler:  runtimepipeline.MustDeliveryTargetHandler(sharedNode),
 	}
 	for _, tc := range []struct {
 		name  string
@@ -213,18 +213,20 @@ func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t
 		t.Run(name, func(t *testing.T) {
 			rt := newRouteTable(nil)
 			rt.eventPath[instancePath+"/"+localEvent] = struct{}{}
+			firstNode := testFlowNode(t, "observer", "first-handler")
+			secondNode := testFlowNode(t, "observer", "second-handler")
 			roles := []Subscriber{
 				{
-					Recipient: events.MustNodeDeliveryRecipient("shared-node"), Path: "observer",
+					Recipient: events.MustNodeDeliveryRecipient(firstNode), Path: "observer",
 					routeSource: subscriberRouteSourceSubscription, LocalizedEvent: localEvent,
-					handlerFlowID: "observer", handlerNodeID: "first-handler",
-					targetHandler: runtimepipeline.MustDeliveryTargetHandler("observer", "first-handler"),
+					handlerNode:   firstNode,
+					targetHandler: runtimepipeline.MustDeliveryTargetHandler(firstNode),
 				},
 				{
-					Recipient: events.MustNodeDeliveryRecipient("shared-node"), Path: "observer",
+					Recipient: events.MustNodeDeliveryRecipient(secondNode), Path: "observer",
 					routeSource: subscriberRouteSourceSubscription, LocalizedEvent: localEvent,
-					handlerFlowID: "observer", handlerNodeID: "second-handler",
-					targetHandler: runtimepipeline.MustDeliveryTargetHandler("observer", "second-handler"),
+					handlerNode:   secondNode,
+					targetHandler: runtimepipeline.MustDeliveryTargetHandler(secondNode),
 				},
 			}
 			if reverse {
@@ -356,7 +358,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 func subscriberIDsForTest(in []Subscriber) map[string]int {
 	out := make(map[string]int, len(in))
 	for _, subscriber := range in {
-		out[subscriber.Recipient.ID()]++
+		out[subscriber.Recipient.LocalID()]++
 	}
 	return out
 }

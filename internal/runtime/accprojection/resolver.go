@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -21,7 +22,7 @@ type Binding struct {
 	EntityType      string
 	TargetField     string
 	TargetDecl      runtimecontracts.EntityFieldDecl
-	SourceNodeID    string
+	SourceNode      runtimeidentity.ExecutableNode
 	SourceEventType string
 	AccumulatorName string
 	SourceField     runtimecontracts.NodeStateField
@@ -37,7 +38,7 @@ type Issue struct {
 	Message         string
 	Location        string
 	FlowID          string
-	SourceNodeID    string
+	SourceNode      runtimeidentity.ExecutableNode
 	SourceEventType string
 	AccumulatorName string
 }
@@ -81,20 +82,18 @@ func Resolve(source semanticview.Source) Result {
 	return result
 }
 
-func ForHandler(source semanticview.Source, flowID, nodeID, eventType string) ([]Binding, []Issue) {
-	result := ForHandlerWithAccumulator(source, flowID, nodeID, eventType, "")
+func ForExecutableHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) ([]Binding, []Issue) {
+	result := ForExecutableHandlerWithAccumulator(source, node, eventType, "")
 	return result.Bindings, result.Issues
 }
 
-func ForHandlerWithAccumulator(source semanticview.Source, flowID, nodeID, eventType, activeAccumulatorName string) HandlerResult {
+func ForExecutableHandlerWithAccumulator(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, activeAccumulatorName string) HandlerResult {
 	resolved := Resolve(source)
 	result := HandlerResult{}
 	out := make([]Binding, 0)
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
 	eventType = normalizeEventType(eventType)
 	activeAccumulatorName = strings.TrimSpace(activeAccumulatorName)
-	active := activeHandlerResolution(source, nodeID, eventType)
+	active := activeHandlerResolution(source, node, eventType)
 	if activeAccumulatorName == "" {
 		activeAccumulatorName = active.AccumulatorName
 	}
@@ -102,21 +101,20 @@ func ForHandlerWithAccumulator(source semanticview.Source, flowID, nodeID, event
 	result.ActiveAuthoredEventType = active.AuthoredEventType
 	result.ActiveCanonicalEventType = active.CanonicalEventType
 	for _, binding := range resolved.Bindings {
-		if bindingMatchesActiveAccumulator(binding, flowID, nodeID, activeAccumulatorName) {
+		if bindingMatchesActiveAccumulator(binding, node, activeAccumulatorName) {
 			result.ExpectedBindingCount++
 		}
-		if strings.TrimSpace(binding.FlowID) == flowID &&
-			strings.TrimSpace(binding.SourceNodeID) == nodeID &&
-			handlerEventMatches(source, nodeID, binding.SourceEventType, eventType, active) {
+		if binding.SourceNode.Equal(node) &&
+			handlerEventMatches(source, node, binding.SourceEventType, eventType, active) {
 			out = append(out, binding)
 		}
 	}
 	issues := make([]Issue, 0)
 	for _, issue := range resolved.Issues {
-		if issueMatchesActiveAccumulator(issue, flowID, nodeID, activeAccumulatorName) {
+		if issueMatchesActiveAccumulator(issue, node, activeAccumulatorName) {
 			result.ExpectedBindingCount++
 		}
-		if issueRelevantToHandler(source, issue, flowID, nodeID, eventType, activeAccumulatorName, active) {
+		if issueRelevantToHandler(source, issue, node, eventType, activeAccumulatorName, active) {
 			issues = append(issues, issue)
 		}
 	}
@@ -131,15 +129,15 @@ type activeHandler struct {
 	CanonicalEventType string
 }
 
-func activeHandlerResolution(source semanticview.Source, nodeID, eventType string) activeHandler {
+func activeHandlerResolution(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) activeHandler {
 	var active activeHandler
 	if source == nil {
 		return active
 	}
-	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
 	if resolved.Matched {
 		active.AuthoredEventType = resolved.HandlerEventKey
-		active.CanonicalEventType = canonicalNodeEvent(source, nodeID, active.AuthoredEventType)
+		active.CanonicalEventType = canonicalNodeEvent(source, node, active.AuthoredEventType)
 		if resolved.Handler.Accumulate != nil {
 			active.AccumulatorName = strings.TrimSpace(resolved.Handler.Accumulate.Into)
 		}
@@ -148,15 +146,15 @@ func activeHandlerResolution(source semanticview.Source, nodeID, eventType strin
 	return active
 }
 
-func issueRelevantToHandler(source semanticview.Source, issue Issue, flowID, nodeID, eventType, accumulatorName string, active activeHandler) bool {
-	if strings.TrimSpace(issue.SourceNodeID) != strings.TrimSpace(nodeID) {
+func issueRelevantToHandler(source semanticview.Source, issue Issue, node runtimeidentity.ExecutableNode, eventType, accumulatorName string, active activeHandler) bool {
+	if !issue.SourceNode.Equal(node) {
 		return false
 	}
-	if issueFlowID := strings.TrimSpace(issue.FlowID); issueFlowID != "" && issueFlowID != strings.TrimSpace(flowID) {
+	if issueFlowID := strings.TrimSpace(issue.FlowID); issueFlowID != "" && issueFlowID != node.FlowID() {
 		return false
 	}
 	if issueEventType := strings.TrimSpace(issue.SourceEventType); issueEventType != "" {
-		return handlerEventMatches(source, nodeID, issueEventType, eventType, active)
+		return handlerEventMatches(source, node, issueEventType, eventType, active)
 	}
 	if issueAccumulatorName := strings.TrimSpace(issue.AccumulatorName); issueAccumulatorName != "" {
 		return issueAccumulatorName == strings.TrimSpace(accumulatorName)
@@ -164,27 +162,26 @@ func issueRelevantToHandler(source semanticview.Source, issue Issue, flowID, nod
 	return false
 }
 
-func bindingMatchesActiveAccumulator(binding Binding, flowID, nodeID, accumulatorName string) bool {
+func bindingMatchesActiveAccumulator(binding Binding, node runtimeidentity.ExecutableNode, accumulatorName string) bool {
 	if strings.TrimSpace(accumulatorName) == "" {
 		return false
 	}
-	return strings.TrimSpace(binding.FlowID) == strings.TrimSpace(flowID) &&
-		strings.TrimSpace(binding.SourceNodeID) == strings.TrimSpace(nodeID) &&
+	return binding.SourceNode.Equal(node) &&
 		strings.TrimSpace(binding.AccumulatorName) == strings.TrimSpace(accumulatorName)
 }
 
-func issueMatchesActiveAccumulator(issue Issue, flowID, nodeID, accumulatorName string) bool {
+func issueMatchesActiveAccumulator(issue Issue, node runtimeidentity.ExecutableNode, accumulatorName string) bool {
 	if strings.TrimSpace(accumulatorName) == "" {
 		return false
 	}
-	if strings.TrimSpace(issue.FlowID) != "" && strings.TrimSpace(issue.FlowID) != strings.TrimSpace(flowID) {
+	if strings.TrimSpace(issue.FlowID) != "" && strings.TrimSpace(issue.FlowID) != node.FlowID() {
 		return false
 	}
-	return strings.TrimSpace(issue.SourceNodeID) == strings.TrimSpace(nodeID) &&
+	return issue.SourceNode.Equal(node) &&
 		strings.TrimSpace(issue.AccumulatorName) == strings.TrimSpace(accumulatorName)
 }
 
-func handlerEventMatches(source semanticview.Source, nodeID, authoredEventType, runtimeEventType string, active activeHandler) bool {
+func handlerEventMatches(source semanticview.Source, node runtimeidentity.ExecutableNode, authoredEventType, runtimeEventType string, active activeHandler) bool {
 	authoredEventType = normalizeEventType(authoredEventType)
 	runtimeEventType = normalizeEventType(runtimeEventType)
 	if authoredEventType == "" || runtimeEventType == "" {
@@ -196,15 +193,15 @@ func handlerEventMatches(source semanticview.Source, nodeID, authoredEventType, 
 	if authoredEventType == active.AuthoredEventType {
 		return true
 	}
-	authoredCanonical := canonicalNodeEvent(source, nodeID, authoredEventType)
-	runtimeCanonical := canonicalNodeEvent(source, nodeID, runtimeEventType)
+	authoredCanonical := canonicalNodeEvent(source, node, authoredEventType)
+	runtimeCanonical := canonicalNodeEvent(source, node, runtimeEventType)
 	if authoredCanonical != "" && runtimeCanonical != "" && authoredCanonical == runtimeCanonical {
 		return true
 	}
 	return active.CanonicalEventType != "" && authoredCanonical == active.CanonicalEventType
 }
 
-func canonicalNodeEvent(source semanticview.Source, nodeID, eventType string) string {
+func canonicalNodeEvent(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) string {
 	eventType = normalizeEventType(eventType)
 	if eventType == "" {
 		return ""
@@ -212,7 +209,7 @@ func canonicalNodeEvent(source semanticview.Source, nodeID, eventType string) st
 	if source == nil {
 		return eventType
 	}
-	canonical := normalizeEventType(source.ResolveNodeEventReference(strings.TrimSpace(nodeID), eventType))
+	canonical := normalizeEventType(source.ResolveExecutableNodeEventReference(node, eventType))
 	if canonical == "" {
 		return eventType
 	}
@@ -229,7 +226,7 @@ func scopedIssue(binding Binding, code, location, message string) Issue {
 		Message:         message,
 		Location:        location,
 		FlowID:          strings.TrimSpace(binding.FlowID),
-		SourceNodeID:    strings.TrimSpace(binding.SourceNodeID),
+		SourceNode:      binding.SourceNode,
 		SourceEventType: strings.TrimSpace(binding.SourceEventType),
 		AccumulatorName: strings.TrimSpace(binding.AccumulatorName),
 	}
@@ -237,6 +234,7 @@ func scopedIssue(binding Binding, code, location, message string) Issue {
 
 type materializedFieldTarget struct {
 	FlowID      string
+	PackageKey  string
 	EntityType  string
 	FieldName   string
 	FieldDecl   runtimecontracts.EntityFieldDecl
@@ -245,7 +243,7 @@ type materializedFieldTarget struct {
 
 func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []materializedFieldTarget {
 	out := make([]materializedFieldTarget, 0)
-	add := func(flowID, entityType string, contract runtimecontracts.EntityContract, types runtimecontracts.TypeCatalogDocument) {
+	add := func(packageKey, flowID, entityType string, contract runtimecontracts.EntityContract, types runtimecontracts.TypeCatalogDocument) {
 		fieldNames := make([]string, 0, len(contract.Fields))
 		for fieldName := range contract.Fields {
 			fieldNames = append(fieldNames, strings.TrimSpace(fieldName))
@@ -258,6 +256,7 @@ func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontr
 			}
 			out = append(out, materializedFieldTarget{
 				FlowID:      strings.TrimSpace(flowID),
+				PackageKey:  strings.TrimSpace(packageKey),
 				EntityType:  strings.TrimSpace(entityType),
 				FieldName:   fieldName,
 				FieldDecl:   decl,
@@ -267,7 +266,7 @@ func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontr
 	}
 	if root := bundle.RootEntityContracts(); len(root) > 0 {
 		for entityType, contract := range root {
-			add("", entityType, contract, bundle.RootTypeCatalog())
+			add(runtimeidentity.RootPackageKey, "", entityType, contract, bundle.RootTypeCatalog())
 		}
 	}
 	for _, scope := range source.FlowScopes() {
@@ -279,7 +278,7 @@ func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontr
 		if !ok {
 			continue
 		}
-		add(flowID, entityType, contract, bundle.ResolvedTypeCatalogForFlow(flowID))
+		add(scope.PackageKey, flowID, entityType, contract, bundle.ResolvedTypeCatalogForFlow(flowID))
 	}
 	return out
 }
@@ -299,23 +298,25 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 		issues = append(issues, Issue{Code: "invalid_reference", Location: loc, Message: fmt.Sprintf("materialize_from %q must have shape <node_id>.<accumulator_name>", strings.TrimSpace(target.FieldDecl.MaterializeFrom))})
 		return binding, issues
 	}
-	binding.SourceNodeID = sourceNodeID
+	node, identityErr := runtimeidentity.AdmitExecutableNodeDeclaration(target.PackageKey, target.FlowID, sourceNodeID)
+	if identityErr != nil {
+		issues = append(issues, Issue{Code: "invalid_source_node", Location: loc, Message: identityErr.Error()})
+		return binding, issues
+	}
+	binding.SourceNode = node
 	binding.AccumulatorName = accName
 
-	node, ok := source.NodeEntries()[sourceNodeID]
+	record, ok := source.ExecutableNode(node)
 	if !ok {
 		issues = append(issues, scopedIssue(binding, "unknown_source_node", loc, fmt.Sprintf("materialize_from %q references unknown node %q", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)))
 		return binding, issues
 	}
-	sourceFlowID := ""
-	if sourceRef, ok := source.NodeContractSource(sourceNodeID); ok {
-		sourceFlowID = strings.TrimSpace(sourceRef.FlowID)
-	}
+	sourceFlowID := node.FlowID()
 	if sourceFlowID != strings.TrimSpace(target.FlowID) {
 		issues = append(issues, scopedIssue(binding, "cross_flow_reference", loc, fmt.Sprintf("materialize_from %q references node in flow %s, but target entity %s belongs to flow %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), flowLabel(sourceFlowID), target.EntityType, flowLabel(target.FlowID))))
 	}
 
-	handlers := handlersForAccumulator(node, accName)
+	handlers := handlersForAccumulator(record.Entry, accName)
 	switch len(handlers) {
 	case 0:
 		issues = append(issues, scopedIssue(binding, "missing_accumulate_into", loc, fmt.Sprintf("materialize_from %q does not resolve to an explicitly declared accumulator (accumulate.into:) on node %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), sourceNodeID)))
@@ -333,7 +334,7 @@ func resolveTarget(source semanticview.Source, bundle *runtimecontracts.Workflow
 		issues = append(issues, scopedIssue(binding, "unused_reason_with_materialize_from", loc, fmt.Sprintf("field %q declares both materialize_from and _unused_reason; remove _unused_reason", target.FieldName)))
 	}
 
-	field, ok := nodeStateField(node, accName)
+	field, ok := nodeStateField(record.Entry, accName)
 	if !ok {
 		issues = append(issues, scopedIssue(binding, "unknown_accumulator_state", loc, fmt.Sprintf("materialize_from %q references state_schema field %q missing on node %s", strings.TrimSpace(target.FieldDecl.MaterializeFrom), accName, sourceNodeID)))
 	} else {
@@ -448,16 +449,16 @@ func validateProject(source semanticview.Source, target materializedFieldTarget,
 func validateEventTypedView(source semanticview.Source, types runtimecontracts.TypeCatalogDocument, binding Binding) []Issue {
 	entry, ok := source.EventEntry(binding.SourceEventType)
 	if !ok {
-		canonical := source.ResolveNodeEventReference(binding.SourceNodeID, binding.SourceEventType)
+		canonical := source.ResolveExecutableNodeEventReference(binding.SourceNode, binding.SourceEventType)
 		if canonical != "" {
 			entry, ok = source.EventEntry(canonical)
 		}
 	}
 	if !ok {
-		return []Issue{scopedIssue(binding, "unknown_source_event", binding.SourceNodeID, fmt.Sprintf("accumulate.into %q references event %q, but no event catalog entry exists", binding.AccumulatorName, binding.SourceEventType))}
+		return []Issue{scopedIssue(binding, "unknown_source_event", binding.SourceNode.Key(), fmt.Sprintf("accumulate.into %q references event %q, but no event catalog entry exists", binding.AccumulatorName, binding.SourceEventType))}
 	}
 	issues := make([]Issue, 0)
-	loc := fmt.Sprintf("node %s handler %s", binding.SourceNodeID, binding.SourceEventType)
+	loc := fmt.Sprintf("node %s handler %s", binding.SourceNode.Key(), binding.SourceEventType)
 	for _, fieldName := range sortedTypeFields(binding.SourceNamedType) {
 		expected := strings.TrimSpace(binding.SourceNamedType.Fields[fieldName].Type)
 		payloadField, ok := entry.Payload.Properties[fieldName]

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -29,7 +30,7 @@ func (c *checkerContext) transitionReferences() []Finding {
 				Message:  fmt.Sprintf("transition %s missing trigger", id),
 				Location: id,
 			})
-		} else if transitionTriggerIsTimerReference(c.source, transition.Trigger) {
+		} else if transitionTriggerIsTimerReference(c.source, transition) {
 			// Timer-triggered transitions are derived from stage timer rows and are
 			// not event catalog entries. The timer owner is validated separately.
 		} else if !eventExists(c.source, strings.TrimSpace(transition.Trigger)) {
@@ -106,8 +107,8 @@ func (c *checkerContext) transitionReferences() []Finding {
 	return c.transitionRefFindings
 }
 
-func transitionTriggerIsTimerReference(source semanticview.Source, trigger string) bool {
-	trigger = strings.TrimSpace(trigger)
+func transitionTriggerIsTimerReference(source semanticview.Source, transition runtimecontracts.WorkflowTransitionContract) bool {
+	trigger := strings.TrimSpace(transition.Trigger)
 	if !strings.HasPrefix(trigger, "timer:") {
 		return false
 	}
@@ -115,7 +116,7 @@ func transitionTriggerIsTimerReference(source semanticview.Source, trigger strin
 	if timerID == "" || source == nil {
 		return false
 	}
-	timer, ok := source.WorkflowTimerByID(timerID)
+	timer, ok := source.WorkflowStageTimerByID(transition.FlowID, timerID)
 	return ok && timer.StageOwned
 }
 
@@ -137,23 +138,25 @@ func (c *checkerContext) transitionOwnership() []Finding {
 	producerEventsByNode := map[string]map[string]struct{}{}
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	for _, endpoint := range census.Consumers() {
-		if endpoint.NodeID != "" {
-			addTransitionEndpointEvent(consumerEventsByNode, endpoint.NodeID, endpoint.Event)
+		if endpoint.Node.Valid() {
+			addTransitionEndpointEvent(consumerEventsByNode, endpoint.Node.Key(), endpoint.Event)
 		}
 	}
 	for _, endpoint := range census.Producers() {
-		if endpoint.NodeID != "" {
-			addTransitionEndpointEvent(producerEventsByNode, endpoint.NodeID, endpoint.Event)
+		if endpoint.Node.Valid() {
+			addTransitionEndpointEvent(producerEventsByNode, endpoint.Node.Key(), endpoint.Event)
 		}
 	}
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
+		nodeID := node.Key()
+		nodeLabel := executableNodeDiagnostic(node)
 		subs := consumerEventsByNode[nodeID]
 		produces := producerEventsByNode[nodeID]
-		for _, transitionID := range node.OwnedTransitions {
+		for _, transitionID := range record.Entry.OwnedTransitions {
 			transitionID = strings.TrimSpace(transitionID)
 			if transitionID == "" {
 				continue
@@ -163,16 +166,16 @@ func (c *checkerContext) transitionOwnership() []Finding {
 				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
 					CheckID:  "transition_ownership_validation",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s owns unknown transition %s", nodeID, transitionID),
+					Message:  fmt.Sprintf("%s owns unknown transition %s", nodeLabel, transitionID),
 					Location: nodeID,
 				})
 				continue
 			}
-			if owner := strings.TrimSpace(transition.Node); owner != nodeID {
+			if owner := transition.ExecutableNode; !owner.Equal(node) {
 				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
 					CheckID:  "transition_ownership_validation",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s owns transition %s but workflow owner is %s", nodeID, transitionID, owner),
+					Message:  fmt.Sprintf("%s owns transition %s but workflow owner is %s", nodeLabel, transitionID, executableNodeDiagnostic(owner)),
 					Location: nodeID,
 				})
 			}
@@ -214,32 +217,30 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 		return c.eventRuntimeFindings
 	}
 	c.eventRuntimeLoaded = true
-	nodes := c.source.NodeEntries()
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	for _, requirement := range runtimeHandledEventRequirements(c.source) {
-		if requirement.owner == "" {
+		if !requirement.owner.Valid() {
 			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
 				CheckID:  "event_runtime_wiring_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("event %s with runtime_handling=%s missing owning_node", requirement.eventType, requirement.handling),
+				Message:  fmt.Sprintf("event %s with runtime_handling=%s missing exact owning_node", requirement.eventType, requirement.handling),
 				Location: requirement.eventType,
 			})
 			continue
 		}
-		if _, ok := nodes[requirement.owner]; !ok {
+		if _, ok := c.source.ExecutableNode(requirement.owner); !ok {
 			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
 				CheckID:  "event_runtime_wiring_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("event %s owning_node %s missing from system nodes", requirement.eventType, requirement.owner),
+				Message:  fmt.Sprintf("event %s owning_node %s missing from system nodes", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
 				Location: requirement.eventType,
 			})
 			continue
 		}
-		if handlers := c.source.NodeEventHandlers(requirement.owner); len(handlers) > 0 {
-			sourceRef, _ := c.source.NodeContractSource(requirement.owner)
+		if handlers := c.source.ExecutableNodeEventHandlers(requirement.owner); len(handlers) > 0 {
 			matched := false
-			for _, endpoint := range census.MatchingConsumers(sourceRef.FlowID, requirement.eventType) {
-				if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == requirement.owner {
+			for _, endpoint := range census.MatchingConsumers(requirement.owner.FlowID(), requirement.eventType) {
+				if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.Node.Equal(requirement.owner) {
 					matched = true
 					break
 				}
@@ -248,7 +249,7 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 				c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
 					CheckID:  "event_runtime_wiring_validation",
 					Severity: "error",
-					Message:  fmt.Sprintf("event %s owning_node %s missing semantic event_handler", requirement.eventType, requirement.owner),
+					Message:  fmt.Sprintf("event %s owning_node %s missing semantic event_handler", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
 					Location: requirement.eventType,
 				})
 			}
@@ -260,7 +261,7 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 type runtimeHandledEventRequirement struct {
 	eventType string
 	handling  string
-	owner     string
+	owner     runtimeidentity.ExecutableNode
 }
 
 func runtimeHandledEventRequirements(source semanticview.Source) []runtimeHandledEventRequirement {
@@ -268,17 +269,26 @@ func runtimeHandledEventRequirements(source semanticview.Source) []runtimeHandle
 		return nil
 	}
 	out := make([]runtimeHandledEventRequirement, 0)
-	for eventType, entry := range source.EventEntries() {
-		eventType = strings.TrimSpace(eventType)
-		handling := strings.TrimSpace(entry.RuntimeHandling)
-		if eventType == "" || !requiresOwningNode(handling) {
-			continue
+	appendEntries := func(packageKey, flowID string, entries map[string]runtimecontracts.EventCatalogEntry) {
+		for eventType, entry := range entries {
+			eventType = strings.TrimSpace(eventType)
+			handling := strings.TrimSpace(entry.RuntimeHandling)
+			if eventType == "" || !requiresOwningNode(handling) {
+				continue
+			}
+			owner, _ := runtimeidentity.AdmitExecutableNodeDeclaration(packageKey, flowID, entry.OwningNode)
+			out = append(out, runtimeHandledEventRequirement{
+				eventType: eventType,
+				handling:  handling,
+				owner:     owner,
+			})
 		}
-		out = append(out, runtimeHandledEventRequirement{
-			eventType: eventType,
-			handling:  handling,
-			owner:     strings.TrimSpace(entry.OwningNode),
-		})
+	}
+	for _, scope := range source.ProjectScopes() {
+		appendEntries(scope.Key, scope.OwningFlowID, scope.Events)
+	}
+	for _, scope := range source.FlowScopes() {
+		appendEntries(scope.PackageKey, scope.ID, scope.Events)
 	}
 	return out
 }
@@ -288,22 +298,21 @@ func runtimeHandledEventsMissingExecutors(source semanticview.Source) []Finding 
 		return nil
 	}
 	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(source)
-	nodes := source.NodeEntries()
 	out := make([]Finding, 0)
 	for _, requirement := range runtimeHandledEventRequirements(source) {
-		if requirement.owner == "" {
+		if !requirement.owner.Valid() {
 			continue
 		}
-		if _, ok := nodes[requirement.owner]; !ok {
+		if _, ok := source.ExecutableNode(requirement.owner); !ok {
 			continue
 		}
-		if _, ok := runtimeExecutors[requirement.owner]; ok {
+		if _, ok := runtimeExecutors[requirement.owner.Key()]; ok {
 			continue
 		}
 		out = append(out, Finding{
 			CheckID:  "handler_field_compliance",
 			Severity: "error",
-			Message:  fmt.Sprintf("event %s owning_node %s has no runtime executor", requirement.eventType, requirement.owner),
+			Message:  fmt.Sprintf("event %s owning_node %s has no runtime executor", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
 			Location: requirement.eventType,
 		})
 	}
@@ -323,13 +332,23 @@ func contractBundleUsesOwningNodeModel(source semanticview.Source) bool {
 	if source == nil {
 		return false
 	}
-	for _, entry := range source.EventEntries() {
-		if strings.TrimSpace(entry.OwningNode) != "" {
-			return true
+	for _, scope := range source.ProjectScopes() {
+		for _, entry := range scope.Events {
+			if strings.TrimSpace(entry.OwningNode) != "" {
+				return true
+			}
 		}
 	}
-	for _, node := range source.NodeEntries() {
-		if len(source.NodeEventHandlers(node.ID)) > 0 {
+	for _, scope := range source.FlowScopes() {
+		for _, entry := range scope.Events {
+			if strings.TrimSpace(entry.OwningNode) != "" {
+				return true
+			}
+		}
+	}
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err == nil && len(source.ExecutableNodeEventHandlers(node)) > 0 {
 			return true
 		}
 	}

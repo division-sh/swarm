@@ -51,7 +51,7 @@ func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwner
 		t.Fatalf("singleton contained fields = %#v, want audit_log list", coordinator.ContainedState)
 	}
 
-	handler, ok := source.NodeEventHandler(singletoncoordinatorpilot.NodeID, singletoncoordinatorpilot.InputEvent)
+	handler, ok := source.ExecutableNodeEventHandler(conformanceNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), singletoncoordinatorpilot.InputEvent)
 	if !ok {
 		t.Fatalf("handler %s/%s missing", singletoncoordinatorpilot.NodeID, singletoncoordinatorpilot.InputEvent)
 	}

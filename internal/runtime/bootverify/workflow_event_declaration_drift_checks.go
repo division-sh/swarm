@@ -22,7 +22,7 @@ func (c *checkerContext) producesDrift() []Finding {
 		}
 		declared := stringSet(assertion.EventTypes)
 		for _, endpoint := range census.Producers() {
-			if endpoint.Kind != semanticview.EventEndpointNodeHandler || endpoint.NodeID != assertion.NodeID {
+			if endpoint.Kind != semanticview.EventEndpointNodeHandler || !endpoint.Node.Equal(assertion.Node) {
 				continue
 			}
 			emitted := strings.TrimSpace(endpoint.Event.Authored)
@@ -32,8 +32,8 @@ func (c *checkerContext) producesDrift() []Finding {
 			c.producesDriftFindings = append(c.producesDriftFindings, Finding{
 				CheckID:  "produces_drift",
 				Severity: "warning",
-				Message:  fmt.Sprintf("node %s handler %s emits %s outside produces list", assertion.NodeID, endpoint.HandlerEvent, emitted),
-				Location: assertion.NodeID,
+				Message:  fmt.Sprintf("node %s handler %s emits %s outside produces list", assertion.Node.Key(), endpoint.HandlerEvent, emitted),
+				Location: assertion.Node.Key(),
 			})
 		}
 	}
@@ -52,7 +52,7 @@ func (c *checkerContext) phantomProduces() []Finding {
 		}
 		emitted := map[string]struct{}{}
 		for _, endpoint := range census.Producers() {
-			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == assertion.NodeID {
+			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.Node.Equal(assertion.Node) {
 				emitted[strings.TrimSpace(endpoint.Event.Authored)] = struct{}{}
 			}
 		}
@@ -67,8 +67,8 @@ func (c *checkerContext) phantomProduces() []Finding {
 			c.phantomFindings = append(c.phantomFindings, Finding{
 				CheckID:  "phantom_produces",
 				Severity: "warning",
-				Message:  fmt.Sprintf("node %s produces lists %s but no handler emits it", assertion.NodeID, eventType),
-				Location: assertion.NodeID,
+				Message:  fmt.Sprintf("node %s produces lists %s but no handler emits it", assertion.Node.Key(), eventType),
+				Location: assertion.Node.Key(),
 			})
 		}
 	}

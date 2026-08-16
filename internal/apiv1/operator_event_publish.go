@@ -933,18 +933,22 @@ func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventNam
 		return false
 	}
 	eventName = runtimeeventidentity.Normalize(eventName)
-	for _, nodeID := range source.RuntimeEventOwners(eventName) {
-		handler, ok := source.NodeEventHandler(nodeID, eventName)
-		if ok && handler.CreateEntity {
+	for _, node := range source.RuntimeEventOwners(eventName) {
+		resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventName)
+		if resolution.Matched && resolution.Handler.CreateEntity {
 			return true
 		}
 	}
-	for nodeID := range source.NodeEntries() {
-		for authoredEventName, handler := range source.NodeEventHandlers(nodeID) {
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for authoredEventName, handler := range source.ExecutableNodeEventHandlers(node) {
 			if !handler.CreateEntity {
 				continue
 			}
-			canonical := runtimeeventidentity.Normalize(source.ResolveNodeEventReference(nodeID, authoredEventName))
+			canonical := runtimeeventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, authoredEventName))
 			authored := runtimeeventidentity.Normalize(authoredEventName)
 			if canonical == eventName || authored == eventName {
 				return true

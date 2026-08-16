@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,11 +113,12 @@ func TestWorkflowNodeHarnessInputKeepsOnlyAuthoredLocalSubscription(t *testing.T
 	harness := loadHarnessInjectionPipelineSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
 	withoutSource := loadHarnessInjectionPipelineSource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
 
-	got, err := workflowNodeSubscriptionAliases(harness, "worker-node", "work.requested")
+	workerNode := pipelinePackageNode(t, "flows/worker", "worker", "worker-node")
+	got, err := workflowNodeSubscriptionAliases(harness, workerNode, "work.requested")
 	if err != nil {
 		t.Fatalf("harness subscription aliases: %v", err)
 	}
-	want, err := workflowNodeSubscriptionAliases(withoutSource, "worker-node", "work.requested")
+	want, err := workflowNodeSubscriptionAliases(withoutSource, workerNode, "work.requested")
 	if err != nil {
 		t.Fatalf("plain subscription aliases: %v", err)
 	}
@@ -132,16 +134,21 @@ func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *te
 	for _, authored := range []string{"child/task.done", "missing/task.done", "child/grandchild/task.done", "swarm://child/task.done"} {
 		t.Run(strings.ReplaceAll(authored, "/", "_"), func(t *testing.T) {
 			source := workflowNodeExactSubscriptionSource(authored)
-			if aliases, err := workflowNodeSubscriptionAliases(source, "listener", authored); err == nil || aliases != nil {
+			nodeRef := pipelinePackageNode(t, "flows/child", "child", "listener")
+			if aliases, err := workflowNodeSubscriptionAliases(source, nodeRef, authored); err == nil || aliases != nil {
 				t.Fatalf("subscription aliases = %#v error = %v, want typed rejection", aliases, err)
 			}
-			if _, ok := source.NodeEventHandler("listener", "child/task.done"); ok {
+			if _, ok := source.ExecutableNodeEventHandler(nodeRef, "child/task.done"); ok {
 				t.Fatal("invalid authored handler resolved through the semantic source")
 			}
-			if resolved := workflowNodeEventHandlerResolutionForEventType(source, "listener", "child/task.done"); resolved.Matched {
+			if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeRef, "child/task.done"); resolved.Matched {
 				t.Fatalf("invalid authored handler reached execution projection: %#v", resolved)
 			}
-			node := NewNode(source.NodeEntries()["listener"], source, nil, nil)
+			record, ok := source.ExecutableNode(nodeRef)
+			if !ok {
+				t.Fatal("listener executable node missing")
+			}
+			node := NewNode(nodeRef, record.Entry, source, nil, nil)
 			if subscriptions := node.Subscriptions(); len(subscriptions) != 0 {
 				t.Fatalf("invalid authored subscription reached node executor: %#v", subscriptions)
 			}
@@ -154,17 +161,18 @@ func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *te
 
 func TestWorkflowNodeProjectionPreservesLocalExactHandler(t *testing.T) {
 	source := workflowNodeExactSubscriptionSource("task.done")
-	aliases, err := workflowNodeSubscriptionAliases(source, "listener", "task.done")
+	node := pipelinePackageNode(t, "flows/child", "child", "listener")
+	aliases, err := workflowNodeSubscriptionAliases(source, node, "task.done")
 	if err != nil {
 		t.Fatalf("workflowNodeSubscriptionAliases: %v", err)
 	}
 	if got := strings.Join(aliases, ","); got != "child/task.done,task.done" {
 		t.Fatalf("aliases = %q, want canonical and local exact forms", got)
 	}
-	if _, ok := source.NodeEventHandler("listener", "child/task.done"); !ok {
+	if _, ok := source.ExecutableNodeEventHandler(node, "child/task.done"); !ok {
 		t.Fatal("local authored handler did not resolve from its canonical runtime event")
 	}
-	if resolved := workflowNodeEventHandlerResolutionForEventType(source, "listener", "child/task.done"); !resolved.Matched || resolved.HandlerEventKey != "task.done" {
+	if resolved := workflowNodeEventHandlerResolutionForEventType(source, node, "child/task.done"); !resolved.Matched || resolved.HandlerEventKey != "task.done" {
 		t.Fatalf("handler resolution = %#v, want local exact handler", resolved)
 	}
 }
@@ -213,7 +221,8 @@ func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	if got := workflowNodeExternalEventType(semanticview.Wrap(bundle), "child-worker", "work.completed"); got != "child/work.completed" {
+	source := semanticview.Wrap(bundle)
+	if got := workflowNodeExternalEventType(source, pipelineSourceNode(t, source, "child", "child-worker"), "work.completed"); got != "child/work.completed" {
 		t.Fatalf("workflowNodeExternalEventType = %q, want child/work.completed", got)
 	}
 }
@@ -341,7 +350,7 @@ func TestLoadWorkflowNodes_ImportInputBindingRequiresEffectiveConnect(t *testing
 		t.Fatalf("worker-node subscriptions = %#v, bind must not add producer authority", worker.Subscriptions)
 	}
 	evt := eventtest.RunCreatingRootIngress("", "parent.lead_captured", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-node", evt)
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, pipelinePackageNode(t, "flows/worker", "worker", "worker-node"), evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only producer event resolved handler: %#v", resolved)
 	}
@@ -361,7 +370,7 @@ func TestLoadWorkflowNodes_ImportOutputBindingRequiresEffectiveConnect(t *testin
 		t.Fatalf("parent-listener subscriptions = %#v, want receiver-local parent.lead_enriched", parent.Subscriptions)
 	}
 	evt := eventtest.RunCreatingRootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, pipelineNode(t, "", "parent-listener"), evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only child event resolved parent handler: %#v", resolved)
 	}
@@ -381,7 +390,7 @@ func TestLoadWorkflowNodes_ImportOutputWildcardRequiresEffectiveConnect(t *testi
 		t.Fatalf("parent-listener subscriptions = %#v, bind must not authorize child output", parent.Subscriptions)
 	}
 	evt := eventtest.RunCreatingRootIngress("", "worker/work.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "parent-listener", evt)
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, pipelineNode(t, "", "parent-listener"), evt)
 	if resolved.Matched {
 		t.Fatalf("bind-only child event resolved wildcard parent handler: %#v", resolved)
 	}
@@ -399,7 +408,11 @@ func TestWorkflowNodeHandlerResolution_ConnectConsumesImportBindings(t *testing.
 	} {
 		evt := eventtest.RunCreatingRootIngress("", tc.eventType, "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 		route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, tc.wantKey, tc.nodeID)
-		resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, tc.nodeID, evt)
+		node, ok := route.Recipient.Node()
+		if !ok {
+			t.Fatal("stamped connect route lacks exact node recipient")
+		}
+		resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, node, evt)
 		if !resolved.Matched || resolved.HandlerEventKey != tc.wantKey {
 			t.Fatalf("handler resolution for %s = %#v, want %s", tc.eventType, resolved, tc.wantKey)
 		}
@@ -416,9 +429,33 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedPackage
 
 	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	route := workflowNodeStampedConnectRoute(t, source, "child", "micro_done", "child-relay")
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "child-relay", evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "child", "child-relay"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
 		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
+	}
+}
+
+func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedRootReceiverConnect(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	producerEvent := source.ResolveFlowEventReference("child", "micro.relayed")
+	receiverEvent := source.ResolveFlowEventReference("", "micro.done")
+	if producerEvent == receiverEvent {
+		t.Fatalf("producer event %q must differ from receiver event %q for this proof", producerEvent, receiverEvent)
+	}
+
+	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	route := workflowNodeStampedConnectRoute(t, source, "", "micro_done", "root-collector")
+	node := pipelineSourceNode(t, source, "", "root-collector")
+	loaded, err := LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	if !slices.ContainsFunc(loaded, func(candidate WorkflowNode) bool { return candidate.Node.Equal(node) }) {
+		t.Fatalf("loaded workflow nodes = %#v, want exact root node %s", loaded, node.Key())
+	}
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, node, evt)
+	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
+		t.Fatalf("root receiver connect handler resolution = %#v, want root-collector micro.done", resolved)
 	}
 }
 
@@ -436,8 +473,9 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_DoesNotInferClaimFromF
 			evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 				FlowInstance: tc.flowInstance,
 			}, time.Unix(1, 0).UTC())
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("child-relay")}
-			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "child-relay", evt)
+			childRelay := pipelineNode(t, "child", "child-relay")
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(childRelay)}
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, childRelay, evt)
 			if resolved.Matched {
 				t.Fatalf("connected-input resolution = %#v, want no authority without a stamped claim", resolved)
 			}
@@ -455,7 +493,7 @@ func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *tes
 	}, time.Unix(1, 0).UTC())
 
 	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_requested", "receiver-node")
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "receiver-node", evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "deploy.requested" {
 		t.Fatalf("concrete template connect handler resolution = %#v, want receiver deploy.requested", resolved)
 	}
@@ -492,7 +530,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 				route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_requested", "receiver-node")
 				ctx = withWorkflowNodeDeliveryRoute(ctx, route)
 			}
-			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, "receiver-node", evt)
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
 			if resolved.Matched != tc.want {
 				t.Fatalf("handler resolution = %#v, want matched %v", resolved, tc.want)
 			}
@@ -511,7 +549,7 @@ func TestWorkflowNodeConnectedInputHandlerUsesExactStampedReceiverPin(t *testing
 
 	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_accepted", "receiver-node")
 	ctx := withWorkflowNodeDeliveryRoute(context.Background(), route)
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, "receiver-node", evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "deploy.accepted" {
 		t.Fatalf("stamped connected-input resolution = %#v, want deploy.accepted", resolved)
 	}
@@ -525,17 +563,21 @@ func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanti
 			continue
 		}
 		receiver := plan.ReceiverEndpoint().Readback()
-		flowID := workflowNodeFlowID(source, nodeID)
+		flowID := receiver.FlowID
+		node := pipelineSourceNode(t, source, flowID, nodeID)
 		target := plan.ReceiverRoute(receiver.FlowPath, "receiver-entity")
 		if target.FlowID == "" {
 			target.FlowID = flowID
+			if target.FlowID == "" {
+				target.FlowID = semanticview.RootExecutionFlowID(source)
+			}
 		}
 		if target.FlowInstance == "" {
-			target.FlowInstance = flowID
+			target.FlowInstance = target.FlowID
 		}
 		blueprint := runtimepinrouting.ConnectDeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target,
-			Handler: runtimepinrouting.MustConnectReceiverHandler(flowID, nodeID),
+			Recipient: events.MustNodeDeliveryRecipient(node), Target: target,
+			Handler: runtimepinrouting.MustConnectReceiverHandler(node),
 		}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, blueprint)
 		if err != nil {
@@ -555,9 +597,16 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 			continue
 		}
 		target := plan.ReceiverRoute(receiver.FlowPath, "receiver-entity")
+		if target.FlowID == "" {
+			target.FlowID = semanticview.RootExecutionFlowID(source)
+		}
+		if target.FlowInstance == "" {
+			target.FlowInstance = target.FlowID
+		}
+		node := pipelineSourceNode(t, source, receiver.FlowID, nodeID)
 		blueprint := runtimepinrouting.ConnectDeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target,
-			Handler: runtimepinrouting.MustConnectReceiverHandler(receiver.FlowID, nodeID),
+			Recipient: events.MustNodeDeliveryRecipient(node), Target: target,
+			Handler: runtimepinrouting.MustConnectReceiverHandler(node),
 		}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, blueprint)
 		if err != nil {
@@ -683,8 +732,9 @@ func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScoped
 		FlowInstance: "account_case/ti-1",
 		EntityID:     "entity-1",
 	})
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: events.MustExistingEntityTarget(evt.TargetRoute())}
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
+	accountNode := pipelineNode(t, "account_case", "account-case-worker")
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(accountNode), Target: events.MustExistingEntityTarget(evt.TargetRoute())}
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, accountNode, evt)
 	if resolved.Matched || !strings.Contains(resolved.Failure, "stamped connect claim") {
 		t.Fatalf("target-route-only resolution = %#v, want fail-closed stamped-claim error", resolved)
 	}
@@ -709,8 +759,9 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryConsumesExactTarget
 		{name: "unrelated flow", target: events.RouteIdentity{FlowID: "intake", FlowInstance: "account_case/ti-1", EntityID: "entity-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: events.MustExistingEntityTarget(tc.target)}
-			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
+			accountNode := pipelineNode(t, "account_case", "account-case-worker")
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(accountNode), Target: events.MustExistingEntityTarget(tc.target)}
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, accountNode, evt)
 			if resolved.Matched != tc.want {
 				t.Fatalf("direct concrete resolution = %#v, want matched=%t", resolved, tc.want)
 			}
@@ -782,7 +833,7 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 
 	route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, "operating.reported", "portfolio-collector")
 	route.Target = events.MustExistingEntityTarget(evt.TargetRoute())
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "portfolio-collector", evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "portfolio", "portfolio-collector"), evt)
 	if !resolved.Matched {
 		t.Fatal("expected portfolio handler to resolve through the canonical cross-flow event")
 	}
@@ -794,11 +845,12 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := loadPipelineImportBoundaryWildcardSource(t, canonicalrouting.ImportBoundaryWildcardDenied)
 	evt := eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
+	workerNode := pipelineSourceNode(t, source, "worker", "worker-listener")
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, workerNode, evt)
 	if resolved.Matched {
 		t.Fatalf("worker-listener matched ungranted sibling event through raw wildcard fallback: %#v", resolved)
 	}
-	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); ok {
+	if _, ok := source.ExecutableNodeEventHandler(workerNode, "producer/task.done"); ok {
 		t.Fatal("semantic source NodeEventHandler matched ungranted sibling event")
 	}
 }
@@ -806,7 +858,8 @@ func TestWorkflowNodeHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t
 func TestWorkflowNodeHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := loadPipelineImportBoundaryWildcardSource(t, canonicalrouting.ImportBoundaryWildcardObserveGranted)
 	evt := eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "worker-listener", evt)
+	node := pipelineSourceNode(t, source, "worker", "worker-listener")
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
 	if !resolved.Matched {
 		t.Fatal("worker-listener did not match granted sibling event")
 	}
@@ -860,7 +913,7 @@ func loadPipelineImportBoundaryWildcardBundle(t *testing.T, variant canonicalrou
 
 func workflowNodeByIDForTest(nodes []WorkflowNode, id string) *WorkflowNode {
 	for i := range nodes {
-		if nodes[i].ID == id {
+		if nodes[i].Node.NodeID() == id {
 			return &nodes[i]
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -180,6 +181,7 @@ func loopValidationFindings(bundle *runtimecontracts.WorkflowContractBundle) []F
 
 func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 	revisionField := "revision_id"
+	controller, _ := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "controller")
 	emit := func(event string) runtimecontracts.EmitSpec {
 		return runtimecontracts.EmitSpec{Event: event, Fields: map[string]runtimecontracts.ExpressionValue{revisionField: runtimecontracts.RefExpression("loop.revision_id")}}
 	}
@@ -198,10 +200,10 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	operations := []runtimecontracts.WorkflowLoopOperationPlan{
-		{NodeID: "controller", HandlerEvent: "research.done", Kind: runtimecontracts.LoopOperationStart, LoopID: "revision", From: "research", AdvancesTo: "drafting", Emit: emit("draft.requested")},
-		{NodeID: "controller", HandlerEvent: "draft.ready", Kind: runtimecontracts.LoopOperationAdmit, LoopID: "revision", From: "drafting", AdvancesTo: "review", Emit: emit("review.requested")},
-		{NodeID: "controller", HandlerEvent: "review.issues", Kind: runtimecontracts.LoopOperationRepeat, LoopID: "revision", From: "review", AdvancesTo: "drafting", Emit: emit("draft.requested")},
-		{NodeID: "controller", HandlerEvent: "review.passed", Kind: runtimecontracts.LoopOperationClose, LoopID: "revision", From: "review", AdvancesTo: "approved"},
+		{Node: controller, HandlerEvent: "research.done", Kind: runtimecontracts.LoopOperationStart, LoopID: "revision", From: "research", AdvancesTo: "drafting", Emit: emit("draft.requested")},
+		{Node: controller, HandlerEvent: "draft.ready", Kind: runtimecontracts.LoopOperationAdmit, LoopID: "revision", From: "drafting", AdvancesTo: "review", Emit: emit("review.requested")},
+		{Node: controller, HandlerEvent: "review.issues", Kind: runtimecontracts.LoopOperationRepeat, LoopID: "revision", From: "review", AdvancesTo: "drafting", Emit: emit("draft.requested")},
+		{Node: controller, HandlerEvent: "review.passed", Kind: runtimecontracts.LoopOperationClose, LoopID: "revision", From: "review", AdvancesTo: "approved"},
 	}
 	events := map[string]runtimecontracts.EventCatalogEntry{}
 	for _, eventType := range []string{"draft.ready", "review.issues", "review.passed", "draft.requested", "review.requested"} {
@@ -226,10 +228,11 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBundle) {
+	controller, _ := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "controller")
 	transitions := make([]runtimecontracts.HandlerTransitionSemantic, 0)
 	for eventType, handler := range bundle.Nodes["controller"].EventHandlers {
 		transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
-			ID: eventType, NodeID: "controller", EventType: eventType, CreateEntity: handler.CreateEntity,
+			ID: eventType, Node: controller, EventType: eventType, CreateEntity: handler.CreateEntity,
 			AdvancesTo: handler.AdvancesTo, Emit: handler.Emit, Loop: handler.Loop, OnComplete: handler.OnComplete,
 			Rules: handler.Rules, Accumulate: handler.Accumulate, Join: handler.Join,
 		})

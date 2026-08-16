@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -44,10 +45,11 @@ func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(
 	if !hasString(event.SourceSubscriberTypes, "node") || !hasString(event.SourceSubscriberIDs, "source-node") {
 		t.Fatalf("source delivery evidence = types:%v ids:%v", event.SourceSubscriberTypes, event.SourceSubscriberIDs)
 	}
-	if !hasString(event.WorkflowNodeSubscribers, "consumer-node") {
+	consumerNode := identitytest.FlowNode(t, "consumer", "consumer-node").Key()
+	if !hasString(event.WorkflowNodeSubscribers, consumerNode) {
 		t.Fatalf("workflow node subscribers = %v, want consumer-node", event.WorkflowNodeSubscribers)
 	}
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != "consumer-node" || !event.DerivedRecipients[0].Recipient.IsNode() {
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != consumerNode || !event.DerivedRecipients[0].Recipient.IsNode() {
 		t.Fatalf("derived recipients = %#v, want selected contract consumer-node", event.DerivedRecipients)
 	}
 	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {
@@ -78,7 +80,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	}
 	gotA := admissionA.FrontierEvents[0].DerivedRecipients[0].Recipient.ID()
 	gotB := admissionB.FrontierEvents[0].DerivedRecipients[0].Recipient.ID()
-	if gotA != "consumer-a" || gotB != "consumer-b" {
+	if gotA != identitytest.FlowNode(t, "consumer", "consumer-a").Key() || gotB != identitytest.FlowNode(t, "consumer", "consumer-b").Key() {
 		t.Fatalf("selected contract recipients = %q/%q, want consumer-a/consumer-b", gotA, gotB)
 	}
 }
@@ -97,7 +99,7 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
 	event := admission.FrontierEvents[0]
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != "consumer-node" {
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != identitytest.FlowNode(t, "consumer", "consumer-node").Key() {
 		t.Fatalf("derived recipients = %#v, want consumer-node through producer connect", event.DerivedRecipients)
 	}
 	if hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
@@ -269,9 +271,9 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 func assertContractFrontierMixedRecipients(t *testing.T, recipients []runfork.RunForkContractFrontierRecipient) {
 	t.Helper()
 	want := map[string]bool{
-		"node/root-node":     true,
-		"agent/root-agent":   true,
-		"node/consumer-node": true,
+		"node/" + identitytest.RootNode(t, "root-node").Key(): true,
+		"agent/root-agent": true,
+		"node/" + identitytest.FlowNode(t, "consumer", "consumer-node").Key(): true,
 	}
 	if len(recipients) != len(want) {
 		t.Fatalf("recipients = %#v, want root node, root agent, and child carrier", recipients)
@@ -434,7 +436,7 @@ func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T
 	if !hasString(event.SourceFlowInstances, "review/inst-1") {
 		t.Fatalf("source flow instances = %v, want review/inst-1", event.SourceFlowInstances)
 	}
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != "reviewer-inst-1" {
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != identitytest.FlowNode(t, "review", "reviewer").Key() {
 		t.Fatalf("derived recipients = %#v, want materialized reviewer-inst-1", event.DerivedRecipients)
 	}
 	if event.DerivedRecipients[0].Path != "review/inst-1" {

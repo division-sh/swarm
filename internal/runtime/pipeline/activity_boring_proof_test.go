@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -52,7 +53,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 			fixture = newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true)
 			seedActivityBoringSourceFlow(t, fixture, tc.kind, sourceEvent)
 			fixture.pc.SetTestWorkflowNodeHandlerStartHook(func(ctx context.Context, nodeID string, evt events.Event) error {
-				if nodeID != "scanner" || evt.ID() != sourceEvent.ID() {
+				if nodeID != mustActivityBoringNode("scanner").Key() || evt.ID() != sourceEvent.ID() {
 					return nil
 				}
 				if got := calls.Load(); got != 0 {
@@ -91,7 +92,7 @@ func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReuse
 			}
 			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 1)
 			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 1)
-			assertActivityBoringDeliveryStatus(t, fixture.db, tc.kind, sourceEvent.ID(), "scanner", "delivered")
+			assertActivityBoringDeliveryStatus(t, fixture.db, tc.kind, sourceEvent.ID(), mustActivityBoringNode("scanner").Key(), "delivered")
 
 			request := fixture.bus.outboxIntent(0)
 			handled, _, err = fixture.pc.handleEventResult(ctx, request.Event)
@@ -474,7 +475,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 			bundle:   bundle,
 			workflow: NewWorkflowDefinition("research", []WorkflowStage{{Name: "pending"}}, nil),
 			workflowNodes: []WorkflowNode{{
-				ID:            "scanner",
+				Node:          mustActivityBoringNode("scanner"),
 				Subscriptions: []events.EventType{"source.requested"},
 				Produces:      []events.EventType{"research.scanner_source_requested_source_scrape.succeeded", "research.scanner_source_requested_source_scrape.failed"},
 				ExecutionType: runtimecontracts.SystemNodeExecutionType,
@@ -610,8 +611,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 	flowInstance := "research/" + evt.EntityID()
 	routingSource := mustActivityBoringRoutingSource(evt.EntityID())
 	site := runtimecontracts.ActivitySite{
-		FlowID:          "research",
-		NodeID:          "scanner",
+		Node:            mustActivityBoringNode("scanner"),
 		HandlerEventKey: "source.requested",
 		RuleIndex:       -1,
 		Spec: runtimecontracts.ActivitySpec{
@@ -635,8 +635,8 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 		RetryBackoff:     defaults.Backoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(runtimecontracts.ActivityEffectClassReadOnly),
 		EntityID:         identity.NormalizeEntityID(evt.EntityID()),
-		NodeID:           identity.NormalizeNodeID("scanner"),
-		FlowID:           identity.NormalizeFlowID("research"),
+		Owner:            runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
+		ExecutionFlowID:  identity.NormalizeFlowID("research"),
 		FlowInstance:     flowInstance,
 		HandlerEventKey:  "source.requested",
 		SourceEventID:    evt.ID(),
@@ -666,8 +666,8 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		RetryBackoff:     "none",
 		ForkPolicy:       runtimecontracts.ActivityForkReexecuteRead,
 		EntityID:         identity.NormalizeEntityID(entityID),
-		NodeID:           identity.NormalizeNodeID("scanner"),
-		FlowID:           identity.NormalizeFlowID("research"),
+		Owner:            runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
+		ExecutionFlowID:  identity.NormalizeFlowID("research"),
 		FlowInstance:     "research/" + entityID,
 		HandlerEventKey:  "source.requested",
 		SourceEventID:    uuid.NewString(),
@@ -845,10 +845,18 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 }
 
 func activityBoringNodeRoute(evt events.Event, nodeID string) events.DeliveryRoute {
-	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+	return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustActivityBoringNode(nodeID)), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: "research", FlowInstance: "research/" + strings.TrimSpace(evt.EntityID()), EntityID: strings.TrimSpace(evt.EntityID()),
 	}),
 	}
+}
+
+func mustActivityBoringNode(nodeID string) identity.ExecutableNode {
+	node, err := identity.AdmitExecutableNodeDeclaration("activity-boring-proof", "research", strings.TrimSpace(nodeID))
+	if err != nil {
+		panic(err)
+	}
+	return node
 }
 
 func assertActivityBoringEventCount(t *testing.T, db *sql.DB, kind activityBoringStoreKind, eventID string, want int) {

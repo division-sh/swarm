@@ -81,7 +81,7 @@ func workflowNodeCarrierTestEventAndRoute(t *testing.T) (events.Event, events.De
 	t.Helper()
 	eventID := uuid.NewString()
 	route := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("node-a"),
+		Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, "", "node-a")),
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "carrier-guard"}),
 	}
 	deliveryID, err := runtimedelivery.DeliveryID(eventID, route)

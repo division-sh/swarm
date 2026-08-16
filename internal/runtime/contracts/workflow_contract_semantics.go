@@ -103,7 +103,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		}
 	}
 	for _, record := range bundle.ScopedNodeRecords() {
-		nodeID := strings.TrimSpace(record.LogicalID)
+		node, _ := record.Identity()
 		flowID := strings.TrimSpace(record.Source.FlowID)
 		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
@@ -113,36 +113,31 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			}
 			resultType, _ := ResolveEventFieldType(bundle, flowID, eventType, joinOutputField(handler.Join.Output))
 			semantics.Joins = append(semantics.Joins, WorkflowJoinPlan{
-				FlowID:       flowID,
-				NodeID:       nodeID,
+				Node:         node,
 				HandlerEvent: eventType,
 				Spec:         *handler.Join,
 				ResultType:   resultType,
 			})
 		}
 	}
-	for nodeID, node := range bundle.Nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
+	for _, record := range bundle.ScopedNodeRecords() {
+		nodeRef, err := record.Identity()
+		if err != nil {
 			continue
 		}
+		nodeID := nodeRef.NodeID()
+		node := record.Entry
 		effective := SystemNodeEffectiveSemantics{
 			ID:                   EffectiveSystemNodeID(nodeID, node),
 			ExecutionType:        EffectiveSystemNodeExecutionType(node),
 			RuntimeSubscriptions: EffectiveSystemNodeSubscriptions(node),
 			Produces:             EffectiveSystemNodeProduces(node),
 		}
-		semantics.EffectiveNodes[nodeID] = effective
-		if strings.TrimSpace(node.ID) == "" || strings.TrimSpace(node.ExecutionType) == "" {
-			node.ID = effective.ID
-			node.ExecutionType = effective.ExecutionType
-			bundle.Nodes[nodeID] = node
-		}
+		semantics.EffectiveNodes[nodeRef.Key()] = effective
 		if len(node.EventHandlers) == 0 {
 			continue
 		}
 		handlers := make(map[string]SystemNodeEventHandler, len(node.EventHandlers))
-		source, _ := bundle.NodeContractSource(nodeID)
 		for eventType, handler := range node.EventHandlers {
 			rawEventType := strings.TrimSpace(eventType)
 			if rawEventType == "" {
@@ -150,15 +145,14 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			}
 			handler = DefaultSystemNodeHandlerSourceEvent(handler, rawEventType)
 			handlers[rawEventType] = handler
-			ownerEventType := strings.TrimSpace(bundle.resolveNodeEventOwnerPattern(nodeID, rawEventType))
+			ownerEventType := strings.TrimSpace(bundle.ResolveExecutableNodeEventPattern(nodeRef, rawEventType))
 			if ownerEventType == "" {
 				ownerEventType = rawEventType
 			}
-			semantics.EventOwners[ownerEventType] = appendIfMissingString(semantics.EventOwners[ownerEventType], nodeID)
+			semantics.EventOwners[ownerEventType] = appendIfMissingString(semantics.EventOwners[ownerEventType], nodeRef.Key())
 			transition := HandlerTransitionSemantic{
-				ID:                   fmt.Sprintf("%s:%s", nodeID, rawEventType),
-				NodeID:               nodeID,
-				FlowID:               strings.TrimSpace(source.FlowID),
+				ID:                   fmt.Sprintf("%s:%s", nodeRef.Key(), rawEventType),
+				Node:                 nodeRef,
 				EventType:            rawEventType,
 				CreateEntity:         handler.CreateEntity,
 				Action:               handler.Action,
@@ -192,12 +186,12 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			}
 			semantics.Transitions = append(semantics.Transitions, deriveRuleTransitions(transition)...)
 			semantics.Transitions = append(semantics.Transitions, deriveJoinTransitions(transition)...)
-			if semantics.HandlerTransitionIndex[nodeID] == nil {
-				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
+			if semantics.HandlerTransitionIndex[nodeRef.Key()] == nil {
+				semantics.HandlerTransitionIndex[nodeRef.Key()] = map[string]HandlerTransitionSemantic{}
 			}
-			semantics.HandlerTransitionIndex[nodeID][rawEventType] = transition
+			semantics.HandlerTransitionIndex[nodeRef.Key()][rawEventType] = transition
 		}
-		semantics.NodeHandlers[nodeID] = handlers
+		semantics.NodeHandlers[nodeRef.Key()] = handlers
 	}
 	semantics.Loops = deriveWorkflowLoopPlans(bundle, semantics.HandlerTransitions)
 	semantics.StageTopologies = deriveWorkflowStageTopologies(semantics)
@@ -256,11 +250,11 @@ func deriveWorkflowLoopPlans(bundle *WorkflowContractBundle, transitions []Handl
 			continue
 		}
 		for idx := range plans {
-			if plans[idx].ID != loopID || plans[idx].FlowID != strings.TrimSpace(transition.FlowID) {
+			if plans[idx].ID != loopID || plans[idx].FlowID != transition.Node.FlowID() {
 				continue
 			}
 			operation := WorkflowLoopOperationPlan{
-				NodeID:       strings.TrimSpace(transition.NodeID),
+				Node:         transition.Node,
 				HandlerEvent: strings.TrimSpace(transition.EventType),
 				Kind:         kind,
 				LoopID:       loopID,
@@ -390,8 +384,8 @@ func deriveWorkflowGuardEntries(bundle *WorkflowContractBundle) []GuardActionEnt
 		return nil
 	}
 	seen := map[string]GuardActionEntry{}
-	for _, nodeID := range sortedContractKeys(bundle.Nodes) {
-		node := bundle.Nodes[nodeID]
+	for _, record := range bundle.ScopedNodeRecords() {
+		node := record.Entry
 		for _, eventType := range sortedContractKeys(node.EventHandlers) {
 			handler := node.EventHandlers[eventType]
 			if handler.Guard == nil {
@@ -415,8 +409,8 @@ func deriveWorkflowActionEntries(bundle *WorkflowContractBundle) []GuardActionEn
 		return nil
 	}
 	seen := map[string]GuardActionEntry{}
-	for _, nodeID := range sortedContractKeys(bundle.Nodes) {
-		node := bundle.Nodes[nodeID]
+	for _, record := range bundle.ScopedNodeRecords() {
+		node := record.Entry
 		for _, eventType := range sortedContractKeys(node.EventHandlers) {
 			handler := node.EventHandlers[eventType]
 			if id := strings.TrimSpace(handler.Action.ID); id != "" {
@@ -456,7 +450,7 @@ func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (Wor
 		From:             []string{"*"},
 		To:               to,
 		Trigger:          strings.TrimSpace(transition.EventType),
-		Node:             strings.TrimSpace(transition.NodeID),
+		ExecutableNode:   transition.Node,
 		DataAccumulation: transition.DataAccumulation,
 	}
 	if transition.Loop != nil && strings.TrimSpace(transition.Loop.From) != "" {
@@ -489,20 +483,20 @@ func deriveJoinTransitions(transition HandlerTransitionSemantic) []WorkflowTrans
 	out := make([]WorkflowTransitionContract, 0, 2)
 	if target := strings.TrimSpace(join.OnComplete.AdvancesTo); target != "" {
 		out = append(out, WorkflowTransitionContract{
-			ID:      strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":complete",
-			From:    from,
-			To:      target,
-			Trigger: strings.TrimSpace(transition.EventType),
-			Node:    strings.TrimSpace(transition.NodeID),
+			ID:             strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":complete",
+			From:           from,
+			To:             target,
+			Trigger:        strings.TrimSpace(transition.EventType),
+			ExecutableNode: transition.Node,
 		})
 	}
 	if target := strings.TrimSpace(join.Timeout.Outcome.AdvancesTo); target != "" {
 		out = append(out, WorkflowTransitionContract{
-			ID:      strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":timeout",
-			From:    from,
-			To:      target,
-			Trigger: "platform.join_timeout",
-			Node:    strings.TrimSpace(transition.NodeID),
+			ID:             strings.TrimSpace(transition.ID) + ":join:" + join.EffectiveID() + ":timeout",
+			From:           from,
+			To:             target,
+			Trigger:        "platform.join_timeout",
+			ExecutableNode: transition.Node,
 		})
 	}
 	return out
@@ -525,12 +519,12 @@ func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTrans
 		}
 		defaultIDIndex++
 		out = append(out, WorkflowTransitionContract{
-			ID:      id,
-			From:    []string{"*"},
-			To:      strings.TrimSpace(carrier.AdvancesTo),
-			Trigger: strings.TrimSpace(transition.EventType),
-			Node:    strings.TrimSpace(transition.NodeID),
-			Actions: actionIDsForRule(rule),
+			ID:             id,
+			From:           []string{"*"},
+			To:             strings.TrimSpace(carrier.AdvancesTo),
+			Trigger:        strings.TrimSpace(transition.EventType),
+			ExecutableNode: transition.Node,
+			Actions:        actionIDsForRule(rule),
 		})
 	}
 	handlerAdvanceTo := handlerLevelAdvanceTarget(transition)
@@ -548,12 +542,12 @@ func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTrans
 		}
 		defaultIDIndex++
 		out = append(out, WorkflowTransitionContract{
-			ID:      id,
-			From:    []string{"*"},
-			To:      to,
-			Trigger: strings.TrimSpace(transition.EventType),
-			Node:    strings.TrimSpace(transition.NodeID),
-			Actions: actionIDsForRule(rule),
+			ID:             id,
+			From:           []string{"*"},
+			To:             to,
+			Trigger:        strings.TrimSpace(transition.EventType),
+			ExecutableNode: transition.Node,
+			Actions:        actionIDsForRule(rule),
 		})
 	}
 	return out
@@ -580,15 +574,15 @@ func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTime
 	indexByID := map[string]int{}
 	addTimer := func(timer WorkflowTimerContract) {
 		timer = normalizeWorkflowSemanticTimer(bundle, timer)
-		id := strings.TrimSpace(timer.ID)
-		if id == "" {
+		key := timer.SemanticKey()
+		if key == "" {
 			return
 		}
-		if idx, ok := indexByID[id]; ok {
+		if idx, ok := indexByID[key]; ok {
 			out[idx] = mergeWorkflowSemanticTimer(out[idx], timer)
 			return
 		}
-		indexByID[id] = len(out)
+		indexByID[key] = len(out)
 		out = append(out, timer)
 	}
 	for _, timer := range deriveNodeWorkflowTimers(bundle) {
@@ -671,11 +665,12 @@ func deriveStageTimerTransitions(bundle *WorkflowContractBundle) []WorkflowTrans
 			continue
 		}
 		out = append(out, WorkflowTransitionContract{
-			ID:      "timer:" + strings.TrimSpace(timer.ID),
-			From:    []string{strings.TrimSpace(timer.Stage)},
-			To:      strings.TrimSpace(timer.AdvancesTo),
-			Trigger: "timer:" + strings.TrimSpace(timer.ID),
-			Node:    "runtime",
+			ID:            "timer:" + strings.TrimSpace(timer.ID),
+			From:          []string{strings.TrimSpace(timer.Stage)},
+			To:            strings.TrimSpace(timer.AdvancesTo),
+			Trigger:       "timer:" + strings.TrimSpace(timer.ID),
+			FlowID:        strings.TrimSpace(timer.FlowID),
+			InternalOwner: "runtime",
 		})
 	}
 	return out
@@ -691,15 +686,16 @@ func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCon
 	}
 	out := make([]WorkflowTimerContract, 0, 8)
 	for _, item := range scopedNodes {
-		nodeID := strings.TrimSpace(item.LogicalID)
+		nodeRef, _ := item.Identity()
+		nodeID := nodeRef.NodeID()
 		node := item.Entry
 		if len(node.Timers) == 0 {
 			continue
 		}
-		flowID := strings.TrimSpace(item.Source.FlowID)
 		for _, timer := range node.Timers {
-			timer.NodeID = nodeID
-			timer.FlowID = flowID
+			timer.Node = nodeRef
+			timer.FlowID = ""
+			timer.StageOwned = false
 			if strings.TrimSpace(timer.Owner) == "" {
 				timer.Owner = nodeID
 			}
@@ -716,17 +712,21 @@ func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer Workfl
 	timer.Stage = strings.TrimSpace(timer.Stage)
 	timer.Event = strings.TrimSpace(timer.Event)
 	timer.Owner = strings.TrimSpace(timer.Owner)
-	timer.FlowID = strings.TrimSpace(timer.FlowID)
-	timer.NodeID = strings.TrimSpace(timer.NodeID)
+	if timer.Node.Valid() {
+		timer.FlowID = ""
+	} else {
+		timer.FlowID = strings.TrimSpace(timer.FlowID)
+	}
 	timer.AdvancesTo = strings.TrimSpace(timer.AdvancesTo)
 	timer.Action = strings.TrimSpace(timer.Action)
 	timer.Cancellation = strings.TrimSpace(timer.Cancellation)
 	timer.Delay = strings.TrimSpace(timer.Delay)
 	timer.StartOn = strings.TrimSpace(timer.StartOn)
 	timer.CancelOn = strings.TrimSpace(timer.CancelOn)
-	if timer.Event == "" && timer.NodeID != "" {
-		node := bundle.Nodes[timer.NodeID]
-		timer.Event = inferWorkflowTimerEvent(bundle, node, timer)
+	if timer.Event == "" && timer.Node.Valid() {
+		if record, ok := bundle.ExecutableNode(timer.Node); ok {
+			timer.Event = inferWorkflowTimerEvent(bundle, record.Entry, timer)
+		}
 	}
 	return timer
 }
@@ -743,11 +743,11 @@ func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) Workfl
 	if strings.TrimSpace(existing.Owner) == "" {
 		existing.Owner = incoming.Owner
 	}
-	if strings.TrimSpace(existing.FlowID) == "" {
+	if strings.TrimSpace(existing.FlowID) == "" && !existing.Node.Valid() {
 		existing.FlowID = incoming.FlowID
 	}
-	if strings.TrimSpace(existing.NodeID) == "" {
-		existing.NodeID = incoming.NodeID
+	if !existing.Node.Valid() {
+		existing.Node = incoming.Node
 	}
 	existing.StageOwned = existing.StageOwned || incoming.StageOwned
 	if strings.TrimSpace(existing.AdvancesTo) == "" {

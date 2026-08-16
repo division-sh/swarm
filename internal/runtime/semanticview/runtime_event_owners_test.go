@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 func TestRuntimeEventOwners_UsesScopedAuthoritativeOwners(t *testing.T) {
@@ -34,10 +35,10 @@ func TestRuntimeEventOwners_UsesScopedAuthoritativeOwners(t *testing.T) {
 	}
 }
 
-func testHasAll(values []string, wants ...string) bool {
+func testHasAll(values []runtimeidentity.ExecutableNode, wants ...string) bool {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		seen[value] = struct{}{}
+		seen[value.NodeID()] = struct{}{}
 	}
 	for _, want := range wants {
 		if _, ok := seen[want]; !ok {
@@ -47,10 +48,10 @@ func testHasAll(values []string, wants ...string) bool {
 	return true
 }
 
-func testHasAny(values []string, wants ...string) bool {
+func testHasAny(values []runtimeidentity.ExecutableNode, wants ...string) bool {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		seen[value] = struct{}{}
+		seen[value.NodeID()] = struct{}{}
 	}
 	for _, want := range wants {
 		if _, ok := seen[want]; ok {

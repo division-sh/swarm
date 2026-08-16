@@ -179,7 +179,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	route = seedPipelineNodeDeliveryRouteAuthority(t, db, evt, route)
 	deliveryCtx := withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route)
 
-	if handled := pc.executeNodeHandlerPlan(deliveryCtx, "dispatcher", evt); handled {
+	if handled := pc.executeNodeHandlerPlan(deliveryCtx, pipelineNode(t, "", "dispatcher"), evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
 	}
 	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
@@ -193,7 +193,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatalf("state after wrong node execution = %q, want waiting", got)
 	}
 
-	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, "listener", evt); err != nil || !handled {
+	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, pipelineNode(t, "", "listener"), evt); err != nil || !handled {
 		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
 	}
 	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
@@ -260,9 +260,10 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	triggerRoute := seedPipelineNodeDeliveryAuthority(t, db, trigger, "child-worker")
+	triggerRoute := seedPipelineNodeDeliveryAuthority(t, db, trigger, pipelineNode(t, "child", "child-worker"))
 
-	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), "child-worker", trigger); err != nil || !handled {
+	childWorker := pipelineNode(t, "child", "child-worker")
+	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), childWorker, trigger); err != nil || !handled {
 		t.Fatalf("child-worker should handle work.requested through the input-pin alias: handled=%v err=%v", handled, err)
 	}
 	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
@@ -297,12 +298,13 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		time.Now().UTC(),
 	)
 
-	completionRoute := seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
-	handler, ok := pc.SemanticSource().NodeEventHandler("parent-listener", "work.completed")
+	completionRoute := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "parent-listener"))
+	parentListener := pipelineNode(t, "", "parent-listener")
+	handler, ok := pc.SemanticSource().ExecutableNodeEventHandler(parentListener, "work.completed")
 	if !ok {
 		t.Fatal("parent-listener handler missing for root-local work.completed")
 	}
-	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), "parent-listener", handler, workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), parentListener, handler, workflowTriggerContext{
 		Event: completion,
 		State: mustCurrentWorkflowState(t, pc, withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), testWorkflowInstanceRoute(testPipelineRunID), entityID),
 	}, false)
@@ -313,7 +315,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		t.Fatalf("handler emits = %#v, want no retired dead output", result.Outcome)
 	}
 
-	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), "parent-listener", completion); !handled {
+	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), parentListener, completion); !handled {
 		t.Fatal("parent-listener should clear inherited child flow scope and handle root-local work.completed")
 	}
 	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
@@ -379,7 +381,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "parent-listener")
+	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "parent-listener"))
 	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
@@ -473,7 +475,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
 	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
 	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
 		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
@@ -578,7 +580,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
 	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
 	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
 		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
@@ -661,7 +663,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
+	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
 	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin nested completion author activity story: %v", err)

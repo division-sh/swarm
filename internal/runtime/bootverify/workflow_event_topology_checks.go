@@ -171,12 +171,12 @@ func generatedActivityResultEventNamesLocal(source semanticview.Source) map[stri
 	if source == nil {
 		return out
 	}
-	for _, nodeID := range sortedNodeIDs(source) {
-		flowID := ""
-		if contractSource, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(contractSource.FlowID)
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
 		}
-		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, source.NodeEventHandlers(nodeID)) {
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
 			results := runtimecontracts.ActivityResultEventsForSite(site)
 			eventTypes := []string{results.SuccessEvent, results.FailureEvent}
 			if site.Spec.Approval != nil {

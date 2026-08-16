@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -39,13 +40,14 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 			}
 
 			t.Run("accumulator", func(t *testing.T) {
+				nodeKey := pipelineNode(t, "review", "node-a").Key()
 				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "accumulator", runtimecontracts.SystemNodeEventHandler{
 					Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
 				}, json.RawMessage(`{"item_id":"a"}`), nil, nil)
 				if !result.Handled {
 					t.Fatal("accumulator execution was not handled")
 				}
-				nodeBucket, ok := instance.StateBuckets["node-a"].(map[string]any)
+				nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any)
 				if !ok {
 					t.Fatalf("accumulator node bucket = %#v, want persisted node-a bucket", instance.StateBuckets)
 				}
@@ -55,13 +57,14 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 			})
 
 			t.Run("clear", func(t *testing.T) {
+				nodeKey := pipelineNode(t, "review", "node-a").Key()
 				initialMetadata := map[string]any{
 					"revision_count":    3,
 					"dedup_key":         "pending-a",
 					"accumulated_count": 1,
 				}
-				initialBuckets := map[string]any{"node-a": map[string]any{
-					"handler_accumulators": map[string]any{"work.ready": map[string]any{"items": []any{"a"}}},
+				initialBuckets := map[string]any{nodeKey: map[string]any{
+					"handler_accumulators": map[string]any{nodeKey + ":work.ready": map[string]any{"items": []any{"a"}}},
 				}}
 				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "clear", runtimecontracts.SystemNodeEventHandler{
 					Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state", "pending_dedup", "revision_count"}},
@@ -74,7 +77,7 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 						t.Fatalf("clear retained field %q in %#v", field, instance.Fields)
 					}
 				}
-				if nodeBucket, ok := instance.StateBuckets["node-a"].(map[string]any); ok {
+				if nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any); ok {
 					if _, retained := nodeBucket["handler_accumulators"]; retained {
 						t.Fatalf("clear retained handler accumulator state: %#v", nodeBucket)
 					}
@@ -117,14 +120,15 @@ func TestEntitylessDeclarativeEmissionDoesNotMaterializeWorkflowStateOnSQLiteAnd
 				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
+			node := pipelineNode(t, "review", "node-a")
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient("node-a"),
+				Recipient: events.MustNodeDeliveryRecipient(node),
 				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 					FlowID: "review", FlowInstance: instancePath,
 				}),
 			})
 
-			outcome, err := newCoordinatorHandlerExecutionEngine(pc, "node-a").ExecuteHandlerSteps(
+			outcome, err := newCoordinatorHandlerExecutionEngine(pc, node).ExecuteHandlerSteps(
 				deliveryCtx,
 				runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "work.emitted"}},
 				evt,
@@ -208,11 +212,12 @@ func executeExistingOwnerBehavior(
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: flowInstance, EntityID: entityID}
 	seedExactOnceEvent(t, pc.workflowStore, ctx, sourceEvent)
 	evt := eventtest.TargetRouted(sourceEvent, target)
+	node := pipelineNode(t, "review", "node-a")
 	deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("node-a"),
+		Recipient: events.MustNodeDeliveryRecipient(node),
 		Target:    events.MustExistingEntityTarget(target),
 	})
-	result, err := pc.executeNodeContractHandler(deliveryCtx, "node-a", handler, workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(deliveryCtx, node, handler, workflowTriggerContext{
 		Event: evt,
 		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(flowInstance), entityID),
 	}, false)
@@ -254,9 +259,9 @@ type handlerEntityRequirementSemanticSource struct {
 	semanticview.Source
 }
 
-func (s handlerEntityRequirementSemanticSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
-	if strings.TrimSpace(nodeID) == "node-a" {
+func (s handlerEntityRequirementSemanticSource) ExecutableNodeSource(node runtimeidentity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
+	if node.Equal(mustPipelineNode("review", "node-a")) {
 		return runtimecontracts.ContractItemSource{FlowID: "review", Layer: "flow"}, true
 	}
-	return s.Source.NodeContractSource(nodeID)
+	return s.Source.ExecutableNodeSource(node)
 }

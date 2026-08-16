@@ -11,32 +11,30 @@ import (
 )
 
 type DeclarativeNode struct {
-	nodeID   identity.NodeID
+	node     identity.ExecutableNode
 	executor *Executor
 }
 
-func NewDeclarativeNode(nodeID string, executor *Executor) *DeclarativeNode {
-	if executor == nil {
+func NewDeclarativeNode(node identity.ExecutableNode, executor *Executor) *DeclarativeNode {
+	if executor == nil || !node.Valid() {
 		return nil
 	}
-	return &DeclarativeNode{nodeID: identity.NormalizeNodeID(nodeID), executor: executor}
+	return &DeclarativeNode{node: node, executor: executor}
 }
 
 func (n *DeclarativeNode) NodeID() string {
 	if n == nil {
 		return ""
 	}
-	return n.nodeID.String()
+	return n.node.NodeID()
 }
 
 func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
-	nodeID := identity.NormalizeNodeID(firstNonEmpty(n.nodeID.String(), req.NodeID.String()))
-	if nodeID.IsZero() {
+	if !n.node.Valid() || !req.Node.Valid() || !n.node.Equal(req.Node) {
 		return ExecutionResult{}, ErrMissingNodeID
 	}
-	req.NodeID = nodeID
 	if isZeroHandler(req.Handler) {
-		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type()))
+		resolved := resolvedExecutionHandler(n.executor.deps.Source, req.Node, string(req.Event.Type()))
 		if !resolved.matched {
 			return ExecutionResult{}, ErrMissingNodeHandler
 		}
@@ -46,7 +44,7 @@ func (n *DeclarativeNode) handle(ctx context.Context, req ExecutionRequest) (Exe
 		}
 	}
 	if strings.TrimSpace(req.HandlerEventKey) == "" {
-		resolved := resolvedExecutionHandler(n.executor.deps.Source, nodeID.String(), string(req.Event.Type()))
+		resolved := resolvedExecutionHandler(n.executor.deps.Source, req.Node, string(req.Event.Type()))
 		if resolved.matched {
 			req.HandlerEventKey = resolved.handlerEventKey
 		}
@@ -71,11 +69,11 @@ type executionHandlerResolution struct {
 	matched         bool
 }
 
-func resolvedExecutionHandler(source semanticview.Source, nodeID, eventType string) executionHandlerResolution {
+func resolvedExecutionHandler(source semanticview.Source, node identity.ExecutableNode, eventType string) executionHandlerResolution {
 	if source == nil {
 		return executionHandlerResolution{}
 	}
-	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
 	if resolved.Matched {
 		return executionHandlerResolution{
 			handler:         resolved.Handler,

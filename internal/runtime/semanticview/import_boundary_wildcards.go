@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type ImportBoundaryWildcardPattern struct {
@@ -126,47 +127,12 @@ func ResolveImportBoundaryWildcardSubscriptionForRelation(source Source, package
 	return resolution
 }
 
-func ResolveImportBoundaryWildcardSubscriptionForNode(source Source, nodeID, raw string) ImportBoundaryWildcardSubscriptionResolution {
-	if source == nil {
-		return ImportBoundaryWildcardSubscriptionResolution{}
-	}
-	contractSource, ok := source.NodeContractSource(strings.TrimSpace(nodeID))
-	if !ok {
-		return ImportBoundaryWildcardSubscriptionResolution{}
-	}
-	return ResolveImportBoundaryWildcardSubscription(
-		source,
-		contractSource.PackageKey,
-		contractSource.FlowID,
-		importBoundaryBasePathForFlow(source, contractSource.FlowID),
-		importBoundaryNodeLocalEvents(source, nodeID, contractSource),
-		raw,
-	)
-}
-
 func ImportBoundaryWildcardSubscriptionMatches(source Source, packageKey, flowID, basePath string, localEvents map[string]struct{}, raw, eventType string) (bool, bool) {
 	eventType = eventidentity.Normalize(eventType)
 	if eventType == "" {
 		return false, false
 	}
 	resolution := ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
-	if !resolution.Scoped {
-		return false, false
-	}
-	for _, pattern := range resolution.Patterns {
-		if eventidentity.MatchPattern(pattern.EventPattern, eventType) {
-			return true, true
-		}
-	}
-	return false, true
-}
-
-func ImportBoundaryWildcardSubscriptionMatchesNode(source Source, nodeID, raw, eventType string) (bool, bool) {
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return false, false
-	}
-	resolution := ResolveImportBoundaryWildcardSubscriptionForNode(source, nodeID, raw)
 	if !resolution.Scoped {
 		return false, false
 	}
@@ -252,45 +218,39 @@ func ImportBoundaryWildcardSubscriptionIssues(source Source) []ImportBoundaryWil
 	return issues
 }
 
-func RuntimeEventOwners(source Source, eventType string) []string {
-	bundle, ok := Bundle(source)
-	if !ok || bundle == nil {
+func RuntimeEventOwners(source Source, eventType string) []runtimeidentity.ExecutableNode {
+	if source == nil {
 		return nil
 	}
 	eventType = eventidentity.Normalize(eventType)
 	if eventType == "" {
 		return nil
 	}
-	owners := importBoundaryRuntimeDirectOwners(bundle, eventType)
-	for nodeID, handlers := range bundle.Semantics.NodeHandlers {
-		for pattern := range handlers {
-			pattern = eventidentity.Normalize(pattern)
-			if pattern == "" || !strings.Contains(pattern, "*") {
+	owners := make([]runtimeidentity.ExecutableNode, 0)
+	canonicalEvents := map[string]struct{}{}
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		if resolution := ResolveExecutableNodeSubscriptionHandler(source, node, eventType); resolution.Matched {
+			if strings.Contains(eventType, "/") && !resolution.Admission.Matches(eventType) {
 				continue
 			}
-			matched, scoped := ImportBoundaryWildcardSubscriptionMatchesNode(source, nodeID, pattern, eventType)
-			if scoped {
-				if matched {
-					owners = appendUniqueStringLocal(owners, strings.TrimSpace(nodeID))
-				}
-				continue
+			canonicalEvent := eventType
+			if !strings.Contains(eventType, "/") {
+				canonicalEvent = eventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, eventType))
 			}
-			nodeSource, _ := source.NodeContractSource(nodeID)
-			basePath := importBoundaryBasePathForFlow(source, nodeSource.FlowID)
-			localEvents := importBoundaryNodeLocalEvents(source, nodeID, nodeSource)
-			resolved := importBoundaryResolvePatternInScope(importBoundaryWildcardScope{
-				Path:        basePath,
-				LocalEvents: localEvents,
-			}, pattern)
-			if resolved == "" {
-				resolved = pattern
-			}
-			if eventidentity.MatchPattern(resolved, eventType) {
-				owners = appendUniqueStringLocal(owners, strings.TrimSpace(nodeID))
-			}
+			owners = append(owners, node)
+			canonicalEvents[canonicalEvent] = struct{}{}
 		}
 	}
-	sort.Strings(owners)
+	if len(canonicalEvents) > 1 {
+		// A bare event name that resolves into multiple scoped event identities is
+		// ambiguous. Callers must present the scoped event identity.
+		return nil
+	}
+	sort.Slice(owners, func(i, j int) bool { return owners[i].Key() < owners[j].Key() })
 	return owners
 }
 

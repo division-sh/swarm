@@ -143,7 +143,7 @@ func newWorkflowTimerDDLProofRow(runID string) workflowTimerDDLProofRow {
 	entityID := uuid.NewString()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
 	ref := timeridentity.WorkflowTimerActivationRef{
-		ActivationID: timerID, Declaration: "waiting.timeout", DeclarationRevision: "sha256:waiting-timeout",
+		ActivationID: timerID, DeclarationKey: "waiting.timeout", DeclarationRevision: "sha256:waiting-timeout",
 		Cause: timeridentity.WorkflowTimerActivationCauseInitial,
 	}
 	routingSource, err := events.NewRootRoutingSource(entityID)

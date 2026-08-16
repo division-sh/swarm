@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -100,7 +101,11 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	var intent runtimeengine.EmitIntent
 	switch card.Verdict {
 	case "approve":
-		intent, err = activityRequestEmitIntentFromAdmittedSource(activityIntentFromProposedEffect(continuation, executionSource))
+		var activityIntent runtimeengine.ActivityIntent
+		activityIntent, err = activityIntentFromProposedEffect(continuation, executionSource)
+		if err == nil {
+			intent, err = activityRequestEmitIntentFromAdmittedSource(activityIntent)
+		}
 	case "revise", "reject":
 		var product events.Event
 		product, err = proposedEffectOutcomeEvent(card, evt, continuation)
@@ -145,8 +150,12 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	return nil, runtimepipelineobligation.Continue(), nil
 }
 
-func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation, source events.RoutingSource) runtimeengine.ActivityIntent {
+func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation, source events.RoutingSource) (runtimeengine.ActivityIntent, error) {
 	continuation = continuation.Canonical()
+	owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
+	if err != nil {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("proposed-effect continuation owner identity: %w", err)
+	}
 	intent := runtimeengine.ActivityIntent{
 		Context: events.DeliveryContext{}, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
 		BundleHash: continuation.BundleHash, WorkflowVersion: continuation.WorkflowVersion,
@@ -154,8 +163,8 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 		SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent,
 		RevisionEvent: continuation.RevisionEvent, RejectedEvent: continuation.RejectedEvent,
 		RetryMaxAttempts: continuation.RetryMaxAttempts, RetryBackoff: continuation.RetryBackoff, ForkPolicy: continuation.ForkPolicy,
-		EntityID: identity.NormalizeEntityID(continuation.EntityID), NodeID: identity.NormalizeNodeID(continuation.NodeID),
-		FlowID: identity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
+		EntityID: identity.NormalizeEntityID(continuation.EntityID), Owner: owner,
+		ExecutionFlowID: identity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
 		RoutingSource:   source,
 		HandlerEventKey: continuation.HandlerEventKey, SourceEventID: continuation.SourceEventID,
 		SourceRunID: continuation.SourceRunID, SourceTaskID: continuation.SourceTaskID,
@@ -166,7 +175,7 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 	if continuation.ReplyContextID != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
 	}
-	return intent.Normalized()
+	return intent.Normalized(), nil
 }
 
 func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, continuation decisioncard.ProposedEffectContinuation) (events.Event, error) {

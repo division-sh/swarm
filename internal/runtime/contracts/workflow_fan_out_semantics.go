@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
@@ -50,7 +51,10 @@ func indexedFanOutSiteSource(scope string, index int, id string) string {
 	return fmt.Sprintf("%s[%d].fan_out", scope, index)
 }
 
-func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(flowID, eventType string, spec FanOutSpec) (FanOutEffectiveSemantics, error) {
+func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec FanOutSpec) (FanOutEffectiveSemantics, error) {
+	if !node.Valid() {
+		return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out requires an exact executable node owner")
+	}
 	itemsPath, err := ValidateFanOutItemsSource(spec)
 	if err != nil {
 		return FanOutEffectiveSemantics{}, err
@@ -62,7 +66,7 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(flowID, eventTy
 		return FanOutEffectiveSemantics{}, err
 	}
 
-	collectionType, err := b.resolveFanOutCollectionType(flowID, eventType, itemsPath)
+	collectionType, err := b.resolveFanOutCollectionType(node, eventType, itemsPath)
 	if err != nil {
 		return FanOutEffectiveSemantics{}, err
 	}
@@ -99,16 +103,17 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(flowID, eventTy
 	}, nil
 }
 
-func (b *WorkflowContractBundle) resolveFanOutCollectionType(flowID, eventType string, path paths.Path) (CatalogTypeReference, error) {
+func (b *WorkflowContractBundle) resolveFanOutCollectionType(node runtimeidentity.ExecutableNode, eventType string, path paths.Path) (CatalogTypeReference, error) {
 	if b == nil {
 		return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from requires a loaded contract bundle")
 	}
+	flowID := node.FlowID()
 	field := strings.TrimSpace(path.Segments[0])
 	switch path.Root {
 	case paths.RootPayload:
-		ref, ok := ResolveEventFieldType(b, flowID, eventType, field)
+		ref, ok := ResolveExecutableNodeEventFieldType(b, node, eventType, field)
 		if !ok {
-			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references undeclared payload field %s for event %s in flow %s", field, defaultFanOutEventLabel(eventType), defaultPrimaryEntityFlowLabel(flowID))
+			return CatalogTypeReference{}, fmt.Errorf("fan_out.items_from references undeclared payload field %s for event %s at executable node %s", field, defaultFanOutEventLabel(eventType), node.Key())
 		}
 		return ref, nil
 	case paths.RootEntity:

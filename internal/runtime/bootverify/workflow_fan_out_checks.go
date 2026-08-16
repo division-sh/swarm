@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -17,23 +18,24 @@ func (c *checkerContext) fanOutValidation() []Finding {
 		return c.fanOutFindings
 	}
 	c.fanOutLoaded = true
-	for _, nodeID := range sortedNodeIDs(c.source) {
-		node, ok := c.source.NodeEntries()[nodeID]
-		if !ok {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		flowID := nodeFlowID(c.source, nodeID)
-		for eventType, handler := range node.EventHandlers {
+		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			for _, site := range runtimecontracts.HandlerFanOutSites(handler) {
-				c.fanOutFindings = append(c.fanOutFindings, c.validateFanOutSite(flowID, nodeID, eventType, site)...)
+				c.fanOutFindings = append(c.fanOutFindings, c.validateFanOutSite(node, eventType, site)...)
 			}
 		}
 	}
 	return c.fanOutFindings
 }
 
-func (c *checkerContext) validateFanOutSite(flowID, nodeID, eventType string, site runtimecontracts.WorkflowFanOutSite) []Finding {
+func (c *checkerContext) validateFanOutSite(node runtimeidentity.ExecutableNode, eventType string, site runtimecontracts.WorkflowFanOutSite) []Finding {
+	flowID := node.FlowID()
+	nodeID := node.Key()
 	spec := site.Spec
 	if spec == nil {
 		return nil
@@ -50,7 +52,7 @@ func (c *checkerContext) validateFanOutSite(flowID, nodeID, eventType string, si
 	if err := runtimecontracts.ValidateFanOutAlias(spec.As); err != nil {
 		add("fan_out." + err.Error())
 	}
-	effective, effectiveErr := c.source.ResolveFanOutEffectiveSemantics(flowID, eventType, *spec)
+	effective, effectiveErr := c.source.ResolveFanOutEffectiveSemantics(node, eventType, *spec)
 	if effectiveErr != nil {
 		add(effectiveErr.Error())
 	} else {

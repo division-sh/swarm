@@ -266,7 +266,7 @@ type RouteSettlement struct {
 
 func NewDeliverySettlement(class EventWriteClass, ledger ConnectEvaluationLedger) (RouteSettlement, error) {
 	settlement := RouteSettlement{writeClass: class, arm: routeSettlementDelivery, ledger: ledger}
-	if err := settlement.Validate([]DeliveryRoute{{Recipient: MustNodeDeliveryRecipient("validation-only")}}); err != nil {
+	if err := settlement.Validate([]DeliveryRoute{{}}); err != nil {
 		return RouteSettlement{}, err
 	}
 	return settlement, nil
@@ -527,7 +527,7 @@ func requireJSONEOF(decoder *json.Decoder) error {
 func (s RouteSettlement) validateShape() error {
 	routes := []DeliveryRoute(nil)
 	if s.Delivered() {
-		routes = []DeliveryRoute{{Recipient: MustNodeDeliveryRecipient("validation-only")}}
+		routes = []DeliveryRoute{{}}
 	}
 	return s.Validate(routes)
 }
@@ -576,12 +576,12 @@ func normalizeCandidateEvidence(in []ConnectCandidateEvidence) ([]ConnectCandida
 }
 
 func sameCandidateIdentity(left, right ConnectCandidateEvidence) bool {
-	return left.receiver == right.receiver && left.recipient.kind == right.recipient.kind && left.recipient.id == right.recipient.id &&
+	return left.receiver == right.receiver && left.recipient == right.recipient &&
 		left.path == right.path && left.agent == right.agent
 }
 
 func equalCandidate(left, right ConnectCandidateEvidence) bool {
-	return left.receiver == right.receiver && left.recipient.kind == right.recipient.kind && left.recipient.id == right.recipient.id &&
+	return left.receiver == right.receiver && left.recipient == right.recipient &&
 		left.path == right.path && left.agent == right.agent && left.outcome == right.outcome
 }
 

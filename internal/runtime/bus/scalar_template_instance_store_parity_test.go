@@ -162,7 +162,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if err != nil {
 				t.Fatalf("ListEventDeliveryRoutes: %v", err)
 			}
-			if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.ID() != "account-node" || persistedRoutes[0].Target.Route().Normalized() != wantTarget.Normalized() {
+			if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.LocalID() != "account-node" || persistedRoutes[0].Target.Route().Normalized() != wantTarget.Normalized() {
 				t.Fatalf("persisted routes = %#v, want account-node at %#v", persistedRoutes, wantTarget)
 			}
 
@@ -193,7 +193,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			}
 			selected.setScalarTemplateInstanceDescriptorError(nil)
 
-			replayed := subscribeInternalDeliveriesForTest(t, eventBus, "account-node")
+			replayed := subscribeInternalDeliveriesForTest(t, eventBus, persistedRoutes[0].Recipient.ID())
 			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
 				InstanceID:      "drift",
 				EntityID:        uuid.NewString(),

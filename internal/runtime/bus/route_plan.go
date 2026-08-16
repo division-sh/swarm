@@ -220,11 +220,23 @@ type RoutePlan struct {
 
 type RoutePlanLiveRecipient struct {
 	Recipient         events.DeliveryRecipient
+	InternalID        string
 	AgentIdentity     agentidentity.Identity
 	PersistAsDelivery bool
 	Producer          routeIntentProducer
 	liveAuthority     liveRecipientAuthority
 	agentRoute        *agentRouteHandle
+}
+
+func (r RoutePlanLiveRecipient) subscriberID() string {
+	if id := strings.TrimSpace(r.InternalID); id != "" {
+		return id
+	}
+	return r.Recipient.ID()
+}
+
+func (r RoutePlanLiveRecipient) isInternal() bool {
+	return strings.TrimSpace(r.InternalID) != "" && r.Recipient.Empty()
 }
 
 type liveRecipientAuthority uint8
@@ -421,7 +433,7 @@ func (p RoutePlan) RecipientIDs() []string {
 	p = p.Normalized()
 	out := make([]string, 0, len(p.LiveRecipients))
 	for _, recipient := range p.LiveRecipients {
-		out = append(out, recipient.Recipient.ID())
+		out = append(out, recipient.subscriberID())
 	}
 	return uniqueStrings(out)
 }
@@ -575,7 +587,7 @@ func (p RoutePlan) InternalDeliveryRoutes() []events.DeliveryRoute {
 	}
 	if _, carrier := internalSet[workflowRuntimeInternalCarrierID]; carrier {
 		for _, route := range known {
-			if route.Recipient.IsNode() && route.Recipient.ID() != workflowRuntimeInternalCarrierID {
+			if route.Recipient.IsNode() && route.Recipient.LocalID() != workflowRuntimeInternalCarrierID {
 				out = append(out, route)
 			}
 		}
@@ -598,7 +610,7 @@ func (p RoutePlan) InternalRecipientIDs() []string {
 	internal := make([]string, 0, len(p.LiveRecipients))
 	for _, recipient := range p.LiveRecipients {
 		if !recipient.PersistAsDelivery {
-			internal = append(internal, recipient.Recipient.ID())
+			internal = append(internal, recipient.subscriberID())
 		}
 	}
 	return uniqueStrings(internal)
@@ -630,18 +642,19 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, pro
 		if _, ok := persisted[recipient]; ok {
 			persist = true
 		}
-		typedRecipient := events.MustNodeDeliveryRecipient(recipient)
-		if persist {
-			typedRecipient = events.MustAgentDeliveryRecipient(recipient)
-		}
-		out = append(out, RoutePlanLiveRecipient{
-			Recipient:         typedRecipient,
+		live := RoutePlanLiveRecipient{
 			AgentIdentity:     candidate.AgentIdentity,
 			PersistAsDelivery: persist,
 			Producer:          producer,
 			liveAuthority:     candidate.LiveAuthority.Normalized(),
 			agentRoute:        candidate.AgentRoute,
-		})
+		}
+		if persist {
+			live.Recipient = events.MustAgentDeliveryRecipient(recipient)
+		} else {
+			live.InternalID = recipient
+		}
+		out = append(out, live)
 	}
 	return normalizeRoutePlanLiveRecipients(out)
 }
@@ -687,7 +700,7 @@ func routePlanDeliveryIntentsFromConnectRoutes(routes []runtimepinrouting.Connec
 	for _, route := range routes {
 		handler := runtimepipeline.DeliveryTargetHandler{}
 		if !route.Handler.Empty() {
-			handler = runtimepipeline.MustDeliveryTargetHandler(route.Handler.FlowID(), route.Handler.NodeID()).ForEvent(receiverEvent)
+			handler = runtimepipeline.MustDeliveryTargetHandler(route.Handler.Node()).ForEvent(receiverEvent)
 		}
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: route.Recipient, AgentIdentity: route.AgentIdentity, TargetBlueprint: route.Target,
@@ -702,6 +715,9 @@ func deliveryRouteLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLiveR
 	routes = events.NormalizeDeliveryRoutes(routes)
 	out := make([]RoutePlanLiveRecipient, 0, len(routes))
 	for _, route := range routes {
+		if !route.Recipient.IsAgent() {
+			continue
+		}
 		out = append(out, RoutePlanLiveRecipient{
 			Recipient: route.Recipient, AgentIdentity: route.AgentIdentity,
 			PersistAsDelivery: route.Recipient.IsAgent(), Producer: routeIntentProducerConnectRoutePlan,
@@ -747,6 +763,7 @@ func normalizeRoutePlanSource(source routePlanSource) routePlanSource {
 
 type liveRecipientKey struct {
 	recipient     events.DeliveryRecipient
+	internalID    string
 	agentIdentity agentidentity.Identity
 }
 
@@ -757,11 +774,27 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 	out := make([]RoutePlanLiveRecipient, 0, len(in))
 	indexByKey := make(map[liveRecipientKey]int, len(in))
 	for _, recipient := range in {
+		recipient.InternalID = strings.TrimSpace(recipient.InternalID)
 		recipient.AgentIdentity = recipient.AgentIdentity.Normalize()
 		recipient.Producer = recipient.Producer.Normalized()
 		recipient.liveAuthority = recipient.liveAuthority.Normalized()
 		if recipient.liveAuthority == liveRecipientAuthorityIdentity {
 			recipient.agentRoute = nil
+		}
+		if recipient.InternalID != "" {
+			if !recipient.Recipient.Empty() || !recipient.AgentIdentity.IsZero() || recipient.PersistAsDelivery {
+				continue
+			}
+			key := liveRecipientKey{internalID: recipient.InternalID}
+			if idx, ok := indexByKey[key]; ok {
+				if out[idx].Producer.Empty() {
+					out[idx].Producer = recipient.Producer
+				}
+				continue
+			}
+			indexByKey[key] = len(out)
+			out = append(out, recipient)
+			continue
 		}
 		if recipient.Recipient.Empty() {
 			continue

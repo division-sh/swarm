@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -21,7 +22,8 @@ func TestEffectiveSpecForHandlerConsumesCanonicalFanInAssociation(t *testing.T) 
 		},
 	}})
 
-	effective, err := EffectiveSpecForHandler(source, "worker", "worker-node", "work.requested", &runtimecontracts.AccumulateSpec{Into: "items"})
+	node := identitytest.FlowNode(t, "worker", "worker-node")
+	effective, err := EffectiveSpecForHandler(source, node, "work.requested", &runtimecontracts.AccumulateSpec{Into: "items"})
 	if err != nil {
 		t.Fatalf("effective spec: %v", err)
 	}
@@ -29,7 +31,7 @@ func TestEffectiveSpecForHandlerConsumesCanonicalFanInAssociation(t *testing.T) 
 		t.Fatalf("effective spec = %#v, want pin-owned window/dedup", effective)
 	}
 
-	byPin, err := EffectiveSpecForHandler(source, "worker", "worker-node", "work", &runtimecontracts.AccumulateSpec{Into: "items"})
+	byPin, err := EffectiveSpecForHandler(source, node, "work", &runtimecontracts.AccumulateSpec{Into: "items"})
 	if err != nil || byPin.Window != effective.Window || byPin.DedupBy != effective.DedupBy {
 		t.Fatalf("pin-name association = %#v err=%v, want same effective spec", byPin, err)
 	}
@@ -41,7 +43,8 @@ func TestEffectiveSpecForHandlerRejectsRedeclarationAndAmbiguity(t *testing.T) {
 		Event:      "work.requested",
 		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn, Aggregation: "stream", Window: "payload.window_id", DedupBy: []string{"payload.work_id"}},
 	}})
-	if _, err := EffectiveSpecForHandler(source, "worker", "worker-node", "work.requested", &runtimecontracts.AccumulateSpec{Window: "payload.other"}); err == nil || !strings.Contains(err.Error(), "must not redeclare") {
+	node := identitytest.FlowNode(t, "worker", "worker-node")
+	if _, err := EffectiveSpecForHandler(source, node, "work.requested", &runtimecontracts.AccumulateSpec{Window: "payload.other"}); err == nil || !strings.Contains(err.Error(), "must not redeclare") {
 		t.Fatalf("redeclaration error = %v, want fail-closed", err)
 	}
 
@@ -49,7 +52,7 @@ func TestEffectiveSpecForHandlerRejectsRedeclarationAndAmbiguity(t *testing.T) {
 		{Name: "work-a", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
 		{Name: "work-b", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
 	})
-	if _, _, err := FanInInputPinForHandler(ambiguous, "worker", "worker-node", "work.requested"); err == nil || !strings.Contains(err.Error(), "work-a work-b") {
+	if _, _, err := FanInInputPinForHandler(ambiguous, node, "work.requested"); err == nil || !strings.Contains(err.Error(), "work-a work-b") {
 		t.Fatalf("ambiguity error = %v, want both pin names", err)
 	}
 }

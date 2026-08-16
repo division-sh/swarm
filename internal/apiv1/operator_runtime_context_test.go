@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -137,7 +138,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 		t.Fatalf("event.publish existing run deliveries = %#v, want typed agent and node rows", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key(), "pending", 1)
 	if got := countEventRowsByRunID(t, fixture.db, runID); got != 2 {
 		t.Fatalf("event rows for existing run = %d, want 2", got)
 	}

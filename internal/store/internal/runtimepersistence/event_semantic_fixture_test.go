@@ -228,7 +228,7 @@ func commitDeliveryReplayEventFixture(
 	var recipient events.DeliveryRecipient
 	switch subscriberType {
 	case "node":
-		recipient, err = events.NewNodeDeliveryRecipient(subscriberID)
+		recipient, err = events.NewNodeDeliveryRecipient(mustPersistenceRootNode(subscriberID))
 	case "agent":
 		recipient, err = events.NewAgentDeliveryRecipient(subscriberID)
 	default:

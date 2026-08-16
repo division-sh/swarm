@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -369,7 +370,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				source:   source,
 				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}}, nil),
 				nodes: []runtimepipeline.WorkflowNode{{
-					ID: "support", Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
+					Node: externalPipelineSourceNode(t, source, "", "support"), Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
@@ -406,7 +407,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 				events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 			)
-			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, "support", entityID)
+			sourceRoute := seedProposedEffectProofDelivery(t, selected, bus, sourceEvent, externalPipelineSourceNode(t, source, "", "support"), entityID)
 			if !sourceRoute.Target.ExistingEntity() || sourceRoute.Target.Route().EntityID != entityID {
 				t.Fatalf("approval execution target = %#v, want exact existing owner %s", sourceRoute.Target, entityID)
 			}
@@ -563,7 +564,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()),
 					events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 				)
-				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, "support", entityID)
+				proposalRoute := seedProposedEffectProofDelivery(t, selected, bus, proposal, externalPipelineSourceNode(t, source, "", "support"), entityID)
 				proposalCtx := events.WithDeliveryContext(ctx, proposal.DeliveryContext())
 				proposalDelivery, deliveryErr := events.NewDeliveryEvent(proposal, proposalRoute)
 				if deliveryErr != nil {
@@ -621,8 +622,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					t.Fatalf("%s readback = %#v, %v", verdict, readback, routeErr)
 				}
 			}
-			routeWithoutDispatch("revise", "support/send_support_reply.revision_requested", map[string]any{"feedback": "Please rewrite it."})
-			routeWithoutDispatch("reject", "support/send_support_reply.rejected", map[string]any{"reason": "Do not send."})
+			routeWithoutDispatch("revise", "send_support_reply.revision_requested", map[string]any{"feedback": "Please rewrite it."})
+			routeWithoutDispatch("reject", "send_support_reply.rejected", map[string]any{"reason": "Do not send."})
 		})
 	}
 }
@@ -637,6 +638,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				selected := storeCase.open(t)
 				ctx := testAuthorActivityContext(t, context.Background())
 				runID, entityID := uuid.NewString(), uuid.NewString()
+				supportNode := externalPipelineNode(t, "", "support")
+				supportOwner := activityidentity.MustNodeOwner(supportNode)
 				insertGateRecoveryRun(t, selected, runID)
 				now := time.Date(2026, 7, 14, 22, 0, 0, 0, time.UTC)
 				input, err := canonicaljson.FromGo(map[string]any{"chat_id": "support-room", "text": "Exact approved text"})
@@ -649,7 +652,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
 				storetest.CommitSemanticEvent(t, ctx, selected.events, sourceEvent)
 				requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
-					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID, FlowID: "support", NodeID: "support",
+					RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
+					Owner: supportOwner, ExecutionFlowID: "support",
 					HandlerEventKey: "support.reply_drafted", ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 				})
 				continuation := decisioncard.ProposedEffectContinuation{
@@ -660,7 +664,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-					EntityID: entityID, NodeID: "support", FlowID: "support", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
+					EntityID: entityID, NodeID: supportOwner.Key(), FlowID: "support", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
 					CreatedAt: now, UpdatedAt: now,
@@ -790,6 +794,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			bundle.Semantics.NodeHandlers["support"]["support.reply_drafted"] = handler
 
 			source := semanticview.Wrap(bundle)
+			supportNode := externalPipelineSourceNode(t, source, "", "support")
 			bundleSource := mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, BundleSourceFact: bundleSource,
@@ -801,7 +806,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				source:   source,
 				workflow: runtimepipeline.NewWorkflowDefinition("support", []runtimepipeline.WorkflowStage{{Name: "drafting"}, {Name: "queued"}}, nil),
 				nodes: []runtimepipeline.WorkflowNode{{
-					ID: "support", Subscriptions: []events.EventType{"support.reply_drafted"},
+					Node: supportNode, Subscriptions: []events.EventType{"support.reply_drafted"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"support.reply_drafted": {Consume: true}},
@@ -830,7 +835,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID,
 				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-			route := seedProposedEffectProofDelivery(t, selected, bus, event, "support", entityID)
+			route := seedProposedEffectProofDelivery(t, selected, bus, event, supportNode, entityID)
 			delivery, deliveryErr := events.NewDeliveryEvent(event, route)
 			if deliveryErr != nil {
 				t.Fatalf("construct proposal failure delivery: %v", deliveryErr)
@@ -861,12 +866,12 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&continuations); err != nil || continuations != 0 {
 				t.Fatalf("proposed-effect continuations after rollback = %d, %v", continuations, err)
 			}
-			deliveryQuery := `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'support'`
+			deliveryQuery := `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 			if selected.postgres {
-				deliveryQuery = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'support'`
+				deliveryQuery = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
 			}
 			var deliveryStatus string
-			if err := selected.db.QueryRowContext(ctx, deliveryQuery, event.ID()).Scan(&deliveryStatus); err != nil || deliveryStatus != "dead_letter" {
+			if err := selected.db.QueryRowContext(ctx, deliveryQuery, event.ID(), supportNode.Key()).Scan(&deliveryStatus); err != nil || deliveryStatus != "dead_letter" {
 				t.Fatalf("planted persistence failure delivery status = %q, %v", deliveryStatus, err)
 			}
 		})
@@ -1532,16 +1537,30 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 		t.Fatal(err)
 	}
 	if got != want {
-		t.Fatalf("%s event count = %d, want %d", eventType, got, want)
+		rows, err := selected.db.QueryContext(testAuthorActivityContext(t, context.Background()), `SELECT event_name FROM events WHERE run_id = ? ORDER BY created_at`, runID)
+		if selected.postgres {
+			rows, err = selected.db.QueryContext(testAuthorActivityContext(t, context.Background()), `SELECT event_name FROM events WHERE run_id = $1::uuid ORDER BY created_at`, runID)
+		}
+		var names []string
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				if rows.Scan(&name) == nil {
+					names = append(names, name)
+				}
+			}
+		}
+		t.Fatalf("%s event count = %d, want %d; run events=%v readback_error=%v", eventType, got, want, names, err)
 	}
 }
 
-func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, nodeID, entityID string) events.DeliveryRoute {
+func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, node runtimeidentity.ExecutableNode, entityID string) events.DeliveryRoute {
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
 	target := events.RouteIdentity{FlowID: "support", FlowInstance: evt.RunID(), EntityID: entityID}
 	owner := events.MustExistingEntityTarget(target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: owner}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: owner}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := selected.events.ProveHandoff(ctx, evt.ID(), route)
 	if err != nil {

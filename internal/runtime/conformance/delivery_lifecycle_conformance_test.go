@@ -41,7 +41,7 @@ type deliveryLifecycleConformanceBackend struct {
 
 func deliveryLifecycleConformanceRoute(t testing.TB, subscriberType, subscriberID string) events.DeliveryRoute {
 	t.Helper()
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(subscriberID)}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(conformanceNode(t, "", subscriberID))}
 	if subscriberType == string(runtimedelivery.SubscriberAgent) {
 		route.Recipient = events.MustAgentDeliveryRecipient(subscriberID)
 		route.AgentIdentity = agentidentitytest.RootRuntime(t, subscriberID, "delivery-lifecycle-conformance")

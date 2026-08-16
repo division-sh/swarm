@@ -135,8 +135,12 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 			}
 		}
 	}
-	for nodeID := range source.NodeEntries() {
-		for _, handler := range source.NodeEventHandlers(nodeID) {
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for _, handler := range source.ExecutableNodeEventHandlers(node) {
 			if selectedContractHandlerCreatesDynamicFlow(handler) {
 				return true
 			}

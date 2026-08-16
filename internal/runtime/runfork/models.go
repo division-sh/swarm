@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 
@@ -192,7 +193,11 @@ func (r *RunForkContractFrontierRecipient) UnmarshalJSON(raw []byte) error {
 	)
 	switch strings.TrimSpace(wire.SubscriberType) {
 	case "node":
-		recipient, err = events.NewNodeDeliveryRecipient(wire.SubscriberID)
+		var node runtimeidentity.ExecutableNode
+		node, err = runtimeidentity.ParseExecutableNodeKey(wire.SubscriberID)
+		if err == nil {
+			recipient, err = events.NewNodeDeliveryRecipient(node)
+		}
 	case "agent":
 		recipient, err = events.NewAgentDeliveryRecipient(wire.SubscriberID)
 	default:

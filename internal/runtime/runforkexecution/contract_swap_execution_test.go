@@ -34,7 +34,7 @@ func TestBuildHistoricalReplayContractSwapBootResumeConsumesOwnersAndSelectedRec
 		execution.ExecutableWork[0].SourceEventID != "source-event" ||
 		len(execution.ExecutableWork[0].SourceDeliveryIDs) != 2 ||
 		len(execution.ExecutableWork[0].SelectedRecipients) != 1 ||
-		execution.ExecutableWork[0].SelectedRecipients[0].Recipient.ID() != "selected-node" {
+		execution.ExecutableWork[0].SelectedRecipients[0].Recipient.ID() != mustRunForkNode("flow-a", "selected-node").Key() {
 		t.Fatalf("executable work = %#v, want selected recipient-plan work grouped by source event", execution.ExecutableWork)
 	}
 	if execution.ExecutableWork[0].SelectedRecipients[0].Recipient.ID() == "source-agent" {

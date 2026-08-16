@@ -268,8 +268,8 @@ func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateIns
 	}
 	target := events.RouteIdentity{FlowID: "claim-flow", FlowInstance: "claim-flow"}
 	blueprint := runtimepinrouting.ConnectDeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("claim-node"), Target: target,
-		Handler: runtimepinrouting.MustConnectReceiverHandler("claim-flow", "claim-node"),
+		Recipient: events.MustNodeDeliveryRecipient(mustPersistenceNode("claim-flow", "claim-node")), Target: target,
+		Handler: runtimepinrouting.MustConnectReceiverHandler(mustPersistenceNode("claim-flow", "claim-node")),
 	}
 	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, blueprint)
 	if err != nil {

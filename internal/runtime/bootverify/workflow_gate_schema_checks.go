@@ -14,24 +14,23 @@ func (c *checkerContext) gateSchemaValidation() []Finding {
 		return c.gateSchemaFindings
 	}
 	c.gateSchemaLoaded = true
-	nodes := c.source.NodeEntries()
 	for _, transition := range c.source.DerivedHandlerTransitions() {
 		gate := gateNameLocal(transition.SetsGate)
 		if gate == "" {
 			continue
 		}
-		node, ok := nodes[strings.TrimSpace(transition.NodeID)]
+		record, ok := c.source.ExecutableNode(transition.Node)
 		if !ok {
 			continue
 		}
-		validGates := stateSchemaGateNamesLocal(node.GateState)
+		validGates := stateSchemaGateNamesLocal(record.Entry.GateState)
 		if _, ok := validGates[gate]; ok {
 			continue
 		}
 		c.gateSchemaFindings = append(c.gateSchemaFindings, Finding{
 			CheckID:  "gate_schema_validation",
 			Severity: "error",
-			Message:  fmt.Sprintf("handler transition %s sets_gate %s not recognized in node %s gate_state schema", transition.ID, gate, transition.NodeID),
+			Message:  fmt.Sprintf("handler transition %s sets_gate %s not recognized in node %s gate_state schema", transition.ID, gate, transition.Node.Key()),
 			Location: strings.TrimSpace(transition.ID),
 		})
 	}

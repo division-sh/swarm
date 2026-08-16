@@ -143,43 +143,13 @@ func (r SourceBootEffectReachability) LiveWorkflowActivitySites(toolID string) [
 func sourceLiveWorkflowActivitySites(source semanticview.Source) map[string][]string {
 	sitesByTool := map[string][]string{}
 	seen := map[string]map[string]struct{}{}
-	scopedLocalNodeIDs := map[string]struct{}{}
-	appendNodes := func(scopeLabel, flowID string, nodes map[string]runtimecontracts.SystemNodeContract) {
-		for _, rawNodeID := range sortedSetKeysLocal(nodes) {
-			nodeID := strings.TrimSpace(rawNodeID)
-			if nodeID == "" {
-				continue
-			}
-			scopedLocalNodeIDs[nodeID] = struct{}{}
-			node := nodes[rawNodeID]
-			appendWorkflowActivitySites(sitesByTool, seen, scopeLabel, runtimecontracts.ActivitySitesForNode(flowID, nodeID, node.EventHandlers))
-		}
-	}
-	for _, scope := range source.ProjectScopes() {
-		projectID := strings.TrimSpace(scope.Key)
-		if projectID == "" || projectID == "." {
-			projectID = "root"
-		}
-		appendNodes("project "+projectID, scope.OwningFlowID, scope.Nodes)
-	}
-	for _, scope := range source.FlowScopes() {
-		appendNodes("", scope.ID, scope.Nodes)
-	}
-	aliases := source.NodeEntries()
-	for _, rawNodeID := range sortedSetKeysLocal(aliases) {
-		nodeID := strings.TrimSpace(rawNodeID)
-		if nodeID == "" {
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		if _, represented := scopedLocalNodeIDs[nodeID]; represented {
-			continue
-		}
-		flowID := ""
-		if contractSource, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(contractSource.FlowID)
-		}
-		node := aliases[rawNodeID]
-		appendWorkflowActivitySites(sitesByTool, seen, "", runtimecontracts.ActivitySitesForNode(flowID, nodeID, node.EventHandlers))
+		scopeLabel := "package " + node.PackageKey()
+		appendWorkflowActivitySites(sitesByTool, seen, scopeLabel, runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)))
 	}
 	for toolID := range sitesByTool {
 		sort.Strings(sitesByTool[toolID])
@@ -210,10 +180,10 @@ func workflowActivitySiteLabel(scopeLabel string, site runtimecontracts.Activity
 	if scopeLabel = strings.TrimSpace(scopeLabel); scopeLabel != "" {
 		parts = append(parts, scopeLabel)
 	}
-	if flowID := strings.TrimSpace(site.FlowID); flowID != "" {
+	if flowID := site.Node.FlowID(); flowID != "" {
 		parts = append(parts, "flow "+flowID)
 	}
-	parts = append(parts, "node "+strings.TrimSpace(site.NodeID), "handler "+strings.TrimSpace(site.HandlerEventKey))
+	parts = append(parts, "node "+site.Node.NodeID(), "handler "+strings.TrimSpace(site.HandlerEventKey))
 	if source := strings.TrimSpace(site.Source); source != "" {
 		parts = append(parts, source)
 	}

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type ProjectScope struct {
@@ -57,6 +58,40 @@ func FlowScopeByID(source Source, flowID string) (FlowScope, bool) {
 		return FlowScope{}, false
 	}
 	return source.FlowScopeByID(flowID)
+}
+
+// ExecutableNodeFlowScope resolves the exact authored flow that owns node.
+// A bare flow ID is not sufficient because imported packages may reuse it.
+func ExecutableNodeFlowScope(source Source, node runtimeidentity.ExecutableNode) (FlowScope, bool) {
+	if source == nil || !node.Valid() || node.FlowID() == "" {
+		return FlowScope{}, false
+	}
+	for _, scope := range source.FlowScopes() {
+		packageKey := strings.Trim(strings.TrimSpace(scope.PackageKey), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == node.PackageKey() && strings.TrimSpace(scope.ID) == node.FlowID() {
+			return scope, true
+		}
+	}
+	return FlowScope{}, false
+}
+
+func executableNodeProjectScope(source Source, node runtimeidentity.ExecutableNode) (ProjectScope, bool) {
+	if source == nil || !node.Valid() {
+		return ProjectScope{}, false
+	}
+	for _, scope := range source.ProjectScopes() {
+		packageKey := strings.Trim(strings.TrimSpace(scope.Key), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == node.PackageKey() {
+			return scope, true
+		}
+	}
+	return ProjectScope{}, false
 }
 
 // RootExecutionFlowID returns the authored flow scope used to execute root

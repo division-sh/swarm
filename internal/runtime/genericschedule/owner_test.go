@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -138,7 +139,11 @@ func TestSystemJoinScheduleAdmissionRejectsDeclarationDrift(t *testing.T) {
 func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generation attemptgeneration.Generation) AdmissionCommand {
 	t.Helper()
 	entityID := uuid.NewString()
-	ref, err := timeridentity.NewJoinRefForGeneration(flowID, "join-node", "item.completed", "awaiting", "shared", "window-1", generation)
+	node := identitytest.RootNode(t, "join-node")
+	if flowID != "" {
+		node = identitytest.FlowNode(t, flowID, "join-node")
+	}
+	ref, err := timeridentity.NewJoinRefForGeneration(node, "item.completed", "awaiting", "shared", "window-1", generation)
 	if err != nil {
 		t.Fatal(err)
 	}

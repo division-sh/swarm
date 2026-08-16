@@ -1558,19 +1558,19 @@ func (r scenarioRunner) evaluateScenarioSetupGates(evaluator *scenarioExpression
 func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]struct{} {
 	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
 	out := map[string]struct{}{}
-	for nodeID, node := range r.bundle.Nodes {
-		source, ok := r.bundle.NodeContractSource(nodeID)
-		if !ok || strings.Trim(strings.TrimSpace(source.FlowID), "/") != flowID {
+	for _, record := range r.bundle.ScopedNodeRecords() {
+		node, err := record.Identity()
+		if err != nil || strings.Trim(node.FlowID(), "/") != flowID {
 			continue
 		}
-		for _, gate := range node.GateState.Gates {
+		for _, gate := range record.Entry.GateState.Gates {
 			if name := strings.TrimSpace(gate.Name); name != "" {
 				out[name] = struct{}{}
 			}
 		}
 	}
 	for _, transition := range r.bundle.DerivedHandlerTransitions() {
-		if strings.Trim(strings.TrimSpace(transition.FlowID), "/") != flowID {
+		if strings.Trim(transition.Node.FlowID(), "/") != flowID {
 			continue
 		}
 		if transition.SetsGate != nil {

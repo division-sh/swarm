@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -1117,6 +1118,7 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bo
 		}
 		return
 	}
+	handlerNodeID := identitytest.RootNode(t, "node-6").Key()
 	query := catalogDialectQuery(db, `
 		SELECT COUNT(*), COALESCE(MAX(dl.chain_depth), 0), COALESCE(MAX(dl.handler_node), ''),
 		       COALESCE(MAX(dl.failure->>'class'), ''), COALESCE(MAX(dl.original_event), '')
@@ -1149,7 +1151,7 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bo
 		  AND e.payload->>'entity_id' = $2
 		  AND e.payload->'failure'->>'class' = 'platform.chain_depth_exceeded'
 		  AND (e.payload->>'chain_depth')::integer = 6
-		  AND e.payload->>'handler_node' = 'node-6'
+		  AND e.payload->>'handler_node' = $3
 	`, `
 		SELECT COUNT(*)
 		FROM events e
@@ -1158,9 +1160,9 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bo
 		  AND json_extract(e.payload, '$.entity_id') = ?
 		  AND json_extract(e.payload, '$.failure.class') = 'platform.chain_depth_exceeded'
 		  AND CAST(json_extract(e.payload, '$.chain_depth') AS INTEGER) = 6
-		  AND json_extract(e.payload, '$.handler_node') = 'node-6'
+		  AND json_extract(e.payload, '$.handler_node') = ?
 	`)
-	diagnosticArgs := []any{catalogRuntimeRunID, entityID}
+	diagnosticArgs := []any{catalogRuntimeRunID, entityID, handlerNodeID}
 	var diagnosticCount int
 	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), diagnosticQuery, diagnosticArgs...).Scan(&diagnosticCount); err != nil {
 		t.Fatalf("query chain_depth_exceeded diagnostic: %v", err)
@@ -1192,7 +1194,7 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bo
 		t.Fatalf("query chain_depth_exceeded author activity: %v", err)
 	}
 
-	got := relationCount == 1 && diagnosticCount == 1 && activityCount == 1 && chainDepth == 6 && handlerNode == "node-6:chain.e6" && failureClass == "platform.chain_depth_exceeded" && originalEvent == "chain.e6"
+	got := relationCount == 1 && diagnosticCount == 1 && activityCount == 1 && chainDepth == 6 && handlerNode == handlerNodeID+":chain.e6" && failureClass == "platform.chain_depth_exceeded" && originalEvent == "chain.e6"
 	if got != want {
 		t.Fatalf("chain_depth_exceeded facts = relation:%d diagnostic:%d activity:%d depth:%d handler:%q class:%q original:%q, want exact=%v", relationCount, diagnosticCount, activityCount, chainDepth, handlerNode, failureClass, originalEvent, want)
 	}

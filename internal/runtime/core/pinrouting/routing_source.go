@@ -7,35 +7,35 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // AdmitNodeExecutionRoutingSource admits the exact source fact at the node
 // execution boundary. Downstream event producers copy this value unchanged.
-func AdmitNodeExecutionRoutingSource(source semanticview.Source, executionFlowID, nodeID string, route events.RouteIdentity) (events.RoutingSource, error) {
+func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeidentity.ExecutableNode, executionFlowID string, route events.RouteIdentity) (events.RoutingSource, error) {
 	if source == nil {
 		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires semantic source")
 	}
 	executionFlowID = strings.TrimSpace(executionFlowID)
-	nodeID = strings.TrimSpace(nodeID)
-	if executionFlowID == "" || nodeID == "" {
+	if executionFlowID == "" || !node.Valid() {
 		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires exact flow and node owners")
 	}
-	if _, _, ok := semanticview.ResolveFlowNodeDeclaration(source, executionFlowID, nodeID); !ok {
-		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires node %q in exact flow scope %q", nodeID, executionFlowID)
+	if _, ok := source.ExecutableNode(node); !ok {
+		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared node %q", node.Key())
 	}
-	owner := runtimecontracts.ContractItemSource{Layer: "flow", FlowID: executionFlowID}
-	if executionFlowID == semanticview.RootExecutionFlowID(source) {
-		owner = runtimecontracts.ContractItemSource{Layer: "project"}
+	owner := runtimecontracts.ContractItemSource{PackageKey: node.PackageKey(), Layer: "flow", FlowID: node.FlowID()}
+	if node.FlowID() == "" {
+		owner.Layer = "project"
 	}
 	route = route.Normalized()
 	if strings.TrimSpace(owner.Layer) == "project" && route.EntityID == "" {
 		if route.FlowID != strings.TrimSpace(source.WorkflowName()) || route.FlowInstance == "" {
-			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", nodeID)
+			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", node.Key())
 		}
 		return events.NewStaticFlowRoutingSource(route)
 	}
-	return admitDeclaredExecutionRoutingSource(source, "node", nodeID, owner, route)
+	return admitDeclaredExecutionRoutingSource(source, "node", node.Key(), owner, route)
 }
 
 // AdmitAgentExecutionRoutingSource admits the exact source fact from the
@@ -87,7 +87,7 @@ func admitDeclaredExecutionRoutingSource(source semanticview.Source, ownerType, 
 			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source flow_id %q conflicts with declared flow %q", ownerType, ownerID, route.FlowID, owner.FlowID)
 		}
 		route.FlowID = owner.FlowID
-		scope, ok := semanticview.FlowScopeByID(source, owner.FlowID)
+		scope, ok := exactRoutingFlowScope(source, owner.PackageKey, owner.FlowID)
 		if !ok {
 			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source references missing flow %q", ownerType, ownerID, owner.FlowID)
 		}
@@ -123,4 +123,21 @@ func admitDeclaredExecutionRoutingSource(source semanticview.Source, ownerType, 
 	default:
 		return events.RoutingSource{}, fmt.Errorf("%s %q routing source has unsupported declaration layer %q", ownerType, ownerID, owner.Layer)
 	}
+}
+
+func exactRoutingFlowScope(source semanticview.Source, packageKey, flowID string) (semanticview.FlowScope, bool) {
+	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
+	if packageKey == "" {
+		return semanticview.FlowScopeByID(source, flowID)
+	}
+	for _, scope := range source.FlowScopes() {
+		candidate := strings.Trim(strings.TrimSpace(scope.PackageKey), "/")
+		if candidate == "" {
+			candidate = runtimeidentity.RootPackageKey
+		}
+		if candidate == packageKey && strings.TrimSpace(scope.ID) == strings.TrimSpace(flowID) {
+			return scope, true
+		}
+	}
+	return semanticview.FlowScope{}, false
 }

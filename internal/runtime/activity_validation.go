@@ -2,11 +2,11 @@ package runtime
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -15,22 +15,22 @@ func validateDurableActivitySurface(source semanticview.Source) []error {
 		return nil
 	}
 	var errs []error
-	nodes := source.NodeEntries()
-	for nodeID := range nodes {
-		flowID := ""
-		if sourceInfo, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceInfo.FlowID)
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
-		for handlerEventKey, handler := range source.NodeEventHandlers(nodeID) {
-			errs = append(errs, validateHandlerActivitySurface(source, flowID, nodeID, handlerEventKey, handler)...)
+		for handlerEventKey, handler := range source.ExecutableNodeEventHandlers(node) {
+			errs = append(errs, validateHandlerActivitySurface(source, node, handlerEventKey, handler)...)
 		}
 	}
 	errs = append(errs, validateActivityResultEventNameCollisions(source)...)
 	return errs
 }
 
-func validateHandlerActivitySurface(source semanticview.Source, flowID, nodeID, handlerEventKey string, handler runtimecontracts.SystemNodeEventHandler) []error {
-	context := fmt.Sprintf("node %s handler %s", strings.TrimSpace(nodeID), strings.TrimSpace(handlerEventKey))
+func validateHandlerActivitySurface(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEventKey string, handler runtimecontracts.SystemNodeEventHandler) []error {
+	context := fmt.Sprintf("node %s handler %s", node.Key(), strings.TrimSpace(handlerEventKey))
 	var errs []error
 	hasTopLevelActivity := !handler.Activity.Empty()
 	hasRuleActivity := false
@@ -54,7 +54,7 @@ func validateHandlerActivitySurface(source semanticview.Source, flowID, nodeID, 
 		if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
 			errs = append(errs, fmt.Errorf("%s activity: activity and authored emit/on_success emit are mutually exclusive in Stage 1; use generated activity result events", context))
 		}
-		errs = append(errs, validateActivitySpec(source, flowID, nodeID, handlerEventKey, "", -1, context+".activity", handler.Activity)...)
+		errs = append(errs, validateActivitySpec(source, node, handlerEventKey, "", -1, context+".activity", handler.Activity)...)
 	}
 	if hasRuleActivity {
 		if !handler.Activity.Empty() {
@@ -77,7 +77,7 @@ func validateHandlerActivitySurface(source semanticview.Source, flowID, nodeID, 
 			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
 				errs = append(errs, fmt.Errorf("%s activity: activity and authored emit/fan_out emit are mutually exclusive in Stage 1; use generated activity result events", ruleContext))
 			}
-			errs = append(errs, validateActivitySpec(source, flowID, nodeID, handlerEventKey, rule.ID, idx, ruleContext+".activity", rule.Activity)...)
+			errs = append(errs, validateActivitySpec(source, node, handlerEventKey, rule.ID, idx, ruleContext+".activity", rule.Activity)...)
 		}
 	}
 	errs = append(errs, rejectUnsupportedNestedActivityContexts(context, handler)...)
@@ -94,7 +94,7 @@ func rejectUnsupportedNestedActivityContexts(context string, handler runtimecont
 	return errs
 }
 
-func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEventKey, ruleID string, ruleIndex int, context string, activity runtimecontracts.ActivitySpec) []error {
+func validateActivitySpec(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEventKey, ruleID string, ruleIndex int, context string, activity runtimecontracts.ActivitySpec) []error {
 	var errs []error
 	toolID := strings.TrimSpace(activity.Tool)
 	if toolID == "" {
@@ -148,7 +148,7 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 			errs = append(errs, fmt.Errorf("%s.approval: activity approval requires effect_class non_idempotent_write", context))
 		}
 		approvalSite := runtimecontracts.ActivitySite{
-			FlowID: flowID, NodeID: nodeID, HandlerEventKey: handlerEventKey, RuleID: ruleID, RuleIndex: ruleIndex, Spec: activity,
+			Node: node, HandlerEventKey: handlerEventKey, RuleID: ruleID, RuleIndex: ruleIndex, Spec: activity,
 		}
 		if !activityRevisionConsumerExists(source, approvalSite) {
 			events := runtimecontracts.ActivityResultEventsForSite(approvalSite)
@@ -157,8 +157,7 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	}
 	errs = append(errs, validateActivityInputAgainstToolSchema(context, activity, tool.InputSchema())...)
 	site := runtimecontracts.ActivitySite{
-		FlowID:          flowID,
-		NodeID:          nodeID,
+		Node:            node,
 		HandlerEventKey: handlerEventKey,
 		Spec:            activity,
 	}
@@ -174,15 +173,13 @@ func activityRevisionConsumerExists(source semanticview.Source, site runtimecont
 		return false
 	}
 	want := eventidentity.Normalize(runtimecontracts.ActivityResultEventsForSite(site).RevisionRequested)
-	for nodeID := range source.NodeEntries() {
-		consumerFlow := ""
-		if info, ok := source.NodeContractSource(nodeID); ok {
-			consumerFlow = strings.TrimSpace(info.FlowID)
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
 		}
-		for subscribed := range source.NodeEventHandlers(nodeID) {
-			if eventidentity.Normalize(source.ResolveFlowEventReference(consumerFlow, subscribed)) == want {
-				return true
-			}
+		if semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, want).Matched {
+			return true
 		}
 	}
 	return false
@@ -207,24 +204,15 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 	addAuthoredEvents(source.AuthoredEventEntries(), "authored event")
 	addAuthoredEvents(source.AuthoredResolvedEventCatalog(), "authored resolved event")
 
-	nodes := source.NodeEntries()
-	nodeIDs := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID != "" {
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-	}
-	sort.Strings(nodeIDs)
-
 	var errs []error
 	generated := map[string]string{}
-	for _, nodeID := range nodeIDs {
-		flowID := ""
-		if sourceInfo, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceInfo.FlowID)
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
-		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, source.NodeEventHandlers(nodeID)) {
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
 			context := activitySiteContext(site)
 			resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 			eventTypes := []string{resultEvents.SuccessEvent, resultEvents.FailureEvent}
@@ -252,7 +240,7 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 }
 
 func activitySiteContext(site runtimecontracts.ActivitySite) string {
-	context := fmt.Sprintf("node %s handler %s", strings.TrimSpace(site.NodeID), strings.TrimSpace(site.HandlerEventKey))
+	context := fmt.Sprintf("node %s handler %s", site.Node.Key(), strings.TrimSpace(site.HandlerEventKey))
 	if site.RuleIndex >= 0 {
 		if strings.TrimSpace(site.RuleID) != "" {
 			return fmt.Sprintf("%s.rules[%s].activity", context, strings.TrimSpace(site.RuleID))

@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -115,12 +116,13 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish validation request: %v", err)
 	}
+	accountNodeID := identitytest.FlowNode(t, "account", "account-node").Key()
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'account-node'
-	`, 1, evt.ID())
+		  AND subscriber_id = $2
+	`, 1, evt.ID(), accountNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -132,13 +134,13 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'account-node'
+		  AND subscriber_id = $3
 		  AND delivery_target_route @> $2::jsonb
 	`, 1, evt.ID(), templateFlowPilotDeliveryTargetRouteJSON(t, events.RouteIdentity{
 		FlowID:       "account",
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
-	}))
+	}), accountNodeID)
 	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RouteForInstancePath(flowInstance))
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)

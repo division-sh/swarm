@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -29,7 +30,7 @@ const (
 type workflowNodeExecutor = WorkflowNodeExecutor
 
 type WorkflowNode struct {
-	ID               string
+	Node             runtimeidentity.ExecutableNode
 	Subscriptions    []events.EventType
 	Produces         []events.EventType
 	OwnedTransitions []string
@@ -50,10 +51,9 @@ func workflowNodesSnapshot(nodes []WorkflowNode) []WorkflowNode {
 	return out
 }
 
-func workflowNodeSubscriptions(nodes []WorkflowNode, nodeID string) []events.EventType {
-	nodeID = strings.TrimSpace(nodeID)
+func workflowNodeSubscriptions(nodes []WorkflowNode, nodeRef runtimeidentity.ExecutableNode) []events.EventType {
 	for _, node := range nodes {
-		if strings.TrimSpace(node.ID) != nodeID {
+		if !node.Node.Equal(nodeRef) {
 			continue
 		}
 		return append([]events.EventType{}, node.Subscriptions...)
@@ -61,11 +61,10 @@ func workflowNodeSubscriptions(nodes []WorkflowNode, nodeID string) []events.Eve
 	return nil
 }
 
-func workflowNodeEventPolicy(nodes []WorkflowNode, nodeID, eventType string) (WorkflowEventPolicy, bool) {
+func workflowNodeEventPolicy(nodes []WorkflowNode, nodeRef runtimeidentity.ExecutableNode, eventType string) (WorkflowEventPolicy, bool) {
 	eventType = strings.TrimSpace(eventType)
-	nodeID = strings.TrimSpace(nodeID)
 	for _, node := range nodes {
-		if nodeID != "" && strings.TrimSpace(node.ID) != nodeID {
+		if nodeRef.Valid() && !node.Node.Equal(nodeRef) {
 			continue
 		}
 		if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
@@ -80,16 +79,16 @@ func workflowNodePolicyForDelivery(ctx context.Context, source semanticview.Sour
 	if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
 		return policy, true, nil
 	}
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, strings.TrimSpace(node.ID), evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, node.Node, evt)
 	if resolved.Failure != "" {
-		return WorkflowEventPolicy{}, false, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(node.ID), resolved.Failure)
+		return WorkflowEventPolicy{}, false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Node.Key(), resolved.Failure)
 	}
 	if !resolved.Matched {
 		return WorkflowEventPolicy{}, false, nil
 	}
 	candidates := []string{resolved.HandlerEventKey}
 	if source != nil {
-		candidates = append(candidates, workflowNodeExternalEventType(source, strings.TrimSpace(node.ID), resolved.HandlerEventKey))
+		candidates = append(candidates, workflowNodeExternalEventType(source, node.Node, resolved.HandlerEventKey))
 	}
 	for _, candidate := range candidates {
 		if policy, ok := workflowNodePolicyForEventType(node.Policies, candidate); ok {
@@ -118,8 +117,8 @@ func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eve
 	return WorkflowEventPolicy{}, false
 }
 
-func workflowNodeEventHandlerForDelivery(source semanticview.Source, nodeID string, evt events.Event) (runtimecontracts.SystemNodeEventHandler, bool) {
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
+func workflowNodeEventHandlerForDelivery(source semanticview.Source, node runtimeidentity.ExecutableNode, evt events.Event) (runtimecontracts.SystemNodeEventHandler, bool) {
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
 	return resolved.Handler, resolved.Matched
 }
 
@@ -131,13 +130,17 @@ type workflowNodeEventHandlerResolution struct {
 	Failure         string
 }
 
-func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, nodeID string, evt events.Event) workflowNodeEventHandlerResolution {
-	return workflowNodeEventHandlerResolutionForDeliveryContext(nil, source, nodeID, evt)
+func workflowNodeEventHandlerResolutionForDelivery(source semanticview.Source, node runtimeidentity.ExecutableNode, evt events.Event) workflowNodeEventHandlerResolution {
+	return workflowNodeEventHandlerResolutionForDeliveryContext(nil, source, node, evt)
 }
 
-func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, source semanticview.Source, nodeID string, evt events.Event) workflowNodeEventHandlerResolution {
-	if source == nil {
+func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, source semanticview.Source, node runtimeidentity.ExecutableNode, evt events.Event) workflowNodeEventHandlerResolution {
+	if source == nil || !node.Valid() {
 		return workflowNodeEventHandlerResolution{}
+	}
+	executionFlowID := node.FlowID()
+	if executionFlowID == "" {
+		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
 	rawEventType := eventidentity.Normalize(string(evt.Type()))
 	if rawEventType == "" {
@@ -148,63 +151,66 @@ func workflowNodeEventHandlerResolutionForDeliveryContext(ctx context.Context, s
 		if err != nil {
 			return workflowNodeEventHandlerResolution{Failure: err.Error()}
 		}
-		if !ok || resolution.Ref.NodeID() != strings.TrimSpace(nodeID) {
+		if !ok || !resolution.Ref.Node().Equal(node) {
 			return workflowNodeEventHandlerResolution{}
-		}
-		handlerFlowID := resolution.Ref.FlowID()
-		if handlerFlowID == "" {
-			handlerFlowID = semanticview.RootExecutionFlowID(source)
 		}
 		return workflowNodeEventHandlerResolution{
 			Handler: resolution.Handler, HandlerEventKey: resolution.Ref.HandlerEvent(),
-			FlowID: handlerFlowID, Matched: true,
+			FlowID: executionFlowID, Matched: true,
 		}
 	}
 	route, deliveryRouted := workflowNodeDeliveryRoute(ctx)
 	if deliveryRouted && !route.ConnectClaim.Empty() {
-		handlerFlowID, handlerNodeID, handlerEvent, authorized := route.ConnectClaim.NodeHandlerOwner(nodeID)
-		if !authorized {
-			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim does not authorize node %s", strings.TrimSpace(nodeID))}
+		handlerNode, handlerEvent, authorized := route.ConnectClaim.NodeHandlerOwner()
+		if !authorized || !handlerNode.Equal(node) {
+			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim does not authorize node %s", node.Key())}
 		}
-		handlerResolution := semanticview.ResolveFlowNodeSubscriptionHandler(source, handlerFlowID, handlerNodeID, string(handlerEvent))
+		handlerResolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, handlerNode, string(handlerEvent))
 		if !handlerResolution.Matched {
-			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim authorizes event %s but declaration node %s has no matching handler", handlerEvent, handlerNodeID)}
+			return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("connect delivery claim authorizes event %s but declaration node %s has no matching handler", handlerEvent, handlerNode.Key())}
 		}
 		return workflowNodeEventHandlerResolution{
 			Handler:         handlerResolution.Handler,
 			HandlerEventKey: handlerResolution.HandlerEventKey,
-			FlowID:          handlerFlowID,
+			FlowID:          executionFlowID,
 			Matched:         true,
 		}
 	}
 	if deliveryRouted {
 		// Direct typed-pubsub delivery remains owned by the semantic source. Only
 		// compiled-connect delivery requires the route-scoped connect claim above.
-		if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
+		if resolved := workflowNodeEventHandlerResolutionForEventType(source, node, rawEventType); resolved.Matched {
 			return resolved
 		}
-		if resolved := workflowNodeDirectDeliveryHandlerResolution(source, nodeID, rawEventType, route.Target.Route()); resolved.Matched {
+		if resolved := workflowNodeDirectDeliveryHandlerResolution(source, node, rawEventType, route.Target.Route()); resolved.Matched {
 			return resolved
 		}
 		return workflowNodeEventHandlerResolution{Failure: fmt.Sprintf("node delivery event %s has no semantic handler or stamped connect claim", rawEventType)}
 	}
-	if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeID, rawEventType); resolved.Matched {
+	if resolved := workflowNodeEventHandlerResolutionForEventType(source, node, rawEventType); resolved.Matched {
 		return resolved
 	}
 	return workflowNodeEventHandlerResolution{}
 }
 
-func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nodeID, eventType string, target events.RouteIdentity) workflowNodeEventHandlerResolution {
+func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, target events.RouteIdentity) workflowNodeEventHandlerResolution {
 	target = target.Normalized()
 	if target.FlowID == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
+	executionFlowID := node.FlowID()
+	if executionFlowID == "" {
+		executionFlowID = semanticview.RootExecutionFlowID(source)
+	}
 	eventType = eventidentity.Normalize(eventType)
-	if resolved := semanticview.ResolveFlowNodeSubscriptionHandler(source, target.FlowID, nodeID, eventType); resolved.Matched {
+	if target.FlowID != executionFlowID {
+		return workflowNodeEventHandlerResolution{}
+	}
+	if resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventType); resolved.Matched {
 		return workflowNodeEventHandlerResolution{
 			Handler:         resolved.Handler,
 			HandlerEventKey: resolved.HandlerEventKey,
-			FlowID:          target.FlowID,
+			FlowID:          executionFlowID,
 			Matched:         true,
 		}
 	}
@@ -212,36 +218,40 @@ func workflowNodeDirectDeliveryHandlerResolution(source semanticview.Source, nod
 	if prefix == "/" || !strings.HasPrefix(eventType, prefix) {
 		return workflowNodeEventHandlerResolution{}
 	}
-	resolved := semanticview.ResolveFlowNodeSubscriptionHandler(source, target.FlowID, nodeID, strings.TrimPrefix(eventType, prefix))
+	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, strings.TrimPrefix(eventType, prefix))
 	if !resolved.Matched {
 		return workflowNodeEventHandlerResolution{}
 	}
 	return workflowNodeEventHandlerResolution{
 		Handler:         resolved.Handler,
 		HandlerEventKey: resolved.HandlerEventKey,
-		FlowID:          target.FlowID,
+		FlowID:          executionFlowID,
 		Matched:         true,
 	}
 }
 
-func workflowNodeExactEventHandlerResolution(source semanticview.Source, nodeID, eventType string) workflowNodeEventHandlerResolution {
+func workflowNodeExactEventHandlerResolution(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) workflowNodeEventHandlerResolution {
 	eventType = eventidentity.Normalize(eventType)
 	if source == nil || eventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
 	if !resolved.Matched {
 		return workflowNodeEventHandlerResolution{}
+	}
+	executionFlowID := node.FlowID()
+	if executionFlowID == "" {
+		executionFlowID = semanticview.RootExecutionFlowID(source)
 	}
 	return workflowNodeEventHandlerResolution{
 		Handler:         resolved.Handler,
 		HandlerEventKey: resolved.HandlerEventKey,
-		FlowID:          workflowNodeFlowID(source, nodeID),
+		FlowID:          executionFlowID,
 		Matched:         true,
 	}
 }
 
-func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, nodeID, eventType string) workflowNodeEventHandlerResolution {
+func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) workflowNodeEventHandlerResolution {
 	if source == nil {
 		return workflowNodeEventHandlerResolution{}
 	}
@@ -249,20 +259,24 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 	if eventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	resolved := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
 	if resolved.Matched {
+		executionFlowID := node.FlowID()
+		if executionFlowID == "" {
+			executionFlowID = semanticview.RootExecutionFlowID(source)
+		}
 		return workflowNodeEventHandlerResolution{
 			Handler:         resolved.Handler,
 			HandlerEventKey: resolved.HandlerEventKey,
-			FlowID:          workflowNodeFlowID(source, nodeID),
+			FlowID:          executionFlowID,
 			Matched:         true,
 		}
 	}
 	return workflowNodeEventHandlerResolution{}
 }
 
-func workflowNodeHandlerEventKeyForExecution(ctx context.Context, source semanticview.Source, nodeID string, evt events.Event) string {
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, nodeID, evt)
+func workflowNodeHandlerEventKeyForExecution(ctx context.Context, source semanticview.Source, node runtimeidentity.ExecutableNode, evt events.Event) string {
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, node, evt)
 	if resolved.Matched {
 		return resolved.HandlerEventKey
 	}
@@ -273,20 +287,18 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 	if source == nil {
 		return nil, ErrContractBundleNil
 	}
-	path := "workflow contract bundle"
-
-	wantIDs := workflowRuntimeNodeIDs(source)
-	nodes := source.NodeEntries()
-	out := make([]WorkflowNode, 0, len(wantIDs))
-	for _, nodeID := range wantIDs {
-		entry, ok := nodes[nodeID]
-		if !ok {
-			return nil, fmt.Errorf("system node %q missing from %s", nodeID, path)
+	records := source.ExecutableNodeRecords()
+	out := make([]WorkflowNode, 0, len(records))
+	for _, record := range records {
+		node, err := record.Identity()
+		if err != nil {
+			return nil, fmt.Errorf("admit executable node %q: %w", record.LogicalID, err)
 		}
-		runtimeSubscriptions := source.NodeRuntimeSubscriptions(nodeID)
+		entry := record.Entry
+		runtimeSubscriptions := source.ExecutableNodeRuntimeSubscriptions(node)
 		subscriptions := make([]events.EventType, 0, len(runtimeSubscriptions))
 		for _, evt := range runtimeSubscriptions {
-			aliases, err := workflowNodeSubscriptionAliases(source, nodeID, evt)
+			aliases, err := workflowNodeSubscriptionAliases(source, node, evt)
 			if err != nil {
 				return nil, err
 			}
@@ -297,17 +309,17 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 				subscriptions = append(subscriptions, events.EventType(resolved))
 			}
 		}
-		effectiveProduces := semanticview.NodeEffectiveProduces(source, nodeID)
+		effectiveProduces := semanticview.ExecutableNodeEffectiveProduces(source, node)
 		produces := make([]events.EventType, 0, len(effectiveProduces))
 		for _, evt := range effectiveProduces {
-			evt = workflowNodeExternalEventType(source, nodeID, evt)
+			evt = workflowNodeExternalEventType(source, node, evt)
 			if evt == "" {
 				continue
 			}
 			produces = append(produces, events.EventType(evt))
 		}
 		out = append(out, WorkflowNode{
-			ID:               nodeID,
+			Node:             node,
 			Subscriptions:    subscriptions,
 			Produces:         produces,
 			OwnedTransitions: append([]string{}, entry.OwnedTransitions...),
@@ -316,24 +328,24 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 			Implementation:   strings.TrimSpace(entry.Implementation),
 			StateTable:       strings.TrimSpace(entry.StateTable),
 			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
-			Policies:         buildWorkflowNodePolicies(source, nodeID, subscriptions),
+			Policies:         buildWorkflowNodePolicies(source, node, subscriptions),
 		})
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
 	return out, nil
 }
 
-func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventType string) ([]string, error) {
-	nodeID = strings.TrimSpace(nodeID)
+func workflowNodeSubscriptionAliases(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) ([]string, error) {
 	eventType = eventidentity.Normalize(eventType)
-	if nodeID == "" || eventType == "" || source == nil {
+	if !node.Valid() || eventType == "" || source == nil {
 		if eventType == "" {
 			return nil, nil
 		}
 		return []string{eventType}, nil
 	}
-	admission := semanticview.ClassifyNodeSubscription(source, nodeID, eventType)
+	admission := semanticview.ClassifyExecutableNodeSubscription(source, node, eventType)
 	if !admission.Admitted() {
-		return nil, fmt.Errorf("workflow node %s: %s", nodeID, admission.Message())
+		return nil, fmt.Errorf("workflow node %s: %s", node.Key(), admission.Message())
 	}
 	out := make([]string, 0, 2)
 	appendAlias := func(value string) {
@@ -348,8 +360,7 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 		}
 		out = append(out, value)
 	}
-	contractSource, _ := source.NodeContractSource(nodeID)
-	flowID := strings.TrimSpace(contractSource.FlowID)
+	flowID := node.FlowID()
 	if admission.Pattern() {
 		for _, pattern := range admission.RoutePatterns() {
 			appendAlias(pattern)
@@ -382,79 +393,8 @@ func workflowFlowHasInputEvent(source semanticview.Source, flowID, eventType str
 	return source.FlowHasInputEvent(flowID, eventType)
 }
 
-func workflowRuntimeNodeIDs(source semanticview.Source) []string {
-	if source == nil {
-		return nil
-	}
-	nodes := source.NodeEntries()
-	events := source.EventEntries()
-	seen := make(map[string]struct{})
-	out := make([]string, 0, len(nodes))
-	for _, transition := range source.WorkflowTransitions() {
-		nodeID := strings.TrimSpace(transition.Node)
-		if nodeID == "" {
-			continue
-		}
-		if _, ok := nodes[nodeID]; !ok {
-			continue
-		}
-		if _, ok := seen[nodeID]; ok {
-			continue
-		}
-		seen[nodeID] = struct{}{}
-		out = append(out, nodeID)
-	}
-	for _, entry := range events {
-		nodeID := strings.TrimSpace(entry.OwningNode)
-		if nodeID == "" {
-			continue
-		}
-		if _, ok := nodes[nodeID]; !ok {
-			continue
-		}
-		if _, ok := seen[nodeID]; ok {
-			continue
-		}
-		seen[nodeID] = struct{}{}
-		out = append(out, nodeID)
-	}
-	for _, transition := range source.DerivedHandlerTransitions() {
-		nodeID := strings.TrimSpace(transition.NodeID)
-		if nodeID == "" {
-			continue
-		}
-		if _, ok := nodes[nodeID]; !ok {
-			continue
-		}
-		if _, ok := seen[nodeID]; ok {
-			continue
-		}
-		if strings.TrimSpace(transition.AdvancesTo) == "" {
-			continue
-		}
-		seen[nodeID] = struct{}{}
-		out = append(out, nodeID)
-	}
-	for nodeID, node := range nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
-			continue
-		}
-		if _, ok := seen[nodeID]; ok {
-			continue
-		}
-		if len(source.NodeRuntimeSubscriptions(nodeID)) == 0 && len(node.OwnedTransitions) == 0 && len(node.Timers) == 0 {
-			continue
-		}
-		seen[nodeID] = struct{}{}
-		out = append(out, nodeID)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func buildWorkflowNodePolicies(source semanticview.Source, nodeID string, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
-	allowed := workflowNodeRuntimePolicyEvents(source, strings.TrimSpace(nodeID), subscriptions)
+func buildWorkflowNodePolicies(source semanticview.Source, node runtimeidentity.ExecutableNode, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
+	allowed := workflowNodeRuntimePolicyEvents(source, node, subscriptions)
 	if len(allowed) == 0 {
 		return nil
 	}
@@ -492,9 +432,8 @@ func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []str
 	return out
 }
 
-func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, subscriptions []events.EventType) map[string]struct{} {
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" || source == nil {
+func workflowNodeRuntimePolicyEvents(source semanticview.Source, node runtimeidentity.ExecutableNode, subscriptions []events.EventType) map[string]struct{} {
+	if !node.Valid() || source == nil {
 		return nil
 	}
 	out := make(map[string]struct{}, len(subscriptions)+8)
@@ -504,47 +443,24 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, 
 			out[name] = struct{}{}
 		}
 	}
-	for eventType := range source.EventEntries() {
-		eventType = strings.TrimSpace(eventType)
-		if eventType == "" {
-			continue
-		}
-		for _, owner := range source.RuntimeEventOwners(eventType) {
-			if strings.TrimSpace(owner) == nodeID {
-				out[eventType] = struct{}{}
-				break
-			}
-		}
-	}
-	for eventType := range source.NodeEventHandlers(nodeID) {
-		eventType = workflowNodeExternalEventType(source, nodeID, eventType)
+	for eventType := range source.ExecutableNodeEventHandlers(node) {
+		eventType = workflowNodeExternalEventType(source, node, eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
-	for _, transition := range source.WorkflowTransitions() {
-		if strings.TrimSpace(transition.Node) != nodeID {
-			continue
-		}
-		trigger := strings.TrimSpace(transition.Trigger)
-		if trigger != "" {
-			out[trigger] = struct{}{}
-		}
-	}
-	if contractSource, ok := source.NodeContractSource(nodeID); ok {
-		flowID := strings.TrimSpace(contractSource.FlowID)
-		if flowID != "" {
-			for _, eventType := range source.FlowInputEvents(flowID) {
-				eventType = strings.TrimSpace(eventType)
-				if eventType != "" {
-					out[eventType] = struct{}{}
-				}
+	flowID := node.FlowID()
+	if flowID != "" {
+		for _, eventType := range source.FlowInputEvents(flowID) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" {
+				out[eventType] = struct{}{}
 			}
-			for _, eventType := range source.FlowOutputEvents(flowID) {
-				eventType = strings.TrimSpace(eventType)
-				if eventType != "" {
-					out[eventType] = struct{}{}
-				}
+		}
+		for _, eventType := range source.FlowOutputEvents(flowID) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" {
+				out[eventType] = struct{}{}
 			}
 		}
 	}
@@ -554,11 +470,11 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, 
 	return out
 }
 
-func workflowNodeExternalEventType(source semanticview.Source, nodeID, eventType string) string {
+func workflowNodeExternalEventType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) string {
 	if source == nil {
 		return eventidentity.Normalize(eventType)
 	}
-	return source.ResolveNodeEventReference(nodeID, eventType)
+	return source.ResolveExecutableNodeEventReference(node, eventType)
 }
 
 func deriveWorkflowEventPolicy(source semanticview.Source, eventType string) WorkflowEventPolicy {
@@ -578,13 +494,12 @@ func (pc *PipelineCoordinator) BackgroundNodes() []BackgroundNode {
 	return nil
 }
 
-func (pc *PipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {
+func (pc *PipelineCoordinator) backgroundWorkflowExecutor(node runtimeidentity.ExecutableNode) WorkflowNodeExecutor {
 	if pc == nil {
 		return nil
 	}
-	nodeID = strings.TrimSpace(nodeID)
 	for _, executor := range pc.workflowNodeExecutors() {
-		if strings.TrimSpace(executor.NodeID()) != nodeID {
+		if !executor.ExecutableNode().Equal(node) {
 			continue
 		}
 		provider, ok := executor.(BackgroundWorkflowExecutorProvider)
@@ -607,15 +522,11 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 	nodes := pc.WorkflowNodes()
 	out := make([]workflowNodeExecutor, 0, len(nodes))
 	for _, node := range nodes {
-		nodeID := strings.TrimSpace(node.ID)
-		if nodeID == "" {
-			continue
-		}
-		contract, ok := source.NodeEntries()[nodeID]
+		record, ok := source.ExecutableNode(node.Node)
 		if !ok {
 			continue
 		}
-		executor := NewNode(contract, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, nodeID), nil)
+		executor := NewNode(node.Node, record.Entry, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, node.Node), nil)
 		if executor == nil {
 			continue
 		}
@@ -627,8 +538,18 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, eventType string, evt events.Event) (bool, bool, error) {
 	eventType = strings.TrimSpace(eventType)
 	source := pc.SemanticSource()
+	deliveryRoute, deliveryRouted := workflowNodeDeliveryRoute(ctx)
+	deliveryNode, exactNodeRoute := deliveryRoute.Recipient.Node()
+	nodeFound := false
+	targetMatched := false
 	for _, node := range pc.WorkflowNodes() {
-		if !pc.workflowNodeDeliveryRouteMatches(ctx, strings.TrimSpace(node.ID), evt.TargetRoute()) {
+		if exactNodeRoute && node.Node.Equal(deliveryNode) {
+			nodeFound = true
+			if pc.workflowNodeMatchesDeliveryTarget(node.Node, deliveryRoute.Target.Route()) {
+				targetMatched = true
+			}
+		}
+		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.TargetRoute()) {
 			continue
 		}
 		var (
@@ -638,7 +559,7 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 		var err error
 		policy, ok, err = workflowNodePolicyForDelivery(ctx, source, node, evt)
 		if err != nil {
-			applies, authorityErr := pc.workflowNodeConnectedInputFailureApplies(ctx, strings.TrimSpace(node.ID), evt)
+			applies, authorityErr := pc.workflowNodeConnectedInputFailureApplies(ctx, node.Node, evt)
 			if authorityErr != nil {
 				return false, true, authorityErr
 			}
@@ -650,7 +571,7 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 		if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 			if resolution, refOK, resolveErr := resolveWorkflowJoinOccurrence(source, evt); resolveErr != nil {
 				return false, true, resolveErr
-			} else if refOK && resolution.Ref.NodeID() == strings.TrimSpace(node.ID) {
+			} else if refOK && resolution.Ref.Node().Equal(node.Node) {
 				if node.Policies != nil {
 					policy, ok = workflowNodePolicyForEventType(node.Policies, resolution.Ref.HandlerEvent())
 				}
@@ -660,10 +581,20 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			return policy.Consume, true, nil
 		}
 	}
+	if deliveryRouted && exactNodeRoute {
+		claimNode, claimEvent, claimed := deliveryRoute.ConnectClaim.NodeHandlerOwner()
+		if !nodeFound {
+			return false, true, fmt.Errorf("exact workflow node delivery recipient %s is not present in the runtime node census", deliveryNode.Key())
+		}
+		if !targetMatched {
+			return false, true, fmt.Errorf("exact workflow node delivery recipient %s does not own target %#v", deliveryNode.Key(), deliveryRoute.Target.Route())
+		}
+		return false, true, fmt.Errorf("exact workflow node delivery recipient %s has no policy for event %s (connect_claim=%t handler=%s event=%s)", deliveryNode.Key(), eventType, claimed, claimNode.Key(), claimEvent)
+	}
 	return false, false, nil
 }
 
-func (pc *PipelineCoordinator) workflowNodeConnectedInputFailureApplies(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
+func (pc *PipelineCoordinator) workflowNodeConnectedInputFailureApplies(ctx context.Context, _ runtimeidentity.ExecutableNode, evt events.Event) (bool, error) {
 	if _, ok := workflowNodeDeliveryRoute(ctx); ok {
 		return true, nil
 	}
@@ -686,11 +617,10 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(c
 	}
 	handledAny := false
 	for _, node := range pc.WorkflowNodes() {
-		nodeID := strings.TrimSpace(node.ID)
-		if !pc.workflowNodeDeliveryRouteMatches(ctx, nodeID, evt.TargetRoute()) {
+		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.TargetRoute()) {
 			continue
 		}
-		handled, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, nodeID, evt, emissions)
+		handled, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node.Node, evt, emissions)
 		if err != nil {
 			return handledAny || handled, err
 		}
@@ -701,18 +631,18 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(c
 	return handledAny, nil
 }
 
-func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, nodeID string, eventTarget events.RouteIdentity) bool {
-	nodeID = strings.TrimSpace(nodeID)
+func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, node runtimeidentity.ExecutableNode, eventTarget events.RouteIdentity) bool {
 	if route, ok := workflowNodeDeliveryRoute(ctx); ok {
-		if route.Recipient.ID() != nodeID {
+		recipient, exact := route.Recipient.Node()
+		if !exact || !recipient.Equal(node) {
 			return false
 		}
-		return pc.workflowNodeMatchesDeliveryTarget(nodeID, route.Target.Route())
+		return pc.workflowNodeMatchesDeliveryTarget(node, route.Target.Route())
 	}
 	return false
 }
 
-func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, target events.RouteIdentity) bool {
+func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(node runtimeidentity.ExecutableNode, target events.RouteIdentity) bool {
 	target = target.Normalized()
 	if target.Empty() {
 		return true
@@ -724,14 +654,9 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 	if source == nil {
 		return false
 	}
-	flowID := strings.TrimSpace(workflowNodeFlowID(source, nodeID))
+	flowID := node.FlowID()
 	if flowID == "" {
-		rootScope := strings.Trim(strings.TrimSpace(source.WorkflowName()), "/")
-		targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
-		if rootScope == "" || targetPath != rootScope {
-			return false
-		}
-		return target.FlowID == "" || strings.Trim(strings.TrimSpace(target.FlowID), "/") == rootScope
+		flowID = semanticview.RootExecutionFlowID(source)
 	}
 	if target.FlowID != "" {
 		return target.FlowID == flowID && pc.workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)

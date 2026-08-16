@@ -12,7 +12,7 @@ func TestWorkflowTimerActivationAndOccurrenceIdentityAreCanonical(t *testing.T) 
 	activationID := WorkflowTimerActivationID("run-1", "entity-1", "review/one", "review.expiry", "", "initial", "", "", "", "", "waiting")
 	ref := WorkflowTimerActivationRef{
 		ActivationID:        activationID,
-		Declaration:         "review.expiry",
+		DeclarationKey:      "review.expiry",
 		DeclarationRevision: "sha256:revision",
 		Cause:               WorkflowTimerActivationCauseInitial,
 		Generation: attemptgeneration.Generation{
@@ -46,7 +46,7 @@ func TestWorkflowTimerIdentityRejectsNonCanonicalOrUnknownFields(t *testing.T) {
 	activationID := WorkflowTimerActivationID("run-1", "entity-1")
 	valid := WorkflowTimerActivationRef{
 		ActivationID:        activationID,
-		Declaration:         "timer",
+		DeclarationKey:      "timer",
 		DeclarationRevision: "sha256:revision",
 		Cause:               WorkflowTimerActivationCauseInitial,
 	}.TaskID()

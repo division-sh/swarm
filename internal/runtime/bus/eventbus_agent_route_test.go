@@ -577,7 +577,7 @@ func TestInternalSubscriptionInactiveSendReturnsExactContinuation(t *testing.T) 
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "node-a"))}
 	for _, test := range []struct {
 		name   string
 		handle *internalSubscriptionHandle
@@ -708,14 +708,14 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 				}
 			} else {
 				var err error
-				subscription, err = bus.SubscribeInternal(context.Background(), subscriberID, events.EventType("test.work"))
+				subscription, err = bus.SubscribeInternal(context.Background(), workflowRuntimeInternalCarrierID, events.EventType("test.work"))
 				if err != nil {
 					t.Fatalf("subscribe internal route: %v", err)
 				}
 			}
 
 			eventID, runID := uuid.NewString(), uuid.NewString()
-			recipient := events.MustNodeDeliveryRecipient(subscriberID)
+			recipient := events.MustNodeDeliveryRecipient(testRootNode(t, subscriberID))
 			if tc.subscriberType == "agent" {
 				recipient = events.MustAgentDeliveryRecipient(subscriberID)
 			}
@@ -737,7 +737,7 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 				if err := bus.deliverLiveRecipientsWithRoutes(
 					context.Background(),
 					evt,
-					[]RoutePlanLiveRecipient{{Recipient: events.MustNodeDeliveryRecipient(subscriberID), PersistAsDelivery: false,
+					[]RoutePlanLiveRecipient{{InternalID: workflowRuntimeInternalCarrierID, PersistAsDelivery: false,
 						liveAuthority: liveRecipientAuthorityIdentity,
 					}},
 					[]events.DeliveryRoute{route},
@@ -817,7 +817,7 @@ func TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration(t *testin
 	if err := eb.deliverLiveRecipientsWithRoutes(
 		context.Background(),
 		evt,
-		[]RoutePlanLiveRecipient{{Recipient: events.MustNodeDeliveryRecipient("reset-proof"), PersistAsDelivery: false,
+		[]RoutePlanLiveRecipient{{InternalID: "reset-proof", PersistAsDelivery: false,
 			liveAuthority: liveRecipientAuthorityIdentity,
 		}},
 		nil,

@@ -224,16 +224,19 @@ func validateComputeModuleSchemaNoFloat(context string, value any) []error {
 
 func validatePolicySheetComputeModuleRows(bundle *WorkflowContractBundle) []error {
 	errs := []error{}
-	for nodeID, node := range bundle.Nodes {
-		source, _ := bundle.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(source.FlowID)
-		policy := bundle.ResolvedPolicyForFlow(flowID)
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range bundle.ScopedNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		policy := bundle.ResolvedPolicyForExecutableNode(node)
+		for eventType, handler := range record.Entry.EventHandlers {
 			for idx, rule := range handler.Rules {
 				if !policySheetRuleIsComputeModuleValueRow(rule) {
 					continue
 				}
-				context := fmt.Sprintf("node %s handler %s rules[%d] compute_module row %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), idx, strings.TrimSpace(rule.ID))
+				context := fmt.Sprintf("node %s handler %s rules[%d] compute_module row %s", node.Key(), strings.TrimSpace(eventType), idx, strings.TrimSpace(rule.ID))
 				errs = append(errs, validatePolicySheetComputeModuleRow(context, rule, policy)...)
 			}
 		}

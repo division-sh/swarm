@@ -53,7 +53,7 @@ func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.Exe
 	}
 	route := execCtx.Request.StateAddress().Route
 	entityID := strings.TrimSpace(execCtx.Request.EntityID.String())
-	flowID := strings.TrimSpace(execCtx.Request.FlowID.String())
+	flowID := execCtx.Request.Node.FlowID()
 	bucketID = strings.TrimSpace(bucketID)
 	if entityID == "" || bucketID == "" {
 		return nil, fmt.Errorf("record_evidence requires exact entity and evidence target")

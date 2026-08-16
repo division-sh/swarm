@@ -854,8 +854,8 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 		t.Fatalf("workflow timer execution mode = %q, want mock", activations[0].ExecutionMode)
 	}
 	activation := activations[0]
-	if activation.Ref.Declaration != "review.awaiting_review.expired" {
-		t.Fatalf("timer declaration = %q, want review.awaiting_review.expired", activation.Ref.Declaration)
+	if activation.Ref.DeclarationKey != "stage:review:review.awaiting_review.expired" {
+		t.Fatalf("timer declaration = %q, want stage:review:review.awaiting_review.expired", activation.Ref.DeclarationKey)
 	}
 	scheduledAt := activation.FireAt
 	if want := trigger.CreatedAt().Add(2 * time.Hour); !scheduledAt.Equal(want) {
@@ -1423,7 +1423,8 @@ opco.ceo_ready:
 	)
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111"})
 
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "lifecycle-orchestrator", evt)
+	node := pipelineNode(t, "operating", "lifecycle-orchestrator")
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
 	if !resolved.Matched {
 		t.Fatal("expected exact local event to resolve to lifecycle-orchestrator handler")
 	}
@@ -1441,8 +1442,8 @@ opco.ceo_ready:
 		module:         staticSemanticWorkflowModule{source: source},
 	}
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "lifecycle-orchestrator")
-	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), "lifecycle-orchestrator", evt)
+	route := seedPipelineNodeDeliveryAuthority(t, db, evt, pipelineNode(t, "operating", "lifecycle-orchestrator"))
+	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), node, evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}
@@ -1500,7 +1501,8 @@ states: [initializing, ready]
 	)
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: entityID})
 
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "build-orchestrator", evt)
+	node := pipelineNode(t, "operating", "build-orchestrator")
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
 	if !resolved.Matched {
 		t.Fatal("expected exact local event to resolve to build-orchestrator handler")
 	}
@@ -1535,9 +1537,9 @@ states: [initializing, ready]
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "build-orchestrator")
+	route := seedPipelineNodeDeliveryAuthority(t, db, evt, pipelineNode(t, "operating", "build-orchestrator"))
 
-	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, route), "build-orchestrator", evt)
+	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, route), node, evt)
 	if err != nil {
 		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
 	}

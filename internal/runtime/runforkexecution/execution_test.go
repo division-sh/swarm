@@ -144,7 +144,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				sourceTimerID = uuid.NewString()
 				ref := timeridentity.WorkflowTimerActivationRef{
 					ActivationID:        sourceTimerID,
-					Declaration:         "test-node.check_timer",
+					DeclarationKey:      "test-node.check_timer",
 					DeclarationRevision: "sha256:test-node-check-timer",
 					Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 				}
@@ -647,6 +647,8 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 
 	var forkReceipts, targetNodeDeliveries, sourceNodeDeliveries int
+	targetNodeID := runForkSourceNode(t, loaded.Source, "test-node").Key()
+	sourceNodeID := mustRunForkRootNode("source-only-node").Key()
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, forkEventID).Scan(&forkReceipts); err != nil {
 		t.Fatalf("count fork receipts: %v", err)
 	}
@@ -656,8 +658,8 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		WHERE run_id = $1::uuid
 		  AND event_id = $2::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'test-node'
-	`, result.Materialization.ForkRunID, forkEventID).Scan(&targetNodeDeliveries); err != nil {
+		  AND subscriber_id = $3
+	`, result.Materialization.ForkRunID, forkEventID, targetNodeID).Scan(&targetNodeDeliveries); err != nil {
 		t.Fatalf("count target node fork deliveries: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
@@ -666,8 +668,8 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		WHERE run_id = $1::uuid
 		  AND event_id = $2::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'source-only-node'
-	`, result.Materialization.ForkRunID, forkEventID).Scan(&sourceNodeDeliveries); err != nil {
+		  AND subscriber_id = $3
+	`, result.Materialization.ForkRunID, forkEventID, sourceNodeID).Scan(&sourceNodeDeliveries); err != nil {
 		t.Fatalf("count source node fork deliveries: %v", err)
 	}
 	if forkReceipts == 0 || targetNodeDeliveries != 1 || sourceNodeDeliveries != 0 {
@@ -1194,7 +1196,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	if _, ok := loaded.Source.NodeEventHandler("complete-node", "task.completed"); !ok {
+	if _, ok := loaded.Source.ExecutableNodeEventHandler(runForkSourceNode(t, loaded.Source, "complete-node"), "task.completed"); !ok {
 		t.Fatal("selected source omitted complete-node task.completed handler")
 	}
 	processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
@@ -4081,7 +4083,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesCanonicalPlan(t *tes
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 				Type:        "node",
-				ID:          "alpha-intake",
+				ID:          mustRunForkNode("flow-a", "alpha-intake").Key(),
 				Path:        "flow-a/alpha-intake",
 				RouteSource: "selected_contracts",
 			}},
@@ -4121,7 +4123,7 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 	base := bus.PublishRecipientPlan{
 		RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 			Type:        "node",
-			ID:          "validator-node",
+			ID:          mustRunForkNode("validator", "validator-node").Key(),
 			Path:        "validator/fork-instance",
 			RouteSource: "canonical_connect",
 		}},
@@ -4134,18 +4136,18 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 	}{
 		{
 			name: "create fresh projected route accepts fork-local path",
-			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}),
+			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}),
 				PayloadProjection: projection,
 			}},
 		},
 		{
 			name:    "select canonical path drift is rejected",
-			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
+			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
 			wantErr: true,
 		},
 		{
 			name:    "select-or-create canonical path drift is rejected",
-			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
+			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(mustRunForkNode("validator", "validator-node")), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"})}},
 			wantErr: true,
 		},
 	}
@@ -4211,7 +4213,7 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 				},
 				{
 					Type:        "node",
-					ID:          "test-node",
+					ID:          mustRunForkRootNode("test-node").Key(),
 					RouteSource: "selected_contracts",
 				},
 			},
@@ -4221,7 +4223,7 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 	}
 	if len(routes) != 1 ||
 		!routes[0].Recipient.IsNode() ||
-		routes[0].Recipient.ID() != "test-node" ||
+		routes[0].Recipient.ID() != mustRunForkRootNode("test-node").Key() ||
 		!routes[0].Target.Empty() ||
 		routes[0].Handler.Empty() ||
 		routes[0].Handler.FlowID() != "selected-workflow" {
@@ -4254,7 +4256,7 @@ func TestSelectedContractRecipientPlanPublishGuardAuthorizesContractSwapOwner(t 
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 				Type:        "node",
-				ID:          "alpha-intake",
+				ID:          mustRunForkNode("flow-a", "alpha-intake").Key(),
 				Path:        "flow-a/alpha-intake",
 				RouteSource: "selected_contracts",
 			}},
@@ -4288,7 +4290,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 				Type:        "node",
-				ID:          "alpha-intake",
+				ID:          mustRunForkNode("flow-a", "alpha-intake").Key(),
 				Path:        "flow-a/alpha-intake",
 				RouteSource: "selected_contracts",
 			}},
@@ -4304,7 +4306,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 				Type:        "node",
-				ID:          "alpha-intake",
+				ID:          mustRunForkNode("flow-a", "alpha-intake").Key(),
 				Path:        "flow-a/alpha-intake",
 				RouteSource: "selected_contracts",
 			}},
@@ -4321,7 +4323,7 @@ func TestSelectedContractRecipientPlanPublishGuardRejectsBypassAndSubscriptions(
 		bus.PublishRecipientPlan{
 			RoutedRecipients: []bus.PublishDiagnosticRecipient{{
 				Type:        "node",
-				ID:          "other-node",
+				ID:          mustRunForkNode("flow-a", "other-node").Key(),
 				Path:        "flow-a/other-node",
 				RouteSource: "selected_contracts",
 			}},
@@ -4695,7 +4697,7 @@ func seedSelectedExecutionSourceRunWithRoutes(
 
 func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 	return events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Recipient: events.MustNodeDeliveryRecipient(mustRunForkRootNode(nodeID)),
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
 		}),

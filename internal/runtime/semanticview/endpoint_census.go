@@ -9,6 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -46,6 +47,7 @@ type AuthoredEventEndpoint struct {
 	Event          FlowEventProof                           `json:"event"`
 	Pattern        bool                                     `json:"pattern,omitempty"`
 	NodeID         string                                   `json:"node_id,omitempty"`
+	Node           runtimeidentity.ExecutableNode           `json:"-"`
 	HandlerEvent   string                                   `json:"handler_event,omitempty"`
 	AgentLocalID   string                                   `json:"agent_local_id,omitempty"`
 	AgentID        string                                   `json:"agent_id,omitempty"`
@@ -160,10 +162,11 @@ type InvalidAuthoredSubscription struct {
 }
 
 type NodeProducerAssertion struct {
-	NodeID     string   `json:"node_id"`
-	FlowID     string   `json:"flow_id,omitempty"`
-	Declared   bool     `json:"declared"`
-	EventTypes []string `json:"event_types"`
+	NodeID     string                         `json:"node_id"`
+	FlowID     string                         `json:"flow_id,omitempty"`
+	Node       runtimeidentity.ExecutableNode `json:"-"`
+	Declared   bool                           `json:"declared"`
+	EventTypes []string                       `json:"event_types"`
 }
 
 type AuthoredEventEndpointCensus struct {
@@ -682,9 +685,11 @@ func (c AuthoredEventEndpointCensus) ResolveDeclaredInputEndpoint(flowID, identi
 	return endpointAssociationResult(flowID, identity, "", candidates)
 }
 
-func (c AuthoredEventEndpointCensus) ResolveFanInInputForHandler(flowID, nodeID, handlerEvent string) EndpointAssociationResult {
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
+func (c AuthoredEventEndpointCensus) ResolveFanInInputForHandler(node runtimeidentity.ExecutableNode, handlerEvent string) EndpointAssociationResult {
+	if !node.Valid() {
+		return EndpointAssociationResult{Status: EndpointAssociationNotFound, Identity: eventidentity.Normalize(handlerEvent)}
+	}
+	flowID := node.FlowID()
 	handlerEvent = eventidentity.Normalize(handlerEvent)
 	candidates := make([]AuthoredEventEndpoint, 0)
 	for _, endpoint := range c.inputPins {
@@ -695,7 +700,7 @@ func (c AuthoredEventEndpointCensus) ResolveFanInInputForHandler(flowID, nodeID,
 			candidates = append(candidates, endpoint)
 		}
 	}
-	return endpointAssociationResult(flowID, handlerEvent, nodeID, candidates)
+	return endpointAssociationResult(flowID, handlerEvent, node.NodeID(), candidates)
 }
 
 func endpointAssociationResult(flowID, identity, nodeID string, candidates []AuthoredEventEndpoint) EndpointAssociationResult {
@@ -734,53 +739,61 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 	authoredByNodeEvent := map[string]struct{}{}
 	for _, site := range AuthoredEmitSites(b.source) {
 		eventType := site.Spec.EventType()
-		endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeHandler, site.FlowID, eventType)
-		endpoint.PackageKey = strings.TrimSpace(site.FlowPackageKey)
+		endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeHandler, site.FlowID(), eventType)
+		endpoint.PackageKey = site.PackageKey()
 		endpoint.FlowPath = strings.TrimSpace(site.FlowPath)
-		endpoint.NodeID = strings.TrimSpace(site.NodeID)
+		endpoint.NodeID = site.NodeID()
+		endpoint.Node = site.Node
 		endpoint.HandlerEvent = strings.TrimSpace(site.HandlerEvent)
 		endpoint.Site = strings.TrimSpace(site.SiteKey)
 		endpoint.SourceLocation = strings.TrimSpace(site.SiteKey)
-		if source, ok := b.source.NodeContractSource(site.NodeID); ok {
+		if source, ok := b.source.ExecutableNodeSource(site.Node); ok {
 			endpoint.SourceFile = strings.TrimSpace(source.File)
 		}
 		b.add(endpoint)
-		authoredByNodeEvent[nodeEventKey(endpoint.NodeID, endpoint.Event.EventKey())] = struct{}{}
+		authoredByNodeEvent[nodeEventKey(endpoint.Node.Key(), endpoint.Event.EventKey())] = struct{}{}
 	}
 
-	nodeIDs := sortedMapKeys(b.source.NodeEntries())
-	for _, nodeID := range nodeIDs {
-		node := b.source.NodeEntries()[nodeID]
-		source, _ := b.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(source.FlowID)
+	for _, record := range b.source.ExecutableNodeRecords() {
+		nodeRef, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		nodeID := nodeRef.NodeID()
+		node := record.Entry
+		source := record.Source
+		flowID := nodeRef.FlowID()
 		b.assertions = append(b.assertions, NodeProducerAssertion{
 			NodeID:     nodeID,
 			FlowID:     flowID,
+			Node:       nodeRef,
 			Declared:   node.ProducesDeclared || node.Produces != nil,
 			EventTypes: normalizedSortedStrings(node.Produces),
 		})
-		for _, eventType := range NodeEffectiveProduces(b.source, nodeID) {
+		for _, eventType := range ExecutableNodeEffectiveProduces(b.source, nodeRef) {
 			proof := ResolveFlowEventProof(b.source, flowID, eventType)
-			if _, exists := authoredByNodeEvent[nodeEventKey(nodeID, proof.EventKey())]; exists {
+			if _, exists := authoredByNodeEvent[nodeEventKey(nodeRef.Key(), proof.EventKey())]; exists {
 				continue
 			}
 			endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeGenerated, flowID, eventType)
 			endpoint.NodeID = nodeID
+			endpoint.Node = nodeRef
 			endpoint.PackageKey = strings.TrimSpace(source.PackageKey)
 			endpoint.SourceFile = strings.TrimSpace(source.File)
 			endpoint.SourceLocation = "effective generated producer"
 			b.add(endpoint)
 		}
-		consumerEvents := append(NodeEffectiveSubscriptions(b.source, nodeID), b.source.NodeHandlerSubscriptions(nodeID)...)
+		consumerEvents := append(ExecutableNodeEffectiveSubscriptions(b.source, nodeRef), sortedMapKeys(b.source.ExecutableNodeEventHandlers(nodeRef))...)
 		for _, eventType := range normalizedSortedStrings(consumerEvents) {
 			kind := EventEndpointNodeGenerated
 			handlerEvent := ""
-			if resolution, ok := resolveNodeHandlerProof(b.source, nodeID, eventType); ok {
+			if resolution, ok := resolveNodeHandlerProof(b.source, nodeRef, eventType); ok {
 				kind = EventEndpointNodeHandler
 				handlerEvent = resolution
 			}
 			endpoint := b.endpoint(EventEndpointConsumer, kind, flowID, eventType)
 			endpoint.NodeID = nodeID
+			endpoint.Node = nodeRef
 			endpoint.HandlerEvent = handlerEvent
 			endpoint.PackageKey = strings.TrimSpace(source.PackageKey)
 			endpoint.SourceFile = strings.TrimSpace(source.File)
@@ -867,7 +880,7 @@ func (b *endpointCensusBuilder) addTimerEndpoints() {
 	timers := append([]runtimecontracts.WorkflowTimerContract(nil), b.source.WorkflowTimers()...)
 	sort.SliceStable(timers, func(i, j int) bool { return strings.TrimSpace(timers[i].ID) < strings.TrimSpace(timers[j].ID) })
 	for _, timer := range timers {
-		flowID := strings.TrimSpace(timer.FlowID)
+		flowID := timer.OwningFlowID()
 		if eventType := strings.TrimSpace(timer.Event); eventType != "" {
 			kind := EventEndpointTimer
 			location := "timer.event"
@@ -877,7 +890,10 @@ func (b *endpointCensusBuilder) addTimerEndpoints() {
 			}
 			endpoint := b.endpoint(EventEndpointProducer, kind, flowID, eventType)
 			endpoint.TimerID = strings.TrimSpace(timer.ID)
-			endpoint.NodeID = strings.TrimSpace(timer.NodeID)
+			if timer.Node.Valid() {
+				endpoint.PackageKey = timer.Node.PackageKey()
+				endpoint.NodeID = timer.Node.NodeID()
+			}
 			endpoint.SourceLocation = location
 			b.add(endpoint)
 		}
@@ -1232,19 +1248,19 @@ func fanInInputMatchesHandler(source Source, endpoint AuthoredEventEndpoint, han
 	return declaredInputIdentityMatches(source, endpoint, handlerEvent)
 }
 
-func resolveNodeHandlerProof(source Source, nodeID, eventType string) (string, bool) {
-	if source == nil {
+func resolveNodeHandlerProof(source Source, node runtimeidentity.ExecutableNode, eventType string) (string, bool) {
+	if source == nil || !node.Valid() {
 		return "", false
 	}
 	authored := eventidentity.Normalize(eventType)
-	if admission := ClassifyNodeSubscription(source, nodeID, authored); admission.Admitted() {
-		for key := range source.NodeEventHandlers(nodeID) {
+	if admission := ClassifyExecutableNodeSubscription(source, node, authored); admission.Admitted() {
+		for key := range source.ExecutableNodeEventHandlers(node) {
 			if eventidentity.Normalize(key) == authored {
 				return authored, true
 			}
 		}
 	}
-	resolution := ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	resolution := ResolveExecutableNodeSubscriptionHandler(source, node, eventType)
 	if resolution.Matched {
 		return strings.TrimSpace(resolution.HandlerEventKey), true
 	}

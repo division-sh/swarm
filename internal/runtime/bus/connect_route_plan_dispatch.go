@@ -793,7 +793,7 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 			continue
 		}
 		handler, err := runtimepipeline.AdmitDeliveryTargetHandler(
-			r.source, subscriber.handlerFlowID, subscriber.handlerNodeID,
+			r.source, subscriber.handlerNode,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("resolve connect receiver target handler: %w", err)

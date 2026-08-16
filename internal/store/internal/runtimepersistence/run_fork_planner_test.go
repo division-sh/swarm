@@ -595,6 +595,8 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
+	nodeDeadID := mustPersistenceRootNode("node-dead").Key()
+	nodeOKID := mustPersistenceRootNode("node-ok").Key()
 	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, testEntitylessNodeDeliveryRoute("node-dead"), runtimedelivery.StateRetrying, &retryFailure)
 	seedDeliveryStateFixture(t, ctx, pg, event, testEntitylessNodeDeliveryRoute("node-ok"), runtimedelivery.StateDelivered, nil)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-ok")}, runtimedelivery.StateDelivered, nil)
@@ -604,12 +606,12 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 			failure, retry_count, handler_node, created_at
 		)
 		VALUES
-			($1::uuid, $5::uuid, $6, 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, 'node-dead', $4),
+			($1::uuid, $5::uuid, $6, 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, $7, $4),
 			($1::uuid, NULL, NULL, 'fork.work', '{}'::jsonb, 'runtime', $3::jsonb, 3, 'node-other', $4)
 	`, eventID,
 		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)),
 		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "different_node_failed", nil)), at,
-		nodeDead.DeliveryID, nodeDead.ClaimVersion); err != nil {
+		nodeDead.DeliveryID, nodeDead.ClaimVersion, nodeDeadID); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
 
@@ -626,9 +628,9 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 		got[item.SubscriberID] = item.Classification
 	}
 	want := map[string]string{
-		"node-dead": runfork.RunForkPendingClassificationDeadLetter,
-		"node-ok":   runfork.RunForkPendingClassificationDeliveredCompleted,
-		"agent-ok":  runfork.RunForkPendingClassificationDeliveredCompleted,
+		nodeDeadID: runfork.RunForkPendingClassificationDeadLetter,
+		nodeOKID:   runfork.RunForkPendingClassificationDeliveredCompleted,
+		"agent-ok": runfork.RunForkPendingClassificationDeliveredCompleted,
 	}
 	for subscriber, classification := range want {
 		if got[subscriber] != classification {
@@ -834,8 +836,8 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	}
 	for key, wantOutcome := range map[string]string{
 		"platform/pipeline": "success",
-		"node/node-a":       "",
-		"agent/agent-done":  "",
+		"node/" + mustPersistenceRootNode("node-a").Key(): "",
+		"agent/agent-done": "",
 	} {
 		item, ok := got[key]
 		if !ok {

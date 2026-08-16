@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -207,7 +208,10 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if err := validateHandlerEntityWriteTargets(e.deps.Source, req.FlowID.String(), req.Handler); err != nil {
+	if !req.Node.Valid() {
+		return fmt.Errorf("%w: exact executable node identity is required", ErrInvalidConfig)
+	}
+	if err := validateHandlerEntityWriteTargets(e.deps.Source, req.Node.FlowID(), req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	return nil
@@ -612,7 +616,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	base, err := BuildBaseContext(ContextBuilderInput{
 		Source:  e.deps.Source,
-		FlowID:  req.FlowID.String(),
+		FlowID:  req.Node.FlowID(),
 		State:   state,
 		Event:   req.Event,
 		Payload: payload,
@@ -731,7 +735,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	}
 	if internal && !ref.Declaration().Equal(declaration) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_timer_identity_mismatch", "runtime.engine", "join", map[string]any{
-			"row_id": spec.EffectiveID(), "node_id": frame.req.NodeID.String(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
 	window := ""
@@ -752,7 +756,7 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		generation = frame.loopActivation.Generation()
 	}
 	key := joinruntime.ActivationKeyForGeneration(spec.Stage, spec.EffectiveID(), window, generation)
-	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, frame.req.NodeID.String(), key)
+	activation, found, err := joinruntime.Load(frame.state.State.StateCarrier.StateBuckets, frame.req.Node, key)
 	if err != nil {
 		return false, fmt.Errorf("load join activation %s: %w", key, err)
 	}
@@ -760,11 +764,11 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		return false, e.joinArrivalFailure(frame, failures.ClassEarlyArrival, "join_not_armed", spec, window, "")
 	}
 	expectedRef, err := timeridentity.NewJoinRefForGeneration(
-		declaration.FlowID(), declaration.NodeID(), declaration.HandlerEvent(), declaration.Stage(), declaration.JoinID(), window, generation,
+		declaration.Node(), declaration.HandlerEvent(), declaration.Stage(), declaration.JoinID(), window, generation,
 	)
 	if err != nil || !activation.JoinRef().Equal(expectedRef) {
 		return false, failures.New(failures.ClassUnexpectedArrival, "join_activation_identity_mismatch", "runtime.engine", "join", map[string]any{
-			"row_id": spec.EffectiveID(), "node_id": frame.req.NodeID.String(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+			"row_id": spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
 	if internal && timerKind == timeridentity.TimerHandleJoinComplete {
@@ -877,7 +881,7 @@ func (e *Executor) joinArrivalFailure(frame *executionFrame, class failures.Clas
 	attributes := map[string]any{
 		"row_id":        spec.EffectiveID(),
 		"stage":         strings.TrimSpace(spec.Stage),
-		"node_id":       frame.req.NodeID.String(),
+		"node_id":       frame.req.Node.Key(),
 		"handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 	}
 	if strings.TrimSpace(window) != "" {
@@ -1226,7 +1230,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if !ok || bundle == nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("semantic source is not a workflow contract bundle")}
 	}
-	policy := bundle.ResolvedPolicyForFlow(frame.req.FlowID.String())
+	policy := bundle.ResolvedPolicyForFlow(frame.req.Node.FlowID())
 	module, ok := policy.Modules[moduleID]
 	if !ok {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unknown module %q", moduleID)}
@@ -1485,7 +1489,7 @@ func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimeco
 	if rowID == "" {
 		rowID = strings.TrimSpace(spec.StoreAs)
 	}
-	policy := e.deps.Source.ResolvedPolicyForFlow(frame.req.FlowID.String())
+	policy := e.deps.Source.ResolvedPolicyForFlow(frame.req.Node.FlowID())
 	setName := strings.TrimSpace(plan.Set)
 	set, ok := policy.Validation[setName]
 	if !ok {
@@ -1671,7 +1675,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if handlerEvent == "" {
 		handlerEvent = strings.TrimSpace(string(frame.req.Event.Type()))
 	}
-	effective, err := e.deps.Source.ResolveFanOutEffectiveSemantics(strings.TrimSpace(string(frame.req.FlowID)), handlerEvent, *spec)
+	effective, err := e.deps.Source.ResolveFanOutEffectiveSemantics(frame.req.Node, handlerEvent, *spec)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
@@ -1929,13 +1933,13 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		return nil
 	}
 	handlerEventType := handlerAccumulatorEventType(frame.req)
-	result := accprojection.ForHandlerWithAccumulator(e.deps.Source, frame.req.FlowID.String(), frame.req.NodeID.String(), string(handlerEventType), activeAccumulatorName(frame.req.Handler))
+	result := accprojection.ForExecutableHandlerWithAccumulator(e.deps.Source, frame.req.Node, string(handlerEventType), activeAccumulatorName(frame.req.Handler))
 	if len(result.Issues) > 0 {
 		return fmt.Errorf("accumulator projection declarations are invalid: %s", result.Issues[0].Message)
 	}
 	if len(result.Bindings) == 0 {
 		if result.ExpectedBindingCount > 0 {
-			return fmt.Errorf("runtime_invariant_violation: materialize_from binding declared for node %s accumulator %s but no accumulator buffer resolved at runtime for event %s; likely event identity drift between verify-time declaration and execution-time lookup", frame.req.NodeID.String(), result.ActiveAccumulatorName, string(frame.req.Event.Type()))
+			return fmt.Errorf("runtime_invariant_violation: materialize_from binding declared for node %s accumulator %s but no accumulator buffer resolved at runtime for event %s; likely event identity drift between verify-time declaration and execution-time lookup", frame.req.Node.Key(), result.ActiveAccumulatorName, string(frame.req.Event.Type()))
 		}
 		return nil
 	}
@@ -1952,7 +1956,7 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 	}
 	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if !ok {
-		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.NodeID.String(), string(handlerEventType))
+		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.Node.Key(), string(handlerEventType))
 	}
 	for _, binding := range result.Bindings {
 		projected, err := e.projectAccumulatorItems(frame, binding, acc.Items)
@@ -1960,7 +1964,7 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 			return err
 		}
 		if err := e.writeStepValue(frame, "entity."+binding.TargetField, projected); err != nil {
-			return fmt.Errorf("materialize_from %s.%s: %w", binding.SourceNodeID, binding.AccumulatorName, err)
+			return fmt.Errorf("materialize_from %s.%s: %w", binding.SourceNode.Key(), binding.AccumulatorName, err)
 		}
 	}
 	frame.projectionApplied = true
@@ -2007,8 +2011,7 @@ func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtime
 	}
 	return runtimeaccumulator.EffectiveSpecForHandler(
 		e.deps.Source,
-		frame.req.FlowID.String(),
-		frame.req.NodeID.String(),
+		frame.req.Node,
 		string(handlerAccumulatorEventType(frame.req)),
 		spec,
 	)
@@ -2019,7 +2022,7 @@ func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accpro
 	for idx, item := range items {
 		typedView, err := accumulatorTypedView(binding, item)
 		if err != nil {
-			return nil, fmt.Errorf("materialize_from %s.%s item %d: %w", binding.SourceNodeID, binding.AccumulatorName, idx, err)
+			return nil, fmt.Errorf("materialize_from %s.%s item %d: %w", binding.SourceNode.Key(), binding.AccumulatorName, idx, err)
 		}
 		if len(binding.Project) == 0 {
 			out = append(out, typedView)
@@ -2027,7 +2030,7 @@ func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accpro
 		}
 		projected, err := e.projectAccumulatorItem(frame, binding, typedView)
 		if err != nil {
-			return nil, fmt.Errorf("materialize_from %s.%s item %d: %w", binding.SourceNodeID, binding.AccumulatorName, idx, err)
+			return nil, fmt.Errorf("materialize_from %s.%s item %d: %w", binding.SourceNode.Key(), binding.AccumulatorName, idx, err)
 		}
 		out = append(out, projected)
 	}
@@ -2292,8 +2295,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		ruleIndex = selectedRuleIndex(frame.req.Handler, frame.rule)
 	}
 	site := runtimecontracts.ActivitySite{
-		FlowID:          frame.req.FlowID.String(),
-		NodeID:          frame.req.NodeID.String(),
+		Node:            frame.req.Node,
 		HandlerEventKey: frame.req.HandlerEventKey,
 		RuleID:          ruleID,
 		RuleIndex:       ruleIndex,
@@ -2302,7 +2304,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	sourceRoute := emitSourceRoute(frame)
-	intentFlowID := frame.req.FlowID
+	intentFlowID := identity.NormalizeFlowID(frame.req.Node.FlowID())
 	if sourceRoute.FlowID != "" {
 		intentFlowID = identity.NormalizeFlowID(sourceRoute.FlowID)
 	}
@@ -2324,8 +2326,8 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		RetryBackoff:     defaults.Backoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
 		EntityID:         intentEntityID,
-		NodeID:           frame.req.NodeID,
-		FlowID:           intentFlowID,
+		Owner:            activityidentity.MustNodeOwner(frame.req.Node),
+		ExecutionFlowID:  intentFlowID,
 		FlowInstance:     sourceRoute.FlowInstance,
 		HandlerEventKey:  frame.req.HandlerEventKey,
 		SourceEventID:    frame.req.Event.ID(),
@@ -2406,8 +2408,8 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 		}
 		switch target {
 		case "accumulator_state":
-			if !frame.req.NodeID.IsZero() {
-				if bucket, ok := frame.state.State.StateBucket(frame.req.NodeID.String()); ok {
+			if frame.req.Node.Valid() {
+				if bucket, ok := frame.state.State.StateBucket(frame.req.Node.Key()); ok {
 					delete(bucket.Raw(), handlerAccumulatorBucketKey)
 				}
 			}
@@ -2523,7 +2525,7 @@ func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersis
 	}
 	appendWrite := func(write runtimecontracts.WorkflowDataWrite) {
 		if write.IsContainedOperation() {
-			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.FlowID.String())
+			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.Node.FlowID())
 			if !ok {
 				return
 			}
@@ -2654,8 +2656,8 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Fields))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
-	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.FlowID.String())))
-	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), strings.TrimSpace(frame.req.FlowID.String()))
+	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.Node.FlowID())))
+	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.Node.FlowID())
 	ctx.Computed = values.Wrap(cloneStringAnyMap(frame.state.Computed))
 	return ctx
 }
@@ -2684,14 +2686,14 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 		frame.state.State.StateCarrier.Fields = map[string]any{}
 	}
 	storagePath := parsed
-	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
+	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.Node.FlowID(), target); err != nil {
 		return err
 	} else if entityTarget {
 		storagePath = paths.Parse(resolved.Path)
 		if value != nil && len(resolved.Field.Path) != 0 {
-			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.FlowID.String())
+			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.Node.FlowID())
 			if !ok {
-				return fmt.Errorf("flow %s has no declared entity contract", strings.TrimSpace(frame.req.FlowID.String()))
+				return fmt.Errorf("flow %s has no declared entity contract", frame.req.Node.FlowID())
 			}
 			normalized, normalizeErr := entityruntime.NormalizeFieldValue(contract, resolved.Path, value)
 			if normalizeErr != nil {
@@ -2714,7 +2716,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 	}
 	parsed := paths.Parse(target)
 	if !parsed.HasExplicitRoot() {
-		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
+		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.Node.FlowID(), target); err != nil {
 			return err
 		} else if entityTarget {
 			executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
@@ -2735,7 +2737,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		return fmt.Errorf("join context is read-only")
 	case paths.RootEntity, paths.RootMetadata:
 		if parsed.Root == paths.RootEntity {
-			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
+			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.Node.FlowID(), target); err != nil {
 				return err
 			} else {
 				executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
@@ -2973,8 +2975,7 @@ func (e *Executor) lowerEmitSpecForFrame(frame *executionFrame, site string, spe
 		triggerEvent = strings.TrimSpace(string(frame.req.Event.Type()))
 	}
 	return bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
-		NodeID:           frame.req.NodeID.String(),
-		FlowID:           frame.req.FlowID.String(),
+		Node:             frame.req.Node,
 		TriggerEventType: triggerEvent,
 		Site:             site,
 	}, spec)
@@ -3063,7 +3064,7 @@ func (e *Executor) resolveDeclarativeEmitEventType(frame *executionFrame, eventT
 	if eventType == "" || e == nil || e.deps.Source == nil || frame == nil {
 		return eventType
 	}
-	flowID := strings.TrimSpace(frame.req.FlowID.String())
+	flowID := frame.req.Node.FlowID()
 	if flowID == "" {
 		return eventType
 	}
@@ -3160,7 +3161,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	evt, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
 			Type:     events.EventType(strings.TrimSpace(eventType)),
-			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.NodeID.String()},
+			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: frame.req.Node.Key()},
 			Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
 			RoutingSource: routingSource, CreatedAt: createdAt,
 		},
@@ -3204,7 +3205,7 @@ func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, env
 	delivery, deliveryPresent := runtimedelivery.RouteFromContext(frame.ctx)
 	input := runtimepinrouting.ResolutionInput{
 		Source:               e.deps.Source,
-		FlowID:               strings.TrimSpace(frame.req.FlowID.String()),
+		FlowID:               frame.req.Node.FlowID(),
 		EventType:            strings.TrimSpace(eventType),
 		RoutingSource:        frame.req.ProducerSource,
 		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Fields),
@@ -3303,7 +3304,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 	case GuardFailureKill:
 		frame.result.Status = OutcomeKilled
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "kill")
-		if killedState := e.killStateTarget(frame.req.FlowID.String()); killedState != "" {
+		if killedState := e.killStateTarget(frame.req.Node.FlowID()); killedState != "" {
 			frame.result.NextState = killedState
 			frame.state.State.CurrentState = killedState
 			frame.result.StateMutation.NextState = killedState

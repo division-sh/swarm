@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -20,22 +21,19 @@ func checkComputeModuleValueRows(c *checkerContext) []Finding {
 		ctx = context.Background()
 	}
 	findings := make([]Finding, 0)
-	nodes := c.source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(c.source) {
-		node, ok := nodes[nodeID]
-		if !ok {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		flowID := nodeFlowID(c.source, nodeID)
-		for eventType, handler := range node.EventHandlers {
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			for idx, rule := range handler.Rules {
 				if !policySheetRuleIsComputeModuleValueRow(rule) {
 					continue
 				}
 				ref := computeModuleRef{
-					FlowID:    flowID,
-					NodeID:    nodeID,
+					Node:      node,
 					EventType: eventType,
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
@@ -48,8 +46,7 @@ func checkComputeModuleValueRows(c *checkerContext) []Finding {
 }
 
 type computeModuleRef struct {
-	FlowID    string
-	NodeID    string
+	Node      runtimeidentity.ExecutableNode
 	EventType string
 	RuleIndex int
 	RuleID    string
@@ -59,8 +56,8 @@ func computeModuleFinding(ref computeModuleRef, detail string) Finding {
 	return Finding{
 		CheckID:  computeModuleCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s compute_module row %s: %s", defaultFlowLabel(ref.FlowID), ref.NodeID, ref.EventType, ref.RowLabel(), detail),
-		Location: ref.NodeID,
+		Message:  fmt.Sprintf("flow %s node %s handler %s compute_module row %s: %s", defaultFlowLabel(ref.Node.FlowID()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Location: ref.Node.Key(),
 	}
 }
 
@@ -99,7 +96,7 @@ func validateComputeModuleValueRow(ctx context.Context, source semanticview.Sour
 	} else if !policySheetLookupPathIsSimple(storePath) {
 		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.into %q must be a simple computed.* path", storeAs)))
 	}
-	policy := source.ResolvedPolicyForFlow(ref.FlowID)
+	policy := source.ResolvedPolicyForExecutableNode(ref.Node)
 	moduleID := strings.TrimSpace(spec.Module)
 	module, ok := policy.Modules[moduleID]
 	if !ok {
@@ -117,7 +114,7 @@ func validateComputeModuleValueRow(ctx context.Context, source semanticview.Sour
 			}
 		}
 	}
-	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, ref.RuleIndex, storeAs) {
+	if !policySheetLookupBindingConsumed(source, ref.Node, ref.EventType, handler, ref.RuleIndex, storeAs) {
 		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", storeAs)))
 	}
 	return findings

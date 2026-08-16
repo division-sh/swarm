@@ -27,6 +27,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -175,7 +176,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 		t.Fatalf("deliveries = %#v, want persisted node and agent deliveries", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
@@ -201,7 +202,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 		t.Fatalf("event.publish replay deliveries = %#v, want persisted node and agent deliveries", replayDeliveries)
 	}
 	assertEventPublishDeliveriesContain(t, replayDeliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, replayDeliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, replayDeliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
@@ -264,7 +265,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	runID := stringValue(t, result["run_id"], "run_id")
 	deliveries := asSlice(t, result["deliveries"])
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	assertEventPublishPersistence(t, db, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
@@ -312,7 +313,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if len(deliveries) != 1 {
 		t.Fatalf("sqlite deliveries = %#v, want one persisted delivery", deliveries)
 	}
-	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", eventPublishScanNodeID(t), "pending", 1)
 	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
 	if count := countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(sqliteStore)); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows = %d, want 1", count)
@@ -475,7 +476,7 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 		t.Fatalf("deliveries = %#v, want typed agent and node deliveries", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "repo-observer", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "repo-observer", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishRepoObserverNodeID(t), "pending", 1)
 	got := requireAPIV1RuntimeBusEvent(t, ch, "flow-scoped event.publish delivery")
 	if got.ID() != eventID || string(got.Type()) != canonicalEventName {
 		t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
@@ -507,15 +508,15 @@ func TestOperatorEventPublishSQLiteCarriesExactOrdinaryFlowEndpoint(t *testing.T
 	if len(deliveries) != 1 {
 		t.Fatalf("deliveries = %#v, want one exact static node delivery", deliveries)
 	}
-	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", "repo-observer", "pending", 1)
+	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", eventPublishRepoObserverNodeID(t), "pending", 1)
 	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(selected), runID, eventID, canonicalEventName, "cli-publish:"+actorTokenID(testToken))
 
 	var rawTarget string
 	if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `
 		SELECT delivery_target_route
 		FROM event_deliveries
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'repo-observer'
-	`, eventID).Scan(&rawTarget); err != nil {
+		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?
+	`, eventID, eventPublishRepoObserverNodeID(t)).Scan(&rawTarget); err != nil {
 		t.Fatalf("load exact static delivery target: %v", err)
 	}
 	var target map[string]any
@@ -780,7 +781,7 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 		t.Fatalf("first deliveries = %#v, want typed stored delivery results", firstDeliveries)
 	}
 	assertEventPublishDeliveriesContain(t, firstDeliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, firstDeliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, firstDeliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after stored completion")
 
 	replay := rpcCall(t, handler, body)
@@ -807,7 +808,7 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 		t.Fatalf("replay deliveries = %#v, want typed persisted delivery results", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 }
 
 func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *testing.T) {
@@ -1041,7 +1042,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("targeted deliveries = %#v, want typed agent and node deliveries", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
 	}
@@ -2075,7 +2076,7 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 		t.Fatalf("paused event.publish deliveries = %#v, want typed agent and node deliveries", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	requireNoAPIV1RuntimeBusEvent(t, ch, "paused event.publish before resume")
 	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("paused event deliveries = %d, want 1 queued route", got)
@@ -3092,6 +3093,16 @@ func assertEventPublishDeliveryIdentity(t *testing.T, delivery map[string]any, w
 		delivery["attempt"] != float64(wantAttempt) {
 		t.Fatalf("delivery = %#v, want %s/%s %s attempt %d", delivery, wantSubscriberType, wantSubscriberID, wantStatus, wantAttempt)
 	}
+}
+
+func eventPublishScanNodeID(t testing.TB) string {
+	t.Helper()
+	return identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key()
+}
+
+func eventPublishRepoObserverNodeID(t testing.TB) string {
+	t.Helper()
+	return identitytest.FlowNode(t, "repo-scaffold", "repo-observer").Key()
 }
 
 func assertEventPublishDeliveriesContain(t *testing.T, deliveries []any, wantSubscriberType, wantSubscriberID, wantStatus string, wantAttempt int) {

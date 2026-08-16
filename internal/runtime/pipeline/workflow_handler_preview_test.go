@@ -8,15 +8,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	bundle := loadPipelineImportBoundaryWildcardBundle(t, canonicalrouting.ImportBoundaryWildcardDenied)
+	node := pipelineSourceNode(t, semanticview.Wrap(bundle), "worker", "worker-listener")
 	_, err := PreviewContractHandlerExecution(
 		testAuthorActivityContext(t, context.Background()),
 		bundle,
-		"worker-listener",
+		node,
 		eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		WorkflowState{},
 		nil,
@@ -24,17 +26,18 @@ func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback
 	if err == nil {
 		t.Fatal("expected preview to deny ungranted sibling event")
 	}
-	if !strings.Contains(err.Error(), "missing handler worker-listener/producer/task.done") {
+	if !strings.Contains(err.Error(), "missing handler "+node.Key()+"/producer/task.done") {
 		t.Fatalf("preview error = %v, want missing handler denial", err)
 	}
 }
 
 func TestPreviewContractHandlerExecution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	bundle := loadPipelineImportBoundaryWildcardBundle(t, canonicalrouting.ImportBoundaryWildcardObserveGranted)
+	node := pipelineSourceNode(t, semanticview.Wrap(bundle), "worker", "worker-listener")
 	preview, err := PreviewContractHandlerExecution(
 		testAuthorActivityContext(t, context.Background()),
 		bundle,
-		"worker-listener",
+		node,
 		eventtest.RunCreatingRootIngress("", "producer/task.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		WorkflowState{},
 		nil,

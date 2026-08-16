@@ -218,8 +218,7 @@ func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *test
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "item.arrived", "", "", json.RawMessage(`{"item_id":"a"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
@@ -252,8 +251,7 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "unreachable_state",
@@ -297,8 +295,7 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard:      &runtimecontracts.GuardSpec{ID: "not_in_terminal_state"},
@@ -335,8 +332,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 
 	rejected, err := newExecutor(50, false).ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
@@ -355,8 +351,7 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 
 	passed, err := newExecutor(80, true).ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
@@ -408,7 +403,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "ent-1",
-		NodeID:   "node-1",
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"item.evaluated", "", "", json.RawMessage(`{"entity_id":"ent-1","score":80}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
@@ -483,8 +478,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	}
 	first := ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"task.completed", "", "", json.RawMessage(`{"item_id":"item-1","marker":"first"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 		Handler: handler,
@@ -515,7 +509,7 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	if got := repo.snapshot.StateCarrier.Fields["marker"]; got != "first" {
 		t.Fatalf("marker after duplicate = %#v, want first arrival value", got)
 	}
-	acc, ok := loadAccumulator(repo.snapshot, "node-1", events.EventType("task.completed"))
+	acc, ok := loadAccumulator(repo.snapshot, testFlowExecutableNode(t, "flow-1", "node-1"), events.EventType("task.completed"))
 	if !ok {
 		t.Fatal("expected accumulator state")
 	}
@@ -529,7 +523,8 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 
 func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 	source := templatefanin.LoadSource(t, templatefanin.Options{})
-	handler, ok := source.NodeEventHandler(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	receiverNode := testFlowExecutableNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
+	handler, ok := source.ExecutableNodeEventHandler(receiverNode, templatefanin.ReceiverEvent)
 	if !ok {
 		t.Fatalf("missing fixture handler %s.%s", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
@@ -564,8 +559,7 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 		}
 		_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 			EntityID:        templatefanin.ReceiverFlowInstance,
-			NodeID:          templatefanin.ReceiverNodeID,
-			FlowID:          templatefanin.ReceiverFlowID,
+			Node:            receiverNode,
 			HandlerEventKey: templatefanin.ReceiverEvent,
 			Handler:         handler,
 			Event: eventtest.RunCreatingRootIngress(
@@ -591,7 +585,7 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 	execute("evt-q2-a", "operating-a", "2026-Q2")
 
 	for _, periodID := range []string{"2026-Q1", "2026-Q2"} {
-		bucket := timeridentity.NewAccumulatorWindowBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, periodID)
+		bucket := timeridentity.NewAccumulatorWindowBucketRef(receiverNode, templatefanin.ReceiverEvent, periodID)
 		acc, ok := loadAccumulatorForBucket(repo.snapshot, bucket)
 		if !ok {
 			t.Fatalf("missing fan-in accumulator window %s in %#v", periodID, repo.snapshot.StateCarrier.StateBuckets)
@@ -603,7 +597,7 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 			t.Fatalf("window %s received keys = %#v, want operating-a", periodID, acc.Received)
 		}
 	}
-	if _, ok := loadAccumulatorForBucket(repo.snapshot, timeridentity.NewAccumulatorBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)); ok {
+	if _, ok := loadAccumulatorForBucket(repo.snapshot, timeridentity.NewAccumulatorBucketRef(receiverNode, templatefanin.ReceiverEvent)); ok {
 		t.Fatalf("unwindowed accumulator survived: %#v", repo.snapshot.StateCarrier.StateBuckets)
 	}
 }

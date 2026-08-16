@@ -282,8 +282,8 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		FROM event_deliveries
 		WHERE event_id = ?
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'node-pending'
-	`, eventID).Scan(&deliveryStatus, &reasonCode, &stoppedFailure, &activeSession); err != nil {
+		  AND subscriber_id = ?
+	`, eventID, mustPersistenceRootNode("node-pending").Key()).Scan(&deliveryStatus, &reasonCode, &stoppedFailure, &activeSession); err != nil {
 		t.Fatalf("load stopped sqlite node delivery: %v", err)
 	}
 	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || activeSession != "" {
@@ -312,8 +312,8 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 		WHERE d.event_id = ?
 		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = 'node-pending'
-	`, eventID).Scan(&nodeOutcome, &nodeReason); err != nil {
+		  AND d.subscriber_id = ?
+	`, eventID, mustPersistenceRootNode("node-pending").Key()).Scan(&nodeOutcome, &nodeReason); err != nil {
 		t.Fatalf("load stopped sqlite node receipt: %v", err)
 	}
 	if nodeOutcome != "terminalized" || nodeReason != "run_stopped" {

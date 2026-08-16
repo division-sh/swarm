@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 func TestDeliveryTargetOwnershipRoundTripsClosedVariants(t *testing.T) {
@@ -111,7 +112,7 @@ func TestDeliveryTargetOwnershipDecodeFailsClosed(t *testing.T) {
 }
 
 func TestNodeDeliveryRouteRequiresTypedTargetOwnership(t *testing.T) {
-	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("receiver")}
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(identitytest.RootNode(t, "receiver"))}
 	if _, err := route.Identity(); err == nil || !strings.Contains(err.Error(), "requires typed target ownership") {
 		t.Fatalf("route identity error = %v, want typed target ownership failure", err)
 	}

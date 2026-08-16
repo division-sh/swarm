@@ -153,27 +153,28 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		return nil
 	}
 	errs := make([]error, 0, 8)
-	for nodeID, node := range bundle.Nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		flowID := ""
-		if source, ok := bundle.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(source.FlowID)
+	for _, record := range bundle.ScopedNodeRecords() {
+		node, identityErr := record.Identity()
+		if identityErr != nil {
+			errs = append(errs, identityErr)
+			continue
 		}
-		if authoredID := strings.TrimSpace(node.ID); !SystemNodeIDMatchesKey(nodeID, authoredID) {
+		nodeID := node.Key()
+		if authoredID := strings.TrimSpace(record.Entry.ID); !SystemNodeIDMatchesKey(node.NodeID(), authoredID) {
 			errs = append(errs, fmt.Errorf("%w: node %s id %q must match map key", ErrInvalidField, nodeID, authoredID))
 		}
-		if strings.TrimSpace(node.ExecutionType) != "" {
-			if err := ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+		if strings.TrimSpace(record.Entry.ExecutionType) != "" {
+			if err := ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s %v", ErrInvalidField, nodeID, err))
 			}
 		}
-		for eventType, handler := range node.EventHandlers {
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			if err := ValidateAccumulateHandlerIsolation(handler); err != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, eventType, err))
 			}
 			for _, site := range HandlerFanOutSites(handler) {
-				if _, err := bundle.ResolveFanOutEffectiveSemantics(flowID, eventType, *site.Spec); err != nil {
+				if _, err := bundle.ResolveFanOutEffectiveSemantics(node, eventType, *site.Spec); err != nil {
 					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s: %v", ErrInvalidField, nodeID, eventType, site.Source, err))
 				}
 			}

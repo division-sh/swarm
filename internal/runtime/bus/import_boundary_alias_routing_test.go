@@ -82,20 +82,23 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	for _, tc := range []struct {
-		id        string
-		eventType string
-		recipient string
-		envelope  events.EventEnvelope
-		source    events.RoutingSource
+		id                  string
+		eventType           string
+		recipient           string
+		diagnosticRecipient string
+		envelope            events.EventEnvelope
+		source              events.RoutingSource
 	}{
 		{
 			id: eventtest.UUID("evt-input-connect"), eventType: "parent.lead_captured", recipient: "worker-node",
-			source: mustRootRoutingSource(t, eventtest.UUID("root-input-source")),
+			diagnosticRecipient: testFlowNode(t, "worker", "worker-node").Key(),
+			source:              mustRootRoutingSource(t, eventtest.UUID("root-input-source")),
 		},
 		{
-			id:        eventtest.UUID("evt-output-connect"),
-			eventType: "worker/work.completed",
-			recipient: "parent-listener",
+			id:                  eventtest.UUID("evt-output-connect"),
+			eventType:           "worker/work.completed",
+			recipient:           "parent-listener",
+			diagnosticRecipient: testRootNode(t, "parent-listener").Key(),
 			source: mustStaticRoutingSource(t, events.RouteIdentity{
 				FlowID: "worker", FlowInstance: "worker", EntityID: eventtest.UUID("worker-output-source"),
 			}),
@@ -106,8 +109,8 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", tc.eventType, err)
 		}
-		if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != tc.recipient {
-			t.Fatalf("routed recipients for %s = %#v, want %s", tc.eventType, plan.RoutedRecipients, tc.recipient)
+		if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != tc.diagnosticRecipient {
+			t.Fatalf("routed recipients for %s = %#v, want %s", tc.eventType, plan.RoutedRecipients, tc.diagnosticRecipient)
 		}
 		if err := eb.Publish(context.Background(), evt); err != nil {
 			t.Fatalf("Publish(%s): %v", tc.eventType, err)
@@ -143,7 +146,7 @@ func (s *routePersistenceTestStore) InsertEventDeliveryRoutes(_ context.Context,
 	recipients := make([]string, 0, len(routes))
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if !route.Recipient.Empty() {
-			recipients = append(recipients, route.Recipient.ID())
+			recipients = append(recipients, route.Recipient.LocalID())
 		}
 	}
 	s.deliveries[eventID] = recipients

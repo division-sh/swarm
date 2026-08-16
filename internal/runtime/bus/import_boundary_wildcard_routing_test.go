@@ -23,11 +23,12 @@ import (
 
 func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{})
+	workerNode := testFlowNode(t, "worker", "worker-listener")
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if routes := rt.Resolve("worker/task.done"); len(routes) != 1 || routes[0].Recipient.ID() != "worker-listener" {
+	if routes := rt.Resolve("worker/task.done"); len(routes) != 1 || routes[0].Recipient.LocalID() != "worker-listener" {
 		t.Fatalf("Resolve(worker/task.done) = %#v, want worker-listener", routes)
 	}
 	if routes := rt.Resolve("producer/task.done"); len(routes) != 0 {
@@ -36,7 +37,7 @@ func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *tes
 	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 0 {
 		t.Fatalf("RuntimeEventOwners(producer/task.done) = %#v, want no sibling owner without grant", owners)
 	}
-	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); ok {
+	if resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, workerNode, "producer/task.done"); resolution.Matched {
 		t.Fatal("NodeEventHandler(worker-listener, producer/task.done) matched ungranted sibling event")
 	}
 
@@ -119,17 +120,18 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ObserveGrant: "      observe:\n        - source: producer\n          events: [task.done]\n",
 	})
+	workerNode := testFlowNode(t, "worker", "worker-listener")
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if routes := rt.Resolve("producer/task.done"); len(routes) != 1 || routes[0].Recipient.ID() != "worker-listener" || routes[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
+	if routes := rt.Resolve("producer/task.done"); len(routes) != 1 || routes[0].Recipient.LocalID() != "worker-listener" || routes[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
 		t.Fatalf("Resolve(producer/task.done) = %#v, want worker-listener via grant", routes)
 	}
-	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 1 || owners[0] != "worker-listener" {
+	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 1 || !owners[0].Equal(workerNode) {
 		t.Fatalf("RuntimeEventOwners(producer/task.done) = %#v, want worker-listener", owners)
 	}
-	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); !ok {
+	if resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, workerNode, "producer/task.done"); !resolution.Matched {
 		t.Fatal("NodeEventHandler(worker-listener, producer/task.done) did not resolve through grant")
 	}
 
@@ -143,7 +145,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "worker-listener" {
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != workerNode.Key() {
 		t.Fatalf("routed recipients = %#v, want worker-listener", plan.RoutedRecipients)
 	}
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -260,7 +262,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 	if got := directRoutes.Resolve("producer/child/task.done"); len(got) != 0 {
 		t.Fatalf("direct static descendant route after rejected collision = %#v, want unchanged authority", got)
 	}
-	if got := directRoutes.Resolve("producer/inst-direct/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" {
+	if got := directRoutes.Resolve("producer/inst-direct/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 		t.Fatalf("direct sibling route after rejected collision = %#v, want existing route unchanged", got)
 	}
 
@@ -299,7 +301,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" || got[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" || got[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
 				t.Fatalf("Resolve materialized template event = %#v, want grant-backed worker route", got)
 			}
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
@@ -319,7 +321,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if len(store.deleteCalls) != deleteCalls {
 				t.Fatalf("persistence delete calls = %#v, rejected removal must not reach persistence", store.deleteCalls)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" {
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 				t.Fatalf("route after mismatched identity operations = %#v, want installed owner unchanged", got)
 			}
 			if got := eb.RouteTable().Resolve("producer/inst-1/task.failed"); len(got) != 0 {
@@ -357,7 +359,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if got := store.deliveries[staticEvent.ID()]; len(got) != 0 {
 				t.Fatalf("static descendant persisted deliveries = %#v, want none after rejected collision", got)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" {
+			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 				t.Fatalf("existing sibling route after rejected collision = %#v, want unchanged authority", got)
 			}
 
@@ -366,7 +368,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
-			if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "worker-listener" || len(plan.DeliveryRoutes) != 1 {
+			if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != testFlowNode(t, "worker", "worker-listener").Key() || len(plan.DeliveryRoutes) != 1 {
 				t.Fatalf("publish recipient plan = %#v, want one grant-backed worker delivery", plan)
 			}
 			if err := eb.Publish(context.Background(), evt); err != nil {
@@ -379,7 +381,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: secondIdentity}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute(inst-2): %v", err)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-2/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" {
+			if got := eb.RouteTable().Resolve("producer/inst-2/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 				t.Fatalf("Resolve second materialized instance = %#v, want grant-backed worker route", got)
 			}
 			if err := eb.RemoveFlowInstanceRoute(identity); err != nil {
@@ -388,7 +390,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if got := eb.RouteTable().Resolve("producer/inst-1/task.done"); len(got) != 0 {
 				t.Fatalf("Resolve after route removal = %#v, want no template-instance route", got)
 			}
-			if got := eb.RouteTable().Resolve("producer/inst-2/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" {
+			if got := eb.RouteTable().Resolve("producer/inst-2/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 				t.Fatalf("Resolve surviving sibling instance = %#v, want independent grant-backed route", got)
 			}
 			if got := eb.RouteTable().Resolve("producer/child/task.done"); len(got) != 0 {
@@ -438,7 +440,7 @@ func TestImportBoundaryWildcardTemplateSourceAndConsumerLifecycleOrdersRemainExa
 			if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: second}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute(second): %v", err)
 			}
-			if got := routes.Resolve("producer/source-1/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" || got[0].Path != "worker/consumer-1" {
+			if got := routes.Resolve("producer/source-1/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" || got[0].Path != "worker/consumer-1" {
 				t.Fatalf("Resolve after both lifecycles exist = %#v, want exact template-consumer route", got)
 			}
 			if got := routes.Resolve("producer/child/task.done"); len(got) != 0 {
@@ -468,6 +470,7 @@ func TestImportBoundaryWildcardTemplateSourceAndConsumerLifecycleOrdersRemainExa
 
 func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.T, source semanticview.Source, eventPattern, matchPattern string) {
 	t.Helper()
+	workerNode := testFlowNode(t, "worker", "worker-listener")
 	if issues := semanticview.ImportBoundaryWildcardGrantIssues(source); len(issues) != 0 {
 		t.Fatalf("observe grant issues = %#v, want grant accepted", issues)
 	}
@@ -491,13 +494,13 @@ func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := routes.Resolve("producer/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" || got[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
+	if got := routes.Resolve("producer/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" || got[0].RouteSourceCode() != "import_boundary_wildcard_grant" {
 		t.Fatalf("Resolve(producer/task.done) = %#v, want one grant-backed worker route", got)
 	}
-	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 1 || owners[0] != "worker-listener" {
+	if owners := source.RuntimeEventOwners("producer/task.done"); len(owners) != 1 || !owners[0].Equal(workerNode) {
 		t.Fatalf("RuntimeEventOwners(producer/task.done) = %#v, want grant-backed worker owner", owners)
 	}
-	if _, ok := source.NodeEventHandler("worker-listener", "producer/task.done"); !ok {
+	if resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, workerNode, "producer/task.done"); !resolution.Matched {
 		t.Fatal("NodeEventHandler(worker-listener, producer/task.done) did not resolve through grant")
 	}
 	store := &routePersistenceTestStore{}
@@ -510,7 +513,7 @@ func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != "worker-listener" || len(plan.DeliveryRoutes) != 1 {
+	if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != workerNode.Key() || len(plan.DeliveryRoutes) != 1 {
 		t.Fatalf("publish recipient plan = %#v, want one routed worker delivery", plan)
 	}
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -684,7 +687,7 @@ func TestImportBoundaryWildcardExactDuplicateAuthorizationCollapsesAcrossSurface
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := routes.Resolve("producer/task.done"); len(got) != 1 || got[0].Recipient.ID() != "worker-listener" {
+	if got := routes.Resolve("producer/task.done"); len(got) != 1 || got[0].Recipient.LocalID() != "worker-listener" {
 		t.Fatalf("Resolve(producer/task.done) = %#v, want one deduplicated worker route", got)
 	}
 }
@@ -748,7 +751,7 @@ func TestImportBoundaryWildcardPreservesTemplateInstanceSubtree(t *testing.T) {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	routes := rt.Resolve("worker/inst-1/task.done")
-	if len(routes) != 1 || routes[0].Recipient.ID() != "worker-listener" || routes[0].Path != "worker/inst-1" {
+	if len(routes) != 1 || routes[0].Recipient.LocalID() != "worker-listener" || routes[0].Path != "worker/inst-1" {
 		t.Fatalf("Resolve(worker/inst-1/task.done) = %#v, want materialized worker-listener", routes)
 	}
 	if sibling := rt.Resolve("producer/task.done"); len(sibling) != 0 {
@@ -762,7 +765,7 @@ func TestRootWildcardSubscriptionsRemainUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if routes := rt.Resolve("producer/task.done"); len(routes) != 1 || routes[0].Recipient.ID() != "root-listener" {
+	if routes := rt.Resolve("producer/task.done"); len(routes) != 1 || routes[0].Recipient.LocalID() != "root-listener" {
 		t.Fatalf("Resolve(producer/task.done) = %#v, want root-listener", routes)
 	}
 }

@@ -1061,9 +1061,12 @@ func resolvedSelectedRunRootIntentMatchesSubscriber(
 	if intent.Producer != routeIntentProducerConcreteNodeRoute {
 		return false
 	}
-	handlerFlowID := strings.TrimSpace(subscriber.handlerFlowID)
+	handlerFlowID := subscriber.handlerNode.FlowID()
+	if handlerFlowID == "" {
+		handlerFlowID = target.FlowID
+	}
 	return handlerFlowID != "" && key.path == handlerFlowID &&
-		key.handler.FlowID() == handlerFlowID && target.FlowID == handlerFlowID
+		key.handler.Node().Equal(subscriber.handlerNode) && target.FlowID == handlerFlowID
 }
 
 func eventTargetsRoutedSubscriber(evt events.Event, subscriber Subscriber) bool {
@@ -1131,7 +1134,7 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		flowID := strings.TrimSpace(subscriber.handlerFlowID)
+		flowID := subscriber.handlerNode.FlowID()
 		out = append(out, RoutePlanDeliveryIntent{
 			Recipient: subscriber.Recipient,
 			TargetBlueprint: events.RouteIdentity{
@@ -1157,7 +1160,7 @@ func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, evt even
 		return false
 	}
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	flowID := strings.TrimSpace(subscriber.handlerFlowID)
+	flowID := subscriber.handlerNode.FlowID()
 	switch subscriber.routeSource {
 	case subscriberRouteSourceSubscription:
 		return admission.kind == apiEventPublicationEndpointOrdinaryFlow && flowID == admission.flowID && path == admission.flowPath
@@ -1203,7 +1206,11 @@ func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber,
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {
 		return false
 	}
-	if strings.TrimSpace(subscriber.handlerFlowID) != strings.TrimSpace(rootFlowID) {
+	handlerFlowID := subscriber.handlerNode.FlowID()
+	if handlerFlowID == "" {
+		handlerFlowID = strings.TrimSpace(rootFlowID)
+	}
+	if handlerFlowID != strings.TrimSpace(rootFlowID) {
 		return false
 	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")

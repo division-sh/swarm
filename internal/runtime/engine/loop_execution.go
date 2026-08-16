@@ -24,7 +24,7 @@ func (e *Executor) stepLoop(frame *executionFrame) error {
 	if err != nil {
 		return err
 	}
-	plan, ok := workflowLoopPlan(e.deps.Source, frame.req.FlowID.String(), loopID)
+	plan, ok := workflowLoopPlan(e.deps.Source, frame.req.Node.FlowID(), loopID)
 	if !ok {
 		return failures.New(failures.ClassUnexpectedArrival, "loop_not_declared", "runtime.engine", "loop", map[string]any{"loop_id": loopID})
 	}

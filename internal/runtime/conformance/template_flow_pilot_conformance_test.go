@@ -274,7 +274,8 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey())
 	}
 
-	handler, ok := source.NodeEventHandler("portfolio-coordinator", notifyallchildren.OwnerTriggerEvent)
+	portfolioNode := conformanceNode(t, "portfolio", "portfolio-coordinator")
+	handler, ok := source.ExecutableNodeEventHandler(portfolioNode, notifyallchildren.OwnerTriggerEvent)
 	if !ok {
 		t.Fatal("portfolio-coordinator notify handler missing")
 	}
@@ -306,8 +307,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	)
 	result, err := exec.Execute(testAuthorActivityContext(context.Background()), runtimeengine.ExecutionRequest{
 		EntityID:       runtimeidentity.EntityID(portfolioEntityID),
-		NodeID:         "portfolio-coordinator",
-		FlowID:         "portfolio",
+		Node:           portfolioNode,
 		Event:          parent,
 		ProducerSource: parent.RoutingSource(),
 		Handler:        handler,
@@ -599,10 +599,14 @@ func (s *fanOutPinRouteMemoryStore) CommitPublication(ctx context.Context, comma
 
 func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity, agentIdentity agentidentity.Identity) bool {
 	target = target.Normalized()
+	accountNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "account", "account-node")
+	if err != nil {
+		return false
+	}
 	nodeFound := false
 	agentFound := false
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.Recipient.IsNode() && route.Recipient.ID() == "account-node" && route.Target.Route() == target {
+		if route.Recipient.IsNode() && route.Recipient.ID() == accountNode.Key() && route.Target.Route() == target {
 			nodeFound = true
 		}
 		if route.Recipient.IsAgent() && route.Recipient.ID() == "account-worker" &&

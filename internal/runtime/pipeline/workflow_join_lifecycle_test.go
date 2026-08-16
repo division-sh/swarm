@@ -40,12 +40,12 @@ type workflowJoinLifecycleSemanticSource struct {
 	semanticview.Source
 }
 
-func (s workflowJoinLifecycleSemanticSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
-	switch strings.TrimSpace(nodeID) {
+func (s workflowJoinLifecycleSemanticSource) ExecutableNodeSource(node identity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
+	switch node.NodeID() {
 	case "join-node", "dispatcher":
 		return runtimecontracts.ContractItemSource{FlowID: "orders", Layer: "flow"}, true
 	default:
-		return s.Source.NodeContractSource(nodeID)
+		return s.Source.ExecutableNodeSource(node)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if activation, found, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey()); loadErr != nil || !found {
+			if activation, found, loadErr := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey()); loadErr != nil || !found {
 				t.Fatalf("selected-store join activation = %#v, found=%v error=%v", activation, found, loadErr)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
@@ -204,7 +204,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok {
 				t.Fatalf("load activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -263,7 +263,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok || activation.Status != tc.wantStatus {
 				t.Fatalf("activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -316,7 +316,7 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok || activation.Status != joinruntime.StatusOpen || activation.CloseReason != "" {
 				t.Fatalf("custom zero activation = %#v, %v, %v, want open", activation, ok, err)
 			}
@@ -387,8 +387,8 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "reviewing"})
 			resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 			bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{
-				{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: first, ResultType: resultType},
-				{FlowID: "orders", NodeID: "join-node", HandlerEvent: "approval.completed", Spec: second, ResultType: resultType},
+				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Spec: first, ResultType: resultType},
+				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "approval.completed", Spec: second, ResultType: resultType},
 			}
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
@@ -436,11 +436,11 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			awaiting, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("awaiting", "shared", ""))
+			awaiting, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), joinruntime.ActivationKey("awaiting", "shared", ""))
 			if err != nil || !ok || awaiting.CloseReason != joinruntime.CloseReasonStageExit {
 				t.Fatalf("awaiting activation = %#v, %v, %v", awaiting, ok, err)
 			}
-			reviewing, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", joinruntime.ActivationKey("reviewing", "shared", ""))
+			reviewing, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), joinruntime.ActivationKey("reviewing", "shared", ""))
 			if err != nil || !ok || reviewing.Status != joinruntime.StatusOpen || reviewing.Stage() != "reviewing" {
 				t.Fatalf("reviewing activation = %#v, %v, %v", reviewing, ok, err)
 			}
@@ -570,7 +570,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			now := time.Now().UTC()
-			ref, err := timeridentity.NewJoinRef("orders", "join-node", "item.completed", "awaiting", "awaiting", "")
+			ref, err := timeridentity.NewJoinRef(mustPipelineNode("orders", "join-node"), "item.completed", "awaiting", "awaiting", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -606,7 +606,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 				go func() {
 					defer wg.Done()
 					<-start
-					result, err := pc.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: evt, State: triggerState, HandlerEventKey: "item.completed"}, false)
+					result, err := pc.executeNodeContractHandler(ctx, mustPipelineNode("orders", "join-node"), handler, workflowTriggerContext{Event: evt, State: triggerState, HandlerEventKey: "item.completed"}, false)
 					results <- raceResult{result: result, err: err}
 				}()
 			}
@@ -632,7 +632,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			closed, ok, err := joinruntime.Load(finalCarrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			closed, ok, err := joinruntime.Load(finalCarrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok || closed.Status != joinruntime.StatusClosed {
 				t.Fatalf("closed activation = %#v, %v, %v", closed, ok, err)
 			}
@@ -693,7 +693,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			}()
 			go func() {
 				<-start
-				_, err := pc.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: arrival, State: triggerState, HandlerEventKey: "item.completed"}, false)
+				_, err := pc.executeNodeContractHandler(ctx, mustPipelineNode("orders", "join-node"), handler, workflowTriggerContext{Event: arrival, State: triggerState, HandlerEventKey: "item.completed"}, false)
 				arrivalErr <- err
 			}()
 			close(start)
@@ -715,7 +715,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			if loadErr != nil {
 				t.Fatal(loadErr)
 			}
-			activation, ok, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			activation, ok, loadErr := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if loadErr != nil || !ok || activation.Status != joinruntime.StatusOpen {
 				t.Fatalf("activation = %#v, %v, %v", activation, ok, loadErr)
 			}
@@ -766,7 +766,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 			deliver := func(coordinator *PipelineCoordinator, id, member, result string) error {
 				evt := eventtest.RunCreatingRootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": result}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
-				_, err := coordinator.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: evt, State: mustCurrentWorkflowState(t, coordinator, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "item.completed"}, false)
+				_, err := coordinator.executeNodeContractHandler(ctx, mustPipelineNode("orders", "join-node"), handler, workflowTriggerContext{Event: evt, State: mustCurrentWorkflowState(t, coordinator, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "item.completed"}, false)
 				return err
 			}
 			assertClass := func(err error, want runtimefailures.Class) {
@@ -804,7 +804,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			closed, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			closed, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok || closed.Status != joinruntime.StatusClosed || closed.Completed() != 2 {
 				t.Fatalf("closed activation = %#v, %v, %v", closed, ok, err)
 			}
@@ -861,7 +861,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			}
 			dispatchHandler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
 			dispatch := eventtest.RunCreatingRootIngress("fan-out-empty", events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
-			result, err := pc.executeNodeContractHandler(ctx, "dispatcher", dispatchHandler, workflowTriggerContext{Event: dispatch, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "order.accepted"}, false)
+			result, err := pc.executeNodeContractHandler(ctx, mustPipelineNode("orders", "dispatcher"), dispatchHandler, workflowTriggerContext{Event: dispatch, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "order.accepted"}, false)
 			if err != nil || !result.Handled || result.Outcome == nil || result.Outcome.FanOutCount != 0 {
 				t.Fatalf("empty fan_out = handled:%v outcome:%#v err:%v", result.Handled, result.Outcome, err)
 			}
@@ -901,7 +901,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok || !activation.OutcomeFired || activation.OutcomePending || !activation.TimerCancelled {
 				t.Fatalf("zero activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -977,7 +977,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, ok, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+			activation, ok, err := joinruntime.Load(carrier.StateBuckets, mustPipelineNode("orders", "join-node"), workflowJoinActivationKey())
 			if err != nil || !ok || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonStageExit || activation.OutcomePending || activation.OutcomeFired || !activation.TimerCancelled {
 				t.Fatalf("exited zero activation = %#v, %v, %v", activation, ok, err)
 			}
@@ -1016,15 +1016,16 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 		t.Fatal(err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
-	route := seedExactOnceEventDelivery(t, pc, ctx, evt, "join-node")
-	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), "join-node", evt); !resolved.Matched {
+	joinNode := pipelineNode(t, "orders", "join-node")
+	route := seedExactOnceEventDelivery(t, pc, ctx, evt, joinNode)
+	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), mustPipelineNode("orders", "join-node"), evt); !resolved.Matched {
 		t.Fatalf("join handler did not resolve: %#v", resolved)
 	}
 	if _, err := store.deliveryStore.ProveHandoff(ctx, evt.ID(), route); err != nil {
 		t.Fatalf("seeded join delivery was not authorized: %v", err)
 	}
 	ctx = withWorkflowNodeDeliveryRoute(ctx, route)
-	handled, err := pc.executeNodeHandlerPlanResult(ctx, "join-node", evt)
+	handled, err := pc.executeNodeHandlerPlanResult(ctx, joinNode, evt)
 	if !handled {
 		t.Fatal("join failure was not handled")
 	}
@@ -1037,8 +1038,8 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 		SELECT d.status, COALESCE(d.failure, ''), COALESCE(o.outcome, '')
 		FROM event_deliveries d
 		LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
-		WHERE d.event_id = ? AND d.subscriber_type = 'node' AND d.subscriber_id = 'join-node'
-	`, evt.ID()).Scan(&status, &failureRaw, &deliveryOutcome); err != nil {
+		WHERE d.event_id = ? AND d.subscriber_type = 'node' AND d.subscriber_id = ?
+	`, evt.ID(), joinNode.Key()).Scan(&status, &failureRaw, &deliveryOutcome); err != nil {
 		t.Fatal(err)
 	}
 	var persisted runtimefailures.Envelope
@@ -1104,7 +1105,7 @@ func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 		Events: eventCatalog,
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "workflow-join-lifecycle", Version: "1.0.0", InitialStage: "dispatching", Stages: []runtimecontracts.WorkflowStageContract{{ID: "dispatching"}, {ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"ready", "attention"},
-			Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+			Joins: []runtimecontracts.WorkflowJoinPlan{{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
 				"join-node":  {ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(joinNode)},
 				"dispatcher": {ID: "dispatcher", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(dispatcher)},

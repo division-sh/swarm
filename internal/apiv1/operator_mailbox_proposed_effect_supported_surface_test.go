@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -238,9 +239,11 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	t.Helper()
 	now := time.Date(2026, 7, 14, 23, 0, 0, 0, time.UTC)
 	sourceEventID := uuid.NewString()
+	activityNode := identitytest.RootNode(t, "activity-runtime")
+	activityOwner := activityidentity.MustNodeOwner(activityNode)
 	requestEventID := activityidentity.RequestEventID(activityidentity.Fact{
 		RunID: runID, SourceEventID: sourceEventID, EntityID: entityID,
-		FlowID: "root", NodeID: "activity-runtime", HandlerEventKey: "support.reply_drafted",
+		Owner: activityOwner, ExecutionFlowID: "root", HandlerEventKey: "support.reply_drafted",
 		ActivityID: "send_support_reply", Tool: "provider_write", Attempt: 1,
 	})
 	input, err := canonicaljson.FromGo(map[string]any{"text": "Exact operator-approved content"})
@@ -255,7 +258,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 		SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-		EntityID: entityID, NodeID: "activity-runtime", FlowID: "root", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
+		EntityID: entityID, NodeID: activityOwner.Key(), FlowID: "root", FlowInstance: "root", HandlerEventKey: "support.reply_drafted",
 		SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 		ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()

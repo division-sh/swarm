@@ -107,11 +107,12 @@ func assertSealedPackageConformanceDependencies(t *testing.T, source semanticvie
 
 func assertSealedPackageConformanceWildcardScope(t *testing.T, source semanticview.Source) {
 	t.Helper()
+	consumerNode := conformancePackageNode(t, "flows/consumer", "consumer", "consumer-node")
 
-	if _, ok := source.NodeEventHandler("consumer-node", "producer/audit.seen"); ok {
+	if _, ok := source.ExecutableNodeEventHandler(consumerNode, "producer/audit.seen"); ok {
 		t.Fatal("consumer handler matched producer/audit.seen through raw sibling wildcard fallback")
 	}
-	if _, ok := source.NodeEventHandler("consumer-node", "consumer/audit.seen"); !ok {
+	if _, ok := source.ExecutableNodeEventHandler(consumerNode, "consumer/audit.seen"); !ok {
 		t.Fatal("consumer handler did not match its own package-subtree wildcard event")
 	}
 }
@@ -160,7 +161,7 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(conformancePackageNode(t, "flows/consumer", "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 	}),
@@ -234,10 +235,14 @@ func sealedPackageConformanceSubscribersContain(subscribers []runtimebus.Subscri
 
 func sealedPackageConformanceRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
+	wantNode, ok := want.Recipient.Node()
+	if !ok {
+		return false
+	}
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {
 		claim := got.ConnectClaim
 		got.ConnectClaim = events.ConnectExecutionClaim{}
-		handlerEvent, claimed := claim.NodeHandlerEvent(want.Recipient.ID())
+		handlerEvent, claimed := claim.NodeHandlerEvent(wantNode)
 		if got == want && claimed && handlerEvent == events.EventType("work.ready") {
 			return true
 		}

@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -234,8 +235,7 @@ func (s StateSnapshot) StateBucket(name string) (values.Bucket, bool) {
 type ExecutionRequest struct {
 	ExecutionID string
 	EntityID    identity.EntityID
-	NodeID      identity.NodeID
-	FlowID      identity.FlowID
+	Node        identity.ExecutableNode
 	// Route is the exact workflow-instance persistence identity selected by
 	// the runtime boundary. ProducerSource remains event-source authority.
 	Route runtimeflowidentity.Route
@@ -272,7 +272,7 @@ type ExecutionRequest struct {
 
 func (r ExecutionRequest) StateAddress() StateAddress {
 	return StateAddress{
-		FlowID:   identity.NormalizeFlowID(r.FlowID.String()),
+		FlowID:   identity.NormalizeFlowID(r.Node.FlowID()),
 		Route:    r.Route,
 		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
 	}
@@ -375,8 +375,8 @@ type ActivityIntent struct {
 	RetryBackoff     string
 	ForkPolicy       runtimecontracts.ActivityForkPolicy
 	EntityID         identity.EntityID
-	NodeID           identity.NodeID
-	FlowID           identity.FlowID
+	Owner            activityidentity.Owner
+	ExecutionFlowID  identity.FlowID
 	FlowInstance     string
 	HandlerEventKey  string
 	SourceEventID    string

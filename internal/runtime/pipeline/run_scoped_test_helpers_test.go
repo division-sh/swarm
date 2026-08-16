@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -548,7 +549,7 @@ func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowIn
 	return transitionCtx
 }
 
-func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) events.DeliveryRoute {
+func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, node runtimeidentity.ExecutableNode) events.DeliveryRoute {
 	t.Helper()
 	target := evt.TargetRoute()
 	if target.Empty() {
@@ -558,7 +559,7 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 	if err != nil {
 		t.Fatalf("seed pipeline node delivery authority target: %v", err)
 	}
-	return seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: owner})
+	return seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: owner})
 }
 
 func seedPipelineNodeDeliveryRouteAuthority(t *testing.T, db *sql.DB, evt events.Event, route events.DeliveryRoute) events.DeliveryRoute {

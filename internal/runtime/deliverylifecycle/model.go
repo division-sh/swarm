@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -36,7 +37,11 @@ const (
 func deliveryRecipientForClass(class SubscriberClass, id string) (events.DeliveryRecipient, error) {
 	switch class {
 	case SubscriberNode:
-		return events.NewNodeDeliveryRecipient(id)
+		node, err := runtimeidentity.ParseExecutableNodeKey(strings.TrimSpace(id))
+		if err != nil {
+			return events.DeliveryRecipient{}, fmt.Errorf("delivery node subscriber identity: %w", err)
+		}
+		return events.NewNodeDeliveryRecipient(node)
 	case SubscriberAgent:
 		return events.NewAgentDeliveryRecipient(id)
 	default:

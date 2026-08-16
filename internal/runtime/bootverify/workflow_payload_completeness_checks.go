@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -20,10 +21,13 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 	}
 	c.payloadCompletenessLoaded = true
 
-	for nodeID := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		nodeSource, _ := c.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		nodeID := node.Key()
+		flowID := node.FlowID()
 		entityFields := map[string]struct{}{}
 		if contract := wave1EntityContractForFlow(c.source, flowID); contract.Defined {
 			for field := range contract.Contract.Fields {
@@ -34,10 +38,10 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 			}
 		}
 
-		for triggerEventType, handler := range c.source.NodeEventHandlers(nodeID) {
+		for triggerEventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			triggerEventType = strings.TrimSpace(triggerEventType)
 			triggerProof := semanticview.ResolveFlowEventProof(c.source, flowID, triggerEventType)
-			for _, emitSite := range payloadCompletenessEmitSites(c.source, nodeID, flowID, triggerEventType, handler) {
+			for _, emitSite := range payloadCompletenessEmitSites(c.source, node, triggerEventType, handler) {
 				if emitSite.Err != nil {
 					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
 						CheckID:  "semantic_drift_payload_completeness",
@@ -130,13 +134,12 @@ func payloadCompletenessRequiredFields(entry runtimecontracts.EventCatalogEntry)
 	return uniquePayloadCompletenessStrings(required...)
 }
 
-func payloadCompletenessEmitSites(source semanticview.Source, nodeID, flowID, triggerEventType string, handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
+func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidentity.ExecutableNode, triggerEventType string, handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
 	var out []payloadCompletenessEmitSite
 	add := func(label string, spec runtimecontracts.EmitSpec) {
 		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
 			lowered, err := bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
-				NodeID:           nodeID,
-				FlowID:           flowID,
+				Node:             node,
 				TriggerEventType: triggerEventType,
 				Site:             label,
 			}, spec)

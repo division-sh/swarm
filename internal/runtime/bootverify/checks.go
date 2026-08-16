@@ -572,9 +572,13 @@ func (c *checkerContext) dialectCompliance() []Finding {
 		return c.dialectFindings
 	}
 	c.dialectLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		nodeID := node.Key()
+		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			if handlerDeclaresConflictingCompletion(handler) {
 				c.dialectFindings = append(c.dialectFindings, Finding{
@@ -626,6 +630,9 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 			Location: "rate_limit",
 		})
 	}
+	for _, record := range c.source.ExecutableNodeRecords() {
+		c.appendInvalidExecutableNodeFindings(record)
+	}
 	for _, scope := range c.source.ProjectScopes() {
 		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
 		if strings.TrimSpace(scope.Manifest.Name) == "" {
@@ -643,53 +650,6 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				Message:  fmt.Sprintf("project package %s missing required field version", scopeLabel),
 				Location: scopeLabel,
 			})
-		}
-		for nodeID, node := range scope.Nodes {
-			nodeID = strings.TrimSpace(nodeID)
-			nodeLabel := scopedObjectLabel(scopeLabel, nodeID)
-			if nodeID == "" {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node in scope %s missing required field id", scopeLabel),
-					Location: scopeLabel,
-				})
-				continue
-			}
-			if authoredID := strings.TrimSpace(node.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID),
-					Location: nodeLabel,
-				})
-			}
-			if strings.TrimSpace(node.ExecutionType) != "" {
-				if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
-					c.invalidFindings = append(c.invalidFindings, Finding{
-						CheckID:  "invalid_field_detection",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
-						Location: nodeLabel,
-					})
-				}
-			}
-			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing declared subscription surface", nodeLabel),
-					Location: nodeLabel,
-				})
-			}
-			if len(node.EventHandlers) == 0 {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing required field event_handlers", nodeLabel),
-					Location: nodeLabel,
-				})
-			}
 		}
 		for agentID, agent := range scope.Agents {
 			agentID = strings.TrimSpace(agentID)
@@ -739,53 +699,6 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 	}
 	for _, scope := range c.source.FlowScopes() {
 		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		for nodeID, node := range scope.Nodes {
-			nodeID = strings.TrimSpace(nodeID)
-			nodeLabel := scopedObjectLabel(scopeLabel, nodeID)
-			if nodeID == "" {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node in scope %s missing required field id", scopeLabel),
-					Location: scopeLabel,
-				})
-				continue
-			}
-			if authoredID := strings.TrimSpace(node.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID),
-					Location: nodeLabel,
-				})
-			}
-			if strings.TrimSpace(node.ExecutionType) != "" {
-				if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
-					c.invalidFindings = append(c.invalidFindings, Finding{
-						CheckID:  "invalid_field_detection",
-						Severity: "error",
-						Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
-						Location: nodeLabel,
-					})
-				}
-			}
-			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing declared subscription surface", nodeLabel),
-					Location: nodeLabel,
-				})
-			}
-			if len(node.EventHandlers) == 0 {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing required field event_handlers", nodeLabel),
-					Location: nodeLabel,
-				})
-			}
-		}
 		for agentID, agent := range scope.Agents {
 			agentID = strings.TrimSpace(agentID)
 			agentLabel := scopedObjectLabel(scopeLabel, agentID)
@@ -814,6 +727,51 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 		}
 	}
 	return c.invalidFindings
+}
+
+func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontracts.ScopedNodeRecord) {
+	nodeID := strings.TrimSpace(record.LogicalID)
+	scopeLabel := strings.TrimSpace(record.Source.PackageKey)
+	if flowID := strings.TrimSpace(record.Source.FlowID); flowID != "" {
+		scopeLabel = flowScopeLabel(flowID, flowID)
+	} else {
+		scopeLabel = projectScopeLabel(scopeLabel, "")
+	}
+	if nodeID == "" {
+		c.invalidFindings = append(c.invalidFindings, Finding{
+			CheckID: "invalid_field_detection", Severity: "error",
+			Message: fmt.Sprintf("node in scope %s missing required field id", scopeLabel), Location: scopeLabel,
+		})
+		return
+	}
+	nodeLabel := scopedObjectLabel(scopeLabel, nodeID)
+	if authoredID := strings.TrimSpace(record.Entry.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
+		c.invalidFindings = append(c.invalidFindings, Finding{
+			CheckID: "invalid_field_detection", Severity: "error",
+			Message: fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID), Location: nodeLabel,
+		})
+	}
+	if strings.TrimSpace(record.Entry.ExecutionType) != "" {
+		if err := runtimecontracts.ValidateSystemNodeExecutionType(record.Entry.ExecutionType); err != nil {
+			c.invalidFindings = append(c.invalidFindings, Finding{
+				CheckID: "invalid_field_detection", Severity: "error",
+				Message: fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType), Location: nodeLabel,
+			})
+		}
+	}
+	nodeRef, err := record.Identity()
+	if err == nil && len(c.source.ExecutableNodeRuntimeSubscriptions(nodeRef)) == 0 {
+		c.invalidFindings = append(c.invalidFindings, Finding{
+			CheckID: "invalid_field_detection", Severity: "error",
+			Message: fmt.Sprintf("node %s missing declared subscription surface", nodeLabel), Location: nodeLabel,
+		})
+	}
+	if len(record.Entry.EventHandlers) == 0 {
+		c.invalidFindings = append(c.invalidFindings, Finding{
+			CheckID: "invalid_field_detection", Severity: "error",
+			Message: fmt.Sprintf("node %s missing required field event_handlers", nodeLabel), Location: nodeLabel,
+		})
+	}
 }
 
 func appendAgentMemoryFindings(findings []Finding, scopeLabel string, proof semanticview.AgentMemoryProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
@@ -917,14 +875,18 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 			}
 		}
 	}
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		flowID := nodeFlowID(c.source, nodeID)
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		nodeID := node.Key()
+		flowID := node.FlowID()
 		declaredStates := declaredStatesForFlow(c.source, flowID)
 		if len(declaredStates) == 0 {
 			continue
 		}
-		for eventType, handler := range node.EventHandlers {
+		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			for _, target := range handlerAdvanceTargets(handler) {
 				target = strings.TrimSpace(target)
@@ -953,20 +915,21 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		}
 	}
 	for _, transition := range c.source.DerivedHandlerTransitions() {
+		flowID := transition.Node.FlowID()
 		target := strings.TrimSpace(transition.AdvancesTo)
 		if target == "" {
 			continue
 		}
-		if flowIsStateless(c.source, strings.TrimSpace(transition.FlowID)) {
+		if flowIsStateless(c.source, flowID) {
 			c.stateFindings = append(c.stateFindings, Finding{
 				CheckID:  "state_machine_coherence",
 				Severity: "error",
-				Message:  fmt.Sprintf("handler transition %s advances_to is invalid in stateless flow %s", transition.ID, validationFlowLabel(strings.TrimSpace(transition.FlowID))),
+				Message:  fmt.Sprintf("handler transition %s advances_to is invalid in stateless flow %s", transition.ID, validationFlowLabel(flowID)),
 				Location: strings.TrimSpace(transition.ID),
 			})
 			continue
 		}
-		validTargets := declaredStatesForFlow(c.source, strings.TrimSpace(transition.FlowID))
+		validTargets := declaredStatesForFlow(c.source, flowID)
 		if len(validTargets) == 0 {
 			continue
 		}
@@ -976,7 +939,7 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		c.stateFindings = append(c.stateFindings, Finding{
 			CheckID:  "state_machine_coherence",
 			Severity: "error",
-			Message:  fmt.Sprintf("handler transition %s advances_to %s outside flow %s states", transition.ID, target, validationFlowLabel(strings.TrimSpace(transition.FlowID))),
+			Message:  fmt.Sprintf("handler transition %s advances_to %s outside flow %s states", transition.ID, target, validationFlowLabel(flowID)),
 			Location: strings.TrimSpace(transition.ID),
 		})
 	}
@@ -1393,16 +1356,6 @@ func flowIsStateless(source semanticview.Source, flowID string) bool {
 		return false
 	}
 	return strings.TrimSpace(source.FlowInitialStage(strings.TrimSpace(flowID))) == "" && len(source.FlowStates(strings.TrimSpace(flowID))) == 0
-}
-
-func nodeFlowID(source semanticview.Source, nodeID string) string {
-	if source == nil {
-		return ""
-	}
-	if contractSource, ok := source.NodeContractSource(strings.TrimSpace(nodeID)); ok {
-		return strings.TrimSpace(contractSource.FlowID)
-	}
-	return ""
 }
 
 func declaredStatesForFlow(source semanticview.Source, flowID string) map[string]struct{} {

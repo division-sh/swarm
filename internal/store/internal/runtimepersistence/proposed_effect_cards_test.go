@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -525,6 +526,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 	if err != nil {
 		t.Fatal(err)
 	}
+	owner := activityidentity.MustNodeOwner(mustPersistenceRootNode("support"))
 	continuation := decisioncard.ProposedEffectContinuation{
 		CardID: decisioncard.ProposedEffectCardID(requestID, "support_reply"), RunID: runID,
 		RequestEventID: requestID, ActivityID: "send_support_reply", Tool: "telegram.send_message", Input: input,
@@ -533,7 +535,7 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 		SuccessEvent: "support_reply.succeeded", FailureEvent: "support_reply.failed",
 		RevisionEvent: "support_reply.revision_requested", RejectedEvent: "support_reply.rejected",
 		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-		EntityID: entityID, NodeID: "support", FlowID: "", FlowInstance: "root",
+		EntityID: entityID, NodeID: owner.Key(), FlowID: "", FlowInstance: "root",
 		HandlerEventKey: "support.drafted", SourceEventID: uuid.NewString(), SourceRunID: runID,
 		Generation: generation, ExecutionMode: "live", ReplyContextID: "reply-context-source", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()

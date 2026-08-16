@@ -132,7 +132,7 @@ func TestOrdinaryFlowAPIEventPublicationAdmissionOwnsOnlyItsExactNodeRoutes(t *t
 		t.Fatalf("CheckPublishRecipientPlan with exact admission: %v", err)
 	}
 	routes := plan.DeliveryRoutes
-	if len(routes) != 1 || routes[0].Recipient.ID() != "child-worker" || !routes[0].Target.EntitylessReceiver() {
+	if len(routes) != 1 || routes[0].Recipient.LocalID() != "child-worker" || !routes[0].Target.EntitylessReceiver() {
 		t.Fatalf("delivery routes = %#v, want one entityless child-worker", routes)
 	}
 	if target := routes[0].Target.Route(); target.FlowID != "child" || target.FlowInstance != "child" || target.EntityID != "" {

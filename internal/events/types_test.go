@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
@@ -279,7 +280,7 @@ func TestDeliveryPayloadProjectionIsCanonicalAndIsolated(t *testing.T) {
 func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
 	first, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
 	second, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
-	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("validator"), Target: MustEntitylessReceiverTarget(RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"})}
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(identitytest.FlowNode(t, "validation", "validator")), Target: MustEntitylessReceiverTarget(RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"})}
 	left, right := route, route
 	left.PayloadProjection, right.PayloadProjection = first, second
 	if err := ValidateDeliveryRouteProjections([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {
@@ -290,7 +291,7 @@ func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
 func TestValidateDeliveryRoutesRejectsContradictoryTargetOwnershipForExactSlot(t *testing.T) {
 	route := RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: "entity-one"}
 	left := DeliveryRoute{
-		Recipient: MustNodeDeliveryRecipient("validator"),
+		Recipient: MustNodeDeliveryRecipient(identitytest.FlowNode(t, "validation", "validator")),
 		Target:    MustExistingEntityTarget(route),
 	}
 	right := left
@@ -407,12 +408,14 @@ func testDeliveryAgentIdentity(t testing.TB, agentID, scopeKey, instanceID, inst
 func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {
 	digest := sha256.Sum256([]byte("connect-edge"))
 	receiverPinDigest := sha256.Sum256([]byte("receiver-pin"))
+	handlerNode := identitytest.FlowNode(t, "review", "node-b")
 	claim := ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: receiverPinDigest,
-		recipientKind: deliveryRecipientNode, recipientID: "node-b",
-		handlerFlowID: "review", handlerNodeID: "node-b", handlerEvent: "flow.completed", present: true,
+		recipientKind: deliveryRecipientNode, recipientID: handlerNode.Key(),
+		handlerNode: handlerNode, handlerEvent: "flow.completed", present: true,
 	}
-	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("node-a"), ConnectClaim: claim}
+	recipientNode := identitytest.FlowNode(t, "review", "node-a")
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(recipientNode), ConnectClaim: claim}
 	if _, err := route.Identity(); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("route identity error = %v, want recipient mismatch", err)
 	}
@@ -421,7 +424,7 @@ func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {
 	}
 
 	raw, err := json.Marshal(deliveryRouteWire{
-		SubscriberType: "node", SubscriberID: "node-a", ConnectClaim: claim,
+		SubscriberType: "node", SubscriberID: recipientNode.Key(), ConnectClaim: claim,
 	})
 	if err != nil {
 		t.Fatal(err)
