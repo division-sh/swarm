@@ -8,7 +8,7 @@ import (
 
 func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
-	timer, ok := bundle.WorkflowTimerByID("item_timeout")
+	timer, ok := bundle.WorkflowTimerForNode(genericExecutableNode(t, bundle, "delivery-node"), "item_timeout")
 	if !ok {
 		t.Fatal("expected item_timeout timer")
 	}

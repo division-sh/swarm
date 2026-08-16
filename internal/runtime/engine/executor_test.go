@@ -254,8 +254,7 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 	t.Helper()
 	return ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("render-node"),
-		FlowID:   identity.FlowID("render"),
+		Node:     testFlowExecutableNode(t, "render", "render-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),
@@ -1103,8 +1102,7 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("node-1"),
-		FlowID:   identity.FlowID("flow-1"),
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("test.event"),
@@ -1172,8 +1170,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	}
 	req := ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("scoring-node"),
-		FlowID:   identity.FlowID("scoring"),
+		Node:     testFlowExecutableNode(t, "scoring", "scoring-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("scoring/score.dimension_complete"),
@@ -1334,7 +1331,7 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "scoring-node",
+		Node:     testRootExecutableNode(t, "scoring-node"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1544,7 +1541,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "scoring-node",
+		Node:     testRootExecutableNode(t, "scoring-node"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high","targets":["agent-a"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: handler,
@@ -1598,7 +1595,7 @@ func executeAccumulatorProjectionTestEvent(t *testing.T, exec *Executor, handler
 	t.Helper()
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "scoring-node",
+		Node:     testRootExecutableNode(t, "scoring-node"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: handler,
@@ -1648,14 +1645,14 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	handler, ok := source.NodeEventHandler("scoring-node", "scoring/score.dimension_complete")
+	scoringNode := testFlowExecutableNode(t, "scoring", "scoring-node")
+	handler, ok := source.ExecutableNodeEventHandler(scoringNode, "scoring/score.dimension_complete")
 	if !ok {
 		t.Fatal("expected qualified runtime event to resolve to authored local handler")
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "scoring-node",
-		FlowID:   "scoring",
+		Node:     scoringNode,
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"scoring/score.dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -1666,10 +1663,10 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef("scoring-node", "score.dimension_complete")); !ok {
+	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef(scoringNode, "score.dimension_complete")); !ok {
 		t.Fatalf("logical accumulator bucket missing from state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
 	}
-	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef("scoring-node", "scoring/score.dimension_complete")); ok {
+	if _, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: result.StateMutation.StateCarrier}, accumulatorBucketRef(scoringNode, "scoring/score.dimension_complete")); ok {
 		t.Fatalf("concrete runtime event bucket survived in state mutation: %#v", result.StateMutation.StateCarrier.StateBuckets)
 	}
 	scores, ok := result.StateMutation.Fields["scores"].([]any)
@@ -1705,11 +1702,11 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 			DedupPath: runtimecontracts.RefExpression("payload.component_id").RefPath,
 		},
 	}
+	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
 	firstState := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
 	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "lifecycle-orchestrator",
-		FlowID:   "operating",
+		Node:     lifecycleNode,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-a",
 			"component-scaffold/a/component.scaffolded",
@@ -1730,15 +1727,14 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	if err != nil {
 		t.Fatalf("first Execute error: %v", err)
 	}
-	firstAccumulator, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: first.StateMutation.StateCarrier}, accumulatorBucketRef("lifecycle-orchestrator", "component.scaffolded"))
+	firstAccumulator, ok := loadAccumulatorForBucket(StateSnapshot{StateCarrier: first.StateMutation.StateCarrier}, accumulatorBucketRef(lifecycleNode, "component.scaffolded"))
 	if !ok || len(firstAccumulator.Items) != 1 {
 		t.Fatalf("first stream accumulator = %#v, want one item", firstAccumulator)
 	}
 	secondState := testStateSnapshot("pending", map[string]any{}, nil, first.StateMutation.StateCarrier.StateBuckets)
 	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "lifecycle-orchestrator",
-		FlowID:   "operating",
+		Node:     lifecycleNode,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-b",
 			"component-scaffold/b/component.scaffolded",
@@ -1760,7 +1756,7 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 		t.Fatalf("second Execute error: %v", err)
 	}
 	state := StateSnapshot{StateCarrier: second.StateMutation.StateCarrier}
-	acc, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component.scaffolded"))
+	acc, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component.scaffolded"))
 	if !ok {
 		t.Fatalf("logical accumulator bucket missing: %#v", second.StateMutation.StateCarrier.StateBuckets)
 	}
@@ -1773,10 +1769,10 @@ func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEv
 	if got := acc.Items[1]["event_type"]; got != "component-scaffold/b/component.scaffolded" {
 		t.Fatalf("second item event_type = %#v", got)
 	}
-	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component-scaffold/a/component.scaffolded")); ok {
+	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component-scaffold/a/component.scaffolded")); ok {
 		t.Fatalf("first concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
 	}
-	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef("lifecycle-orchestrator", "component-scaffold/b/component.scaffolded")); ok {
+	if _, ok := loadAccumulatorForBucket(state, accumulatorBucketRef(lifecycleNode, "component-scaffold/b/component.scaffolded")); ok {
 		t.Fatalf("second concrete event bucket survived: %#v", second.StateMutation.StateCarrier.StateBuckets)
 	}
 }
@@ -1791,14 +1787,15 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 		}}), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	activation, err := newEngineTestJoinActivation("orders", "join-node", "item.completed", spec, "", []string{"a", "b"}, now, now.Add(time.Hour))
+	joinNode := testFlowExecutableNode(t, "orders", "join-node")
+	activation, err := newEngineTestJoinActivation(joinNode, "item.completed", spec, "", []string{"a", "b"}, now, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1808,7 +1805,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	}
 	handler := runtimecontracts.SystemNodeEventHandler{Join: &spec}
 	first, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
+		EntityID: "entity-1", Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEventKey: "item.completed", Handler: handler,
 		JoinDeclaration: activation.JoinRef().Declaration(),
 		Event:           eventtest.RunCreatingRootIngress("evt-b", "item.completed", "", "", json.RawMessage(`{"member_id":"b","result":{"score":2}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
 		State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, buckets),
@@ -1820,7 +1817,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 		t.Fatalf("first status = %s, want waiting", first.Status)
 	}
 	second, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: handler,
+		EntityID: "entity-1", Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEventKey: "item.completed", Handler: handler,
 		JoinDeclaration: activation.JoinRef().Declaration(),
 		Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(time.Second)),
 		State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a", "b"}}, nil, first.StateMutation.StateCarrier.StateBuckets),
@@ -1831,7 +1828,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	if second.StateMutation.NextState != "ready" {
 		t.Fatalf("next state = %q, want ready", second.StateMutation.NextState)
 	}
-	closed, ok, err := joinruntime.Load(second.StateMutation.StateCarrier.StateBuckets, "join-node", activation.Key())
+	closed, ok, err := joinruntime.Load(second.StateMutation.StateCarrier.StateBuckets, joinNode, activation.Key())
 	if err != nil || !ok {
 		t.Fatalf("load closed activation = %#v, %v, %v", closed, ok, err)
 	}
@@ -1855,11 +1852,12 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatalf("load canonical fan-in barrier: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
-	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, "portfolio", "portfolio-collector", "operating.reported")
+	portfolioNode := testFlowExecutableNode(t, "portfolio", "portfolio-collector")
+	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, portfolioNode, "operating.reported")
 	if !ok || plan.Spec.Members.By != "payload.operating_id" || plan.Spec.Window == nil || plan.Spec.Window.By != "payload.period_id" {
 		t.Fatalf("effective barrier plan = %#v", plan)
 	}
-	rawHandler, ok := bundle.NodeEventHandler("portfolio-collector", "operating.reported")
+	rawHandler, ok := source.ExecutableNodeEventHandler(portfolioNode, "operating.reported")
 	if !ok || rawHandler.Join == nil {
 		t.Fatal("authored barrier handler is unavailable")
 	}
@@ -1874,7 +1872,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	activation, err := newEngineTestJoinActivation(plan.FlowID, plan.NodeID, plan.HandlerEvent, plan.Spec, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute))
+	activation, err := newEngineTestJoinActivation(plan.Node, plan.HandlerEvent, plan.Spec, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1883,7 +1881,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "portfolio/portfolio", NodeID: "portfolio-collector", FlowID: "portfolio", HandlerEventKey: "operating.reported", Handler: rawHandler,
+		EntityID: "portfolio/portfolio", Node: portfolioNode, HandlerEventKey: "operating.reported", Handler: rawHandler,
 		JoinDeclaration: activation.JoinRef().Declaration(),
 		Event:           eventtest.RunCreatingRootIngress("evt-operating-a", "operating.reported", "", "", json.RawMessage(`{"operating_id":"operating-a","period_id":"2026-Q3","revenue":42}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now),
 		State:           testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
@@ -1920,9 +1918,10 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 					"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{"score": {Type: "integer"}}},
 				}},
 			}
+			joinNode := testFlowExecutableNode(t, "orders", "join-node")
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:  "orders",
-				Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+				Joins: []runtimecontracts.WorkflowJoinPlan{{Node: joinNode, HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 			}})
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
@@ -1931,7 +1930,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 				t.Fatal(err)
 			}
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			activation, err := newEngineTestJoinActivation("orders", "join-node", "item.completed", spec, "", []string{"a"}, now, now.Add(time.Hour))
+			activation, err := newEngineTestJoinActivation(joinNode, "item.completed", spec, "", []string{"a"}, now, now.Add(time.Hour))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1940,7 +1939,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: "entity-1", NodeID: "join-node", FlowID: "orders", HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
+				EntityID: "entity-1", Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEventKey: "item.completed", Handler: runtimecontracts.SystemNodeEventHandler{Join: &spec},
 				JoinDeclaration: activation.JoinRef().Declaration(),
 				Event:           eventtest.RunCreatingRootIngress("evt-a", "item.completed", "", "", json.RawMessage(`{"member_id":"a","result":{"score":1}}`), 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now),
 				State:           testStateSnapshot("awaiting", map[string]any{"expected": []any{"a"}}, nil, buckets),
@@ -1961,8 +1960,8 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 	}
 }
 
-func newEngineTestJoinActivation(flowID, nodeID, handlerEvent string, spec runtimecontracts.JoinSpec, window string, members []string, armedAt, fireAt time.Time) (joinruntime.Activation, error) {
-	ref, err := timeridentity.NewJoinRef(flowID, nodeID, handlerEvent, spec.Stage, spec.EffectiveID(), window)
+func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent string, spec runtimecontracts.JoinSpec, window string, members []string, armedAt, fireAt time.Time) (joinruntime.Activation, error) {
+	ref, err := timeridentity.NewJoinRef(node, handlerEvent, spec.Stage, spec.EffectiveID(), window)
 	if err != nil {
 		return joinruntime.Activation{}, err
 	}
@@ -1985,7 +1984,8 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
-	storeAccumulator(&state, "lifecycle-orchestrator", "component.scaffolded", &Accumulator{
+	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
+	storeAccumulator(&state, lifecycleNode, "component.scaffolded", &Accumulator{
 		Items: []map[string]any{
 			{"component_id": "a"},
 			{"component_id": "b"},
@@ -1993,8 +1993,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 	})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "lifecycle-orchestrator",
-		FlowID:   "operating",
+		Node:     lifecycleNode,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-b",
 			"component-scaffold/b/component.scaffolded",
@@ -2061,7 +2060,7 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("repo-scaffold"),
+		Node:     testRootExecutableNode(t, "repo-scaffold"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("repo.scaffold_requested"),
@@ -2144,8 +2143,7 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("render-node"),
-		FlowID:   identity.FlowID("render"),
+		Node:     testFlowExecutableNode(t, "render", "render-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),
@@ -2543,7 +2541,7 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("deploy-node"),
+		Node:     testRootExecutableNode(t, "deploy-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("deploy.requested"),
@@ -2665,7 +2663,7 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NodeID("deploy-node"),
+		Node:     testRootExecutableNode(t, "deploy-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("deploy.requested"),
@@ -2727,14 +2725,14 @@ func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotReso
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	handler, ok := source.NodeEventHandler("scoring-node", "scoring/score.dimension_complete")
+	scoringNode := testFlowExecutableNode(t, "scoring", "scoring-node")
+	handler, ok := source.ExecutableNodeEventHandler(scoringNode, "scoring/score.dimension_complete")
 	if !ok {
 		t.Fatal("expected qualified runtime event to resolve to authored local handler")
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "scoring-node",
-		FlowID:   "scoring",
+		Node:     scoringNode,
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"scoring/score.unregistered_dimension_complete", "", "", json.RawMessage(`{"dimension":"market","score":87}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -2840,8 +2838,7 @@ func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID("entity-1"),
-		NodeID:          identity.NormalizeNodeID("scanner"),
-		FlowID:          identity.NormalizeFlowID("research"),
+		Node:            testFlowExecutableNode(t, "research", "scanner"),
 		HandlerEventKey: "source.requested",
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -2892,8 +2889,7 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID("entity-1"),
-		NodeID:          identity.NormalizeNodeID("scanner"),
-		FlowID:          identity.NormalizeFlowID("research"),
+		Node:            testFlowExecutableNode(t, "research", "scanner"),
 		HandlerEventKey: "source.requested",
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "", json.RawMessage(`{"url":"https://example.com"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -2933,8 +2929,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Route:    runtimeflowidentity.RouteForInstancePath("flow-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -2993,15 +2988,15 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 			"dedup_key": "dup-1",
 		}, nil, map[string]map[string]any{}),
 	}
-	storeAccumulator(&initial, "node-1", "items.submitted", &Accumulator{
+	node := testFlowExecutableNode(t, "flow-1", "node-1")
+	storeAccumulator(&initial, node, "items.submitted", &Accumulator{
 		Received: map[string]bool{"seed": true},
 		Items:    []map[string]any{{"seed": true}},
 	})
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     node,
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
@@ -3071,8 +3066,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
@@ -3109,8 +3103,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
@@ -3147,8 +3140,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"score":5,"items":[{"score":7}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Filter: &runtimecontracts.FilterSpec{
@@ -3187,8 +3179,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
@@ -3226,8 +3217,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
@@ -3278,8 +3268,7 @@ rules:
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "scan.requested", "", "", json.RawMessage(`{"mode":"deep"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:  handler,
 		State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -3310,8 +3299,7 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
@@ -3348,8 +3336,7 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
@@ -3392,8 +3379,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -3429,8 +3415,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -3499,8 +3484,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:   "entity-1",
-				NodeID:     "node-1",
-				FlowID:     "flow-1",
+				Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 				ChainDepth: 1,
 				Event: eventtest.RunCreatingRootIngress(
 					"evt-1",
@@ -3594,7 +3578,7 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "bucket-node",
+		Node:       testRootExecutableNode(t, "bucket-node"),
 		ChainDepth: 1,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
@@ -3681,8 +3665,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -3782,8 +3765,7 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":3}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -3830,8 +3812,7 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -3905,8 +3886,7 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -3947,8 +3927,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -4000,8 +3979,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -4054,8 +4032,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -4100,8 +4077,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -4145,8 +4121,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -4207,8 +4182,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
@@ -4336,8 +4310,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
-				NodeID:          "node-1",
-				FlowID:          "flow-1",
+				Node:            testFlowExecutableNode(t, "flow-1", "node-1"),
 				Event:           eventtest.RunCreatingRootIngress("evt-1", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				HandlerEventKey: tc.handlerEventKey,
 				Handler:         tc.handler(newSpec(0)),
@@ -4375,8 +4348,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			exec.deps.TransitionValidator = transition
 			result, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
-				NodeID:          "node-1",
-				FlowID:          "flow-1",
+				Node:            testFlowExecutableNode(t, "flow-1", "node-1"),
 				Event:           eventtest.RunCreatingRootIngress("evt-bound", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				HandlerEventKey: tc.handlerEventKey,
 				Handler:         tc.handler(newSpec(1)),
@@ -4418,7 +4390,7 @@ func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
 				t.Fatalf("NewExecutor error: %v", err)
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: "entity-1", NodeID: "node-1", FlowID: "flow-1",
+				EntityID: "entity-1", Node: testFlowExecutableNode(t, "flow-1", "node-1"),
 				Event:   eventtest.RunCreatingRootIngress("evt-1", "batch.ready", "", "", json.RawMessage(`{"items":[{"id":"item-a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &tc.spec},
 				State:   testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
@@ -4466,8 +4438,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "vertical-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus","discovery_context":{"source":"corpus"}}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -4559,8 +4530,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 			state.EntityID = identity.NormalizeEntityID(targetEntityID)
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: targetEntityID,
-				NodeID:   "validation-router",
-				FlowID:   "validation",
+				Node:     testFlowExecutableNode(t, "validation", "validation-router"),
 				Event: eventtest.RunCreatingRootIngress(
 					"evt-1",
 					"scoring/vertical.resumed",
@@ -4639,8 +4609,7 @@ func TestExecutor_EmitIntentUsesAdmittedProducerSourceBeforeStateMetadata(t *tes
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:       identity.NormalizeEntityID(admitted.EntityID),
-		NodeID:         "validation-router",
-		FlowID:         "validation",
+		Node:           testFlowExecutableNode(t, "validation", "validation-router"),
 		ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
@@ -4692,8 +4661,7 @@ func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalize
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:       "entity-1",
-		NodeID:         "node-1",
-		FlowID:         "root",
+		Node:           testFlowExecutableNode(t, "root", "node-1"),
 		ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
@@ -4785,8 +4753,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "component-entity",
-				NodeID:   "component-node",
-				FlowID:   "component-scaffold",
+				Node:     testFlowExecutableNode(t, "component-scaffold", "component-node"),
 				Event:    eventtest.RunCreatingRootIngress("evt-1", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler:  tc.handler,
 				State: testStateSnapshot("ready", map[string]any{
@@ -4836,8 +4803,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "component-entity",
-		NodeID:   "component-node",
-		FlowID:   "component-scaffold",
+		Node:     testFlowExecutableNode(t, "component-scaffold", "component-node"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
@@ -4899,8 +4865,7 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "child-ent",
-		NodeID:   "child-node",
-		FlowID:   "child",
+		Node:     testFlowExecutableNode(t, "child", "child-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"child/requested",
@@ -4960,10 +4925,10 @@ func TestExecutor_LoweredConnectEmissionRemainsTargetlessBeforeEventBus(t *testi
 	}, nil, map[string]map[string]any{})
 	state.EntityID = identity.NormalizeEntityID("child-source")
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("child-node"), Target: events.MustExistingEntityTarget(currentOwner),
+		Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "child", "child-node")), Target: events.MustExistingEntityTarget(currentOwner),
 	})
 	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{
-		EntityID: "child-source", NodeID: "child-node", FlowID: "child", ProducerSource: producerSource,
+		EntityID: "child-source", Node: testFlowExecutableNode(t, "child", "child-node"), ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress("evt-connect", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: "inbound-owner"}), time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child/inst-1/child.done"}}, State: state,
@@ -5002,10 +4967,10 @@ func TestExecutor_NestedStaticOutputUsesExactCurrentDeliveryTarget(t *testing.T)
 	state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
 	state.EntityID = identity.NormalizeEntityID(currentOwner.EntityID)
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("child-node"), Target: events.MustExistingEntityTarget(currentOwner),
+		Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "child", "child-node")), Target: events.MustExistingEntityTarget(currentOwner),
 	})
 	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{
-		EntityID: identity.NormalizeEntityID(currentOwner.EntityID), NodeID: "child-node", FlowID: "child", ProducerSource: producerSource,
+		EntityID: identity.NormalizeEntityID(currentOwner.EntityID), Node: testFlowExecutableNode(t, "child", "child-node"), ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress("evt-static", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "",
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, inboundOwner), time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
@@ -5031,7 +4996,7 @@ func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t 
 	}{
 		{name: "missing", ctx: context.Background()},
 		{name: "entityless", ctx: runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient("child-node"),
+			Recipient: events.MustNodeDeliveryRecipient(testFlowExecutableNode(t, "child", "child-node")),
 			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "root", FlowInstance: "root/run-1"}),
 		})},
 	} {
@@ -5049,7 +5014,7 @@ func TestExecutor_NestedStaticOutputRejectsMissingOrEntitylessCurrentDelivery(t 
 			state := testStateSnapshot("running", map[string]any{"flow_path": "root/child"}, nil, map[string]map[string]any{})
 			state.EntityID = identity.NormalizeEntityID("state-owner")
 			result, err := exec.ExecuteSemanticFixture(tc.ctx, ExecutionRequest{
-				EntityID: "state-owner", NodeID: "child-node", FlowID: "child", ProducerSource: producerSource,
+				EntityID: "state-owner", Node: testFlowExecutableNode(t, "child", "child-node"), ProducerSource: producerSource,
 				Event:   eventtest.RunCreatingRootIngress("evt-static-hostile", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 			})
@@ -5075,7 +5040,7 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 	}, nil, map[string]map[string]any{})
 	state.EntityID = identity.NormalizeEntityID("child-ent")
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "child-ent", NodeID: "child-node", FlowID: "child",
+		EntityID: "child-ent", Node: testFlowExecutableNode(t, "child", "child-node"),
 		Event:   eventtest.RunCreatingRootIngress("evt-partial-parent", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 	})
@@ -5181,7 +5146,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"summary":"ready"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -5226,7 +5191,7 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"job.received",
@@ -5340,8 +5305,7 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "coordinator-1",
-		NodeID:   "coordinator-node",
-		FlowID:   "coordinator",
+		Node:     testFlowExecutableNode(t, "coordinator", "coordinator-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"job.received",
@@ -5417,7 +5381,7 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -5462,7 +5426,7 @@ func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1",
-				NodeID:   "node-1",
+				Node:     testRootExecutableNode(t, "node-1"),
 				Event:    eventtest.RunCreatingRootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler: runtimecontracts.SystemNodeEventHandler{
 					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -5504,7 +5468,7 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Compute: &runtimecontracts.ComputeSpec{
@@ -5538,7 +5502,7 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"entity.analysis.summary"}},
@@ -5587,8 +5551,7 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 	})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "root",
+		Node:     testFlowExecutableNode(t, "root", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
@@ -5624,8 +5587,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "vertical-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event: eventtest.RunCreatingRootIngress("evt-1",
 			"vertical.discovered", "", "", json.RawMessage(`{"mode":"corpus"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 
@@ -5657,8 +5619,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
@@ -5698,8 +5659,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "root",
+		Node:     testFlowExecutableNode(t, "root", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
@@ -5735,8 +5695,7 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "batch.submitted", "", "", json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -5779,8 +5738,7 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "check.requested", "", "", json.RawMessage(`{"score":50}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
@@ -5819,8 +5777,7 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
@@ -5862,8 +5819,7 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
@@ -5911,8 +5867,7 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"*"},
@@ -5953,8 +5908,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
@@ -5995,8 +5949,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
@@ -6049,8 +6002,7 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{
@@ -6101,8 +6053,7 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "handler_action"},
@@ -6160,8 +6111,7 @@ func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing
 			}
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID: "entity-1",
-				NodeID:   "node-1",
-				FlowID:   "flow-1",
+				Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 				Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 				Handler:  tc.handler,
 				State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -6281,8 +6231,7 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "flow-1",
+		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
@@ -6330,8 +6279,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
@@ -6377,8 +6325,7 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID:   "entity-1",
-		NodeID:     "node-1",
-		FlowID:     "flow-1",
+		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
 		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false,"score":42,"legacy":"should-not-pass"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{

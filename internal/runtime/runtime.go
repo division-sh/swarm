@@ -2030,7 +2030,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 	if rt != nil && rt.Options.WorkflowModule != nil {
 		if source := rt.Options.WorkflowModule.SemanticSource(); source != nil {
 			flowCount = len(source.FlowSchemaEntries())
-			nodeCount = len(source.NodeEntries())
+			nodeCount = len(source.ExecutableNodeRecords())
 			agentCount = len(semanticview.AgentDeclarations(source))
 			eventCount = len(source.ResolvedEventCatalog())
 		}

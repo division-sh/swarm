@@ -29,8 +29,8 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 					FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString(),
 				}
 				routes := []events.DeliveryRoute{
-					{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustExistingEntityTarget(target)},
-					{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustMaterializingEntityTarget(target)},
+					{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("validator")), Target: events.MustExistingEntityTarget(target)},
+					{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("validator")), Target: events.MustMaterializingEntityTarget(target)},
 				}
 				err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes)
 				if err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
@@ -144,13 +144,13 @@ func TestMixedPubsubConnectCompositionPublicReadbackOnBothBackends(t *testing.T)
 			consumerTarget := events.RouteIdentity{
 				FlowID: "consumer", FlowInstance: "consumer", EntityID: uuid.NewString(),
 			}.Normalized()
-			connectRecipient := events.MustNodeDeliveryRecipient("consumer-node")
+			connectRecipient := events.MustNodeDeliveryRecipient(mustPersistenceNode("consumer", "consumer-node"))
+			connectHandler := mustPersistenceNode("consumer", "consumer-node")
 			connectClaim, err := events.AdmitConnectExecutionClaim(
 				sha256.Sum256([]byte("producer.ready->consumer.ready")),
 				sha256.Sum256([]byte("consumer.ready")),
 				connectRecipient,
-				"consumer",
-				"consumer-node",
+				connectHandler,
 				"work.accepted",
 			)
 			if err != nil {
@@ -158,7 +158,7 @@ func TestMixedPubsubConnectCompositionPublicReadbackOnBothBackends(t *testing.T)
 			}
 			routes := []events.DeliveryRoute{
 				{
-					Recipient: events.MustNodeDeliveryRecipient("producer-local"),
+					Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("producer-local")),
 					Target:    events.MustExistingEntityTarget(producerTarget),
 				},
 				{

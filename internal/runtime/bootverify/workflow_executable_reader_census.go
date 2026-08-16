@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -16,8 +17,7 @@ type handlerRuleExecutableReaderCollector func(*[]expressionReference, executabl
 
 type executableReaderContext struct {
 	source    semanticview.Source
-	flowID    string
-	nodeID    string
+	node      runtimeidentity.ExecutableNode
 	eventType string
 }
 
@@ -125,8 +125,8 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	},
 }
 
-func handlerExecutableReaderExpressionsForSource(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
-	ctx := executableReaderContext{source: source, flowID: strings.TrimSpace(flowID), nodeID: strings.TrimSpace(nodeID), eventType: strings.TrimSpace(eventType)}
+func handlerExecutableReaderExpressionsForSource(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+	ctx := executableReaderContext{source: source, node: node, eventType: strings.TrimSpace(eventType)}
 	out := make([]expressionReference, 0, 24)
 	for _, field := range sortedExecutableReaderFields(systemNodeEventHandlerExecutableReaderCensus) {
 		before := len(out)
@@ -137,7 +137,7 @@ func handlerExecutableReaderExpressionsForSource(source semanticview.Source, flo
 	}
 	// Canonical emit lowering expands emit.from and namespace sugar into the
 	// exact expressions executed at every declarative emit site.
-	out = append(out, handlerEmitExpressionsForSource(source, flowID, nodeID, eventType, handler)...)
+	out = append(out, handlerEmitExpressionsForSource(source, node, eventType, handler)...)
 	return out
 }
 

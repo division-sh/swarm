@@ -30,19 +30,24 @@ func (c *checkerContext) timerValidation() []Finding {
 			continue
 		}
 		if owner != "runtime" {
-			if _, systemNode := c.source.NodeEntries()[owner]; !systemNode {
-				if !participantExistsLocal(c.source, owner) {
-					c.timerFindings = append(c.timerFindings, Finding{
-						CheckID:  "timer_validation",
-						Severity: "error",
-						Message:  fmt.Sprintf("timer %s owner %s missing from participants", timer.ID, owner),
-						Location: strings.TrimSpace(timer.ID),
-					})
-				}
+			if !timer.Node.Valid() {
+				c.timerFindings = append(c.timerFindings, Finding{
+					CheckID:  "timer_validation",
+					Severity: "error",
+					Message:  fmt.Sprintf("timer %s owner %s has no exact executable node identity", timer.ID, owner),
+					Location: strings.TrimSpace(timer.ID),
+				})
+			} else if _, exists := c.source.ExecutableNode(timer.Node); !exists {
+				c.timerFindings = append(c.timerFindings, Finding{
+					CheckID:  "timer_validation",
+					Severity: "error",
+					Message:  fmt.Sprintf("timer %s owner %s missing from executable nodes", timer.ID, executableNodeDiagnostic(timer.Node)),
+					Location: strings.TrimSpace(timer.ID),
+				})
 			}
 		}
 		if !timerUsesInternalStageTimerEvent(timer) {
-			fireEvent := semanticview.ResolveFlowEventProof(c.source, timer.FlowID, timer.Event)
+			fireEvent := semanticview.ResolveFlowEventProof(c.source, timer.OwningFlowID(), timer.Event)
 			if !fireEvent.HasSchema {
 				c.timerFindings = append(c.timerFindings, Finding{
 					CheckID:  "timer_validation",
@@ -98,7 +103,7 @@ func (c *checkerContext) validateStageTimerSemantics(timer runtimecontracts.Work
 		return
 	}
 	stage := strings.TrimSpace(timer.Stage)
-	if stage == "" || !containsString(flowStatesForTimer(c.source, timer.FlowID), stage) {
+	if stage == "" || !containsString(flowStatesForTimer(c.source, timer.OwningFlowID()), stage) {
 		c.timerFindings = append(c.timerFindings, Finding{
 			CheckID:  "timer_validation",
 			Severity: "error",
@@ -122,7 +127,7 @@ func (c *checkerContext) validateStageTimerSemantics(timer runtimecontracts.Work
 			Location: strings.TrimSpace(timer.ID),
 		})
 	}
-	if strings.TrimSpace(timer.AdvancesTo) != "" && !containsString(flowStatesForTimer(c.source, timer.FlowID), timer.AdvancesTo) {
+	if strings.TrimSpace(timer.AdvancesTo) != "" && !containsString(flowStatesForTimer(c.source, timer.OwningFlowID()), timer.AdvancesTo) {
 		c.timerFindings = append(c.timerFindings, Finding{
 			CheckID:  "timer_validation",
 			Severity: "error",
@@ -133,7 +138,7 @@ func (c *checkerContext) validateStageTimerSemantics(timer runtimecontracts.Work
 }
 
 func (c *checkerContext) validateLegacyStageTimerFence(timer runtimecontracts.WorkflowTimerContract) {
-	if timer.StageOwned || !timerFlowDeclaresStageMapping(c.source, timer.FlowID) {
+	if timer.StageOwned || !timerFlowDeclaresStageMapping(c.source, timer.OwningFlowID()) {
 		return
 	}
 	for _, field := range []struct {
@@ -189,7 +194,7 @@ func (c *checkerContext) validateTimerTrigger(timer runtimecontracts.WorkflowTim
 	}
 	switch trigger.Kind {
 	case timeridentity.TriggerKindState:
-		if !containsString(flowStatesForTimer(c.source, timer.FlowID), trigger.Name) {
+		if !containsString(flowStatesForTimer(c.source, timer.OwningFlowID()), trigger.Name) {
 			c.timerFindings = append(c.timerFindings, Finding{
 				CheckID:  "timer_validation",
 				Severity: "error",
@@ -198,7 +203,7 @@ func (c *checkerContext) validateTimerTrigger(timer runtimecontracts.WorkflowTim
 			})
 		}
 	case timeridentity.TriggerKindEvent:
-		admission := semanticview.ClassifyTimerSubscription(c.source, timer.ID, timer.FlowID, trigger.Name)
+		admission := semanticview.ClassifyTimerSubscription(c.source, timer.ID, timer.OwningFlowID(), trigger.Name)
 		if !admission.Admitted() {
 			c.timerFindings = append(c.timerFindings, Finding{
 				CheckID:  "timer_validation",
@@ -208,7 +213,7 @@ func (c *checkerContext) validateTimerTrigger(timer runtimecontracts.WorkflowTim
 			})
 			return
 		}
-		ref := semanticview.ResolveFlowEventProof(c.source, timer.FlowID, trigger.Name)
+		ref := semanticview.ResolveFlowEventProof(c.source, timer.OwningFlowID(), trigger.Name)
 		if !ref.HasSchema {
 			c.timerFindings = append(c.timerFindings, Finding{
 				CheckID:  "timer_validation",
@@ -248,7 +253,7 @@ func (c *checkerContext) validateTimerCancelStateReachability(timer runtimecontr
 	if startTrigger.Kind == timeridentity.TriggerKindBoot {
 		return
 	}
-	flowID := strings.TrimSpace(timer.FlowID)
+	flowID := timer.OwningFlowID()
 	declaredStates := declaredStatesForFlow(c.source, flowID)
 	cancelState := strings.TrimSpace(cancelTrigger.Name)
 	if cancelState == "" {
@@ -304,7 +309,7 @@ func timerActivationStates(source semanticview.Source, timer runtimecontracts.Wo
 			out[state] = struct{}{}
 		}
 	case timeridentity.TriggerKindEvent:
-		flowID := strings.TrimSpace(timer.FlowID)
+		flowID := timer.OwningFlowID()
 		ref := semanticview.ResolveFlowEventProof(source, flowID, startTrigger.Name)
 		topology, ok := semanticview.WorkflowStageTopology(source, flowID)
 		if !ok {
@@ -314,7 +319,7 @@ func timerActivationStates(source semanticview.Source, timer runtimecontracts.Wo
 			if !timerHandlerMatchesEvent(source, flowID, handler.EventType, ref) {
 				continue
 			}
-			targets := topology.HandlerTargets(handler.NodeID, handler.EventType)
+			targets := topology.HandlerTargets(handler.Node, handler.EventType)
 			if len(targets) == 0 {
 				addTimerActivationStates(out, declaredStates, handler.Stages)
 				continue
@@ -339,7 +344,7 @@ func addTimerActivationStates(out map[string]struct{}, declaredStates map[string
 }
 
 func timerCancelStateGraphEdges(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) map[string]map[string]struct{} {
-	flowID := strings.TrimSpace(timer.FlowID)
+	flowID := timer.OwningFlowID()
 	fireRef := semanticview.ResolveFlowEventProof(source, flowID, timer.Event)
 	return workflowStageGraphEdges(source, flowID, func(edge runtimecontracts.WorkflowStageTopologyEdge) bool {
 		handlerEvent := strings.TrimSpace(edge.HandlerEvent)
@@ -450,7 +455,7 @@ func (c *checkerContext) timerTriggerEventProduced(timer runtimecontracts.Workfl
 	if c.source == nil {
 		return false
 	}
-	if resolution, ok := c.resolveDeclaredInputProducerSource(strings.TrimSpace(timer.FlowID), ref.Authored); ok {
+	if resolution, ok := c.resolveDeclaredInputProducerSource(timer.OwningFlowID(), ref.Authored); ok {
 		return resolution.HasEvidence()
 	}
 	if timerEventProducedByPlatform(c.source, ref) || nonInputEventMetadataProducerSource(ref.Entry) {
@@ -493,9 +498,6 @@ func participantExistsLocal(source semanticview.Source, participant string) bool
 		return false
 	}
 	if participant == "runtime" || participant == "human" {
-		return true
-	}
-	if _, ok := source.NodeEntries()[participant]; ok {
 		return true
 	}
 	for _, declaration := range semanticview.AgentDeclarations(source) {

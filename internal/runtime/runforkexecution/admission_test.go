@@ -1146,8 +1146,8 @@ func testContractFrontierAdmission(selection runfork.RunForkContractSelection) r
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID:           uuid.NewString(),
 			EventName:               "work.begin",
-			RuntimeEventOwners:      []string{"alpha-intake"},
-			WorkflowNodeSubscribers: []string{"beta-intake"},
+			RuntimeEventOwners:      []string{mustRunForkNode("flow-a", "alpha-intake").Key()},
+			WorkflowNodeSubscribers: []string{mustRunForkNode("flow-b", "beta-intake").Key()},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
 				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
 			},

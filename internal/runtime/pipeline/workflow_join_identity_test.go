@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -49,15 +50,15 @@ func (s exactWorkflowJoinSource) WorkflowJoins() []runtimecontracts.WorkflowJoin
 	return append([]runtimecontracts.WorkflowJoinPlan(nil), s.plans...)
 }
 
-func (s exactWorkflowJoinSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
-	if s.overrideNodeOwner && (nodeID == "join-node" || nodeID == "dispatcher" || nodeID == "observer") {
+func (s exactWorkflowJoinSource) ExecutableNodeSource(node runtimeidentity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
+	if s.overrideNodeOwner && node.FlowID() == s.nodeFlowID && (node.NodeID() == "join-node" || node.NodeID() == "dispatcher" || node.NodeID() == "observer") {
 		layer := "flow"
 		if s.nodeFlowID == "" {
 			layer = "project"
 		}
 		return runtimecontracts.ContractItemSource{FlowID: s.nodeFlowID, Layer: layer}, true
 	}
-	return s.Source.NodeContractSource(nodeID)
+	return s.Source.ExecutableNodeSource(node)
 }
 
 func newExactWorkflowJoinHarness(
@@ -71,9 +72,9 @@ func newExactWorkflowJoinHarness(
 	store, ctx := storeCase.open(t)
 	bundle := workflowJoinLifecycleBundle()
 	plan := bundle.Semantics.Joins[0]
-	plan.FlowID = flowID
+	plan.Node = mustPipelineNode(flowID, "join-node")
 	source := exactWorkflowJoinSource{
-		Source: workflowJoinLifecycleSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
+		Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
 		nodeFlowID: flowID, overrideNodeOwner: true,
 	}
 	harness := &exactWorkflowJoinHarness{
@@ -159,7 +160,7 @@ func (h *exactWorkflowJoinHarness) activation() joinruntime.Activation {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	activation, found, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+	activation, found, err := joinruntime.Load(carrier.StateBuckets, pipelineNode(h.t, h.flowID, "join-node"), workflowJoinActivationKey())
 	if err != nil || !found {
 		h.t.Fatalf("load join activation: found=%v err=%v", found, err)
 	}
@@ -200,13 +201,32 @@ type exactJoinScope struct {
 func exactRootAndFlowJoinSource(bundle *runtimecontracts.WorkflowContractBundle) exactWorkflowJoinSource {
 	plan := bundle.Semantics.Joins[0]
 	rootPlan := plan
-	rootPlan.FlowID = ""
+	rootPlan.Node = mustPipelineNode("", "join-node")
 	flowPlan := plan
-	flowPlan.FlowID = "orders"
+	flowPlan.Node = mustPipelineNode("orders", "join-node")
 	return exactWorkflowJoinSource{
-		Source: workflowJoinLifecycleSource(bundle),
+		Source: workflowJoinLifecycleRootAndFlowSource(bundle),
 		plans:  []runtimecontracts.WorkflowJoinPlan{rootPlan, flowPlan},
 	}
+}
+
+func workflowJoinLifecycleRootAndFlowSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	clone := *bundle
+	root := *bundle.FlowTree.Root
+	root.Children = append([]runtimecontracts.FlowContractView(nil), root.Children...)
+	root.Nodes = make(map[string]runtimecontracts.SystemNodeContract, len(bundle.Nodes))
+	for nodeID, node := range bundle.Nodes {
+		root.Nodes[nodeID] = node
+	}
+	clone.FlowTree.Root = &root
+	clone.FlowTree.ByID = make(map[string]*runtimecontracts.FlowContractView, len(bundle.FlowTree.ByID))
+	for flowID, view := range bundle.FlowTree.ByID {
+		clone.FlowTree.ByID[flowID] = view
+	}
+	if len(root.Children) > 0 {
+		clone.FlowTree.ByID["orders"] = &root.Children[0]
+	}
+	return semanticview.Wrap(&clone)
 }
 
 func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, declarationFlowID, path string) exactJoinScope {
@@ -260,12 +280,13 @@ func deliverExactJoinMember(t *testing.T, pc *PipelineCoordinator, store *workfl
 	)
 	persistExactJoinEvent(t, store, ctx, event)
 	target := events.RouteIdentity{FlowID: scope.executionFlowID, FlowInstance: scope.path, EntityID: scope.entityID}
+	joinNode := pipelineNode(t, scope.declarationFlowID, "join-node")
 	deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("join-node"),
+		Recipient: events.MustNodeDeliveryRecipient(joinNode),
 		Target:    events.MustExistingEntityTarget(target),
 	})
-	handler := source.NodeEventHandlers("join-node")["item.completed"]
-	_, err := pc.executeNodeContractHandler(deliveryCtx, "join-node", handler, workflowTriggerContext{
+	handler := source.ExecutableNodeEventHandlers(joinNode)["item.completed"]
+	_, err := pc.executeNodeContractHandler(deliveryCtx, joinNode, handler, workflowTriggerContext{
 		Event: event, State: mustCurrentWorkflowState(t, pc, ctx, scope.route, scope.entityID), HandlerEventKey: "item.completed",
 	}, false)
 	return err
@@ -317,12 +338,12 @@ func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T)
 
 func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T) {
 	bundle := workflowJoinLifecycleBundle()
-	base := workflowJoinLifecycleSource(bundle)
+	base := workflowJoinLifecycleRootAndFlowSource(bundle)
 	plan := bundle.Semantics.Joins[0]
 	rootPlan := plan
-	rootPlan.FlowID = ""
+	rootPlan.Node = mustPipelineNode("", "join-node")
 	flowPlan := plan
-	flowPlan.FlowID = "orders"
+	flowPlan.Node = mustPipelineNode("orders", "join-node")
 	source := exactWorkflowJoinSource{Source: base, plans: []runtimecontracts.WorkflowJoinPlan{rootPlan, flowPlan}}
 	entityID := uuid.NewString()
 	flowInstance := "orders/order-1"
@@ -360,12 +381,14 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 		{name: "flow", event: flowEvent, flowID: "orders"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			wantNode := pipelineNode(t, tc.flowID, "join-node")
 			resolution, ok, err := resolveWorkflowJoinOccurrence(source, tc.event)
-			if err != nil || !ok || resolution.Ref.FlowID() != tc.flowID || resolution.Plan.FlowID != tc.flowID {
+			if err != nil || !ok || resolution.Ref.FlowID() != tc.flowID || !resolution.Plan.Node.Equal(wantNode) {
 				t.Fatalf("resolution = %#v ok=%v err=%v", resolution, ok, err)
 			}
 			recipient, target, handler, ok, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(source, tc.event)
-			if err != nil || !ok || recipient.ID() != "join-node" || handler.NodeID() != "join-node" || handler.Empty() {
+			recipientNode, recipientIsNode := recipient.Node()
+			if err != nil || !ok || !recipientIsNode || !recipientNode.Equal(wantNode) || !handler.Node().Equal(wantNode) || handler.Empty() {
 				t.Fatalf("delivery target = recipient:%#v target:%#v handler:%#v ok=%v err=%v", recipient, target, handler, ok, err)
 			}
 			wantExecutionFlow := tc.flowID
@@ -374,7 +397,7 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 				wantExecutionFlow = source.WorkflowName()
 				wantInstance = tc.event.RunID()
 			}
-			if target.FlowID != wantExecutionFlow || target.FlowInstance != wantInstance || target.EntityID != entityID || handler.FlowID() != wantExecutionFlow {
+			if target.FlowID != wantExecutionFlow || target.FlowInstance != wantInstance || target.EntityID != entityID || handler.ExecutionFlowID(source) != wantExecutionFlow {
 				t.Fatalf("delivery target = %#v handler=%#v, want flow=%q instance=%q entity=%q", target, handler, wantExecutionFlow, wantInstance, entityID)
 			}
 		})
@@ -406,27 +429,27 @@ func TestWorkflowJoinDeclarationRefUsesExactExecutionScope(t *testing.T) {
 	bundle := workflowJoinLifecycleBundle()
 	plan := bundle.Semantics.Joins[0]
 	rootPlan := plan
-	rootPlan.FlowID = ""
+	rootPlan.Node = mustPipelineNode("", "join-node")
 	flowPlan := plan
-	flowPlan.FlowID = "orders"
+	flowPlan.Node = mustPipelineNode("orders", "join-node")
 	source := exactWorkflowJoinSource{
-		Source: workflowJoinLifecycleSource(bundle),
+		Source: workflowJoinLifecycleRootAndFlowSource(bundle),
 		plans:  []runtimecontracts.WorkflowJoinPlan{rootPlan, flowPlan},
 	}
 	handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 
-	rootRef, err := workflowJoinDeclarationRef(source, source.WorkflowName(), "join-node", "item.completed", handler)
+	rootRef, err := workflowJoinDeclarationRef(source, pipelineNode(t, "", "join-node"), "item.completed", handler)
 	if err != nil || rootRef.FlowID() != "" {
 		t.Fatalf("root declaration = %#v err=%v", rootRef, err)
 	}
-	flowRef, err := workflowJoinDeclarationRef(source, "orders", "join-node", "item.completed", handler)
+	flowRef, err := workflowJoinDeclarationRef(source, pipelineNode(t, "orders", "join-node"), "item.completed", handler)
 	if err != nil || flowRef.FlowID() != "orders" {
 		t.Fatalf("flow declaration = %#v err=%v", flowRef, err)
 	}
 	if rootRef.Equal(flowRef) {
 		t.Fatal("same-leaf root and flow declarations collapsed to one identity")
 	}
-	if _, err := workflowJoinDeclarationRef(source, "returns", "join-node", "item.completed", handler); err == nil {
+	if _, err := workflowJoinDeclarationRef(source, pipelineNode(t, "returns", "join-node"), "item.completed", handler); err == nil {
 		t.Fatal("unrelated flow scope selected a same-leaf join declaration")
 	}
 }
@@ -444,9 +467,9 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				store, ctx := storeCase.open(t)
 				bundle := workflowJoinLifecycleBundle()
 				plan := bundle.Semantics.Joins[0]
-				plan.FlowID = scope.flowID
+				plan.Node = mustPipelineNode(scope.flowID, "join-node")
 				source := exactWorkflowJoinSource{
-					Source: workflowJoinLifecycleSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
+					Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
 					nodeFlowID: scope.flowID, overrideNodeOwner: true,
 				}
 				schedules := &recordingGenericScheduleWakeupOwner{}
@@ -491,7 +514,8 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err != nil {
 					t.Fatal(err)
 				}
-				armedActivation, found, err := joinruntime.Load(armedCarrier.StateBuckets, "join-node", workflowJoinActivationKey())
+				joinNode := pipelineNode(t, scope.flowID, "join-node")
+				armedActivation, found, err := joinruntime.Load(armedCarrier.StateBuckets, joinNode, workflowJoinActivationKey())
 				if err != nil || !found || !armedActivation.JoinRef().Equal(armedRef) {
 					t.Fatalf("armed activation = found:%v activation:%#v ref:%#v err:%v", found, armedActivation, armedRef, err)
 				}
@@ -503,7 +527,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 						envelope = workflowJoinTestEnvelope(path, entityID)
 					}
 					event := eventtest.RunCreatingRootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", envelope, time.Now().UTC())
-					_, err := coordinator.executeNodeContractHandler(ctx, "join-node", handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, coordinator, ctx, route, entityID), HandlerEventKey: "item.completed"}, false)
+					_, err := coordinator.executeNodeContractHandler(ctx, joinNode, handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, coordinator, ctx, route, entityID), HandlerEventKey: "item.completed"}, false)
 					return err
 				}
 				if err := deliver(pc, "member-a", "a"); err != nil {
@@ -521,7 +545,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err != nil {
 					t.Fatal(err)
 				}
-				activation, found, err := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey())
+				activation, found, err := joinruntime.Load(carrier.StateBuckets, joinNode, workflowJoinActivationKey())
 				if err != nil || !found || activation.Status != joinruntime.StatusClosed || activation.FlowID() != scope.flowID || activation.Completed() != 2 || !activation.TimerCancelled {
 					t.Fatalf("closed activation = found:%v activation:%#v err:%v", found, activation, err)
 				}
@@ -686,6 +710,8 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 					FlowID: flowID, ID: "revision", RevisionField: "revision_id",
 					MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "awaiting", RegionStages: []string{"awaiting"},
 				}}
+				h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
+				h.pc = h.newCoordinator()
 				createdAt := time.Now().UTC()
 				loop, err := loopruntime.New(
 					runtimecorrelation.RunIDFromContext(h.ctx), h.entityID, flowID, "revision", "revision_id",
@@ -724,7 +750,7 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 				repeat := runtimecontracts.SystemNodeEventHandler{
 					Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "awaiting"}, AdvancesTo: "awaiting",
 				}
-				result, err := h.pc.executeNodeContractHandler(h.ctx, "observer", repeat, workflowTriggerContext{
+				result, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, flowID, "observer"), repeat, workflowTriggerContext{
 					Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID),
 				}, false)
 				if err != nil || !result.Handled {
@@ -741,7 +767,7 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 					t.Fatalf("next loop = found:%v activation:%#v err:%v", found, nextLoop, err)
 				}
 				firstActivation, found, err := joinruntime.Load(
-					carrier.StateBuckets, "join-node",
+					carrier.StateBuckets, pipelineNode(t, flowID, "join-node"),
 					joinruntime.ActivationKeyForGeneration("awaiting", "awaiting", "", loop.Generation()),
 				)
 				if err != nil || !found || firstActivation.Status != joinruntime.StatusClosed ||
@@ -859,6 +885,8 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 				FlowID: "orders", ID: "revision", RevisionField: "revision_id",
 				MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "awaiting", RegionStages: []string{"awaiting", "ready"},
 			}}
+			h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
+			h.pc = h.newCoordinator()
 			createdAt := time.Now().UTC()
 			loop, err := loopruntime.New(
 				runtimecorrelation.RunIDFromContext(h.ctx), h.entityID, "orders", "revision", "revision_id",
@@ -890,7 +918,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), time.Now().UTC(),
 				)
 				persistExactJoinEvent(t, h.store, h.ctx, event)
-				if _, err := h.pc.executeNodeContractHandler(h.ctx, "join-node", handler, workflowTriggerContext{
+				if _, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
 					Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: "item.completed",
 				}, false); err != nil {
 					t.Fatalf("complete first generation member %s: %v", member, err)
@@ -911,7 +939,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			repeat := runtimecontracts.SystemNodeEventHandler{
 				Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "ready"}, AdvancesTo: "awaiting",
 			}
-			result, err := h.pc.executeNodeContractHandler(h.ctx, "observer", repeat, workflowTriggerContext{
+			result, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, h.flowID, "observer"), repeat, workflowTriggerContext{
 				Event: repeatEvent, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID),
 			}, false)
 			if err != nil || !result.Handled {
@@ -928,7 +956,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 				t.Fatalf("next loop generation = found:%v loop:%#v err:%v", found, nextLoop, err)
 			}
 			nextKey := joinruntime.ActivationKeyForGeneration("awaiting", "awaiting", "", nextLoop.Generation())
-			nextJoin, found, err := joinruntime.Load(carrier.StateBuckets, "join-node", nextKey)
+			nextJoin, found, err := joinruntime.Load(carrier.StateBuckets, pipelineNode(t, "orders", "join-node"), nextKey)
 			if err != nil || !found || nextJoin.Status != joinruntime.StatusOpen || !nextJoin.Generation().Equal(nextLoop.Generation()) {
 				t.Fatalf("next generation join = found:%v activation:%#v err:%v", found, nextJoin, err)
 			}
@@ -950,7 +978,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			nextJoin, found, err = joinruntime.Load(carrier.StateBuckets, "join-node", nextKey)
+			nextJoin, found, err = joinruntime.Load(carrier.StateBuckets, pipelineNode(t, "orders", "join-node"), nextKey)
 			if err != nil || !found || nextJoin.Status != joinruntime.StatusClosed || !nextJoin.Generation().Equal(nextLoop.Generation()) || !nextJoin.TimerCancelled {
 				t.Fatalf("next generation cancellation = found:%v activation:%#v err:%v", found, nextJoin, err)
 			}
@@ -1037,7 +1065,7 @@ func TestConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestart(t *testin
 
 func pipelineJoinHandle(t *testing.T, flowID string, kind timeridentity.TimerHandleKind) timeridentity.TimerHandle {
 	t.Helper()
-	ref, err := timeridentity.NewJoinRef(flowID, "join-node", "item.completed", "awaiting", "awaiting", "")
+	ref, err := timeridentity.NewJoinRef(pipelineNode(t, flowID, "join-node"), "item.completed", "awaiting", "awaiting", "")
 	if err != nil {
 		t.Fatal(err)
 	}

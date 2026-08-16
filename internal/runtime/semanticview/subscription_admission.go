@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type AuthoredSubscriptionConsumerKind string
@@ -267,21 +268,33 @@ func admitNonImportNodePattern(source Source, req AuthoredSubscriptionRequest) s
 	return scope.ResolveSubscriptionPattern(req.Authored, authoredSubscriptionDescendants(source, req.FlowID))
 }
 
-func ClassifyNodeSubscription(source Source, nodeID, authored string) AuthoredSubscriptionAdmission {
-	request := AuthoredSubscriptionRequest{
-		ConsumerKind: AuthoredSubscriptionConsumerNode,
-		ConsumerID:   strings.TrimSpace(nodeID),
-		Authored:     authored,
+func ClassifyExecutableNodeSubscription(source Source, node runtimeidentity.ExecutableNode, authored string) AuthoredSubscriptionAdmission {
+	if source == nil || !node.Valid() {
+		return AuthoredSubscriptionAdmission{}
 	}
-	if source != nil {
-		if owner, ok := source.NodeContractSource(nodeID); ok {
-			request.FlowID = owner.FlowID
-			request.PackageKey = owner.PackageKey
+	flowPath := ""
+	localEvents := map[string]struct{}{}
+	var inputEvents []string
+	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
+		flowPath = scope.Path
+		localEvents, inputEvents = authoredSubscriptionScopeEvents(scope)
+	} else if project, ok := executableNodeProjectScope(source, node); ok && node.FlowID() == "" {
+		for eventType := range project.Events {
+			if eventType = eventidentity.Normalize(eventType); eventType != "" {
+				localEvents[eventType] = struct{}{}
+			}
 		}
-		request.FlowPath = source.FlowPath(request.FlowID)
-		request.LocalEvents, request.InputEvents = authoredSubscriptionFlowEvents(source, request.FlowID)
 	}
-	return ClassifyAuthoredSubscription(source, request)
+	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
+		ConsumerKind: AuthoredSubscriptionConsumerNode,
+		ConsumerID:   node.Key(),
+		FlowID:       node.FlowID(),
+		FlowPath:     flowPath,
+		PackageKey:   node.PackageKey(),
+		LocalEvents:  localEvents,
+		InputEvents:  inputEvents,
+		Authored:     authored,
+	})
 }
 
 func ClassifyTimerSubscription(source Source, timerID, flowID, authored string) AuthoredSubscriptionAdmission {
@@ -304,30 +317,12 @@ type NodeSubscriptionHandlerResolution struct {
 	Matched         bool
 }
 
-// ResolveNodeSubscriptionHandler prevents raw handler maps from becoming a
-// second exact-subscription interpreter at execution time.
-func ResolveNodeSubscriptionHandler(source Source, nodeID, eventType string) NodeSubscriptionHandlerResolution {
-	if source == nil {
+func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentity.ExecutableNode, eventType string) NodeSubscriptionHandlerResolution {
+	if source == nil || !node.Valid() {
 		return NodeSubscriptionHandlerResolution{}
 	}
-	owner, ok := source.NodeContractSource(nodeID)
-	if !ok {
-		return NodeSubscriptionHandlerResolution{}
-	}
-	return ResolveFlowNodeSubscriptionHandler(source, owner.FlowID, nodeID, eventType)
-}
-
-// ResolveFlowNodeSubscriptionHandler resolves one concrete event against the
-// exact typed declaration owner. The explicit flow owner prevents duplicate
-// node IDs in different scopes from becoming implicit routing authority.
-func ResolveFlowNodeSubscriptionHandler(source Source, flowID, nodeID, eventType string) NodeSubscriptionHandlerResolution {
-	if source == nil {
-		return NodeSubscriptionHandlerResolution{}
-	}
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
-	handlers, packageKey, ok := flowNodeEventHandlers(source, flowID, nodeID)
-	if !ok {
+	handlers := source.ExecutableNodeEventHandlers(node)
+	if len(handlers) == 0 {
 		return NodeSubscriptionHandlerResolution{}
 	}
 	keys := make([]string, 0, len(handlers))
@@ -342,118 +337,35 @@ func ResolveFlowNodeSubscriptionHandler(source Source, flowID, nodeID, eventType
 	exact := make([]handlerCandidate, 0, len(keys))
 	patterns := make([]handlerCandidate, 0, len(keys))
 	for _, key := range keys {
-		localEvents, inputEvents := authoredSubscriptionFlowEvents(source, flowID)
-		admission := ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
-			ConsumerKind: AuthoredSubscriptionConsumerNode,
-			ConsumerID:   nodeID,
-			FlowID:       flowID,
-			FlowPath:     source.FlowPath(flowID),
-			PackageKey:   packageKey,
-			LocalEvents:  localEvents,
-			InputEvents:  inputEvents,
-			Authored:     key,
-		})
+		admission := ClassifyExecutableNodeSubscription(source, node, key)
 		if !admission.Admitted() {
 			continue
 		}
 		candidate := handlerCandidate{key: key, admission: admission}
 		if admission.Pattern() {
 			patterns = append(patterns, candidate)
-			continue
+		} else {
+			exact = append(exact, candidate)
 		}
-		exact = append(exact, candidate)
 	}
-	candidates := append(exact, patterns...)
-	flowPath := source.FlowPath(flowID)
-	inputEvents := source.FlowInputEvents(flowID)
-	for _, candidate := range candidates {
-		key := candidate.key
+	flowPath := ""
+	var inputEvents []string
+	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
+		flowPath = scope.Path
+		inputEvents = append([]string(nil), scope.InputEvents...)
+	}
+	for _, candidate := range append(exact, patterns...) {
 		admission := candidate.admission
-		localized := eventidentity.Normalize(admission.LocalEvent())
-		if eventidentity.Normalize(eventType) != localized && !admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {
+		if eventidentity.Normalize(eventType) != eventidentity.Normalize(admission.LocalEvent()) &&
+			!admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {
 			continue
 		}
 		return NodeSubscriptionHandlerResolution{
-			Handler:         handlers[key],
-			HandlerEventKey: strings.TrimSpace(key),
-			Admission:       admission,
-			Matched:         true,
+			Handler: handlers[candidate.key], HandlerEventKey: strings.TrimSpace(candidate.key),
+			Admission: admission, Matched: true,
 		}
 	}
 	return NodeSubscriptionHandlerResolution{}
-}
-
-func flowNodeEventHandlers(source Source, flowID, nodeID string) (map[string]runtimecontracts.SystemNodeEventHandler, string, bool) {
-	node, packageKey, ok := ResolveFlowNodeDeclaration(source, flowID, nodeID)
-	if !ok {
-		return nil, "", false
-	}
-	handlers := make(map[string]runtimecontracts.SystemNodeEventHandler, len(node.EventHandlers))
-	for eventType, handler := range node.EventHandlers {
-		if eventType = eventidentity.Normalize(eventType); eventType != "" {
-			if bundle, ok := Bundle(source); ok && bundle != nil {
-				handler = bundle.ExternalizeNodeHandlerForFlow(flowID, handler)
-			}
-			handlers[eventType] = handler
-		}
-	}
-	return handlers, packageKey, true
-}
-
-// ResolveFlowNodeDeclaration returns the node from one exact flow scope. It
-// does not fall back to a same-named node in another flow.
-func ResolveFlowNodeDeclaration(source Source, flowID, nodeID string) (runtimecontracts.SystemNodeContract, string, bool) {
-	if source == nil {
-		return runtimecontracts.SystemNodeContract{}, "", false
-	}
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
-	if scope, ok := source.FlowScopeByID(flowID); ok {
-		for key, node := range scope.Nodes {
-			if strings.TrimSpace(key) == nodeID || strings.TrimSpace(node.ID) == nodeID {
-				return node, strings.TrimSpace(scope.PackageKey), true
-			}
-		}
-	}
-	var projectNode runtimecontracts.SystemNodeContract
-	projectPackage := ""
-	projectMatches := 0
-	for _, project := range source.ProjectScopes() {
-		ownerFlowID := strings.TrimSpace(project.OwningFlowID)
-		if ownerFlowID == "" {
-			ownerFlowID = strings.TrimSpace(source.WorkflowName())
-		}
-		if ownerFlowID != flowID {
-			continue
-		}
-		for key, node := range project.Nodes {
-			if strings.TrimSpace(key) != nodeID && strings.TrimSpace(node.ID) != nodeID {
-				continue
-			}
-			projectNode = node
-			projectPackage = strings.TrimSpace(project.Key)
-			projectMatches++
-		}
-	}
-	if projectMatches == 1 {
-		return projectNode, projectPackage, true
-	}
-	if projectMatches > 1 {
-		return runtimecontracts.SystemNodeContract{}, "", false
-	}
-	if flowID != "" && flowID != strings.TrimSpace(source.WorkflowName()) {
-		return runtimecontracts.SystemNodeContract{}, "", false
-	}
-	bundle, ok := Bundle(source)
-	if !ok || bundle == nil {
-		return runtimecontracts.SystemNodeContract{}, "", false
-	}
-	for key, node := range bundle.Nodes {
-		if strings.TrimSpace(key) == nodeID || strings.TrimSpace(node.ID) == nodeID {
-			return node, "", true
-		}
-	}
-	return runtimecontracts.SystemNodeContract{}, "", false
 }
 
 func failedAuthoredSubscription(result AuthoredSubscriptionAdmission, failure AuthoredSubscriptionFailure, message string) AuthoredSubscriptionAdmission {

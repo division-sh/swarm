@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
@@ -503,7 +504,9 @@ validation-orchestrator:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "scoring/vertical.shortlisted")
+	node := identitytest.FlowNode(t, "validation", "validation-orchestrator")
+	handler, ok := bundle.Semantics.NodeHandlers[node.Key()]["vertical.shortlisted"]
+	handler = bundle.ExternalizeExecutableNodeHandler(node, handler)
 	if !ok {
 		t.Fatal("expected cross-flow qualified input event to resolve to local handler")
 	}
@@ -611,7 +614,9 @@ validation-orchestrator:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "scoring/vertical.shortlisted")
+	node := identitytest.FlowNode(t, "validation", "validation-orchestrator")
+	handler, ok := bundle.Semantics.NodeHandlers[node.Key()]["vertical.shortlisted"]
+	handler = bundle.ExternalizeExecutableNodeHandler(node, handler)
 	if !ok {
 		t.Fatal("expected cross-flow qualified input event to resolve to local handler")
 	}

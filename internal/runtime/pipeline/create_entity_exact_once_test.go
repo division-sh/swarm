@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -51,7 +52,8 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
 
-			result, err := pc.executeNodeContractHandler(ctx, "w-node", exactOnceCreateEntityHandler(), workflowTriggerContext{
+			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
+			result, err := pc.executeNodeContractHandler(ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
 				Event:           evt,
 				HandlerEventKey: "thing.created",
 				State: WorkflowState{
@@ -146,7 +148,8 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
-			route := seedExactOnceEventDelivery(t, pc, ctx, evt, "w-node")
+			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
+			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 
 			handled, err := pc.dispatchWorkflowNodeEventResult(deliveryCtx, evt)
@@ -170,8 +173,8 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			if got := mailbox.calls; got != 1 {
 				t.Fatalf("mailbox materialization calls after duplicate dispatch = %d, want 1", got)
 			}
-			assertDeliveryOutcomeCount(t, pc.workflowStore, ctx, eventID, "w-node", 1)
-			assertDeliveryStatusCount(t, pc.workflowStore, ctx, eventID, "w-node", "delivered", 1)
+			assertDeliveryOutcomeCount(t, pc.workflowStore, ctx, eventID, node.Key(), 1)
+			assertDeliveryStatusCount(t, pc.workflowStore, ctx, eventID, node.Key(), "delivered", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
 			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
 		})
@@ -197,6 +200,7 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 	}
 	bus := &recordingPipelineBus{}
 	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
+	node := pipelineSourceNode(t, source, "validation", "w-node")
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Persistence:         workflowPersistenceForTest(store),
 		DeliveryStore:       deliveryStore,
@@ -211,7 +215,7 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 				{Name: "new"},
 				{Name: "done", Terminal: true},
 			}, []WorkflowTransition{
-				{Name: "complete", From: []WorkflowStateID{"new"}, To: "done", Trigger: "thing.created", Node: "w-node"},
+				{Name: "complete", From: []WorkflowStateID{"new"}, To: "done", Trigger: "thing.created", Node: node},
 			}),
 		},
 	})
@@ -263,7 +267,7 @@ func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	return ctx
 }
 
-func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx context.Context, evt events.Event, nodeID string) events.DeliveryRoute {
+func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx context.Context, evt events.Event, node runtimeidentity.ExecutableNode) events.DeliveryRoute {
 	t.Helper()
 	store := pc.workflowStore
 	seedExactOnceEvent(t, store, ctx, evt)
@@ -272,7 +276,10 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 		owner = newPipelineTestDeliveryOwner(t, store.testDB(), store.isSQLite())
 		store.deliveryStore = owner
 	}
-	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
+	flowID := node.FlowID()
+	if flowID == "" {
+		flowID = pc.SemanticSource().WorkflowName()
+	}
 	flowInstance := actionResultFlowPath(pc.SemanticSource(), flowID)
 	if concrete := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); actionResultFlowInstanceBelongsToFlow(pc.SemanticSource(), flowID, concrete) {
 		flowInstance = concrete
@@ -293,7 +300,7 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 	} else {
 		targetOwner = events.MustExistingEntityTarget(target)
 	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: targetOwner}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: targetOwner}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("seed exact node delivery: %v", err)
 	}

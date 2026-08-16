@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -19,6 +20,7 @@ func checkConfigFromPayloadAlignment(c *checkerContext) []Finding {
 }
 
 type payloadFieldCoverageSite struct {
+	Node         runtimeidentity.ExecutableNode
 	FlowID       string
 	NodeID       string
 	EventType    string
@@ -31,9 +33,14 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		return c.conditionPolicyFindings
 	}
 	c.conditionPolicyLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		resolvedPolicy := policyValueMap(c.source.ResolvedPolicyForNode(nodeID))
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		nodeID := node.Key()
+		resolvedPolicy := policyValueMap(c.source.ResolvedPolicyForExecutableNode(node))
+		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			for _, cond := range handlerConditions(handler) {
 				for _, ref := range policyReferences(cond.Expression) {
@@ -58,10 +65,15 @@ func (c *checkerContext) conditionPayloadAlignment() []Finding {
 		return c.conditionPayloadFindings
 	}
 	c.conditionPayloadLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		nodeID := node.Key()
+		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
-			payloadFields, eventExists := eventPayloadFieldsForExistingEvent(c.source, eventType)
+			payloadFields, eventExists := executableNodeEventPayloadFields(c.source, node, eventType)
 			if !eventExists {
 				continue
 			}
@@ -118,7 +130,7 @@ func (c *checkerContext) payloadFieldCoverage() []Finding {
 		if sourceEvent == "" || derivedAccumulationSource(sourceEvent) {
 			continue
 		}
-		sourceFields, sourceEventExists := eventPayloadFieldsForExistingEvent(c.source, sourceEvent)
+		sourceFields, sourceEventExists := executableNodeEventPayloadFields(c.source, site.Node, sourceEvent)
 		if !sourceEventExists {
 			continue
 		}
@@ -144,22 +156,21 @@ func payloadFieldCoverageSites(source semanticview.Source) []payloadFieldCoverag
 		return nil
 	}
 	out := make([]payloadFieldCoverageSite, 0)
-	for _, nodeID := range sortedNodeIDs(source) {
-		node, ok := source.NodeEntries()[nodeID]
-		if !ok {
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		flowID := ""
-		if sourceRef, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceRef.FlowID)
-		}
-		for eventType, handler := range node.EventHandlers {
+		nodeID := node.Key()
+		flowID := node.FlowID()
+		for eventType, handler := range source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			add := func(scope string, accumulation runtimecontracts.WorkflowDataAccumulation) {
 				if !accumulation.HasWrites() {
 					return
 				}
 				out = append(out, payloadFieldCoverageSite{
+					Node:         node,
 					FlowID:       flowID,
 					NodeID:       strings.TrimSpace(nodeID),
 					EventType:    eventType,
@@ -365,6 +376,19 @@ func eventPayloadFieldsForExistingEvent(source semanticview.Source, eventType st
 		return nil, false
 	}
 	proof := semanticview.ResolveFlowEventProof(source, "", strings.TrimSpace(eventType))
+	if !proof.HasSchema {
+		return nil, false
+	}
+	out := map[string]struct{}{}
+	collectPayloadFields("", proof.Entry.Payload.Properties, out)
+	return out, true
+}
+
+func executableNodeEventPayloadFields(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) (map[string]struct{}, bool) {
+	if source == nil || !node.Valid() {
+		return nil, false
+	}
+	proof := semanticview.ResolveExecutableNodeEventProof(source, node, strings.TrimSpace(eventType))
 	if !proof.HasSchema {
 		return nil, false
 	}

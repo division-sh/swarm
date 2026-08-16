@@ -25,7 +25,7 @@ func StateStoreSchemaPlans(bundle *runtimecontracts.WorkflowContractBundle) (Sta
 	if err != nil {
 		return StateStoreSchemaPlanSet{}, fmt.Errorf("Platform-owned tables: %w", err)
 	}
-	statePlans, err := store.GenerateNodeStateTableDDLs(bundle.NodeEntries())
+	statePlans, err := store.GenerateNodeStateTableDDLs(bundle.ScopedNodeRecords())
 	if err != nil {
 		return StateStoreSchemaPlanSet{}, fmt.Errorf("state_schema tables: %w", err)
 	}

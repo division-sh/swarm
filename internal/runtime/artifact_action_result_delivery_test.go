@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -46,6 +47,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			repoNodeID := artifactActionResultNodeID(t)
 			resultEventType := "repo-scaffold/inst-1/" + tc.resultEventName
 			bundle := loadRuntimeTempBundle(t, artifactActionResultDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
@@ -78,7 +80,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				FlowRoutes:          bus,
 				ArtifactRoot:        t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
-					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
+					if strings.TrimSpace(nodeID) == repoNodeID && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
 						case resultHandlerStarted <- evt.ID():
 						default:
@@ -133,12 +135,12 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				FROM event_deliveries
 				WHERE event_id = $1::uuid
 				  AND subscriber_type = 'node'
-				  AND subscriber_id = 'repo-scaffold-node'
+				  AND subscriber_id = $3
 				  AND status = 'delivered'
 				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1"))
-			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, "repo-scaffold-node")
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1"), repoNodeID)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
 		})
 	}
 }
@@ -197,6 +199,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			repoNodeID := artifactActionResultNodeID(t)
 			resultEventType := "repo-scaffold/" + tc.resultEventName
 			bundle := loadRuntimeTempBundle(t, artifactActionResultStaticDeliveryFixtureFiles())
 			source := semanticview.Wrap(bundle)
@@ -229,7 +232,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				FlowRoutes:          bus,
 				ArtifactRoot:        t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
-					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
+					if strings.TrimSpace(nodeID) == repoNodeID && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
 						case resultHandlerStarted <- evt.ID():
 						default:
@@ -282,17 +285,22 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				FROM event_deliveries
 				WHERE event_id = $1::uuid
 				  AND subscriber_type = 'node'
-				  AND subscriber_id = 'repo-scaffold-node'
+				  AND subscriber_id = $3
 				  AND status = 'delivered'
 				  AND settled_at IS NOT NULL
 				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath))
-			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, "repo-scaffold-node")
+			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath), repoNodeID)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
 		})
 	}
 }
 
 const artifactActionResultEntityID = "22222222-2222-4222-8222-222222222222"
+
+func artifactActionResultNodeID(t testing.TB) string {
+	t.Helper()
+	return identitytest.FlowNode(t, "repo-scaffold", "repo-scaffold-node").Key()
+}
 
 func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	enteredAt := time.Now().UTC()
@@ -372,9 +380,9 @@ func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *
 			FROM event_deliveries
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
-			  AND subscriber_id = 'repo-scaffold-node'
+			  AND subscriber_id = $3
 			  AND delivery_target_route @> $2::jsonb
-		`, eventID, wantRoute).Scan(&got); err != nil {
+		`, eventID, wantRoute, artifactActionResultNodeID(t)).Scan(&got); err != nil {
 			t.Fatalf("query result delivery route: %v", err)
 		}
 		if got == 1 {

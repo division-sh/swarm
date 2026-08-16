@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -13,9 +14,9 @@ import (
 
 type SingletonCoordinatorDemand struct {
 	FlowID        string
+	Node          runtimeidentity.ExecutableNode
 	SourceFile    string
 	Location      string
-	NodeID        string
 	AgentID       string
 	EventType     string
 	Kind          string
@@ -28,8 +29,8 @@ type SingletonCoordinatorDemand struct {
 
 func (d SingletonCoordinatorDemand) Detail() string {
 	parts := []string{"flow " + defaultFlowLabel(d.FlowID)}
-	if d.NodeID != "" {
-		parts = append(parts, "node "+d.NodeID)
+	if d.Node.Valid() {
+		parts = append(parts, "node "+d.Node.Key())
 	}
 	if d.AgentID != "" {
 		parts = append(parts, "agent "+d.AgentID)
@@ -103,7 +104,7 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 				return
 			}
 		}
-		key := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%t", d.FlowID, d.SourceFile, d.Location, d.NodeID, d.AgentID, d.EventType, d.Kind, d.Field, d.Target, d.WriteIndex, d.HasWriteIndex)
+		key := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%t", d.FlowID, d.SourceFile, d.Location, d.Node.Key(), d.AgentID, d.EventType, d.Kind, d.Field, d.Target, d.WriteIndex, d.HasWriteIndex)
 		if _, duplicate := seen[key]; duplicate {
 			return
 		}
@@ -120,14 +121,14 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 			continue
 		}
 		add(SingletonCoordinatorDemand{
-			FlowID: ownerFlowID, SourceFile: target.SourceFile, Location: target.NodeID,
-			NodeID: target.NodeID, EventType: target.EventType, Kind: target.Kind,
+			FlowID: ownerFlowID, Node: target.Node, SourceFile: target.SourceFile, Location: target.nodeID(),
+			EventType: target.EventType, Kind: target.Kind,
 			Field: rootField, Target: target.Target, WriteIndex: target.WriteIndex, HasWriteIndex: target.HasWriteIndex,
 		}, true)
 	}
 
 	for _, ref := range wave1ContainedStateOperations(source) {
-		contract, ok := entityruntime.ResolveForFlow(source, ref.FlowID)
+		contract, ok := entityruntime.ResolveForFlow(source, ref.flowID())
 		if !ok {
 			continue
 		}
@@ -136,22 +137,23 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 			continue
 		}
 		add(SingletonCoordinatorDemand{
-			FlowID: ref.FlowID, SourceFile: ref.SourceFile, Location: ref.NodeID,
-			NodeID: ref.NodeID, EventType: ref.EventType, Kind: "contained_operation." + ref.Kind,
+			FlowID: ref.flowID(), Node: ref.Node, SourceFile: ref.SourceFile, Location: ref.nodeID(),
+			EventType: ref.EventType, Kind: "contained_operation." + ref.Kind,
 			Field: target.RootField, Target: ref.Write.Target(), Operation: string(ref.Write.Operation),
 			WriteIndex: ref.WriteIndex, HasWriteIndex: true,
 		}, true)
 	}
 
 	for _, record := range wave1ScopedNodeRecords(source) {
-		flowID := strings.TrimSpace(record.Source.FlowID)
-		nodeID := strings.TrimSpace(record.LogicalID)
+		node, _ := record.Identity()
+		flowID := node.FlowID()
+		nodeID := node.Key()
 		for eventType, handler := range record.Entry.EventHandlers {
-			for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(source, node, eventType, handler) {
 				for _, ref := range singletonDemandEntityRefs(source, flows, flowID, expr.Expression) {
 					add(SingletonCoordinatorDemand{
 						FlowID: ref.OwnerFlowID, SourceFile: record.Source.File, Location: nodeID,
-						NodeID: nodeID, EventType: eventType, Kind: "entity_read." + expr.Kind,
+						Node: node, EventType: eventType, Kind: "entity_read." + expr.Kind,
 						Field: ref.Field, Target: "entity." + ref.Ref,
 					}, true)
 				}
@@ -170,22 +172,17 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		}
 	}
 
-	nodeSources := map[string]runtimecontracts.ContractItemSource{}
-	for _, record := range wave1ScopedNodeRecords(source) {
-		key := strings.TrimSpace(record.Source.FlowID) + "\x00" + strings.TrimSpace(record.LogicalID)
-		nodeSources[key] = record.Source
-	}
 	for _, plan := range source.WorkflowJoins() {
-		flowID := strings.TrimSpace(plan.FlowID)
-		nodeID := strings.TrimSpace(plan.NodeID)
-		sourceRef := nodeSources[flowID+"\x00"+nodeID]
+		flowID := plan.Node.FlowID()
+		nodeID := plan.Node.Key()
+		sourceRef, _ := source.ExecutableNodeSource(plan.Node)
 		target := strings.TrimSpace(plan.Spec.ID)
 		if target == "" {
 			target = strings.TrimSpace(plan.Spec.Stage)
 		}
 		add(SingletonCoordinatorDemand{
-			FlowID: flowID, SourceFile: sourceRef.File, Location: nodeID,
-			NodeID: nodeID, EventType: strings.TrimSpace(plan.HandlerEvent), Kind: "workflow_join", Target: target,
+			FlowID: flowID, Node: plan.Node, SourceFile: sourceRef.File, Location: nodeID,
+			EventType: strings.TrimSpace(plan.HandlerEvent), Kind: "workflow_join", Target: target,
 		}, false)
 	}
 
@@ -217,8 +214,8 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 
 	sort.Slice(demands, func(i, j int) bool {
 		left, right := demands[i], demands[j]
-		return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", left.FlowID, left.SourceFile, left.NodeID, left.EventType, left.Kind, left.Target, left.WriteIndex) <
-			fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", right.FlowID, right.SourceFile, right.NodeID, right.EventType, right.Kind, right.Target, right.WriteIndex)
+		return fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", left.FlowID, left.SourceFile, left.Node.Key(), left.EventType, left.Kind, left.Target, left.WriteIndex) <
+			fmt.Sprintf("%s|%s|%s|%s|%s|%s|%06d", right.FlowID, right.SourceFile, right.Node.Key(), right.EventType, right.Kind, right.Target, right.WriteIndex)
 	})
 	return demands
 }

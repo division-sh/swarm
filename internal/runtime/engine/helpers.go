@@ -281,8 +281,8 @@ func nextChainDepth(current, max int) (int, error) {
 	return next, nil
 }
 
-func accumulatorBucketRef(nodeID identity.NodeID, eventType events.EventType) timeridentity.AccumulatorBucketRef {
-	return timeridentity.NewAccumulatorBucketRef(nodeID.String(), string(eventType))
+func accumulatorBucketRef(node identity.ExecutableNode, eventType events.EventType) timeridentity.AccumulatorBucketRef {
+	return timeridentity.NewAccumulatorBucketRef(node, string(eventType))
 }
 
 func handlerAccumulatorEventType(req ExecutionRequest) events.EventType {
@@ -294,7 +294,7 @@ func handlerAccumulatorEventType(req ExecutionRequest) events.EventType {
 }
 
 func handlerAccumulatorBucketRef(req ExecutionRequest) timeridentity.AccumulatorBucketRef {
-	return accumulatorBucketRef(req.NodeID, handlerAccumulatorEventType(req))
+	return accumulatorBucketRef(req.Node, handlerAccumulatorEventType(req))
 }
 
 func handlerAccumulatorBucketRefForSpec(req ExecutionRequest, base BaseContext, state ExecutionState, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, error) {
@@ -304,17 +304,17 @@ func handlerAccumulatorBucketRefForSpec(req ExecutionRequest, base BaseContext, 
 	}
 	value, ok := resolveContractPath(base, state, spec.WindowPath, spec.Window)
 	if !ok {
-		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q did not resolve for node %s event %s", spec.Window, req.NodeID.String(), string(handlerAccumulatorEventType(req)))
+		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q did not resolve for node %s event %s", spec.Window, req.Node.Key(), string(handlerAccumulatorEventType(req)))
 	}
 	window := strings.TrimSpace(fmt.Sprint(value))
 	if window == "" {
-		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q resolved empty for node %s event %s", spec.Window, req.NodeID.String(), string(handlerAccumulatorEventType(req)))
+		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q resolved empty for node %s event %s", spec.Window, req.Node.Key(), string(handlerAccumulatorEventType(req)))
 	}
-	return timeridentity.NewAccumulatorWindowBucketRef(bucket.NodeID, bucket.EventType, window), nil
+	return timeridentity.NewAccumulatorWindowBucketRef(bucket.Node, bucket.EventType, window), nil
 }
 
-func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType events.EventType) (*Accumulator, bool) {
-	return loadAccumulatorForBucket(state, accumulatorBucketRef(nodeID, eventType))
+func loadAccumulator(state StateSnapshot, node identity.ExecutableNode, eventType events.EventType) (*Accumulator, bool) {
+	return loadAccumulatorForBucket(state, accumulatorBucketRef(node, eventType))
 }
 
 func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.AccumulatorBucketRef) (*Accumulator, bool) {
@@ -322,7 +322,7 @@ func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.Accum
 	if !bucketRef.Valid() {
 		return nil, false
 	}
-	bucket, ok := state.StateBucket(bucketRef.NodeID)
+	bucket, ok := state.StateBucket(bucketRef.Node.Key())
 	if !ok {
 		return nil, false
 	}
@@ -346,8 +346,8 @@ func loadAccumulatorForBucket(state StateSnapshot, bucketRef timeridentity.Accum
 	return acc, true
 }
 
-func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType events.EventType, acc *Accumulator) {
-	storeAccumulatorForBucket(state, accumulatorBucketRef(nodeID, eventType), acc)
+func storeAccumulator(state *StateSnapshot, node identity.ExecutableNode, eventType events.EventType, acc *Accumulator) {
+	storeAccumulatorForBucket(state, accumulatorBucketRef(node, eventType), acc)
 }
 
 func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.AccumulatorBucketRef, acc *Accumulator) {
@@ -355,7 +355,7 @@ func storeAccumulatorForBucket(state *StateSnapshot, bucketRef timeridentity.Acc
 	if state == nil || acc == nil || !bucketRef.Valid() {
 		return
 	}
-	bucket := state.EnsureStateBucket(bucketRef.NodeID)
+	bucket := state.EnsureStateBucket(bucketRef.Node.Key())
 	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
 	received := map[string]any{}
 	keys := make([]string, 0, len(acc.Received))

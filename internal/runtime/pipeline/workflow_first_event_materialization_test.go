@@ -74,7 +74,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			engine := newCoordinatorHandlerExecutionEngine(pc, "acceptor")
+			engine := newCoordinatorHandlerExecutionEngine(pc, pipelineSourceNode(t, pc.SemanticSource(), "first-event-transition", "acceptor"))
 			outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
 			}, evt, "request.accepted")

@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -129,7 +130,8 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		}
 		dumpFinalFlowInstanceAuthoringRuntimeProofState(t, ctx, db, evt.ID())
 	})
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID)
+	templateNodeID := identitytest.FlowNode(t, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateNodeID).Key()
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, evt.ID(), templateNodeID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state
 		WHERE flow_instance LIKE 'account/%'
@@ -149,7 +151,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		  AND subscriber_id = $2
 		  AND status = 'delivered'
 		  AND delivery_target_route @> $3::jsonb
-	`, 1, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t, events.RouteIdentity{
+	`, 1, evt.ID(), templateNodeID, finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t, events.RouteIdentity{
 		FlowID:       finalflowinstanceauthoring.TemplateFlowID,
 		FlowInstance: flowInstance,
 		EntityID:     entityID,

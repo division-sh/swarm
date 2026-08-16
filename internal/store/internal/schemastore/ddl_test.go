@@ -348,8 +348,9 @@ func TestGeneratePlatformTableDDLs_OrdersAgentsBeforeIdentityDependents(t *testi
 }
 
 func TestGenerateNodeStateTableDDLs(t *testing.T) {
-	nodes := map[string]runtimecontracts.SystemNodeContract{
-		"processing-node": {
+	nodes := []runtimecontracts.ScopedNodeRecord{{
+		LogicalID: "processing-node",
+		Entry: runtimecontracts.SystemNodeContract{
 			StateTable: "processing_node_state",
 			StateSchema: runtimecontracts.NodeStateSchema{
 				Fields: []runtimecontracts.NodeStateField{
@@ -360,7 +361,8 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 				},
 			},
 		},
-	}
+		Source: runtimecontracts.ContractItemSource{PackageKey: ".", Layer: "project"},
+	}}
 
 	plans, err := GenerateNodeStateTableDDLs(nodes)
 	if err != nil {
@@ -385,8 +387,9 @@ func TestGenerateNodeStateTableDDLs(t *testing.T) {
 }
 
 func TestGenerateNodeStateTableDDLs_RejectsPseudoTypes(t *testing.T) {
-	nodes := map[string]runtimecontracts.SystemNodeContract{
-		"processing-node": {
+	nodes := []runtimecontracts.ScopedNodeRecord{{
+		LogicalID: "processing-node",
+		Entry: runtimecontracts.SystemNodeContract{
 			StateTable: "processing_node_state",
 			StateSchema: runtimecontracts.NodeStateSchema{
 				Fields: []runtimecontracts.NodeStateField{
@@ -394,7 +397,8 @@ func TestGenerateNodeStateTableDDLs_RejectsPseudoTypes(t *testing.T) {
 				},
 			},
 		},
-	}
+		Source: runtimecontracts.ContractItemSource{PackageKey: ".", Layer: "project"},
+	}}
 
 	_, err := GenerateNodeStateTableDDLs(nodes)
 	if err == nil || !strings.Contains(err.Error(), "not canonical") {

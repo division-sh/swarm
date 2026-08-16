@@ -22,6 +22,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -1117,7 +1118,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			events.EventEnvelope{EntityID: runID},
 			time.Now().UTC())
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, nodeOnlyEvent, []events.DeliveryRoute{{
-			Recipient: events.MustNodeDeliveryRecipient("workflow-runtime"),
+			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "workflow-runtime")),
 			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 				FlowID: "workflow-runtime", FlowInstance: runID,
 			}),
@@ -1139,11 +1140,12 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 		if count := countAPIIdempotencyRows(t, db); count != 0 {
 			t.Fatalf("api_idempotency rows after node-only replay = %d, want 0", count)
 		}
+		workflowRuntimeNodeID := identitytest.RootNode(t, "workflow-runtime").Key()
 		var status string
 		if err := db.QueryRowContext(ctx, `
 			SELECT status FROM event_deliveries
-			WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-		`, eventID).Scan(&status); err != nil {
+			WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+		`, eventID, workflowRuntimeNodeID).Scan(&status); err != nil {
 			t.Fatalf("load node-only delivery status: %v", err)
 		}
 		if status != string(runtimedelivery.StatusPending) {

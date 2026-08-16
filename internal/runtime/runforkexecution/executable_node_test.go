@@ -1,0 +1,43 @@
+package runforkexecution
+
+import (
+	"testing"
+
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+func mustRunForkRootNode(nodeID string) runtimeidentity.ExecutableNode {
+	return mustRunForkPackageNode(runtimeidentity.RootPackageKey, "", nodeID)
+}
+
+func mustRunForkNode(flowID, nodeID string) runtimeidentity.ExecutableNode {
+	return mustRunForkPackageNode(runtimeidentity.RootPackageKey, flowID, nodeID)
+}
+
+func mustRunForkPackageNode(packageKey, flowID, nodeID string) runtimeidentity.ExecutableNode {
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(packageKey, flowID, nodeID)
+	if err != nil {
+		panic(err)
+	}
+	return node
+}
+
+func runForkSourceNode(t testing.TB, source semanticview.Source, nodeID string) runtimeidentity.ExecutableNode {
+	t.Helper()
+	var match runtimeidentity.ExecutableNode
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil || node.NodeID() != nodeID {
+			continue
+		}
+		if !match.Empty() {
+			t.Fatalf("selected-contract node %q is package/flow ambiguous", nodeID)
+		}
+		match = node
+	}
+	if match.Empty() {
+		t.Fatalf("selected-contract node %q is missing", nodeID)
+	}
+	return match
+}

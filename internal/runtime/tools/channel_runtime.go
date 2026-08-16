@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -118,8 +119,8 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		RetryBackoff:     defaults.Backoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
 		EntityID:         identity.NormalizeEntityID(entityID),
-		NodeID:           identity.NormalizeNodeID(actor.ID),
-		FlowID:           identity.NormalizeFlowID(flowID),
+		Owner:            activityidentity.MustAgentOwner(actor.ID),
+		ExecutionFlowID:  identity.NormalizeFlowID(flowID),
 		FlowInstance:     flowInstance,
 		HandlerEventKey:  strings.TrimSpace(toolID),
 		SourceEventID:    inbound.ID(),

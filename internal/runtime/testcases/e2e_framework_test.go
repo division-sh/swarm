@@ -3,6 +3,7 @@ package testcases
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -18,10 +19,11 @@ func TestGenericBundle_E2EFrameworkShape(t *testing.T) {
 	if !hasAll(bundle.FlowInputEvents("intake"), "item.created") {
 		t.Fatalf("expected intake input events, got %v", bundle.FlowInputEvents("intake"))
 	}
-	if _, ok := bundle.NodeEventHandler("processing-node", "item.review_requested"); !ok {
+	source := semanticview.Wrap(bundle)
+	if _, ok := source.ExecutableNodeEventHandler(genericExecutableNode(t, bundle, "processing-node"), "item.review_requested"); !ok {
 		t.Fatal("expected processing handler to support rule-outcome assertions")
 	}
-	if _, ok := bundle.NodeEventHandler("delivery-node", "item.completed"); !ok {
+	if _, ok := source.ExecutableNodeEventHandler(genericExecutableNode(t, bundle, "delivery-node"), "item.completed"); !ok {
 		t.Fatal("expected delivery handler to support publish-and-wait style assertions")
 	}
 }

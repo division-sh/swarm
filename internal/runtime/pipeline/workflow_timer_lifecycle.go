@@ -33,7 +33,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		return true, false, err
 	}
 	if !ok {
-		return true, false, fmt.Errorf("workflow timer declaration %s is unavailable", activation.Ref.Declaration)
+		return true, false, fmt.Errorf("workflow timer declaration %s is unavailable", activation.Ref.DeclarationKey)
 	}
 	if err := validateWorkflowTimerTopology(source, timer); err != nil {
 		return true, false, err
@@ -211,7 +211,7 @@ func workflowTimerConnectedToLoop(source semanticview.Source, timer runtimecontr
 		return false
 	}
 	for _, plan := range semanticview.WorkflowLoops(source) {
-		if !loopFlowIDMatches(source, plan.FlowID, timer.FlowID) {
+		if !loopFlowIDMatches(source, plan.FlowID, timer.OwningFlowID()) {
 			continue
 		}
 		for _, stage := range plan.RegionStages {
@@ -237,7 +237,7 @@ func workflowTimerLeavesBoundedLoop(source semanticview.Source, timer runtimecon
 		return false
 	}
 	for _, plan := range semanticview.WorkflowLoops(source) {
-		if !loopFlowIDMatches(source, plan.FlowID, timer.FlowID) || !workflowTimerConnectedToPlan(timer, plan) {
+		if !loopFlowIDMatches(source, plan.FlowID, timer.OwningFlowID()) || !workflowTimerConnectedToPlan(timer, plan) {
 			continue
 		}
 		if !containsLoopStage(plan.RegionStages, target) {

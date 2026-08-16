@@ -15,6 +15,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -63,6 +64,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := mailboxWriteSupportedSurfaceBundle(t)
 			source := semanticview.Wrap(bundle)
+			reviewerNodeID := identitytest.RootNode(t, "reviewer").Key()
 			fact := bundleSourceFactForTestBundle(t, bundle)
 			handler, db, bus, probe := tc.setup(t, ctx, source, fact)
 
@@ -90,7 +92,7 @@ func TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends(t *
 				switch subscriberID {
 				case "workflow-runtime":
 					seenWorkflowRuntime = subscriberType == "agent" && status == "pending"
-				case "reviewer":
+				case reviewerNodeID:
 					seenReviewer = subscriberType == "node" && (status == "pending" || status == "in_progress" || status == "delivered")
 				}
 			}
@@ -179,7 +181,7 @@ func TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud(t *testin
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
-	waitForSQLiteNodeMaterializerFailure(t, storetest.DatabaseForTest(sqliteStore), probe, eventID, "reviewer")
+	waitForSQLiteNodeMaterializerFailure(t, storetest.DatabaseForTest(sqliteStore), probe, eventID, identitytest.RootNode(t, "reviewer").Key())
 }
 
 func newMailboxWriteSupportedSurfaceHandler(

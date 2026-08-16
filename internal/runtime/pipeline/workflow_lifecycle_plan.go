@@ -393,9 +393,9 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 	}
 	activeByDeclaration := make(map[string]WorkflowTimerActivation, len(active))
 	for _, activation := range active {
-		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.Declaration)
+		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.DeclarationKey)
 		if !found {
-			return fmt.Errorf("active workflow timer %s references unknown declaration %s", activation.Ref.ActivationID, activation.Ref.Declaration)
+			return fmt.Errorf("active workflow timer %s references unknown declaration %s", activation.Ref.ActivationID, activation.Ref.DeclarationKey)
 		}
 		if err := validateWorkflowTimerTopology(source, declaration); err != nil {
 			return err
@@ -405,7 +405,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 			plan.RequestCompletionCandidate = true
 			continue
 		}
-		activeByDeclaration[workflowTimerGenerationKey(activation.Ref.Declaration, activation.Ref.Generation)] = activation
+		activeByDeclaration[workflowTimerGenerationKey(activation.Ref.DeclarationKey, activation.Ref.Generation)] = activation
 	}
 
 	generationStage := firstNonEmptyString(nextState, currentState, instance.CurrentState)
@@ -423,7 +423,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 		if err := cause.validateForActivation(); err != nil {
 			return err
 		}
-		interval := workflowTimerDuration(declaration, workflowTimerPolicy(source, declaration.FlowID))
+		interval := workflowTimerDuration(declaration, workflowTimerPolicy(source, declaration.OwningFlowID()))
 		if interval <= 0 {
 			return fmt.Errorf("workflow timer %s has no executable positive delay", declaration.ID)
 		}
@@ -431,7 +431,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 		if err != nil {
 			return err
 		}
-		key := workflowTimerGenerationKey(declaration.ID, generation)
+		key := workflowTimerGenerationKey(declaration.SemanticKey(), generation)
 		if existing, found := activeByDeclaration[key]; found {
 			if existing.Ref != activation.Ref {
 				return fmt.Errorf("active workflow timer %s conflicts with the exact causal activation %s", existing.Ref.ActivationID, activation.Ref.ActivationID)
@@ -500,17 +500,17 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 			return err
 		}
 		key := joinruntime.ActivationKeyForGeneration(joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
-		if _, found, err := joinruntime.Load(carrier.StateBuckets, joinPlan.NodeID, key); err != nil {
+		if _, found, err := joinruntime.Load(carrier.StateBuckets, joinPlan.Node, key); err != nil {
 			return fmt.Errorf("load join %s: %w", key, err)
 		} else if found {
 			continue
 		}
-		delay := workflowTimerRenderedDelay(joinPlan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.FlowID))
+		delay := workflowTimerRenderedDelay(joinPlan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), joinPlan.Node.FlowID()))
 		interval, ok := timeridentity.ParseDelayDuration(delay)
 		if !ok {
 			return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", joinPlan.Spec.EffectiveID(), joinPlan.Spec.Timeout.After)
 		}
-		ref, err := timeridentity.NewJoinRefForGeneration(joinPlan.FlowID, joinPlan.NodeID, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
+		ref, err := timeridentity.NewJoinRefForGeneration(joinPlan.Node, joinPlan.HandlerEvent, joinPlan.Spec.Stage, joinPlan.Spec.EffectiveID(), window, generation)
 		if err != nil {
 			return fmt.Errorf("arm join %s identity: %w", joinPlan.Spec.EffectiveID(), err)
 		}

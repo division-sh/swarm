@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactivityidentity "github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -1936,23 +1937,23 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		panic(err)
 	}
 	return runtimeengine.ActivityIntent{
-		ActivityID:    "scanner_source_scrape",
-		Tool:          "source_scrape",
-		Input:         mustActivityInput(map[string]any{"url": inputURL}),
-		EffectClass:   runtimecontracts.ActivityEffectClassReadOnly,
-		SuccessEvent:  "research.scanner_source_scrape.succeeded",
-		FailureEvent:  "research.scanner_source_scrape.failed",
-		EntityID:      identity.NormalizeEntityID("entity-1"),
-		NodeID:        identity.NormalizeNodeID("scanner"),
-		FlowID:        identity.NormalizeFlowID("research"),
-		FlowInstance:  "research/entity-1",
-		SourceEventID: "evt-1",
-		SourceRunID:   "run-1",
-		SourceTaskID:  "task-1",
-		ChainDepth:    4,
-		Attempt:       1,
-		ExecutionMode: executionmode.Live,
-		RoutingSource: routingSource,
+		ActivityID:      "scanner_source_scrape",
+		Tool:            "source_scrape",
+		Input:           mustActivityInput(map[string]any{"url": inputURL}),
+		EffectClass:     runtimecontracts.ActivityEffectClassReadOnly,
+		SuccessEvent:    "research.scanner_source_scrape.succeeded",
+		FailureEvent:    "research.scanner_source_scrape.failed",
+		EntityID:        identity.NormalizeEntityID("entity-1"),
+		Owner:           runtimeactivityidentity.MustNodeOwner(mustPipelineNode("research", "scanner")),
+		ExecutionFlowID: identity.NormalizeFlowID("research"),
+		FlowInstance:    "research/entity-1",
+		SourceEventID:   "evt-1",
+		SourceRunID:     "run-1",
+		SourceTaskID:    "task-1",
+		ChainDepth:      4,
+		Attempt:         1,
+		ExecutionMode:   executionmode.Live,
+		RoutingSource:   routingSource,
 	}.Normalized()
 }
 

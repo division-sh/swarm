@@ -27,7 +27,7 @@ func (e *Executor) ExecuteWithPersistedComputeModuleReplayEvidence(ctx context.C
 	if eventID == "" {
 		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires request event id")
 	}
-	nodeID := strings.TrimSpace(string(req.NodeID))
+	nodeID := req.Node.Key()
 	if nodeID == "" {
 		return ExecutionResult{}, fmt.Errorf("compute_module persisted replay requires request node id")
 	}

@@ -119,8 +119,8 @@ func TestExactDuplicateReuseRejectsCorruptPreparedAggregateBeforeRoutePlanDeriva
 		t.Fatalf("resolve exact duplicate fixture target: %v", err)
 	}
 	routes := []events.DeliveryRoute{
-		{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustExistingEntityTarget(target)},
-		{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.MustMaterializingEntityTarget(target)},
+		{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator")), Target: events.MustExistingEntityTarget(target)},
+		{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "validator")), Target: events.MustMaterializingEntityTarget(target)},
 	}
 	store.events[evt.ID()] = evt
 	store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)

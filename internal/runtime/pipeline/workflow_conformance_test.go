@@ -37,29 +37,29 @@ func TestWorkflowRuntime_NodesOwnRegisteredPolicies(t *testing.T) {
 	executors := pc.workflowNodeExecutors()
 	executorByID := make(map[string]WorkflowNodeExecutor, len(executors))
 	for _, executor := range executors {
-		executorByID[executor.NodeID()] = executor
+		executorByID[executor.ExecutableNode().Key()] = executor
 	}
 	for _, node := range nodes {
-		executor, ok := executorByID[node.ID]
+		executor, ok := executorByID[node.Node.Key()]
 		if !ok {
-			if node.ID == "build-orchestrator" {
+			if node.Node.NodeID() == "build-orchestrator" {
 				continue
 			}
-			t.Fatalf("missing executor for node %s", node.ID)
+			t.Fatalf("missing executor for node %s", node.Node.Key())
 		}
 		if len(executor.Subscriptions()) == 0 {
-			t.Fatalf("executor %s missing subscriptions", node.ID)
+			t.Fatalf("executor %s missing subscriptions", node.Node.Key())
 		}
 		subscriptions := make(map[string]struct{}, len(node.Subscriptions))
 		for _, sub := range node.Subscriptions {
 			subscriptions[string(sub)] = struct{}{}
 		}
 		if len(node.Policies) == 0 {
-			t.Fatalf("workflow node %s missing runtime policies", node.ID)
+			t.Fatalf("workflow node %s missing runtime policies", node.Node.Key())
 		}
 		for eventType := range node.Policies {
 			if _, ok := subscriptions[eventType]; !ok {
-				t.Fatalf("policy %s for node %s is not backed by a node subscription", eventType, node.ID)
+				t.Fatalf("policy %s for node %s is not backed by a node subscription", eventType, node.Node.Key())
 			}
 		}
 	}

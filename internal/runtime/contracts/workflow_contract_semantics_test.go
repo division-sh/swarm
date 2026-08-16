@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
@@ -137,7 +138,8 @@ func TestStreamAccumulatorDerivesNoIntrinsicTimeoutSubscriptionOrTransition(t *t
 	}
 
 	populateWorkflowSemantics(bundle)
-	if got := bundle.NodeRuntimeSubscriptions("collector"); !reflect.DeepEqual(got, []string{"item.arrived"}) {
+	collector := identitytest.RootNode(t, "collector")
+	if got := bundle.Semantics.EffectiveNodes[collector.Key()].RuntimeSubscriptions; !reflect.DeepEqual(got, []string{"item.arrived"}) {
 		t.Fatalf("stream accumulator subscriptions = %#v, want only authored arrival", got)
 	}
 	for _, transition := range bundle.WorkflowTransitions() {
@@ -205,7 +207,7 @@ func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T
 		if got, want := transition.From, []string{"awaiting_review"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("timer transition From = %#v, want %#v", got, want)
 		}
-		if transition.To != "expired" || transition.Trigger != "timer:awaiting_review.expired" || transition.Node != "runtime" {
+		if transition.To != "expired" || transition.Trigger != "timer:awaiting_review.expired" || transition.InternalOwner != "runtime" || transition.FlowID != "" {
 			t.Fatalf("timer transition = %#v, want runtime timed edge to expired", transition)
 		}
 	}
@@ -330,14 +332,8 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 
 	populateWorkflowSemantics(bundle)
 
-	node := bundle.Nodes["worker"]
-	if node.ID != "worker" {
-		t.Fatalf("normalized node ID = %q, want worker", node.ID)
-	}
-	if node.ExecutionType != SystemNodeExecutionType {
-		t.Fatalf("normalized execution_type = %q, want %q", node.ExecutionType, SystemNodeExecutionType)
-	}
-	effective, ok := bundle.NodeEffectiveSemantics("worker")
+	worker := identitytest.RootNode(t, "worker")
+	effective, ok := bundle.Semantics.EffectiveNodes[worker.Key()]
 	if !ok {
 		t.Fatal("missing effective node semantics")
 	}
@@ -353,14 +349,20 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	if got, want := effective.Produces, []string{"task.approved", "task.child", "task.done", "task.expired", "task.rules.else", "task.rules.then"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective produces = %#v, want %#v", got, want)
 	}
-	handler, ok := bundle.NodeEventHandler("worker", "task.start")
+	handler, ok := bundle.Semantics.NodeHandlers[worker.Key()]["task.start"]
 	if !ok {
 		t.Fatal("missing task.start handler")
 	}
 	if got, want := handler.DataAccumulation.SourceEvent, "task.start"; got != want {
 		t.Fatalf("effective source_event = %q, want %q", got, want)
 	}
-	transition, ok := bundle.DerivedHandlerTransition("worker", "task.start")
+	var transition HandlerTransitionSemantic
+	for _, candidate := range bundle.DerivedHandlerTransitions() {
+		if candidate.Node.Equal(worker) && candidate.EventType == "task.start" {
+			transition, ok = candidate, true
+			break
+		}
+	}
 	if !ok {
 		t.Fatal("missing task.start transition")
 	}

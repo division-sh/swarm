@@ -61,19 +61,19 @@ func TestTier11Probe(t *testing.T) {
 			if h.rt != nil && h.rt.Pipeline != nil {
 				source := h.rt.Pipeline.SemanticSource()
 				for _, node := range h.rt.Pipeline.WorkflowNodes() {
-					t.Logf("node=%s subs=%v produces=%v", node.ID, node.Subscriptions, node.Produces)
+					t.Logf("node=%s subs=%v produces=%v", node.Node.Key(), node.Subscriptions, node.Produces)
 				}
 				if source != nil {
 					trigger := strings.TrimSpace(expected.Trigger.Event)
 					t.Logf("owners(%s)=%v", trigger, source.RuntimeEventOwners(trigger))
 					for _, node := range h.rt.Pipeline.WorkflowNodes() {
-						if src, ok := source.NodeContractSource(node.ID); ok {
-							t.Logf("nodeSource(%s)=%#v flowPath=%q", node.ID, src, source.FlowPath(src.FlowID))
+						if src, ok := source.ExecutableNodeSource(node.Node); ok {
+							t.Logf("nodeSource(%s)=%#v flowPath=%q", node.Node.Key(), src, source.FlowPath(src.FlowID))
 						}
 					}
 					for _, owner := range source.RuntimeEventOwners(trigger) {
-						if handler, ok := source.NodeEventHandler(owner, trigger); ok {
-							t.Logf("handler owner=%s emits=%v advances_to=%s", owner, runtimecontracts.HandlerEmitEvents(handler), handler.AdvancesTo)
+						if handler, ok := source.ExecutableNodeEventHandler(owner, trigger); ok {
+							t.Logf("handler owner=%s emits=%v advances_to=%s", owner.Key(), runtimecontracts.HandlerEmitEvents(handler), handler.AdvancesTo)
 						}
 					}
 					for _, observed := range []string{

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,7 +21,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsOnCompleteAndRules(
 	handler.Rules = []HandlerRuleEntry{{Condition: "else"}}
 	node := bundle.Nodes[nodeID]
 	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	setLoadedWorkflowNode(t, bundle, nodeID, node)
 
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !errors.Is(err, ErrConflictingCompletion) {
@@ -38,7 +39,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsDeprecatedGuardFall
 	handler.Guard = &GuardSpec{ID: "legacy_guard_only"}
 	node := bundle.Nodes[nodeID]
 	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	setLoadedWorkflowNode(t, bundle, nodeID, node)
 
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !errors.Is(err, ErrDeprecatedGuardFallback) {
@@ -62,7 +63,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidExecutionTyp
 
 	for nodeID, node := range bundle.Nodes {
 		node.ExecutionType = "workflow_node"
-		bundle.Nodes[nodeID] = node
+		setLoadedWorkflowNode(t, bundle, nodeID, node)
 		break
 	}
 
@@ -77,7 +78,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsAllowsMissingExecutionType
 
 	for nodeID, node := range bundle.Nodes {
 		node.ExecutionType = ""
-		bundle.Nodes[nodeID] = node
+		setLoadedWorkflowNode(t, bundle, nodeID, node)
 		break
 	}
 
@@ -93,7 +94,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *t
 	var expected string
 	for nodeID, node := range bundle.Nodes {
 		node.ID = nodeID + "-alias"
-		bundle.Nodes[nodeID] = node
+		setLoadedWorkflowNode(t, bundle, nodeID, node)
 		expected = nodeID
 		break
 	}
@@ -102,7 +103,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *t
 	}
 
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !contractErrorContains(err, "node id") || !contractErrorContains(err, "must match map key") {
+	if err == nil || !contractErrorContains(err, expected+"-alias") || !contractErrorContains(err, "must match map key") {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -112,7 +113,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsAllowsRenderedNodeIDTempla
 
 	for nodeID, node := range bundle.Nodes {
 		node.ID = nodeID + "-{instance_id}"
-		bundle.Nodes[nodeID] = node
+		setLoadedWorkflowNode(t, bundle, nodeID, node)
 		break
 	}
 
@@ -132,7 +133,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerA
 	handler.Action = ActionSpec{ID: "increment_revision_count"}
 	node := bundle.Nodes[nodeID]
 	node.EventHandlers[eventType] = handler
-	bundle.Nodes[nodeID] = node
+	setLoadedWorkflowNode(t, bundle, nodeID, node)
 
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !contractErrorContains(err, "action increment_revision_count is not in platform spec") {
@@ -278,6 +279,24 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 	}
 	flow := &FlowContractView{
 		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Nodes: map[string]SystemNodeContract{
+			"deploy_node": {
+				ID: "deploy_node",
+				EventHandlers: map[string]SystemNodeEventHandler{
+					"deploy.requested": {
+						Rules: []HandlerRuleEntry{{
+							ID:        "validate_manifest",
+							PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindValidate, Validation: validation},
+							Compute: &ComputeSpec{
+								Operation:  ComputeOpValidate,
+								StoreAs:    "computed.validation.deploy_manifest",
+								Validation: validation,
+							},
+						}},
+					},
+				},
+			},
+		},
 		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
 			"deploy_manifest": {
 				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
@@ -298,25 +317,6 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 			Root: flow,
 			ByID: map[string]*FlowContractView{
 				"deploy": flow,
-			},
-		},
-		nodeSources: map[string]ContractItemSource{"deploy_node": {FlowID: "deploy"}},
-		Nodes: map[string]SystemNodeContract{
-			"deploy_node": {
-				ID: "deploy_node",
-				EventHandlers: map[string]SystemNodeEventHandler{
-					"deploy.requested": {
-						Rules: []HandlerRuleEntry{{
-							ID:        "validate_manifest",
-							PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindValidate, Validation: validation},
-							Compute: &ComputeSpec{
-								Operation:  ComputeOpValidate,
-								StoreAs:    "computed.validation.deploy_manifest",
-								Validation: validation,
-							},
-						}},
-					},
-				},
 			},
 		},
 	}
@@ -892,12 +892,57 @@ func loadCurrentWorkflowBundleForTest(t *testing.T) *WorkflowContractBundle {
 }
 
 func firstLoadedWorkflowHandler(bundle *WorkflowContractBundle) (string, string, SystemNodeEventHandler, bool) {
-	for nodeID, node := range bundle.Nodes {
-		for eventType, handler := range node.EventHandlers {
-			return nodeID, eventType, handler, true
+	for _, record := range bundle.ScopedNodeRecords() {
+		for eventType, handler := range record.Entry.EventHandlers {
+			return record.LogicalID, eventType, handler, true
 		}
 	}
 	return "", "", SystemNodeEventHandler{}, false
+}
+
+func setLoadedWorkflowNode(t testing.TB, bundle *WorkflowContractBundle, nodeID string, node SystemNodeContract) {
+	t.Helper()
+	var updated bool
+	for key, view := range bundle.projectContracts {
+		if _, ok := view.Nodes[nodeID]; !ok {
+			continue
+		}
+		view.Nodes[nodeID] = node
+		bundle.projectContracts[key] = view
+		updated = true
+		break
+	}
+	var walk func(*FlowContractView)
+	walk = func(view *FlowContractView) {
+		if view == nil || updated {
+			return
+		}
+		if _, ok := view.Nodes[nodeID]; ok {
+			view.Nodes[nodeID] = node
+			updated = true
+			return
+		}
+		for index := range view.Children {
+			walk(&view.Children[index])
+		}
+	}
+	if !updated {
+		walk(bundle.FlowTree.Root)
+	}
+	if !updated {
+		for key, entry := range bundle.scopedNodes {
+			if strings.TrimSpace(entry.ID) != nodeID && !strings.HasSuffix(key, "::"+nodeID) {
+				continue
+			}
+			bundle.scopedNodes[key] = node
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		t.Fatalf("canonical scoped node %q not found", nodeID)
+	}
+	bundle.Nodes[nodeID] = node
 }
 
 func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
@@ -935,14 +980,13 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	if owners := bundle.RuntimeEventOwners("work.begin"); len(owners) != 0 {
-		t.Fatalf("expected no authoritative owners for root work.begin, got %v", owners)
+	alpha := identitytest.FlowNode(t, "flow-a", "alpha-intake")
+	beta := identitytest.FlowNode(t, "flow-b", "beta-intake")
+	if got := bundle.ResolveExecutableNodeEventPattern(alpha, "work.begin"); got != "flow-a/work.begin" {
+		t.Fatalf("alpha exact event projection = %q", got)
 	}
-	if owners := bundle.RuntimeEventOwners("flow-a/work.begin"); !hasAll(owners, "alpha-intake") || hasAny(owners, "beta-intake") {
-		t.Fatalf("expected only alpha-intake to own flow-a/work.begin, got %v", owners)
-	}
-	if owners := bundle.RuntimeEventOwners("flow-b/work.begin"); !hasAll(owners, "beta-intake") || hasAny(owners, "alpha-intake") {
-		t.Fatalf("expected only beta-intake to own flow-b/work.begin, got %v", owners)
+	if got := bundle.ResolveExecutableNodeEventPattern(beta, "work.begin"); got != "flow-b/work.begin" {
+		t.Fatalf("beta exact event projection = %q", got)
 	}
 }
 
@@ -1020,14 +1064,13 @@ flow-b-wildcard:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	if owners := bundle.RuntimeEventOwners("task.done"); len(owners) != 0 {
-		t.Fatalf("expected no authoritative owners for ambiguous root task.done, got %v", owners)
+	flowA := identitytest.FlowNode(t, "flow-a", "flow-a-wildcard")
+	flowB := identitytest.FlowNode(t, "flow-b", "flow-b-wildcard")
+	if got := bundle.ResolveExecutableNodeEventPattern(flowA, "task.*"); got != "flow-a/task.*" {
+		t.Fatalf("flow-a exact wildcard projection = %q", got)
 	}
-	if owners := bundle.RuntimeEventOwners("flow-a/task.done"); !hasAll(owners, "flow-a-wildcard") || hasAny(owners, "flow-b-wildcard") {
-		t.Fatalf("expected only flow-a-wildcard to own flow-a/task.done, got %v", owners)
-	}
-	if owners := bundle.RuntimeEventOwners("flow-b/task.done"); !hasAll(owners, "flow-b-wildcard") || hasAny(owners, "flow-a-wildcard") {
-		t.Fatalf("expected only flow-b-wildcard to own flow-b/task.done, got %v", owners)
+	if got := bundle.ResolveExecutableNodeEventPattern(flowB, "task.*"); got != "flow-b/task.*" {
+		t.Fatalf("flow-b exact wildcard projection = %q", got)
 	}
 }
 
@@ -1045,30 +1088,4 @@ func contractErrorContains(err error, substr string) bool {
 	}
 	text := err.Error()
 	return strings.Contains(text, substr)
-}
-
-func hasAll(values []string, wants ...string) bool {
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		seen[strings.TrimSpace(value)] = struct{}{}
-	}
-	for _, want := range wants {
-		if _, ok := seen[strings.TrimSpace(want)]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func hasAny(values []string, wants ...string) bool {
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		seen[strings.TrimSpace(value)] = struct{}{}
-	}
-	for _, want := range wants {
-		if _, ok := seen[strings.TrimSpace(want)]; ok {
-			return true
-		}
-	}
-	return false
 }

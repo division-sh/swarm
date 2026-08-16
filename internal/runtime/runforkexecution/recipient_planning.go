@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -499,27 +500,23 @@ func selectedContractNodeDeliveryRoutes(source semanticview.Source, eventName st
 		if !recipient.Recipient.IsNode() {
 			continue
 		}
-		id := recipient.Recipient.ID()
-		if id == "" {
+		node, exact := recipient.Recipient.Node()
+		if !exact {
 			continue
 		}
+		id := node.Key()
 		if source == nil {
 			return nil, fmt.Errorf("selected-contract node recipient %s requires its admitted semantic source", id)
 		}
-		declaration, ok := source.NodeContractSource(id)
-		if !ok {
+		if _, ok := source.ExecutableNode(node); !ok {
 			return nil, fmt.Errorf("selected-contract node recipient %s has no canonical declaration owner", id)
 		}
-		flowID := strings.TrimSpace(declaration.FlowID)
-		if flowID == "" {
-			flowID = strings.TrimSpace(source.WorkflowName())
-		}
-		handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, flowID, id)
+		handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
 		if err != nil {
 			return nil, fmt.Errorf("admit selected-contract handler for %s: %w", id, err)
 		}
 		route := runtimebus.DeliveryRouteBlueprint{
-			Recipient: events.MustNodeDeliveryRecipient(id),
+			Recipient: events.MustNodeDeliveryRecipient(node),
 			Handler:   handler.ForEvent(events.EventType(strings.TrimSpace(eventName))),
 		}
 		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
@@ -631,7 +628,11 @@ func deliveryRecipientFromReadback(kind, id string) (events.DeliveryRecipient, b
 	)
 	switch strings.TrimSpace(kind) {
 	case "node":
-		recipient, err = events.NewNodeDeliveryRecipient(id)
+		var node runtimeidentity.ExecutableNode
+		node, err = runtimeidentity.ParseExecutableNodeKey(id)
+		if err == nil {
+			recipient, err = events.NewNodeDeliveryRecipient(node)
+		}
 	case "agent":
 		recipient, err = events.NewAgentDeliveryRecipient(id)
 	default:

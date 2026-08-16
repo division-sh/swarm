@@ -20,6 +20,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -195,7 +196,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	waitForInboundBusQuiescence(t, bus)
 
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventID(t, backend, "123456789")
-	if got := countTelegramConnectorSupportedSurfaceNodeDeliveries(t, backend, inboundEventID, telegramConnectorSupportedSurfaceNodeID); got != 1 {
+	if got := countTelegramConnectorSupportedSurfaceNodeDeliveries(t, backend, inboundEventID, telegramConnectorSupportedSurfaceNodeKey(t)); got != 1 {
 		t.Fatalf("%s node delivery rows for inbound event = %d, want 1", backend.name, got)
 	}
 
@@ -279,6 +280,11 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 }
 
 const telegramConnectorSupportedSurfaceNodeID = "telegram-responder"
+
+func telegramConnectorSupportedSurfaceNodeKey(t testing.TB) string {
+	t.Helper()
+	return identitytest.FlowNode(t, boundedProviderFlowID, telegramConnectorSupportedSurfaceNodeID).Key()
+}
 
 func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
 	t.Helper()
@@ -926,7 +932,7 @@ func telegramConnectorSupportedSurfaceDiagnostics(t *testing.T, backend telegram
 			name:   "node_deliveries",
 			query:  `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`,
 			sqlite: `SELECT COUNT(*) FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`,
-			args:   []any{backend.runID, telegramConnectorSupportedSurfaceNodeID},
+			args:   []any{backend.runID, telegramConnectorSupportedSurfaceNodeKey(t)},
 		},
 		{
 			name:   "activity_requests",
@@ -963,7 +969,7 @@ func telegramConnectorSupportedSurfaceDiagnostics(t *testing.T, backend telegram
 	parts = append(parts, "delivery_status="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
 		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`,
 		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`,
-		backend.runID, telegramConnectorSupportedSurfaceNodeID))
+		backend.runID, telegramConnectorSupportedSurfaceNodeKey(t)))
 	parts = append(parts, "event_names="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
 		`SELECT COALESCE(string_agg(event_id::text || ':' || event_name, ',' ORDER BY created_at), '') FROM events WHERE run_id = $1::uuid`,
 		`SELECT COALESCE(group_concat(event_id || ':' || event_name, ','), '') FROM (SELECT event_id, event_name FROM events WHERE run_id = ? ORDER BY created_at)`,

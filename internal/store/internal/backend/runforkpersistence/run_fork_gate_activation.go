@@ -209,9 +209,13 @@ func forkPendingProposedEffect(sourceCard decisioncard.Card, source decisioncard
 			return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("fork proposed effect %s has no fork-local loop generation", source.ActivityID)
 		}
 	}
+	owner, err := activityidentity.ParseOwnerKey(fork.NodeID)
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, fmt.Errorf("fork proposed effect %s owner identity: %w", fork.ActivityID, err)
+	}
 	fact := activityidentity.Fact{
 		RunID: fork.RunID, SourceEventID: fork.SourceEventID, ParentEventID: fork.ParentEventID,
-		EntityID: fork.EntityID, FlowID: fork.FlowID, NodeID: fork.NodeID,
+		EntityID: fork.EntityID, Owner: owner, ExecutionFlowID: fork.FlowID,
 		HandlerEventKey: fork.HandlerEventKey, ActivityID: fork.ActivityID, Tool: fork.Tool,
 		Attempt: fork.Attempt, RevisionID: fork.Generation.RevisionID,
 	}

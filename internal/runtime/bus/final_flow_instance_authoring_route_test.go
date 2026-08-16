@@ -105,10 +105,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		t.Fatalf("activation bookkeeping = %#v, want last_source_event", activation.Bookkeeping)
 	}
 	persistedRoutes := store.routes[evt.ID()]
-	if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.ID() != finalflowinstanceauthoring.TemplateNodeID {
+	if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.LocalID() != finalflowinstanceauthoring.TemplateNodeID {
 		t.Fatalf("persisted delivery routes = %#v, want one %s subscriber", persistedRoutes, finalflowinstanceauthoring.TemplateNodeID)
 	}
-	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(persistedRoutes[0].Recipient.ID()), Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+	want := events.DeliveryRoute{Recipient: persistedRoutes[0].Recipient, Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID:       finalflowinstanceauthoring.TemplateFlowID,
 		FlowInstance: activation.Instance.InstancePath,
 		EntityID:     activation.Instance.EntityID,

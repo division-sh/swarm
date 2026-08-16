@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
@@ -94,13 +95,26 @@ func (b *WorkflowContractBundle) WorkflowStageTopology(flowID string) (WorkflowS
 	topology, ok := b.Semantics.StageTopologies[strings.TrimSpace(flowID)]
 	return topology, ok
 }
-func (b *WorkflowContractBundle) WorkflowTimerByID(id string) (WorkflowTimerContract, bool) {
+func (b *WorkflowContractBundle) WorkflowTimerForNode(node runtimeidentity.ExecutableNode, id string) (WorkflowTimerContract, bool) {
 	id = strings.TrimSpace(id)
+	if b == nil || !node.Valid() || id == "" {
+		return WorkflowTimerContract{}, false
+	}
+	for _, timer := range b.Semantics.Timers {
+		if timer.Node.Equal(node) && strings.TrimSpace(timer.ID) == id && !timer.StageOwned {
+			return timer, true
+		}
+	}
+	return WorkflowTimerContract{}, false
+}
+
+func (b *WorkflowContractBundle) WorkflowStageTimerByID(flowID, id string) (WorkflowTimerContract, bool) {
+	flowID, id = strings.TrimSpace(flowID), strings.TrimSpace(id)
 	if b == nil || id == "" {
 		return WorkflowTimerContract{}, false
 	}
 	for _, timer := range b.Semantics.Timers {
-		if strings.TrimSpace(timer.ID) == id {
+		if timer.StageOwned && !timer.Node.Valid() && strings.TrimSpace(timer.FlowID) == flowID && strings.TrimSpace(timer.ID) == id {
 			return timer, true
 		}
 	}
@@ -177,26 +191,6 @@ func (b *WorkflowContractBundle) FlowViews() []FlowContractView {
 		flowViewChildren,
 	)
 }
-func (b *WorkflowContractBundle) NodeEntries() map[string]SystemNodeContract {
-	if b == nil {
-		return nil
-	}
-	if len(b.Nodes) == 0 {
-		out := make(map[string]SystemNodeContract)
-		for _, view := range b.ProjectViews() {
-			for key, entry := range view.Nodes {
-				out[key] = entry
-			}
-		}
-		for _, view := range b.FlowViews() {
-			for key, entry := range view.Nodes {
-				out[key] = entry
-			}
-		}
-		return out
-	}
-	return cloneSystemNodeContractMap(b.Nodes)
-}
 
 // ScopedNodeRecords returns every authored node with its exact declaration
 // owner. Consumers that interpret executable node semantics must use this
@@ -253,6 +247,232 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		return out
 	}
 	return nil
+}
+
+func (b *WorkflowContractBundle) ExecutableNode(ref runtimeidentity.ExecutableNode) (ScopedNodeRecord, bool) {
+	if b == nil || !ref.Valid() {
+		return ScopedNodeRecord{}, false
+	}
+	for _, record := range b.ScopedNodeRecords() {
+		candidate, err := record.Identity()
+		if err == nil && candidate.Equal(ref) {
+			return record, true
+		}
+	}
+	return ScopedNodeRecord{}, false
+}
+
+func (b *WorkflowContractBundle) executableNodeFlowView(ref runtimeidentity.ExecutableNode) (*FlowContractView, bool) {
+	if b == nil || !ref.Valid() || ref.FlowID() == "" {
+		return nil, false
+	}
+	for _, view := range b.FlowViews() {
+		packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == ref.PackageKey() && strings.TrimSpace(view.Paths.ID) == ref.FlowID() {
+			candidate := view
+			return &candidate, true
+		}
+	}
+	return nil, false
+}
+
+func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode) eventidentity.Scope {
+	if b == nil || !ref.Valid() {
+		return eventidentity.Scope{}
+	}
+	if ref.FlowID() == "" {
+		return eventidentity.Scope{
+			LocalEvents:  b.rootLocalEvents(),
+			InputEvents:  b.FlowInputEvents(""),
+			OutputEvents: b.FlowOutputEvents(""),
+		}
+	}
+	view, ok := b.executableNodeFlowView(ref)
+	if !ok {
+		return eventidentity.Scope{}
+	}
+	localEvents := make([]string, 0, len(view.Events)+len(view.Schema.Pins.Inputs.Events)+len(view.Schema.Pins.Outputs.Events)+1)
+	for eventType := range view.Events {
+		localEvents = append(localEvents, strings.TrimSpace(eventType))
+	}
+	localEvents = append(localEvents, view.Schema.Pins.Inputs.Events...)
+	localEvents = append(localEvents, view.Schema.Pins.Outputs.Events...)
+	if eventType := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); eventType != "" {
+		localEvents = append(localEvents, eventType)
+	}
+	return eventidentity.Scope{
+		Path:         strings.Trim(strings.TrimSpace(view.Path), "/"),
+		LocalEvents:  normalizedStrings(localEvents),
+		InputEvents:  append([]string{}, view.Schema.Pins.Inputs.Events...),
+		OutputEvents: append([]string{}, view.Schema.Pins.Outputs.Events...),
+	}
+}
+
+func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeidentity.ExecutableNode) []eventidentity.DescendantScope {
+	view, ok := b.executableNodeFlowView(ref)
+	if !ok {
+		return nil
+	}
+	parentPath := eventidentity.Normalize(view.Path)
+	if parentPath == "" {
+		return nil
+	}
+	out := make([]eventidentity.DescendantScope, 0)
+	for _, candidate := range b.FlowViews() {
+		candidatePath := eventidentity.Normalize(candidate.Path)
+		if candidatePath == "" || candidatePath == parentPath || !strings.HasPrefix(candidatePath, parentPath+"/") {
+			continue
+		}
+		packageKey := strings.Trim(strings.TrimSpace(candidate.Paths.PackageKey), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey != ref.PackageKey() && !strings.HasPrefix(packageKey, ref.PackageKey()+"/") {
+			continue
+		}
+		localEvents := make([]string, 0, len(candidate.Events)+len(candidate.Schema.Pins.Inputs.Events)+len(candidate.Schema.Pins.Outputs.Events))
+		for eventType := range candidate.Events {
+			localEvents = append(localEvents, strings.TrimSpace(eventType))
+		}
+		localEvents = append(localEvents, candidate.Schema.Pins.Inputs.Events...)
+		localEvents = append(localEvents, candidate.Schema.Pins.Outputs.Events...)
+		if len(localEvents) != 0 {
+			out = append(out, eventidentity.DescendantScope{Path: candidatePath, LocalEvents: normalizedStrings(localEvents)})
+		}
+	}
+	return out
+}
+
+func (b *WorkflowContractBundle) ResolveExecutableNodeEventReference(ref runtimeidentity.ExecutableNode, eventType string) string {
+	if b == nil || !ref.Valid() {
+		return eventidentity.Normalize(eventType)
+	}
+	return b.executableNodeEventScope(ref).ResolveEvent(eventType, b.executableNodeEventDescendants(ref))
+}
+
+func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, bool) {
+	if b == nil || !ref.Valid() {
+		return EventCatalogEntry{}, "", false
+	}
+	authored := eventidentity.Normalize(eventType)
+	canonical := b.ResolveExecutableNodeEventReference(ref, authored)
+	lookup := func(entries map[string]EventCatalogEntry) (EventCatalogEntry, string, bool) {
+		for key, entry := range entries {
+			key = eventidentity.Normalize(key)
+			if key == "" {
+				continue
+			}
+			resolved := b.ResolveExecutableNodeEventReference(ref, key)
+			if key == authored || key == canonical || resolved == canonical {
+				return entry, resolved, true
+			}
+		}
+		return EventCatalogEntry{}, "", false
+	}
+	if view, ok := b.executableNodeFlowView(ref); ok {
+		for current := view; current != nil; current = current.Parent {
+			packageKey := strings.Trim(strings.TrimSpace(current.Paths.PackageKey), "/")
+			if packageKey == "" {
+				packageKey = runtimeidentity.RootPackageKey
+			}
+			if packageKey != ref.PackageKey() {
+				continue
+			}
+			if entry, key, found := lookup(current.Events); found {
+				return entry, key, true
+			}
+		}
+	}
+	for _, project := range b.ProjectViews() {
+		packageKey := strings.Trim(strings.TrimSpace(project.Paths.Key), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey != ref.PackageKey() {
+			continue
+		}
+		if entry, key, found := lookup(project.Events); found {
+			return entry, key, true
+		}
+	}
+	if ref.PackageKey() == runtimeidentity.RootPackageKey {
+		if entry, key, found := lookup(b.Events); found {
+			return entry, key, true
+		}
+	}
+	if entry, ok := b.GeneratedActivityEventEntries()[canonical]; ok {
+		return entry, canonical, true
+	}
+	return EventCatalogEntry{}, "", false
+}
+
+func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeidentity.ExecutableNode, pattern string) string {
+	if b == nil || !ref.Valid() {
+		return eventidentity.Normalize(pattern)
+	}
+	pattern = eventidentity.Normalize(pattern)
+	scope := b.executableNodeEventScope(ref)
+	resolved := strings.TrimSpace(scope.ResolveSubscriptionPattern(pattern, b.executableNodeEventDescendants(ref)))
+	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
+		return resolved
+	}
+	path := eventidentity.Normalize(scope.Path)
+	if path == "" {
+		return resolved
+	}
+	for _, localEvent := range scope.LocalEvents {
+		if eventidentity.MatchPattern(pattern, localEvent) {
+			return path + "/" + pattern
+		}
+	}
+	return resolved
+}
+
+func (b *WorkflowContractBundle) ExternalizeExecutableNodeHandler(ref runtimeidentity.ExecutableNode, handler SystemNodeEventHandler) SystemNodeEventHandler {
+	externalize := func(spec EmitSpec) EmitSpec {
+		spec = cloneEmitSpec(spec)
+		spec.Event = b.ResolveExecutableNodeEventReference(ref, spec.Event)
+		return spec
+	}
+	handler.Emit = externalize(handler.Emit)
+	handler.OnSuccess.Emit = externalize(handler.OnSuccess.Emit)
+	if handler.FanOut != nil {
+		clone := *handler.FanOut
+		clone.Emit = externalize(clone.Emit)
+		handler.FanOut = &clone
+	}
+	if len(handler.Rules) > 0 {
+		rules := append([]HandlerRuleEntry(nil), handler.Rules...)
+		for index := range rules {
+			rules[index].Emit = externalize(rules[index].Emit)
+			if rules[index].FanOut != nil {
+				clone := *rules[index].FanOut
+				clone.Emit = externalize(clone.Emit)
+				rules[index].FanOut = &clone
+			}
+		}
+		handler.Rules = rules
+	}
+	if len(handler.OnComplete) > 0 {
+		rules := append([]HandlerRuleEntry(nil), handler.OnComplete...)
+		for index := range rules {
+			rules[index].Emit = externalize(rules[index].Emit)
+			if rules[index].FanOut != nil {
+				clone := *rules[index].FanOut
+				clone.Emit = externalize(clone.Emit)
+				rules[index].FanOut = &clone
+			}
+		}
+		handler.OnComplete = rules
+	}
+	if handler.Accumulate != nil {
+		clone := *handler.Accumulate
+		handler.Accumulate = &clone
+	}
+	return handler
 }
 
 func scopedNodeRecordsFromProjectViews(views []ProjectContractView) []ScopedNodeRecord {
@@ -375,18 +595,6 @@ func exportedFlowTreeViewOrderKey(view *FlowContractView, inheritedPackageKey st
 		strings.TrimSpace(view.Paths.NodesFile),
 	}, "\x00")
 }
-func (b *WorkflowContractBundle) NodeEntry(id string) (SystemNodeContract, bool) {
-	id = strings.TrimSpace(id)
-	if b == nil || id == "" {
-		return SystemNodeContract{}, false
-	}
-	entry, ok := b.Nodes[id]
-	return entry, ok
-}
-func (b *WorkflowContractBundle) HasNode(id string) bool {
-	_, ok := b.NodeEntry(id)
-	return ok
-}
 func (b *WorkflowContractBundle) AgentEntries() map[string]AgentRegistryEntry {
 	if b == nil {
 		return nil
@@ -455,22 +663,65 @@ func (b *WorkflowContractBundle) ResolvedPolicyForFlow(flowID string) PolicyDocu
 		flowViewChildren,
 	)
 }
-func (b *WorkflowContractBundle) PolicyValueForFlow(flowID, key string) (PolicyValue, bool) {
-	doc := b.ResolvedPolicyForFlow(flowID)
-	value, ok := doc.Values[strings.TrimSpace(key)]
-	return value, ok
-}
-func (b *WorkflowContractBundle) ResolvedPolicyForNode(nodeID string) PolicyDocument {
-	if b == nil {
+func (b *WorkflowContractBundle) ResolvedPolicyForExecutableNode(node runtimeidentity.ExecutableNode) PolicyDocument {
+	if b == nil || !node.Valid() {
 		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
-	if source, ok := b.NodeContractSource(nodeID); ok {
-		return b.ResolvedPolicyForFlow(source.FlowID)
+	doc := clonePolicyDocument(b.Policy)
+	for _, project := range b.ProjectViews() {
+		packageKey := strings.Trim(strings.TrimSpace(project.Paths.Key), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		if packageKey == node.PackageKey() {
+			mergeContractPolicyDocument(&doc, project.Policy)
+			break
+		}
 	}
-	return b.ResolvedPolicyForFlow("")
+	if view, ok := b.executableNodeFlowView(node); ok {
+		chain := make([]*FlowContractView, 0)
+		for current := view; current != nil; current = current.Parent {
+			chain = append(chain, current)
+		}
+		for index := len(chain) - 1; index >= 0; index-- {
+			mergeContractPolicyDocument(&doc, chain[index].Policy)
+		}
+	}
+	return doc
 }
-func (b *WorkflowContractBundle) PolicyValueForNode(nodeID, key string) (PolicyValue, bool) {
-	doc := b.ResolvedPolicyForNode(nodeID)
+
+func mergeContractPolicyDocument(target *PolicyDocument, overlay PolicyDocument) {
+	if target == nil {
+		return
+	}
+	if target.Values == nil {
+		target.Values = map[string]PolicyValue{}
+	}
+	if target.Criteria == nil {
+		target.Criteria = map[string]PolicyCriteriaSet{}
+	}
+	if target.Validation == nil {
+		target.Validation = map[string]PolicyValidationSet{}
+	}
+	if target.Modules == nil {
+		target.Modules = map[string]PolicyModule{}
+	}
+	cloned := clonePolicyDocument(overlay)
+	for key, value := range cloned.Values {
+		target.Values[key] = value
+	}
+	for key, value := range cloned.Criteria {
+		target.Criteria[key] = value
+	}
+	for key, value := range cloned.Validation {
+		target.Validation[key] = value
+	}
+	for key, value := range cloned.Modules {
+		target.Modules[key] = value
+	}
+}
+func (b *WorkflowContractBundle) PolicyValueForFlow(flowID, key string) (PolicyValue, bool) {
+	doc := b.ResolvedPolicyForFlow(flowID)
 	value, ok := doc.Values[strings.TrimSpace(key)]
 	return value, ok
 }
@@ -851,46 +1102,6 @@ func (b *WorkflowContractBundle) WritePinOwners(pin string) []string {
 	}
 	return append([]string{}, b.Semantics.WritePinOwners[strings.TrimSpace(pin)]...)
 }
-func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItemSource, bool) {
-	if b == nil {
-		return ContractItemSource{}, false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	source, ok := b.nodeSources[nodeID]
-	if ok {
-		return source, true
-	}
-	if _, ok := b.Nodes[nodeID]; ok {
-		return ContractItemSource{Layer: "project"}, true
-	}
-	for _, view := range b.ProjectViews() {
-		for key := range view.Nodes {
-			if strings.TrimSpace(key) != nodeID {
-				continue
-			}
-			return ContractItemSource{
-				PackageKey: strings.TrimSpace(view.Paths.Key),
-				Layer:      "project",
-			}, true
-		}
-	}
-	for _, view := range b.FlowViews() {
-		for key := range view.Nodes {
-			if strings.TrimSpace(key) != nodeID {
-				continue
-			}
-			return ContractItemSource{
-				PackageKey: strings.TrimSpace(view.Paths.PackageKey),
-				FlowID:     strings.TrimSpace(view.Paths.ID),
-				Layer:      "flow",
-			}, true
-		}
-	}
-	if _, ok := b.Nodes[nodeID]; ok {
-		return ContractItemSource{Layer: "project"}, true
-	}
-	return ContractItemSource{}, false
-}
 func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {
 	if b == nil {
 		return ContractItemSource{}, false
@@ -913,78 +1124,6 @@ func (b *WorkflowContractBundle) ScopedAgentContractSource(scope ContractItemSou
 	source, ok := b.scopedAgentSources[contractScopeKey(scope, strings.TrimSpace(agentID))]
 	return source, ok
 }
-func (b *WorkflowContractBundle) ResolveNodeEventReference(nodeID, eventType string) string {
-	if b == nil {
-		return eventidentity.Normalize(eventType)
-	}
-	return b.nodeEventScope(nodeID).ResolveEvent(eventType, b.flowEventDescendants(b.nodeFlowID(nodeID)))
-}
-func (b *WorkflowContractBundle) NodeRuntimeSubscriptions(nodeID string) []string {
-	nodeID = strings.TrimSpace(nodeID)
-	if b == nil || nodeID == "" {
-		return nil
-	}
-	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
-		return append([]string{}, effective.RuntimeSubscriptions...)
-	}
-	entry, ok := b.nodeContract(nodeID)
-	if !ok {
-		return nil
-	}
-	return EffectiveSystemNodeSubscriptions(entry)
-}
-
-func (b *WorkflowContractBundle) NodeEffectiveProduces(nodeID string) []string {
-	nodeID = strings.TrimSpace(nodeID)
-	if b == nil || nodeID == "" {
-		return nil
-	}
-	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
-		return uniqueOrderedStrings(append(append([]string{}, effective.Produces...), b.generatedActivityEventsForNode(nodeID)...))
-	}
-	entry, ok := b.nodeContract(nodeID)
-	if !ok {
-		return nil
-	}
-	return uniqueOrderedStrings(append(EffectiveSystemNodeProduces(entry), b.generatedActivityEventsForNode(nodeID)...))
-}
-
-func (b *WorkflowContractBundle) NodeEffectiveExecutionType(nodeID string) string {
-	nodeID = strings.TrimSpace(nodeID)
-	if b == nil || nodeID == "" {
-		return ""
-	}
-	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
-		return strings.TrimSpace(effective.ExecutionType)
-	}
-	entry, ok := b.nodeContract(nodeID)
-	if !ok {
-		return ""
-	}
-	return EffectiveSystemNodeExecutionType(entry)
-}
-
-func (b *WorkflowContractBundle) NodeEffectiveSemantics(nodeID string) (SystemNodeEffectiveSemantics, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	if b == nil || nodeID == "" {
-		return SystemNodeEffectiveSemantics{}, false
-	}
-	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
-		effective.RuntimeSubscriptions = append([]string{}, effective.RuntimeSubscriptions...)
-		effective.Produces = append([]string{}, effective.Produces...)
-		return effective, true
-	}
-	entry, ok := b.nodeContract(nodeID)
-	if !ok {
-		return SystemNodeEffectiveSemantics{}, false
-	}
-	return SystemNodeEffectiveSemantics{
-		ID:                   EffectiveSystemNodeID(nodeID, entry),
-		ExecutionType:        EffectiveSystemNodeExecutionType(entry),
-		RuntimeSubscriptions: EffectiveSystemNodeSubscriptions(entry),
-		Produces:             EffectiveSystemNodeProduces(entry),
-	}, true
-}
 func (b *WorkflowContractBundle) ScopedAgentEntries() map[string]AgentRegistryEntry {
 	if b == nil {
 		return nil
@@ -997,210 +1136,6 @@ func (b *WorkflowContractBundle) ScopedEventEntries() map[string]EventCatalogEnt
 	}
 	return cloneEventCatalogEntryMap(b.scopedEvents)
 }
-func (b *WorkflowContractBundle) NodeEventHandlers(nodeID string) map[string]SystemNodeEventHandler {
-	if b == nil {
-		return nil
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	handlers, ok := b.Semantics.NodeHandlers[nodeID]
-	if !ok || len(handlers) == 0 {
-		entry, ok := b.nodeContract(nodeID)
-		if !ok || len(entry.EventHandlers) == 0 {
-			return nil
-		}
-		handlers = entry.EventHandlers
-	}
-	out := make(map[string]SystemNodeEventHandler, len(handlers))
-	for eventType, handler := range handlers {
-		out[eventType] = handler
-	}
-	return out
-}
-func (b *WorkflowContractBundle) NodeHandlerSubscriptions(nodeID string) []string {
-	handlers := b.NodeEventHandlers(nodeID)
-	if len(handlers) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(handlers))
-	for eventType := range handlers {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out = append(out, eventType)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-type NodeEventHandlerResolution struct {
-	NodeID             string
-	RawEventType       string
-	LocalizedEventType string
-	AuthoredEventType  string
-	CanonicalEventType string
-	Handler            SystemNodeEventHandler
-	Matched            bool
-}
-
-func (b *WorkflowContractBundle) nodeContract(nodeID string) (SystemNodeContract, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	if b == nil || nodeID == "" {
-		return SystemNodeContract{}, false
-	}
-	if entry, ok := b.Nodes[nodeID]; ok {
-		return entry, true
-	}
-	for _, view := range b.ProjectViews() {
-		if entry, ok := view.Nodes[nodeID]; ok {
-			return entry, true
-		}
-	}
-	for _, view := range b.FlowViews() {
-		if entry, ok := view.Nodes[nodeID]; ok {
-			return entry, true
-		}
-	}
-	return SystemNodeContract{}, false
-}
-func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (SystemNodeEventHandler, bool) {
-	resolved := b.ResolveNodeEventHandler(nodeID, eventType)
-	if !resolved.Matched {
-		return SystemNodeEventHandler{}, false
-	}
-	return b.externalizeNodeHandler(nodeID, resolved.Handler), true
-}
-
-func (b *WorkflowContractBundle) ResolveNodeEventHandler(nodeID, eventType string) NodeEventHandlerResolution {
-	resolved := NodeEventHandlerResolution{
-		NodeID:       strings.TrimSpace(nodeID),
-		RawEventType: eventidentity.Normalize(eventType),
-	}
-	if b == nil {
-		return resolved
-	}
-	nodeID = resolved.NodeID
-	rawEventType := resolved.RawEventType
-	localizedEventType := b.localizeNodeEventType(nodeID, rawEventType)
-	resolved.LocalizedEventType = localizedEventType
-	handlers, ok := b.Semantics.NodeHandlers[nodeID]
-	if !ok {
-		return resolved
-	}
-	if handler, ok := handlers[localizedEventType]; ok {
-		return b.nodeEventHandlerResolution(resolved, localizedEventType, handler)
-	}
-	if rawEventType != "" && rawEventType != localizedEventType {
-		if handler, ok := handlers[rawEventType]; ok {
-			return b.nodeEventHandlerResolution(resolved, rawEventType, handler)
-		}
-	}
-	for pattern, handler := range handlers {
-		if handlerPatternMatches(pattern, localizedEventType) {
-			return b.nodeEventHandlerResolution(resolved, pattern, handler)
-		}
-	}
-	if rawEventType != "" && rawEventType != localizedEventType {
-		for pattern, handler := range handlers {
-			if handlerPatternMatches(pattern, rawEventType) {
-				return b.nodeEventHandlerResolution(resolved, pattern, handler)
-			}
-		}
-	}
-	return resolved
-}
-
-func (b *WorkflowContractBundle) nodeEventHandlerResolution(resolved NodeEventHandlerResolution, authoredEventType string, handler SystemNodeEventHandler) NodeEventHandlerResolution {
-	authoredEventType = strings.TrimSpace(authoredEventType)
-	resolved.AuthoredEventType = authoredEventType
-	resolved.CanonicalEventType = b.ResolveNodeEventReference(resolved.NodeID, authoredEventType)
-	resolved.Handler = handler
-	resolved.Matched = true
-	return resolved
-}
-func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
-	if b == nil {
-		return nil
-	}
-	rawEventType := eventidentity.Normalize(eventType)
-	owners := b.runtimeEventOwnersForQuery(rawEventType)
-	for nodeID, handlers := range b.Semantics.NodeHandlers {
-		for pattern := range handlers {
-			pattern = strings.TrimSpace(pattern)
-			if pattern == "" || !strings.Contains(pattern, "*") {
-				continue
-			}
-			canonicalPattern := strings.TrimSpace(b.resolveNodeEventOwnerPattern(nodeID, pattern))
-			if canonicalPattern == "" {
-				canonicalPattern = pattern
-			}
-			if handlerPatternMatches(canonicalPattern, rawEventType) {
-				owners = appendIfMissingString(owners, nodeID)
-				break
-			}
-		}
-	}
-	return owners
-}
-
-func (b *WorkflowContractBundle) runtimeEventOwnersForQuery(eventType string) []string {
-	eventType = eventidentity.Normalize(eventType)
-	if b == nil || eventType == "" {
-		return nil
-	}
-	if owners := b.Semantics.EventOwners[eventType]; len(owners) > 0 {
-		return append([]string{}, owners...)
-	}
-	if strings.Contains(eventType, "/") {
-		return nil
-	}
-
-	var matched []string
-	for canonical, owners := range b.Semantics.EventOwners {
-		canonical = eventidentity.Normalize(canonical)
-		if eventidentity.LeafName(canonical) != eventType {
-			continue
-		}
-		if matched != nil {
-			// A local name that resolves to more than one canonical owner is
-			// ambiguous; callers must use the scoped event identity.
-			return nil
-		}
-		matched = append([]string{}, owners...)
-	}
-	return matched
-}
-
-func (b *WorkflowContractBundle) resolveNodeEventOwnerPattern(nodeID, pattern string) string {
-	pattern = eventidentity.Normalize(pattern)
-	if b == nil || pattern == "" {
-		return pattern
-	}
-	flowID := b.nodeFlowID(nodeID)
-	scope := b.nodeEventScope(nodeID)
-	resolved := strings.TrimSpace(scope.ResolveSubscriptionPattern(pattern, b.flowEventDescendants(flowID)))
-	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
-		return resolved
-	}
-	path := eventidentity.Normalize(scope.Path)
-	if path == "" {
-		return resolved
-	}
-	for _, localEvent := range scope.LocalEvents {
-		if eventidentity.MatchPattern(pattern, localEvent) {
-			return path + "/" + pattern
-		}
-	}
-	return resolved
-}
-
-func (b *WorkflowContractBundle) localizeNodeEventType(nodeID, eventType string) string {
-	return b.nodeEventScope(nodeID).LocalizeInput(eventType)
-}
-
-func (b *WorkflowContractBundle) externalizeNodeEventType(nodeID, eventType string) string {
-	return b.ResolveNodeEventReference(nodeID, eventType)
-}
-
 func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 	flowID = strings.TrimSpace(flowID)
 	if b == nil || flowID == "" {
@@ -1227,7 +1162,7 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 		out = append(out, autoEmit)
 	}
 	for _, site := range b.ActivitySites() {
-		if strings.TrimSpace(site.FlowID) != flowID {
+		if site.Node.FlowID() != flowID {
 			continue
 		}
 		result := ActivityResultEventsForSite(site)
@@ -1336,131 +1271,6 @@ func (b *WorkflowContractBundle) flowEventDescendants(flowID string) []eventiden
 	return out
 }
 
-func (b *WorkflowContractBundle) nodeEventScope(nodeID string) eventidentity.Scope {
-	if b == nil {
-		return eventidentity.Scope{}
-	}
-	flowID := b.nodeFlowID(nodeID)
-	if flowID == "" {
-		return eventidentity.Scope{}
-	}
-	return b.flowEventScope(flowID)
-}
-
-func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
-	return b.ExternalizeNodeHandlerForFlow(b.nodeFlowID(nodeID), handler)
-}
-
-// ExternalizeNodeHandlerForFlow resolves authored emit names through one exact
-// flow owner without relying on globally unique node IDs.
-func (b *WorkflowContractBundle) ExternalizeNodeHandlerForFlow(flowID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
-	flowID = strings.TrimSpace(flowID)
-	externalize := func(spec EmitSpec) EmitSpec {
-		spec = cloneEmitSpec(spec)
-		spec.Event = b.ResolveFlowEventReference(flowID, spec.Event)
-		return spec
-	}
-	handler.Emit = externalize(handler.Emit)
-	handler.OnSuccess.Emit = externalize(handler.OnSuccess.Emit)
-	if handler.FanOut != nil {
-		clone := *handler.FanOut
-		clone.Emit = externalize(clone.Emit)
-		handler.FanOut = &clone
-	}
-	if len(handler.Rules) > 0 {
-		rules := make([]HandlerRuleEntry, 0, len(handler.Rules))
-		for _, rule := range handler.Rules {
-			rule.Emit = externalize(rule.Emit)
-			if rule.FanOut != nil {
-				clone := *rule.FanOut
-				clone.Emit = externalize(clone.Emit)
-				rule.FanOut = &clone
-			}
-			rules = append(rules, rule)
-		}
-		handler.Rules = rules
-	}
-	if len(handler.OnComplete) > 0 {
-		rules := make([]HandlerRuleEntry, 0, len(handler.OnComplete))
-		for _, rule := range handler.OnComplete {
-			rule.Emit = externalize(rule.Emit)
-			if rule.FanOut != nil {
-				clone := *rule.FanOut
-				clone.Emit = externalize(clone.Emit)
-				rule.FanOut = &clone
-			}
-			rules = append(rules, rule)
-		}
-		handler.OnComplete = rules
-	}
-	if handler.Accumulate != nil {
-		clone := *handler.Accumulate
-		handler.Accumulate = &clone
-	}
-	return handler
-}
-
-func (b *WorkflowContractBundle) externalizeEmitSpec(nodeID string, spec EmitSpec) EmitSpec {
-	spec = cloneEmitSpec(spec)
-	spec.Event = b.externalizeNodeEventType(nodeID, spec.Event)
-	return spec
-}
-
-func (b *WorkflowContractBundle) externalizeEventEmission(nodeID string, emission EventEmission) EventEmission {
-	values := emission.Values()
-	if len(values) == 0 {
-		return EventEmission{}
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		out = append(out, b.externalizeNodeEventType(nodeID, value))
-	}
-	if len(out) == 1 {
-		return EventEmission{Single: out[0]}
-	}
-	return EventEmission{Many: out}
-}
-
-func (b *WorkflowContractBundle) nodeFlowID(nodeID string) string {
-	if b == nil {
-		return ""
-	}
-	source, ok := b.NodeContractSource(nodeID)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(source.FlowID)
-}
-
-func (b *WorkflowContractBundle) flowHasLocalEvent(flowID, eventType string) bool {
-	if b == nil {
-		return false
-	}
-	flowID = strings.TrimSpace(flowID)
-	eventType = strings.TrimSpace(eventType)
-	if flowID == "" || eventType == "" {
-		return false
-	}
-	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
-		if _, ok := view.Events[eventType]; ok {
-			return true
-		}
-		for _, candidate := range view.Schema.Pins.Inputs.Events {
-			if strings.TrimSpace(candidate) == eventType {
-				return true
-			}
-		}
-		for _, candidate := range view.Schema.Pins.Outputs.Events {
-			if strings.TrimSpace(candidate) == eventType {
-				return true
-			}
-		}
-		if strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event) == eventType {
-			return true
-		}
-	}
-	return false
-}
 func (b *WorkflowContractBundle) DerivedHandlerTransitions() []HandlerTransitionSemantic {
 	if b == nil {
 		return nil
@@ -1468,26 +1278,6 @@ func (b *WorkflowContractBundle) DerivedHandlerTransitions() []HandlerTransition
 	out := make([]HandlerTransitionSemantic, len(b.Semantics.HandlerTransitions))
 	copy(out, b.Semantics.HandlerTransitions)
 	return out
-}
-func (b *WorkflowContractBundle) DerivedHandlerTransition(nodeID, eventType string) (HandlerTransitionSemantic, bool) {
-	if b == nil {
-		return HandlerTransitionSemantic{}, false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	eventType = strings.TrimSpace(eventType)
-	transitions, ok := b.Semantics.HandlerTransitionIndex[nodeID]
-	if !ok {
-		return HandlerTransitionSemantic{}, false
-	}
-	if transition, ok := transitions[eventType]; ok {
-		return transition, true
-	}
-	for pattern, transition := range transitions {
-		if handlerPatternMatches(pattern, eventType) {
-			return transition, true
-		}
-	}
-	return HandlerTransitionSemantic{}, false
 }
 func (b *WorkflowContractBundle) TransitionIDsByOwner() map[string][]string {
 	out := map[string][]string{}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -12,10 +13,11 @@ func TestWorkflowContractBundleNodeContractSourceUsesCanonicalRootNodeTable(t *t
 		"root-node": {ID: "root-node"},
 	}}
 
-	source, ok := bundle.NodeContractSource("root-node")
+	record, ok := bundle.ExecutableNode(identitytest.RootNode(t, "root-node"))
 	if !ok {
 		t.Fatal("canonical root node did not have contract source")
 	}
+	source := record.Source
 	if source.Layer != "project" || source.FlowID != "" {
 		t.Fatalf("root node source = %#v, want project-owned", source)
 	}
@@ -127,7 +129,7 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 	}
 	seenFlow := map[string]bool{}
 	for _, join := range bundle.Semantics.Joins {
-		seenFlow[join.FlowID] = true
+		seenFlow[join.Node.FlowID()] = true
 	}
 	for _, flowID := range []string{"", "a", "b"} {
 		if !seenFlow[flowID] {

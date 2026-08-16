@@ -433,6 +433,9 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	expectedState := ""
 	expectedRevision := int64(0)
 	flowID := strings.TrimSpace(address.FlowID.String())
+	if flowID == "" {
+		flowID = semanticview.RootExecutionFlowID(r.coordinator.SemanticSource())
+	}
 	if create {
 		if mutation.TriggeredAt.IsZero() {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
@@ -872,7 +875,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		if currentState == "" {
 			return true, true, nil
 		}
-		flowID := strings.TrimSpace(execCtx.Request.FlowID.String())
+		flowID := execCtx.Request.Node.FlowID()
 		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, *state) {
 			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
 				return false, true, nil
@@ -937,7 +940,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		payload := parsePayloadMap(execCtx.Request.Event.Payload())
 		bucketID := recordEvidenceTarget(execCtx.Request)
 		if bucketID == "" {
-			return runtimeengine.ActionExecution{Handled: true}, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
+			return runtimeengine.ActionExecution{Handled: true}, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.Node.Key(), recordEvidenceHandlerLabel(execCtx.Request))
 		}
 		mutation, err := pc.projectWorkflowEvidence(execCtx, bucketID, payload)
 		if err != nil {
@@ -946,7 +949,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		return runtimeengine.ActionExecution{Handled: true, State: mutation}, nil
 	case "create_flow_instance":
 		plan := handlerExecutionPlan{
-			NodeID:         execCtx.Request.NodeID.String(),
+			Node:           execCtx.Request.Node,
 			EventType:      strings.TrimSpace(string(execCtx.Request.Event.Type())),
 			Action:         actionID,
 			Template:       strings.TrimSpace(action.Template),
@@ -1026,7 +1029,7 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 			return nil, err
 		}
 	}
-	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.FlowID.String(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), req.Node.FlowID(), eventType, out, envelope, runtimeengine.EmitSurfaceFromContext(ctx)); err != nil {
 		return nil, err
 	}
 	return out, nil

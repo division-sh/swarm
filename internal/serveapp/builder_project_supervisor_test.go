@@ -29,6 +29,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -2517,7 +2518,7 @@ flows:
 		t.Fatalf("replacement event deliveries = %#v, want one exact template delivery", persisted.Deliveries)
 	}
 	delivery := persisted.Deliveries[0]
-	if delivery.SubscriberType != "node" || delivery.SubscriberID != "telegram-input-observer" ||
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != identitytest.FlowNode(t, "telegram-chat", "telegram-input-observer").Key() ||
 		delivery.Target.FlowID != "telegram-chat" || !strings.HasPrefix(delivery.Target.FlowInstance, "telegram-chat/") || delivery.Target.EntityID == "" {
 		t.Fatalf("replacement event delivery = %#v, want exact telegram-chat template target", delivery)
 	}

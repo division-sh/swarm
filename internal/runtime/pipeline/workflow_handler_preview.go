@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -73,19 +74,18 @@ func (previewBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return noOpEngineDispatcher{}
 }
 
-func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, nodeID string, evt events.Event, state WorkflowState, policyOverrides map[string]any) (HandlerPreview, error) {
+func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, node identity.ExecutableNode, evt events.Event, state WorkflowState, policyOverrides map[string]any) (HandlerPreview, error) {
 	if bundle == nil {
 		return HandlerPreview{}, ErrContractBundleNil
 	}
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
-		return HandlerPreview{}, fmt.Errorf("node id is required")
+	if !node.Valid() {
+		return HandlerPreview{}, fmt.Errorf("exact executable node identity is required")
 	}
 	previewBundle := semanticview.CloneBundleForPreview(bundle, policyOverrides)
 	source := semanticview.Wrap(previewBundle)
-	handler, ok := source.NodeEventHandler(nodeID, strings.TrimSpace(string(evt.Type())))
+	handler, ok := source.ExecutableNodeEventHandler(node, strings.TrimSpace(string(evt.Type())))
 	if !ok {
-		return HandlerPreview{}, fmt.Errorf("missing handler %s/%s", nodeID, evt.Type())
+		return HandlerPreview{}, fmt.Errorf("missing handler %s/%s", node.Key(), evt.Type())
 	}
 	workflow, err := LoadWorkflowDefinition(source)
 	if err != nil {
@@ -106,7 +106,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}
-	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(ctx, node, handler, workflowTriggerContext{
 		Event: evt,
 		State: state,
 	}, true)

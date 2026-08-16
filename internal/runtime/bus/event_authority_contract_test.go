@@ -77,7 +77,7 @@ func TestCommitPublishRejectsMissingOrDualRouteSettlement(t *testing.T) {
 		{name: "missing", commit: CommitPublishRequest{Event: admitted}},
 		{name: "selected class", commit: CommitPublishRequest{Event: admitted, RouteSettlement: selectedEmpty}},
 		{name: "delivery arm without route", commit: CommitPublishRequest{Event: admitted, RouteSettlement: delivery}},
-		{name: "no delivery arm with route", commit: CommitPublishRequest{Event: admitted, RouteSettlement: normalEmpty, DeliveryRoutes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer")}}}},
+		{name: "no delivery arm with route", commit: CommitPublishRequest{Event: admitted, RouteSettlement: normalEmpty, DeliveryRoutes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "consumer"))}}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := (InMemoryEventStore{}).CommitPublication(context.Background(), PublicationCommand{Commit: test.commit}); err == nil {

@@ -409,6 +409,22 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecExecutableNodeIdentityIsExactAndCanonicalOnly(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	rule := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation", "route_plan_authority", "executable_node_identity")
+	for _, fragment := range []string{
+		"exact package_key",
+		"owning flow_id",
+		"local node_id",
+		"explicitly empty flow_id",
+		"Local node_id",
+		"strict canonical codecs",
+		"no fallback, migration, or dual string authority",
+	} {
+		assertScalarContains(t, rule, fragment)
+	}
+}
+
 func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 

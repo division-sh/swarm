@@ -1398,6 +1398,16 @@ contract_formats:
             concatenated map, deduplication, or equality keys are forbidden in this ownership boundary. RoutingSource is the
             sole source-side admission fact: target routes, EventEnvelope fields, FlowInstance/EntityID shape, qualified suffix,
             and leaf equivalence cannot repair absent or contradictory source provenance.
+        executable_node_identity: |
+          Every executable workflow-node declaration has one opaque immutable identity consisting of its exact package_key,
+          owning flow_id, and local node_id. A root declaration carries package_key "." and an explicitly empty flow_id;
+          that declaration coordinate is distinct from the selected run or execution-flow route. Local node_id, runtime
+          naming, source-event scope, flow-instance text, and descriptor lookup are never executable-node authority. Contract
+          loading mints this identity once, and routing, delivery, handler execution, joins, timers, activities, replay,
+          selected-contract fork, recovery, and readback preserve it without reconstruction. Node subscriber_id and other
+          durable compact forms are strict canonical codecs of the complete tuple: missing coordinates, alternate spellings,
+          unknown fields, malformed keys, or disagreement with the selected declaration fail before mutation. Existing
+          stores and local-ID encodings are unsupported; there is no fallback, migration, or dual string authority.
         decision_state:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1482'

@@ -62,12 +62,13 @@ func TestClassifyDeliveryTargetOwnershipClosedUnion(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handler, err := AdmitDeliveryTargetHandler(source, "review", test.nodeID)
+			node := pipelineNode(t, "review", test.nodeID)
+			handler, err := AdmitDeliveryTargetHandler(source, node)
 			if err != nil {
 				t.Fatalf("admit handler: %v", err)
 			}
 			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(test.nodeID),
+				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
 				Handler:   handler.ForEvent("work.ready"), Candidates: test.candidates,
 			})
@@ -122,7 +123,8 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handler, err := AdmitDeliveryTargetHandler(source, "review", test.nodeID)
+			node := pipelineNode(t, "review", test.nodeID)
+			handler, err := AdmitDeliveryTargetHandler(source, node)
 			if err != nil {
 				t.Fatalf("admit handler: %v", err)
 			}
@@ -131,7 +133,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 				blueprint.EntityID = canonicalID
 			}
 			_, err = ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(test.nodeID),
+				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: blueprint,
 				Handler:   handler.ForEvent("work.ready"), Candidates: test.candidates,
 			})
@@ -148,13 +150,14 @@ func TestClassifyDeliveryTargetOwnershipUsesUnambiguousHandlerFlowOwner(t *testi
 		eventtest.UUID("delivery-target-handler-flow"), events.EventType("review/one/work.ready"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
 	)
-	handler, err := AdmitDeliveryTargetHandler(source, "review", "existing")
+	node := pipelineNode(t, "review", "existing")
+	handler, err := AdmitDeliveryTargetHandler(source, node)
 	if err != nil {
 		t.Fatalf("admit handler: %v", err)
 	}
 	entityID := eventtest.UUID("handler-flow-owner")
 	request := DeliveryTargetOwnershipRequest{
-		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient("existing"),
+		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 		Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/producer-child"},
 		Handler:   handler.ForEvent("work.ready"),
 		Candidates: []DeliveryTargetOwnerCandidate{{Route: events.RouteIdentity{
@@ -202,12 +205,13 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("selected-root-event"), "timer.cancel", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{},
 	)
-	handler, err := AdmitDeliveryTargetHandler(source, "timer-proof", "controller")
+	node := pipelineNode(t, "timer-proof", "controller")
+	handler, err := AdmitDeliveryTargetHandler(source, node)
 	if err != nil {
 		t.Fatalf("admit handler: %v", err)
 	}
 	request := DeliveryTargetOwnershipRequest{
-		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient("controller"),
+		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 		Blueprint: events.RouteIdentity{FlowID: "timer-proof"},
 		Handler:   handler.ForEvent("timer.cancel"),
 	}
@@ -281,12 +285,13 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 				eventtest.UUID("input-acquisition-"+test.name), events.EventType("review/one/"+string(test.eventType)),
 				"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
 			)
-			handler, err := AdmitDeliveryTargetHandler(source, "review", test.nodeID)
+			node := pipelineNode(t, "review", test.nodeID)
+			handler, err := AdmitDeliveryTargetHandler(source, node)
 			if err != nil {
 				t.Fatalf("admit handler: %v", err)
 			}
 			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
-				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(test.nodeID),
+				Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
 				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
 				Handler:   handler.ForEvent(test.eventType), Candidates: test.candidates,
 			})
@@ -315,7 +320,8 @@ func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t
 		eventtest.UUID("stamped-acquisition-owner"), events.EventType("review/one/work.created"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
 	)
-	handlerFact, err := AdmitDeliveryTargetHandler(source, "review", "pin-creator")
+	node := pipelineNode(t, "review", "pin-creator")
+	handlerFact, err := AdmitDeliveryTargetHandler(source, node)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +333,7 @@ func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t
 	wrong := events.MustMaterializingEntityTarget(events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("wrong-stamped-acquisition-owner"),
 	})
-	err = ValidateStampedDeliveryTargetOwnership(source, evt, events.MustNodeDeliveryRecipient("pin-creator"), handlerFact, handler, wrong)
+	err = ValidateStampedDeliveryTargetOwnership(source, evt, events.MustNodeDeliveryRecipient(node), handlerFact, handler, wrong)
 	if err == nil || !strings.Contains(err.Error(), "canonical future entity") {
 		t.Fatalf("ValidateStampedDeliveryTargetOwnership error = %v, want canonical future identity rejection", err)
 	}

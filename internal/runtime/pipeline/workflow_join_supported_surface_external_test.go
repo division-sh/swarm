@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -33,17 +32,6 @@ type exactExternalJoinSource struct {
 
 func (s exactExternalJoinSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 	return append([]runtimecontracts.WorkflowJoinPlan(nil), s.plans...)
-}
-
-func (s exactExternalJoinSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
-	if strings.TrimSpace(nodeID) == "join-node" {
-		layer := "flow"
-		if s.flowID == "" {
-			layer = "project"
-		}
-		return runtimecontracts.ContractItemSource{FlowID: s.flowID, Layer: layer}, true
-	}
-	return s.Source.NodeContractSource(nodeID)
 }
 
 type joinProofGenericScheduleWakeups struct{}
@@ -80,6 +68,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := exactExternalWorkflowJoinSource(t, flowID)
+				joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
 				path := runID
 				workflowName := source.WorkflowName()
 				instanceID := runID
@@ -96,7 +85,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					subscriptionType = eventType
 					additionalDescriptors = append(additionalDescriptors, eventType)
 				}
-				if owners := source.RuntimeEventOwners("item.completed"); len(owners) != 1 || owners[0] != "join-node" {
+				if owners := source.RuntimeEventOwners("item.completed"); len(owners) != 1 || !owners[0].Equal(joinNode) {
 					t.Fatalf("join event owners = %#v", owners)
 				}
 				module := proposedEffectProofModule{
@@ -107,10 +96,10 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 						{Name: "attention", Terminal: true},
 					}, []runtimepipeline.WorkflowTransition{{
 						Name: "complete-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "ready",
-						Trigger: "item.completed", Node: "join-node",
+						Trigger: "item.completed", Node: joinNode,
 					}}),
 					nodes: []runtimepipeline.WorkflowNode{{
-						ID: "join-node", Subscriptions: []events.EventType{events.EventType(subscriptionType)},
+						Node: joinNode, Subscriptions: []events.EventType{events.EventType(subscriptionType)},
 						ExecutionType: runtimecontracts.SystemNodeExecutionType,
 						Policies: map[string]runtimepipeline.WorkflowEventPolicy{
 							subscriptionType: {Consume: true},
@@ -169,7 +158,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					if err != nil {
 						t.Fatalf("plan member %s: %v", member, err)
 					}
-					if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != "join-node" {
+					if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Recipient.ID() != joinNode.Key() {
 						t.Fatalf("member %s delivery plan = %#v", member, plan)
 					}
 					if target := plan.DeliveryRoutes[0].Target.Route(); target.FlowID != wantTargetFlow || target.FlowInstance != path || target.EntityID != entityID {
@@ -184,7 +173,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 						t.Fatalf("wait member %s quiescence: %v", member, err)
 					}
 					cancel()
-					assertExactJoinDeliveryStatus(t, selected, ctx, event.ID(), "delivered")
+					assertExactJoinDeliveryStatus(t, selected, ctx, event.ID(), joinNode.Key(), "delivered")
 					eventsByMember = append(eventsByMember, event)
 				}
 
@@ -219,7 +208,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				if err != nil || !found || afterReplay.Revision != beforeReplayRevision {
 					t.Fatalf("replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
 				}
-				assertExactJoinDeliveryCount(t, selected, ctx, eventsByMember[1].ID(), 1)
+				assertExactJoinDeliveryCount(t, selected, ctx, eventsByMember[1].ID(), joinNode.Key(), 1)
 			})
 		}
 	}
@@ -251,6 +240,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				insertGateRecoveryRun(t, selected, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := exactExternalWorkflowJoinSource(t, flowID)
+				joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
 				path := runID
 				workflowName := source.WorkflowName()
 				instanceID := runID
@@ -268,10 +258,10 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						{Name: "attention", Terminal: true},
 					}, []runtimepipeline.WorkflowTransition{{
 						Name: "complete-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "ready",
-						Trigger: "item.completed", Node: "join-node",
+						Trigger: "item.completed", Node: joinNode,
 					}}),
 					nodes: []runtimepipeline.WorkflowNode{{
-						ID: "join-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+						Node: joinNode, ExecutionType: runtimecontracts.SystemNodeExecutionType,
 						Subscriptions: []events.EventType{"item.completed"},
 						Policies: map[string]runtimepipeline.WorkflowEventPolicy{
 							"item.completed": {Consume: true},
@@ -326,13 +316,27 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				}
 
 				eventID := exactJoinOccurrenceEventID(t, selected, ctx, runID)
+				startedCtx, cancelStarted := context.WithTimeout(ctx, 5*time.Second)
+				handlerStarted, startedErr := probe.Wait(startedCtx, runtimelifecycleprobe.Signal{
+					Kind: runtimelifecycleprobe.HandlerStarted, EventID: eventID,
+				})
+				cancelStarted()
+				if startedErr != nil {
+					t.Fatalf("wait exact join occurrence handler start = %#v err=%v", handlerStarted, startedErr)
+				}
+				handlerCtx, cancelHandler := context.WithTimeout(ctx, 5*time.Second)
+				handlerCompletion, handlerErr := probe.WaitForHandlerCompleted(handlerCtx, eventID, joinNode.Key())
+				cancelHandler()
+				if handlerErr != nil || handlerCompletion.Status != "completed" {
+					t.Fatalf("wait exact join occurrence handler = %#v err=%v", handlerCompletion, handlerErr)
+				}
 				waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
 					cancel()
 					t.Fatalf("wait occurrence delivery quiescence: %v", err)
 				}
 				cancel()
-				assertExactJoinDeliveryStatus(t, selected, ctx, eventID, "delivered")
+				assertExactJoinDeliveryStatus(t, selected, ctx, eventID, joinNode.Key(), "delivered")
 				instance := waitForExactJoinState(t, ctx, coordinator, route, "ready")
 				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 				if err != nil {
@@ -365,7 +369,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				if err != nil || !found || afterReplay.Revision != beforeReplayRevision {
 					t.Fatalf("occurrence replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
 				}
-				assertExactJoinDeliveryCount(t, selected, ctx, eventID, 1)
+				assertExactJoinDeliveryCount(t, selected, ctx, eventID, joinNode.Key(), 1)
 			})
 		}
 	}
@@ -395,22 +399,33 @@ func exactExternalWorkflowJoinSource(t *testing.T, flowID string) semanticview.S
 			After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"},
 		},
 	}
+	baseSource := semanticview.Wrap(bundle)
+	joinNode := externalPipelineSourceNode(t, baseSource, flowID, "join-node")
 	plans := []runtimecontracts.WorkflowJoinPlan{{
-		FlowID: flowID, NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec,
+		Node: joinNode, HandlerEvent: "item.completed", Spec: spec,
 		ResultType: runtimecontracts.CatalogTypeReference{Type: "jsonb"},
 	}}
 	bundle.Semantics.Joins = plans
 	return exactExternalJoinSource{Source: semanticview.Wrap(bundle), flowID: flowID, plans: plans}
 }
 
-func assertExactJoinDeliveryStatus(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, want string) {
+func assertExactJoinDeliveryStatus(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, subscriberKey, want string) {
 	t.Helper()
-	query := `SELECT status, CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'join-node'`
+	query := `SELECT status, CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 	if selected.postgres {
-		query = `SELECT status, COALESCE(failure, '{}'::jsonb)::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'join-node'`
+		query = `SELECT status, COALESCE(failure, '{}'::jsonb)::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
 	}
+	deadline := time.Now().Add(5 * time.Second)
 	var status, failure string
-	if err := selected.db.QueryRowContext(ctx, query, eventID).Scan(&status, &failure); err != nil || status != want {
+	var err error
+	for time.Now().Before(deadline) {
+		err = selected.db.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&status, &failure)
+		if err == nil && status == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil || status != want {
 		var runtimeLog string
 		logQuery := `SELECT CAST(payload AS TEXT) FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
 		_ = selected.db.QueryRowContext(ctx, logQuery).Scan(&runtimeLog)
@@ -418,14 +433,14 @@ func assertExactJoinDeliveryStatus(t *testing.T, selected gateRecoveryStoreCase,
 	}
 }
 
-func assertExactJoinDeliveryCount(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, want int) {
+func assertExactJoinDeliveryCount(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, subscriberKey string, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'join-node'`
+	query := `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 	if selected.postgres {
-		query = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'join-node'`
+		query = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
 	}
 	var count int
-	if err := selected.db.QueryRowContext(ctx, query, eventID).Scan(&count); err != nil || count != want {
+	if err := selected.db.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&count); err != nil || count != want {
 		t.Fatalf("delivery %s rows = %d err=%v, want %d", eventID, count, err, want)
 	}
 }

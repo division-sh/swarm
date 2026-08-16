@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 func TestTimerHandleRoundTripPreservesLoopGeneration(t *testing.T) {
@@ -101,7 +103,7 @@ func TestTimerHandlePayloadRoundTrip(t *testing.T) {
 }
 
 func TestAccumulatorBucketRefRetainsStreamWindowAndGenerationIdentity(t *testing.T) {
-	bucket := NewAccumulatorWindowBucketRef("collector", "item.arrived", "2026-Q1:closed")
+	bucket := NewAccumulatorWindowBucketRef(identitytest.RootNode(t, "collector"), "item.arrived", "2026-Q1:closed")
 	parsedBucket, ok := ParseAccumulatorBucketKey(bucket.Key())
 	if !ok {
 		t.Fatalf("ParseAccumulatorBucketKey(%q) failed", bucket.Key())
@@ -112,12 +114,13 @@ func TestAccumulatorBucketRefRetainsStreamWindowAndGenerationIdentity(t *testing
 }
 
 func TestParseAccumulatorBucketKey(t *testing.T) {
-	bucket, ok := ParseAccumulatorBucketKey("collector:item.arrived")
-	if !ok {
-		t.Fatal("expected accumulator bucket key to parse")
+	if _, ok := ParseAccumulatorBucketKey("collector:item.arrived"); ok {
+		t.Fatal("legacy local-node accumulator bucket key was accepted")
 	}
-	if bucket.NodeID != "collector" || bucket.EventType != "item.arrived" {
-		t.Fatalf("bucket = %#v", bucket)
+	bucket := NewAccumulatorWindowBucketRef(identitytest.RootNode(t, "collector"), "item.arrived", "")
+	parsed, ok := ParseAccumulatorBucketKey(bucket.Key())
+	if !ok || !parsed.Node.Equal(bucket.Node) || parsed.EventType != "item.arrived" {
+		t.Fatalf("parsed bucket = %#v ok=%v", parsed, ok)
 	}
 }
 
@@ -125,21 +128,20 @@ func TestJoinHandleRoundTripIncludesOwningFlowAndStageIdentity(t *testing.T) {
 	awaiting := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
 	reviewing := mustJoinHandle(t, TimerHandleJoinTimeout, "orders", "join-node", "item.completed", "reviewing", "shared", "window-1", attemptgeneration.Generation{})
 	foreignFlow := mustJoinHandle(t, TimerHandleJoinTimeout, "returns", "join-node", "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
+	foreignPackage := mustJoinHandleForNode(t, TimerHandleJoinTimeout, identitytest.ExecutableNode(t, "dependency", "orders", "join-node"), "item.completed", "awaiting", "shared", "window-1", attemptgeneration.Generation{})
 	if awaiting.TaskID() == reviewing.TaskID() {
 		t.Fatalf("join task ids collide across stages: %q", awaiting.TaskID())
 	}
 	if awaiting.TaskID() == foreignFlow.TaskID() {
 		t.Fatalf("join task ids collide across owning flows: %q", awaiting.TaskID())
 	}
+	if awaiting.TaskID() == foreignPackage.TaskID() {
+		t.Fatalf("join task ids collide across owning packages: %q", awaiting.TaskID())
+	}
 	parsed, ok := ParseTimerHandle(awaiting.PayloadMetadata())
 	ref, refOK := parsed.JoinRef()
-	if !ok || !refOK || ref.FlowID() != "orders" || ref.Stage() != "awaiting" || ref.JoinID() != "shared" || ref.Window() != "window-1" {
+	if !ok || !refOK || !ref.Node().Equal(identitytest.FlowNode(t, "orders", "join-node")) || ref.Stage() != "awaiting" || ref.JoinID() != "shared" || ref.Window() != "window-1" {
 		t.Fatalf("parsed join handle = %#v, %v", parsed, ok)
-	}
-	payload := awaiting.PayloadMetadata()
-	delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any), "flow_id")
-	if parsed, ok := ParseTimerHandle(payload); ok {
-		t.Fatalf("join handle without explicit flow owner parsed as %#v", parsed)
 	}
 }
 
@@ -168,8 +170,14 @@ func TestJoinHandleCodecRejectsMissingOrContradictoryDeclarationIdentity(t *test
 		name   string
 		mutate func(map[string]any)
 	}{
-		{name: "missing explicit flow", mutate: func(payload map[string]any) {
-			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any), "flow_id")
+		{name: "missing package coordinate", mutate: func(payload map[string]any) {
+			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "package_key")
+		}},
+		{name: "missing flow coordinate", mutate: func(payload map[string]any) {
+			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "flow_id")
+		}},
+		{name: "missing local coordinate", mutate: func(payload map[string]any) {
+			delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any)["node"].(map[string]any), "node_id")
 		}},
 		{name: "missing derived revision", mutate: func(payload map[string]any) { delete(payload, "revision_id") }},
 		{name: "contradictory derived revision", mutate: func(payload map[string]any) { payload["revision_id"] = "rev-hostile" }},
@@ -206,7 +214,16 @@ func cloneTimerPayload(t *testing.T, payload map[string]any) map[string]any {
 
 func mustJoinHandle(t *testing.T, kind TimerHandleKind, flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) TimerHandle {
 	t.Helper()
-	ref, err := NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window, generation)
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", flowID, nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mustJoinHandleForNode(t, kind, node, handlerEvent, stage, joinID, window, generation)
+}
+
+func mustJoinHandleForNode(t *testing.T, kind TimerHandleKind, node runtimeidentity.ExecutableNode, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) TimerHandle {
+	t.Helper()
+	ref, err := NewJoinRefForGeneration(node, handlerEvent, stage, joinID, window, generation)
 	if err != nil {
 		t.Fatal(err)
 	}

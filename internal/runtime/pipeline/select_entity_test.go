@@ -26,7 +26,7 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	budgetEntityID := seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
-	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db,
 			map[string]any{"vertical_id": "vertical-1", "amount_usd": 42},
 			events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222")),
@@ -65,7 +65,7 @@ func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *tes
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
 	for _, amount := range []int{42, 99} {
-		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+		result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectEntitySpendHandler(), workflowTriggerContext{
 			Event: persistedSelectEntityIngress(t, ctx, db,
 				map[string]any{"vertical_id": "vertical-1", "amount_usd": amount},
 				events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222")),
@@ -107,7 +107,7 @@ func TestExecuteNodeContractHandlerSelectEntityMatchesTypedStatusField(t *testin
 		"domain_status_id": "status-field-regression",
 	}, map[string]any{"status": "waiting"})
 
-	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", runtimecontracts.SystemNodeEventHandler{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), runtimecontracts.SystemNodeEventHandler{
 		SelectEntity: &runtimecontracts.SelectEntitySpec{
 			By: map[string]string{
 				"vertical_id": "payload.vertical_id",
@@ -170,7 +170,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 	pc, _ := newSelectEntityTestCoordinator(t, db)
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 
-	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectOrCreateEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}, events.EventEnvelope{}),
 
 		State: WorkflowState{},
@@ -204,7 +204,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 
 	for _, amount := range []int{42, 99} {
-		result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+		result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectOrCreateEntitySpendHandler(), workflowTriggerContext{
 			Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "vertical-1", "amount_usd": amount}, events.EventEnvelope{}),
 
 			State: WorkflowState{},
@@ -233,7 +233,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnAmbiguousMat
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-1", "vertical-1", 0)
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
 
-	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectOrCreateEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}, events.EventEnvelope{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_ambiguous") {
@@ -265,7 +265,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministi
 		t.Fatalf("seed conflicting entity: %v", err)
 	}
 
-	_, err = pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+	_, err = pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectOrCreateEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}, events.EventEnvelope{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
@@ -289,7 +289,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityConcurrentDuplicateCreate
 		wg.Add(1)
 		go func(trigger events.Event) {
 			defer wg.Done()
-			result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateEntitySpendHandler(), workflowTriggerContext{
+			result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectOrCreateEntitySpendHandler(), workflowTriggerContext{
 				Event: trigger,
 
 				State: WorkflowState{},
@@ -331,7 +331,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 		time.Unix(1_700_000_000, 0).UTC())
 	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
-	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectOrCreateArtifactRepoCommitHandler(), workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectOrCreateArtifactRepoCommitHandler(), workflowTriggerContext{
 		Event: sourceEvent,
 
 		State: WorkflowState{},
@@ -374,7 +374,7 @@ func TestExecuteNodeContractHandlerSelectEntityIgnoresTerminalAndTerminatedMatch
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 
-	result, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}, events.EventEnvelope{}),
 
 		State: WorkflowState{},
@@ -427,7 +427,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnNoMatch(t *testing.T
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
-	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "missing", "amount_usd": 42}, events.EventEnvelope{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
@@ -443,7 +443,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnMissingPayloadRef(t 
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	seedSelectEntityBudget(t, pc.workflowStore, ctx, source, "vertical-1", 0)
 
-	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"amount_usd": 42}, events.EventEnvelope{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "missing required payload ref") {
@@ -460,7 +460,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *te
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-1", "vertical-1", 0)
 	seedSelectEntityBudgetWithInstance(t, pc.workflowStore, ctx, source, "budget-2", "vertical-1", 0)
 
-	_, err := pc.executeNodeContractHandler(ctx, "treasury-orchestrator", selectEntitySpendHandler(), workflowTriggerContext{
+	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "treasury", "treasury-orchestrator"), selectEntitySpendHandler(), workflowTriggerContext{
 		Event: persistedSelectEntityIngress(t, ctx, db, map[string]any{"vertical_id": "vertical-1", "amount_usd": 42}, events.EventEnvelope{}),
 	}, false)
 	if err == nil || !strings.Contains(err.Error(), "select_entity_ambiguous") {

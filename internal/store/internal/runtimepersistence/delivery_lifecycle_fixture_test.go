@@ -175,7 +175,7 @@ func canonicalDeliveryFixtureRouteValue(route events.DeliveryRoute) events.Deliv
 
 func testEntitylessNodeDeliveryRoute(nodeID string) events.DeliveryRoute {
 	return events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode(nodeID)),
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
 		}),

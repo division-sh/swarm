@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -51,7 +52,7 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 		event.SourceEventID == "" ||
 		event.Disposition != runfork.RunForkSelectedContractDispositionEvidenceOnly ||
 		len(event.DerivedRecipients) != 1 ||
-		event.DerivedRecipients[0].Recipient.ID() != "consumer-node" {
+		event.DerivedRecipients[0].Recipient.ID() != identitytest.FlowNode(t, "consumer", "consumer-node").Key() {
 		t.Fatalf("selected route event = %#v, want evidence-only selected consumer-node", event)
 	}
 	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
@@ -90,7 +91,7 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	if err != nil {
 		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
 	}
-	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 || admission.SelectedRouteEvents[0].DerivedRecipients[0].Recipient.ID() != "consumer-node" {
+	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 || admission.SelectedRouteEvents[0].DerivedRecipients[0].Recipient.ID() != identitytest.FlowNode(t, "consumer", "consumer-node").Key() {
 		t.Fatalf("selected route events = %#v, want consumer-node through producer connect", admission.SelectedRouteEvents)
 	}
 }
@@ -127,17 +128,17 @@ func TestAdmitSelectedContractRouteHistoryRetainsEveryStampedRecipient(t *testin
 		t.Fatalf("selected route events = %#v, want one source event", history.SelectedRouteEvents)
 	}
 	recipients := history.SelectedRouteEvents[0].DerivedRecipients
-	if len(recipients) != 2 || recipients[0].Recipient.ID() != "consumer-a" || recipients[1].Recipient.ID() != "consumer-b" {
+	if len(recipients) != 2 || recipients[0].Recipient.ID() != identitytest.RootNode(t, "consumer-a").Key() || recipients[1].Recipient.ID() != identitytest.RootNode(t, "consumer-b").Key() {
 		t.Fatalf("derived recipients = %#v, want both stamped fan-out recipients", recipients)
 	}
 }
 
 func testStampedConnectRoute(t testing.TB, subscriberID string) events.DeliveryRoute {
 	t.Helper()
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(subscriberID), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"})}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"})}
 	digest := sha256.Sum256([]byte("edge:" + subscriberID))
 	pinDigest := sha256.Sum256([]byte("pin:consumer.scan.requested"))
-	claim, err := events.AdmitConnectExecutionClaim(digest, pinDigest, route.Recipient, "scan", "scan-node", events.EventType("scan.requested"))
+	claim, err := events.AdmitConnectExecutionClaim(digest, pinDigest, route.Recipient, identitytest.FlowNode(t, "scan", "scan-node"), events.EventType("scan.requested"))
 	if err != nil {
 		t.Fatalf("admit connect execution claim: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *test
 	}
 	if len(admission.SelectedRouteEvents) != 1 ||
 		len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 ||
-		admission.SelectedRouteEvents[0].DerivedRecipients[0].Recipient.ID() != "reviewer-inst-1" ||
+		admission.SelectedRouteEvents[0].DerivedRecipients[0].Recipient.ID() != identitytest.FlowNode(t, "review", "reviewer").Key() ||
 		admission.SelectedRouteEvents[0].DerivedRecipients[0].Path != "review/inst-1" {
 		t.Fatalf("selected route events = %#v, want materialized dynamic recipient reviewer-inst-1", admission.SelectedRouteEvents)
 	}

@@ -125,7 +125,7 @@ func TestOperatorEventReadbackProjectsTypedDeliveryTargetOwnership(t *testing.T)
 						uuid.NewString(), "assessment.reported", "reviewer", "", json.RawMessage(`{}`), 0,
 						runID, events.EventEnvelope{}, time.Now().UTC(),
 					)
-					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("review-finalize"), Target: test.owner}
+					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("review-finalize")), Target: test.owner}
 					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{route}); err != nil {
 						t.Fatalf("commit delivered event: %v", err)
 					}
@@ -160,7 +160,7 @@ func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *te
 			}
 
 			receiver := events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("review-receiver")))
-			candidate, err := events.NewConnectCandidateEvidence(receiver, events.MustNodeDeliveryRecipient("reviewer"), "review", agentidentity.Identity{}, events.ConnectCandidateAccepted)
+			candidate, err := events.NewConnectCandidateEvidence(receiver, events.MustNodeDeliveryRecipient(mustPersistenceRootNode("reviewer")), "review", agentidentity.Identity{}, events.ConnectCandidateAccepted)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +223,7 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			delivered := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.delivered", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base)
 			matchedEmpty := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.empty", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, base.Add(time.Second))
 			deliberateEmpty := eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"proof"}`), 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Second))
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("review-finalize"), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("review-finalize")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 				FlowID: "review", FlowInstance: "review/instance-1", EntityID: eventtest.UUID("review-instance-1"),
 			})}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, delivered, []events.DeliveryRoute{route}); err != nil {

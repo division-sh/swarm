@@ -23,19 +23,16 @@ func (c *checkerContext) nodeStateSchemaTypedCounterpart() []Finding {
 	}
 	c.nodeStateSchemaLoaded = true
 
-	nodes := c.source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(c.source) {
-		node, ok := nodes[nodeID]
-		if !ok {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		flowID := ""
-		if sourceRef, ok := c.source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceRef.FlowID)
-		}
+		nodeID := node.Key()
+		flowID := node.FlowID()
 		types := nodeStateResolvedTypes(c.source, flowID)
 		counterparts := nodeStateTypedCounterparts(c.source, flowID)
-		for _, field := range node.StateSchema.Fields {
+		for _, field := range record.Entry.StateSchema.Fields {
 			fieldName := strings.TrimSpace(field.Name)
 			if fieldName == "" {
 				continue

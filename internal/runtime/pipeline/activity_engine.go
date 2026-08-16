@@ -139,7 +139,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 	}
 	runID := strings.TrimSpace(intent.SourceRunID)
 	requestEventID := activityRequestEventID(intent)
-	flowInstance := firstNonEmptyString(intent.FlowInstance, intent.FlowID.String(), "root")
+	flowInstance := firstNonEmptyString(intent.FlowInstance, intent.ExecutionFlowID.String(), "root")
 	createdAt := time.Now().UTC()
 	bundleHash := workflowGateBundleHash(ctx, pc)
 	if bundleHash == "" {
@@ -159,7 +159,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 		EffectClass: intent.EffectClass, SuccessEvent: intent.SuccessEvent, FailureEvent: intent.FailureEvent,
 		RevisionEvent: intent.RevisionEvent, RejectedEvent: intent.RejectedEvent,
 		RetryMaxAttempts: intent.RetryMaxAttempts, RetryBackoff: intent.RetryBackoff, ForkPolicy: intent.ForkPolicy,
-		EntityID: intent.EntityID.String(), NodeID: intent.NodeID.String(), FlowID: intent.FlowID.String(), FlowInstance: flowInstance,
+		EntityID: intent.EntityID.String(), NodeID: intent.Owner.Key(), FlowID: intent.ExecutionFlowID.String(), FlowInstance: flowInstance,
 		HandlerEventKey: intent.HandlerEventKey, SourceEventID: intent.SourceEventID, SourceRunID: intent.SourceRunID,
 		SourceTaskID: intent.SourceTaskID, ParentEventID: intent.ParentEventID, ChainDepth: intent.ChainDepth,
 		Attempt: intent.Attempt, Generation: intent.Generation, LoopStage: intent.LoopStage,
@@ -201,7 +201,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
 	}
 	provenance, err := canonicaljson.FromGo(map[string]any{
-		"source_event": intent.SourceEventID, "flow_id": intent.FlowID.String(), "flow_instance": flowInstance, "node_id": intent.NodeID.String(),
+		"source_event": intent.SourceEventID, "flow_id": intent.ExecutionFlowID.String(), "flow_instance": flowInstance, "node_id": intent.Owner.Key(),
 		"execution_mode": executionMode,
 	})
 	if err != nil {
@@ -449,7 +449,7 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	}
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
 	defer unlock()
-	route, err := workflowInstanceRouteForExecution(d.coordinator.SemanticSource(), intent.FlowID.String(), intent.FlowInstance)
+	route, err := workflowInstanceRouteForExecution(d.coordinator.SemanticSource(), intent.ExecutionFlowID.String(), intent.FlowInstance)
 	if err != nil {
 		return fmt.Errorf("activity state route: %w", err)
 	}
@@ -836,10 +836,20 @@ func activityResultEventID(intent runtimeengine.ActivityIntent, eventType string
 func activityIdentityFact(intent runtimeengine.ActivityIntent) activityidentity.Fact {
 	return activityidentity.Fact{
 		RunID: intent.SourceRunID, SourceEventID: intent.SourceEventID, ParentEventID: intent.ParentEventID,
-		EntityID: intent.EntityID.String(), FlowID: intent.FlowID.String(), NodeID: intent.NodeID.String(),
+		EntityID: intent.EntityID.String(), Owner: intent.Owner, ExecutionFlowID: intent.ExecutionFlowID.String(),
 		HandlerEventKey: intent.HandlerEventKey, ActivityID: intent.ActivityID, Tool: intent.Tool,
 		Attempt: intent.Attempt, RevisionID: intent.Generation.RevisionID,
 	}
+}
+
+func activityEventProducer(owner activityidentity.Owner) events.ProducerClaim {
+	if node, ok := owner.Node(); ok {
+		return events.ProducerClaim{Type: events.EventProducerNode, ID: node.Key()}
+	}
+	if agentID := owner.AgentID(); agentID != "" {
+		return events.ProducerClaim{Type: events.EventProducerAgent, ID: agentID}
+	}
+	return events.ProducerClaim{}
 }
 
 func activityRetryMaxAttempts(intent runtimeengine.ActivityIntent, effectClass runtimecontracts.ActivityEffectClass) int {
@@ -911,8 +921,8 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 		RetryBackoff:     intent.RetryBackoff,
 		ForkPolicy:       string(intent.ForkPolicy),
 		EntityID:         intent.EntityID.String(),
-		NodeID:           intent.NodeID.String(),
-		FlowID:           intent.FlowID.String(),
+		NodeID:           intent.Owner.Key(),
+		FlowID:           intent.ExecutionFlowID.String(),
 		FlowInstance:     intent.FlowInstance,
 		HandlerEventKey:  intent.HandlerEventKey,
 		SourceEventID:    intent.SourceEventID,
@@ -949,6 +959,10 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	if payload.PlanGeneration != nil {
 		planGeneration = *payload.PlanGeneration
 	}
+	owner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+	if err != nil {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s owner identity: %w", evt.ID(), err)
+	}
 	intent := runtimeengine.ActivityIntent{
 		Context:          evt.DeliveryContext(),
 		RoutingSource:    evt.RoutingSource(),
@@ -967,8 +981,8 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		RetryBackoff:     payload.RetryBackoff,
 		ForkPolicy:       runtimecontracts.ActivityForkPolicy(strings.TrimSpace(payload.ForkPolicy)),
 		EntityID:         identity.NormalizeEntityID(payload.EntityID),
-		NodeID:           identity.NormalizeNodeID(payload.NodeID),
-		FlowID:           identity.NormalizeFlowID(payload.FlowID),
+		Owner:            owner,
+		ExecutionFlowID:  identity.NormalizeFlowID(payload.FlowID),
 		FlowInstance:     payload.FlowInstance,
 		HandlerEventKey:  payload.HandlerEventKey,
 		SourceEventID:    payload.SourceEventID,
@@ -1289,7 +1303,7 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		source = d.coordinator.SemanticSource()
 		store = d.coordinator.managedCredentials
 	}
-	flowID := intent.FlowID.String()
+	flowID := intent.ExecutionFlowID.String()
 	storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
 	if mapped && storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q is not declared and bound for imported package flow %s", key, flowID)
@@ -1387,7 +1401,7 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 	if d.coordinator != nil {
 		source = d.coordinator.SemanticSource()
 	}
-	flowID := intent.FlowID.String()
+	flowID := intent.ExecutionFlowID.String()
 	for _, key := range keys {
 		storeKey := ""
 		mapped := false
@@ -1483,7 +1497,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	evt, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
 			ID: eventID, Type: events.EventType(eventType),
-			Producer: events.ProducerClaim{Type: events.EventProducerNode, ID: intent.NodeID.String()},
+			Producer: activityEventProducer(intent.Owner),
 			TaskID:   intent.SourceTaskID, Payload: raw, ChainDepth: intent.ChainDepth + 1,
 			Envelope: events.EventEnvelope{
 				EntityID: intent.EntityID.String(), FlowInstance: intent.FlowInstance, Source: routingSource.Route(),
@@ -1556,8 +1570,8 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 		SourceEventID:   intent.SourceEventID,
 		ParentEventID:   intent.ParentEventID,
 		EntityID:        intent.EntityID.String(),
-		FlowInstance:    firstNonEmptyString(intent.FlowInstance, intent.FlowID.String()),
-		NodeID:          intent.NodeID.String(),
+		FlowInstance:    firstNonEmptyString(intent.FlowInstance, intent.ExecutionFlowID.String()),
+		NodeID:          intent.Owner.Key(),
 		HandlerEventKey: intent.HandlerEventKey,
 		ActivityID:      intent.ActivityID,
 		Tool:            intent.Tool,

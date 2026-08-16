@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -68,15 +69,7 @@ func TestAuthoredEventEndpointCensusReportsHarnessSinkWithoutConsumer(t *testing
 func TestAuthoredEventEndpointCensusIncludesCompiledHandlersOutsideEffectiveSubscriptions(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"worker": {ID: "worker"},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"worker": {"work.requested": {}},
-			},
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				"worker": {ID: "worker"},
-			},
+			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}}},
 		},
 	}
 
@@ -211,8 +204,12 @@ func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t
 		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn},
 	}})
 	census := BuildAuthoredEventEndpointCensus(source)
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/worker", "worker", "worker-node")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, identity := range []string{"work.requested", "work"} {
-		result := census.ResolveFanInInputForHandler("worker", "worker-node", identity)
+		result := census.ResolveFanInInputForHandler(node, identity)
 		endpoint, ok := result.Endpoint()
 		if !ok || endpoint.PinName != "work" {
 			t.Fatalf("handler identity %q result = %#v, want work input", identity, result)
@@ -223,7 +220,7 @@ func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t
 		{Name: "work-a", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
 		{Name: "work-b", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
 	})
-	ambiguous := BuildAuthoredEventEndpointCensus(ambiguousSource).ResolveFanInInputForHandler("worker", "worker-node", "work.requested")
+	ambiguous := BuildAuthoredEventEndpointCensus(ambiguousSource).ResolveFanInInputForHandler(node, "work.requested")
 	if ambiguous.Status != EndpointAssociationAmbiguous || len(ambiguous.Candidates) != 2 {
 		t.Fatalf("ambiguous result = %#v, want two candidates", ambiguous)
 	}
@@ -553,28 +550,15 @@ func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *te
 	assertEndpointSourceLine(t, census.Producers(), EventEndpointAgent, "", "test-agent", "task.completed", filepath.Join(fixture, "agents.yaml"), 8)
 }
 
-type endpointSourceFiles struct {
-	Source
-	nodes map[string]runtimecontracts.ContractItemSource
-}
-
-func (s endpointSourceFiles) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
-	source, ok := s.nodes[nodeID]
-	return source, ok
-}
-
 func TestEndpointCensusAcquiresUnprimedSourceThroughCanonicalOwner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nodes.yaml")
 	body := fmt.Sprintf("# unique source: %s\nworker-node:\n  event_handlers:\n    work.requested: {}\n", path)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	source := endpointSourceFiles{
-		Source: endpointCensusFixture(nil),
-		nodes: map[string]runtimecontracts.ContractItemSource{
-			"worker-node": {File: path},
-		},
-	}
+	bundle := endpointCensusBundle(nil)
+	bundle.FlowTree.Root.Children[0].Paths.NodesFile = path
+	source := Wrap(bundle)
 	before := yamlsource.DefaultStats()
 	census := BuildAuthoredEventEndpointCensus(source)
 	after := yamlsource.DefaultStats()

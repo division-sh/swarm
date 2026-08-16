@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -18,7 +19,6 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 		return c.handlerFindings
 	}
 	c.handlerLoaded = true
-	nodes := c.source.NodeEntries()
 	for _, transition := range c.source.WorkflowTransitions() {
 		id := strings.TrimSpace(transition.ID)
 		if id == "" {
@@ -60,22 +60,25 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 			})
 		}
 	}
-	for nodeID, node := range nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		for eventType, handler := range node.EventHandlers {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			eventType = strings.TrimSpace(eventType)
 			if runtimecontracts.HandlerHasAmbiguousTopLevelAction(handler) {
-				c.handlerFindings = append(c.handlerFindings, handlerActionFinding(nodeID, eventType, "handler-level action is invalid when rules are present; move action ownership to the active rule"))
+				c.handlerFindings = append(c.handlerFindings, handlerActionFinding(node.Key(), eventType, "handler-level action is invalid when rules are present; move action ownership to the active rule"))
 			}
-			c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(nodeID, eventType, handler.EvidenceTarget, handler.Action)...)
+			c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(node, eventType, handler.EvidenceTarget, handler.Action)...)
 			for idx, rule := range handler.Rules {
 				ruleLabel := strings.TrimSpace(rule.ID)
 				if ruleLabel == "" {
 					ruleLabel = fmt.Sprintf("%d", idx)
 				}
-				c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(nodeID, fmt.Sprintf("%s rule %s", eventType, ruleLabel), handler.EvidenceTarget, rule.Action)...)
+				c.handlerFindings = append(c.handlerFindings, c.validateWorkflowActionSpec(node, fmt.Sprintf("%s rule %s", eventType, ruleLabel), handler.EvidenceTarget, rule.Action)...)
 			}
-			c.handlerFindings = append(c.handlerFindings, rejectUnsupportedRuleActions(nodeID, eventType, handler)...)
+			c.handlerFindings = append(c.handlerFindings, rejectUnsupportedRuleActions(node.Key(), eventType, handler)...)
 		}
 	}
 	c.handlerFindings = append(c.handlerFindings, runtimeHandledEventsMissingExecutors(c.source)...)
@@ -104,7 +107,8 @@ func handlerRuleContext(prefix string, idx int, id string) string {
 	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
-func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {
+func (c *checkerContext) validateWorkflowActionSpec(node runtimeidentity.ExecutableNode, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {
+	nodeID := node.Key()
 	actionID := strings.TrimSpace(action.ID)
 	if actionID == "" {
 		return nil
@@ -126,7 +130,7 @@ func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, eviden
 		}
 	case "record_evidence":
 		if strings.TrimSpace(evidenceTarget) == "" {
-			findings = append(findings, handlerActionFinding(nodeID, eventContext, recordEvidenceMissingTargetMessage(c, nodeID)))
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, recordEvidenceMissingTargetMessage(c, node)))
 		}
 	case "mailbox_write":
 		if action.Mailbox == nil {
@@ -155,7 +159,7 @@ func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, eviden
 		findings = append(findings, handlerActionFinding(nodeID, eventContext, "mailbox declaration requires action mailbox_write"))
 	}
 	if normalizeWorkflowBuiltinActionID(actionID) == "artifact_repo_commit" {
-		findings = append(findings, validateArtifactRepoActionSpec(c.source, nodeFlowID(c.source, nodeID), nodeID, eventContext, action)...)
+		findings = append(findings, validateArtifactRepoActionSpec(c.source, node.FlowID(), nodeID, eventContext, action)...)
 	} else if action.ArtifactRepo != nil {
 		findings = append(findings, handlerActionFinding(nodeID, eventContext, "artifact_repo declaration requires action artifact_repo_commit"))
 	}
@@ -178,25 +182,26 @@ func handlerActionFinding(nodeID, eventContext, message string) Finding {
 // record_evidence.evidence_target: evidence_target is required (no default),
 // and the message names the declared evidence targets in the same flow so the
 // author sees what the flow already writes.
-func recordEvidenceMissingTargetMessage(c *checkerContext, nodeID string) string {
-	declared := c.declaredEvidenceTargetsForFlow(nodeFlowID(c.source, nodeID))
+func recordEvidenceMissingTargetMessage(c *checkerContext, node runtimeidentity.ExecutableNode) string {
+	declared := c.declaredEvidenceTargetsForFlow(node)
 	targets := "none"
 	if len(declared) > 0 {
 		targets = strings.Join(declared, ", ")
 	}
-	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", defaultFlowLabel(nodeFlowID(c.source, nodeID)), targets)
+	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", defaultFlowLabel(node.FlowID()), targets)
 }
 
 // declaredEvidenceTargetsForFlow returns the sorted set of evidence_target
 // values declared by record_evidence actions (handler-level or rule-level) in
 // the given flow. Rules share their handler's evidence_target.
-func (c *checkerContext) declaredEvidenceTargetsForFlow(flowID string) []string {
+func (c *checkerContext) declaredEvidenceTargetsForFlow(owner runtimeidentity.ExecutableNode) []string {
 	declared := map[string]struct{}{}
-	for nodeID, node := range c.source.NodeEntries() {
-		if nodeFlowID(c.source, nodeID) != flowID {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil || node.PackageKey() != owner.PackageKey() || node.FlowID() != owner.FlowID() {
 			continue
 		}
-		for _, handler := range node.EventHandlers {
+		for _, handler := range c.source.ExecutableNodeEventHandlers(node) {
 			target := strings.TrimSpace(handler.EvidenceTarget)
 			if target == "" {
 				continue
@@ -221,12 +226,13 @@ func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]
 	if source == nil {
 		return out
 	}
-	for nodeID, entry := range source.NodeEntries() {
-		if strings.TrimSpace(nodeID) == "" {
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		if len(source.NodeEventHandlers(nodeID)) > 0 || len(entry.EventHandlers) > 0 {
-			out[nodeID] = struct{}{}
+		if len(source.ExecutableNodeEventHandlers(node)) > 0 || len(record.Entry.EventHandlers) > 0 {
+			out[node.Key()] = struct{}{}
 		}
 	}
 	return out

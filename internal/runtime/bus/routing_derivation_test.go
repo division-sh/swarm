@@ -36,7 +36,8 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
-	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != "reviewer-inst-1" {
+	wantNode := testFlowNode(t, "review", "materialized-node")
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != wantNode.Key() {
 		t.Fatalf("resolved subscribers after add = %#v", got)
 	}
 	if err := eb.RemoveFlowInstanceRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")); err != nil {
@@ -63,8 +64,8 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
-	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != "reviewer-inst-1" {
-		t.Fatalf("resolved subscribers = %#v, want reviewer-inst-1", got)
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
+		t.Fatalf("resolved subscribers = %#v, want materialized-node declaration identity", got)
 	}
 }
 
@@ -102,7 +103,7 @@ func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRo
 	}
 	seen := map[string]bool{}
 	for _, subscriber := range got {
-		seen[subscriber.Recipient.Code()+":"+subscriber.Recipient.ID()] = true
+		seen[subscriber.Recipient.Code()+":"+subscriber.Recipient.LocalID()] = true
 	}
 	if !seen["node:listener"] || !seen["agent:observer"] {
 		t.Fatalf("resolved subscribers = %#v, want listener and observer", got)
@@ -146,7 +147,7 @@ func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRout
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	got := rt.Resolve(identity.InstancePath + "/opco.product_initialization_requested")
-	if len(got) != 1 || got[0].Recipient.ID() != "ceo" || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+	if len(got) != 1 || got[0].Recipient.LocalID() != "ceo" || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
 		t.Fatalf("resolved subscribers = %#v, want concrete same-scope agent route", got)
 	}
 }
@@ -312,8 +313,8 @@ func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *t
 	if store.upsertCalls != 0 || len(store.routes) != 0 {
 		t.Fatalf("route recovery rewrote persistence: calls=%d routes=%#v", store.upsertCalls, store.routes)
 	}
-	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != "reviewer-inst-1" {
-		t.Fatalf("restored route subscribers = %#v, want reviewer-inst-1", got)
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
+		t.Fatalf("restored route subscribers = %#v, want materialized-node declaration identity", got)
 	}
 }
 
@@ -415,10 +416,11 @@ func TestEventBusStageFlowInstanceRoutePersistsCompleteCrossInstanceObserverTopo
 		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
 	}
 	var observerRouteFound bool
+	workerNode := testFlowNode(t, "worker", "worker-listener")
 	for _, route := range store.stagedRoutes {
 		if route.Identity == consumerIdentity &&
 			route.EventPattern == "producer/source-1/task.done" &&
-			route.SubscriberID == "worker-listener" {
+			route.SubscriberID == workerNode.Key() {
 			observerRouteFound = true
 			break
 		}
@@ -479,9 +481,10 @@ func TestEventBusExactFlowInstanceRouteTopologyRemovesObsoleteObserverRows(t *te
 			if got := eb.RouteTable().Resolve("producer/source-1/task.done"); len(got) != 0 {
 				t.Fatalf("observer route after %s removal = %#v, want none", removed.ScopeKey, got)
 			}
+			workerNode := testFlowNode(t, "worker", "worker-listener")
 			for _, route := range store.routes {
 				if route.EventPattern == "producer/source-1/task.done" &&
-					route.SubscriberID == "worker-listener" {
+					route.SubscriberID == workerNode.Key() {
 					t.Fatalf("obsolete observer row survived %s removal: %#v", removed.ScopeKey, route)
 				}
 			}
@@ -613,7 +616,7 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.AddFlowInstanceRoute(req); err != nil {
 		t.Fatalf("exact AddFlowInstanceRoute replay: %v", err)
 	}
-	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != "reviewer-inst-1" {
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("routes after exact replay = %#v, want one installed owner route", got)
 	}
 	replaceCalls := len(store.replaceCalls)
@@ -635,7 +638,7 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if !eb.RouteTable().HasFlowInstanceRoute(installed) {
 		t.Fatal("installed identity disappeared after mismatched add/remove")
 	}
-	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != "reviewer-inst-1" {
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("routes after mismatched add/remove = %#v, want owner authority unchanged", got)
 	}
 	normalizedRemoval := runtimeflowidentity.Route{
@@ -792,7 +795,7 @@ func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
-	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 1 || got[0].Recipient.ID() != "worker-inst-1" {
+	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "child/grandchild", "materialized-node").Key() {
 		t.Fatalf("resolved subscribers after add = %#v", got)
 	}
 	if err := eb.RemoveFlowInstanceRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")); err != nil {
@@ -855,7 +858,7 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one lifecycle-orchestrator route", got)
 	}
-	if got[0].Recipient.ID() != "lifecycle-orchestrator" || !got[0].Recipient.IsNode() || got[0].Path != "operating/inst-1" {
+	if got[0].Recipient.LocalID() != "lifecycle-orchestrator" || !got[0].Recipient.IsNode() || got[0].Path != "operating/inst-1" {
 		t.Fatalf("resolved subscriber = %#v, want node lifecycle-orchestrator at operating/inst-1", got[0])
 	}
 }
@@ -879,10 +882,10 @@ func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one ceo route", got)
 	}
-	if got[0].Recipient.ID() != "ceo" {
-		t.Fatalf("resolved subscriber id = %q, want stable declared ceo name", got[0].Recipient.ID())
+	if got[0].Recipient.LocalID() != "ceo" {
+		t.Fatalf("resolved subscriber id = %q, want stable declared ceo name", got[0].Recipient.LocalID())
 	}
-	if got[0].AgentIdentity.AgentID() != got[0].Recipient.ID() || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+	if got[0].AgentIdentity.AgentID() != got[0].Recipient.LocalID() || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
 		t.Fatalf("resolved subscriber identity = %#v, want exact first instance", got[0].AgentIdentity)
 	}
 	siblingIdentity := runtimeflowidentity.DeriveRoute("operating", "22222222-2222-4222-8222-222222222222")
@@ -895,7 +898,7 @@ func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t
 		t.Fatalf("AddFlowInstanceRoute sibling: %v", err)
 	}
 	sibling := rt.Resolve("operating/22222222-2222-4222-8222-222222222222/opco.product_initialization_requested")
-	if len(sibling) != 1 || sibling[0].Recipient.ID() != got[0].Recipient.ID() ||
+	if len(sibling) != 1 || sibling[0].Recipient.LocalID() != got[0].Recipient.LocalID() ||
 		sibling[0].AgentIdentity.FlowInstance() != siblingIdentity.InstancePath ||
 		sibling[0].AgentIdentity == got[0].AgentIdentity {
 		t.Fatalf("resolved sibling subscriber = %#v, want same slug with distinct concrete identity from %#v", sibling, got[0])
@@ -939,7 +942,7 @@ func TestRouteTableExplicitAgentNameChangesPublicNameNotScopedCoordinate(t *test
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", identity.InstancePath, err)
 		}
 		got := routes.Resolve(identity.InstancePath + "/opco.product_initialization_requested")
-		if len(got) != 1 || got[0].Recipient.ID() != "executive" || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+		if len(got) != 1 || got[0].Recipient.LocalID() != "executive" || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
 			t.Fatalf("resolved %s = %#v, want executive on exact instance", identity.InstancePath, got)
 		}
 		concrete = append(concrete, got[0].AgentIdentity)
@@ -1112,7 +1115,7 @@ func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInst
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one operating-accumulator route", got)
 	}
-	if got[0].Recipient.ID() != "operating-accumulator" || !got[0].Recipient.IsNode() || got[0].MatchPattern != "component-scaffold/*/component.scaffolded" {
+	if got[0].Recipient.LocalID() != "operating-accumulator" || !got[0].Recipient.IsNode() || got[0].MatchPattern != "component-scaffold/*/component.scaffolded" {
 		t.Fatalf("resolved subscriber = %#v, want operating-accumulator wildcard route", got[0])
 	}
 
@@ -1172,7 +1175,7 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 	if got := rt.Resolve("scan.requested"); len(got) != 0 {
 		t.Fatalf("Resolve(scan.requested) = %#v, want none", got)
 	}
-	if got := rt.Resolve("discovery/scan.requested"); len(got) != 1 || got[0].Recipient.ID() != "scan-orchestrator" {
+	if got := rt.Resolve("discovery/scan.requested"); len(got) != 1 || got[0].Recipient.LocalID() != "scan-orchestrator" {
 		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want scan-orchestrator local input route", got)
 	}
 }
@@ -1229,7 +1232,7 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		t.Fatalf("Resolve(producer/scan.requested) = %#v, want none for retired sibling auto-wire", got)
 	}
 	got := rt.Resolve("consumer/scan.requested")
-	if len(got) != 1 || got[0].Recipient.ID() != "consumer-node" {
+	if len(got) != 1 || got[0].Recipient.LocalID() != "consumer-node" {
 		t.Fatalf("Resolve(consumer/scan.requested) = %#v, want consumer-node local input route", got)
 	}
 }
@@ -1282,7 +1285,7 @@ func TestDeriveRouteTable_StaticChildFlowInputSubscriptionsResolveCanonicalNodeO
 			}
 			got := rt.Resolve(tc.eventType)
 			if len(got) != 1 ||
-				got[0].Recipient.ID() != tc.nodeID ||
+				got[0].Recipient.LocalID() != tc.nodeID ||
 				!got[0].Recipient.IsNode() ||
 				got[0].Path != tc.flowPath ||
 				got[0].MatchPattern != tc.routeMatch ||
@@ -1326,7 +1329,7 @@ func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNo
 			got := rt.Resolve(tc.eventType)
 			found := false
 			for _, subscriber := range got {
-				if subscriber.Recipient.ID() == tc.nodeID &&
+				if subscriber.Recipient.LocalID() == tc.nodeID &&
 					subscriber.Recipient.IsNode() &&
 					subscriber.Path == tc.flowPath &&
 					subscriber.MatchPattern == tc.routeMatch {
@@ -1440,7 +1443,7 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	got := rt.Resolve("scoring/score.dimension_complete")
-	if len(got) != 1 || got[0].Recipient.ID() != "scoring-node" {
+	if len(got) != 1 || got[0].Recipient.LocalID() != "scoring-node" {
 		t.Fatalf("Resolve(scoring/score.dimension_complete) = %#v, want scoring-node", got)
 	}
 	if got := rt.Resolve("score.dimension_complete"); len(got) != 0 {
@@ -1512,7 +1515,7 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 		t.Fatalf("direct descendant route = %#v, connect dispatch must own the boundary edge", got)
 	}
 	got := rt.Resolve("child/micro.done")
-	if len(got) != 1 || got[0].Recipient.ID() != "child-aggregator" {
+	if len(got) != 1 || got[0].Recipient.LocalID() != "child-aggregator" {
 		t.Fatalf("Resolve(child/micro.done) = %#v, want receiver-local child-aggregator carrier", got)
 	}
 	if got[0].Path != "child" {

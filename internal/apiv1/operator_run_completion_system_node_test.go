@@ -12,6 +12,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -69,9 +70,10 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	}
 
 	eventID := triggerEventIDForRun(t, db, runID)
+	pipelineNodeID := identitytest.FlowNode(t, "discovery", "pipeline").Key()
 	assertPipelineReceiptSucceeded(t, db, eventID)
-	assertSystemNodeOutcomePersisted(t, db, eventID, "pipeline")
-	assertSystemNodeDeliverySettled(t, db, eventID, "pipeline")
+	assertSystemNodeOutcomePersisted(t, db, eventID, pipelineNodeID)
+	assertSystemNodeDeliverySettled(t, db, eventID, pipelineNodeID)
 	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -2520,7 +2521,11 @@ func decodeRoute(
 	case SubscriberAgent:
 		recipient = events.MustAgentDeliveryRecipient(subscriberID)
 	case SubscriberNode:
-		recipient = events.MustNodeDeliveryRecipient(subscriberID)
+		node, err := runtimeidentity.ParseExecutableNodeKey(subscriberID)
+		if err != nil {
+			return events.DeliveryRoute{}, fmt.Errorf("decode delivery node identity: %w", err)
+		}
+		recipient = events.MustNodeDeliveryRecipient(node)
 	default:
 		return events.DeliveryRoute{}, fmt.Errorf("unsupported delivery subscriber class %q", class)
 	}

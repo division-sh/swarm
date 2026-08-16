@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 func TestConnectRecipientEvaluationPreservesNormalizedPerPlanOutcomes(t *testing.T) {
@@ -16,7 +17,7 @@ func TestConnectRecipientEvaluationPreservesNormalizedPerPlanOutcomes(t *testing
 	}
 	planID := AdmitConnectPlanIdentity(sha256.Sum256([]byte("plan-a")))
 	receiver := AdmitConnectReceiverIdentity(sha256.Sum256([]byte("receiver-a")))
-	recipient := MustNodeDeliveryRecipient("consumer")
+	recipient := MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer"))
 	accepted, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Identity{}, ConnectCandidateAccepted)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestConnectRecipientEvaluationPreservesNormalizedPerPlanOutcomes(t *testing
 		t.Fatal(err)
 	}
 	rejectedReceiver := AdmitConnectReceiverIdentity(sha256.Sum256([]byte("receiver-b")))
-	rejected, err := NewConnectCandidateEvidence(rejectedReceiver, MustNodeDeliveryRecipient("other"), "other", agentidentity.Identity{}, ConnectCandidatePathMismatch)
+	rejected, err := NewConnectCandidateEvidence(rejectedReceiver, MustNodeDeliveryRecipient(identitytest.RootNode(t, "other")), "other", agentidentity.Identity{}, ConnectCandidatePathMismatch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestConnectRecipientEvaluationPreservesNormalizedPerPlanOutcomes(t *testing
 func TestConnectRecipientEvaluationReturnsClosedRejectionEvidence(t *testing.T) {
 	planID := AdmitConnectPlanIdentity(sha256.Sum256([]byte("plan-a")))
 	receiver := AdmitConnectReceiverIdentity(sha256.Sum256([]byte("receiver-a")))
-	recipient := MustNodeDeliveryRecipient("consumer")
+	recipient := MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer"))
 	accepted, err := NewConnectCandidateEvidence(receiver, recipient, "consumer", agentidentity.Identity{}, ConnectCandidateAccepted)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +105,7 @@ func TestEventWriteClassSettlementPolicyIsExhaustive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("consumer")}
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient(identitytest.RootNode(t, "consumer"))}
 	valid := []struct {
 		name   string
 		build  func() (RouteSettlement, error)

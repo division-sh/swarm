@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
@@ -13,9 +14,8 @@ import (
 )
 
 type wave1WriteTarget struct {
-	FlowID        string
+	Node          runtimeidentity.ExecutableNode
 	SourceFile    string
-	NodeID        string
 	EventType     string
 	Kind          string
 	Target        string
@@ -25,6 +25,9 @@ type wave1WriteTarget struct {
 	WriteIndex    int
 	HasWriteIndex bool
 }
+
+func (t wave1WriteTarget) flowID() string { return t.Node.FlowID() }
+func (t wave1WriteTarget) nodeID() string { return t.Node.Key() }
 
 type wave1ScopedAgentRecord struct {
 	LogicalID string
@@ -51,13 +54,13 @@ func wave1WriteTargetContract(source semanticview.Source, target wave1WriteTarge
 			return view, true
 		}
 	}
-	view := wave1EntityContractForFlow(source, target.FlowID)
+	view := wave1EntityContractForFlow(source, target.flowID())
 	if view.Defined {
 		if _, ok := view.Contract.Fields[target.Field]; ok {
 			return view, true
 		}
 	}
-	if target.FlowID != "" && wave1FlowWritesRootField(source, target.FlowID, target.Field) {
+	if target.flowID() != "" && wave1FlowWritesRootField(source, target.flowID(), target.Field) {
 		if root, ok := wave1RootFieldContract(source, target.Field); ok {
 			return root, true
 		}
@@ -118,7 +121,7 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 		if !target.Entity || strings.TrimSpace(target.Field) == "" {
 			continue
 		}
-		key := strings.Join([]string{target.FlowID, target.NodeID, target.EventType, target.Kind, target.Target}, "|")
+		key := strings.Join([]string{target.Node.Key(), target.EventType, target.Kind, target.Target}, "|")
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -132,8 +135,8 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
 				CheckID:  "entity_write_target_compliance",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is invalid: %v", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Target, err),
-				Location: target.NodeID,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s target %q is invalid: %v", defaultFlowLabel(target.flowID()), target.nodeID(), target.EventType, target.Kind, target.Target, err),
+				Location: target.nodeID(),
 			})
 			continue
 		}
@@ -143,8 +146,8 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
 				CheckID:  "entity_write_target_compliance",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from the declared entity contract", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
-				Location: target.NodeID,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from the declared entity contract", defaultFlowLabel(target.flowID()), target.nodeID(), target.EventType, target.Kind, target.Field),
+				Location: target.nodeID(),
 			})
 			continue
 		}
@@ -155,8 +158,8 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
 				CheckID:  "entity_write_target_compliance",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField, contract.EntityType),
-				Location: target.NodeID,
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes undeclared entity field %q on entity_type %s", defaultFlowLabel(target.flowID()), target.nodeID(), target.EventType, target.Kind, rootField, contract.EntityType),
+				Location: target.nodeID(),
 			})
 		}
 	}
@@ -275,7 +278,7 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 		}
 	}
 	for _, ref := range wave1ContainedStateOperations(source) {
-		contract, ok := entityruntime.ResolveForFlow(source, ref.FlowID)
+		contract, ok := entityruntime.ResolveForFlow(source, ref.flowID())
 		if !ok {
 			continue
 		}
@@ -283,7 +286,7 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 		if err != nil {
 			continue
 		}
-		ownerFlowID := strings.TrimSpace(ref.FlowID)
+		ownerFlowID := strings.TrimSpace(ref.flowID())
 		if out[ownerFlowID] == nil {
 			out[ownerFlowID] = map[string]struct{}{}
 		}
@@ -554,11 +557,12 @@ func wave1MergeEntityReaderCoverage(into, extra map[string]map[string]struct{}) 
 func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
 	for _, record := range wave1ScopedNodeRecords(source) {
-		flowID := strings.TrimSpace(record.Source.FlowID)
-		nodeID := strings.TrimSpace(record.LogicalID)
+		node, _ := record.Identity()
+		flowID := node.FlowID()
+		nodeID := node.Key()
 		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(source, node, eventType, handler) {
 				for _, ref := range wave1ResolvedExpressionRefs(source, flowID, nodeID, eventType, expr) {
 					ownerFlowID := strings.TrimSpace(ref.OwnerFlowID)
 					if out[ownerFlowID] == nil {
@@ -575,11 +579,13 @@ func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[
 func wave1AllEntityWriteTargets(source semanticview.Source) []wave1WriteTarget {
 	out := make([]wave1WriteTarget, 0)
 	for _, record := range wave1ScopedNodeRecords(source) {
-		flowID := strings.TrimSpace(record.Source.FlowID)
-		nodeID := strings.TrimSpace(record.LogicalID)
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
 		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, target := range wave1HandlerWriteTargets(flowID, nodeID, eventType, handler) {
+			for _, target := range wave1HandlerWriteTargets(node, eventType, handler) {
 				target.SourceFile = strings.TrimSpace(record.Source.File)
 				out = append(out, target)
 			}
@@ -596,10 +602,10 @@ func wave1ScopedNodeRecords(source semanticview.Source) []runtimecontracts.Scope
 	return bundle.ScopedNodeRecords()
 }
 
-func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []wave1WriteTarget {
+func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []wave1WriteTarget {
 	out := make([]wave1WriteTarget, 0)
 	addIndexed := func(kind, target string, writeIndex int, hasWriteIndex bool) {
-		write := wave1ParseWriteTarget(flowID, nodeID, eventType, kind, target)
+		write := wave1ParseWriteTarget(node, eventType, kind, target)
 		if strings.TrimSpace(write.Target) == "" {
 			return
 		}
@@ -665,10 +671,9 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 	return out
 }
 
-func wave1ParseWriteTarget(flowID, nodeID, eventType, kind, target string) wave1WriteTarget {
+func wave1ParseWriteTarget(node runtimeidentity.ExecutableNode, eventType, kind, target string) wave1WriteTarget {
 	write := wave1WriteTarget{
-		FlowID:    strings.TrimSpace(flowID),
-		NodeID:    strings.TrimSpace(nodeID),
+		Node:      node,
 		EventType: strings.TrimSpace(eventType),
 		Kind:      strings.TrimSpace(kind),
 		Target:    strings.TrimSpace(target),
@@ -718,12 +723,12 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 	}
 	rootField, _, _ := strings.Cut(path, ".")
 	if !strings.Contains(path, ".") {
-		if view := wave1EntityContractForFlow(source, target.FlowID); view.Defined {
+		if view := wave1EntityContractForFlow(source, target.flowID()); view.Defined {
 			if _, ok := view.Contract.Fields[strings.TrimSpace(rootField)]; ok {
 				return wave1ResolvedType{}, strings.TrimSpace(view.FlowID), strings.TrimSpace(rootField), nil
 			}
 		}
-		if target.FlowID != "" && wave1FlowWritesRootField(source, target.FlowID, rootField) {
+		if target.flowID() != "" && wave1FlowWritesRootField(source, target.flowID(), rootField) {
 			if root, ok := wave1RootFieldContract(source, rootField); ok {
 				return wave1ResolvedType{}, strings.TrimSpace(root.FlowID), strings.TrimSpace(rootField), nil
 			}
@@ -731,9 +736,9 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 		if platformcontext.LegacyEntityMetadataField(rootField) {
 			return wave1ResolvedType{}, "", "", fmt.Errorf("%s", legacyEntityMetadataDiagnostic(rootField))
 		}
-		return wave1ResolvedType{}, strings.TrimSpace(target.FlowID), strings.TrimSpace(rootField), nil
+		return wave1ResolvedType{}, strings.TrimSpace(target.flowID()), strings.TrimSpace(rootField), nil
 	}
-	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.FlowID, "entity."+path)
+	leaf, ownerFlowID, err := wave1ResolveEntityPathWithOwner(source, target.flowID(), "entity."+path)
 	if err != nil {
 		return wave1ResolvedType{}, "", "", err
 	}
@@ -762,18 +767,5 @@ func wave1ResolvedExpressionRefs(source semanticview.Source, flowID, nodeID, eve
 			Leaf:        leaf,
 		})
 	}
-	return out
-}
-
-func sortedNodeIDs(source semanticview.Source) []string {
-	nodes := source.NodeEntries()
-	out := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID != "" {
-			out = append(out, nodeID)
-		}
-	}
-	sort.Strings(out)
 	return out
 }

@@ -15,6 +15,7 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -341,8 +342,9 @@ func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&finalizedID, &finalizedBy, &finalizedType, &finalizedSource); err != nil {
 		t.Fatalf("load node emitted event: %v", err)
 	}
-	if finalizedBy != "bridge-node" || finalizedType != "node" || finalizedSource != completedID {
-		t.Fatalf("task.finalized lineage = producer %s/%s source %s, want bridge-node/node source %s", finalizedType, finalizedBy, finalizedSource, completedID)
+	bridgeNodeID := identitytest.RootNode(t, "bridge-node").Key()
+	if finalizedBy != bridgeNodeID || finalizedType != "node" || finalizedSource != completedID {
+		t.Fatalf("task.finalized lineage = producer %s/%s source %s, want %s/node source %s", finalizedType, finalizedBy, finalizedSource, bridgeNodeID, completedID)
 	}
 
 	receiptQuery := `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' AND r.outcome = 'success'`
@@ -493,6 +495,7 @@ func closedReceiverEvidenceDiagnostic(t testing.TB, ctx context.Context, db *sql
 
 func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string) bool {
 	t.Helper()
+	bridgeNodeID := identitytest.RootNode(t, "bridge-node").Key()
 	query := `
 		SELECT
 			(SELECT COUNT(DISTINCT o.agent_id)
@@ -503,7 +506,7 @@ func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, 
 			(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
 			 WHERE e.run_id = ? AND d.status = 'delivered'
 			   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
-			     OR (d.subscriber_type = 'node' AND d.subscriber_id = 'bridge-node')))
+			     OR (d.subscriber_type = 'node' AND d.subscriber_id = ?)))
 	`
 	if backend == "postgres" {
 		query = `
@@ -516,13 +519,13 @@ func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, 
 				(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
 				 WHERE e.run_id = $1::uuid AND d.status = 'delivered'
 				   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
-				     OR (d.subscriber_type = 'node' AND d.subscriber_id = 'bridge-node')))
+				     OR (d.subscriber_type = 'node' AND d.subscriber_id = $2)))
 		`
 	}
 	var actors, eventsCount, deliveries int
-	args := []any{runID, runID}
+	args := []any{runID, runID, bridgeNodeID}
 	if backend == "postgres" {
-		args = []any{runID}
+		args = []any{runID, bridgeNodeID}
 	}
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&actors, &eventsCount, &deliveries); err != nil {
 		t.Fatalf("query closed receiver evidence readiness: %v", err)

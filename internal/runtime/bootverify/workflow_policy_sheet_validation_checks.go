@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -13,22 +14,19 @@ const policySheetValidationCheckID = "policy_sheet_validation_value_rows"
 
 func checkPolicySheetValidationValueRows(c *checkerContext) []Finding {
 	findings := make([]Finding, 0)
-	nodes := c.source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(c.source) {
-		node, ok := nodes[nodeID]
-		if !ok {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		flowID := nodeFlowID(c.source, nodeID)
-		for eventType, handler := range node.EventHandlers {
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			for idx, rule := range handler.Rules {
 				if !policySheetRuleIsValidationValueRow(rule) {
 					continue
 				}
 				ref := policySheetValidationRef{
-					FlowID:    flowID,
-					NodeID:    nodeID,
+					Node:      node,
 					EventType: eventType,
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
@@ -41,8 +39,7 @@ func checkPolicySheetValidationValueRows(c *checkerContext) []Finding {
 }
 
 type policySheetValidationRef struct {
-	FlowID    string
-	NodeID    string
+	Node      runtimeidentity.ExecutableNode
 	EventType string
 	RuleIndex int
 	RuleID    string
@@ -52,8 +49,8 @@ func policySheetValidationFinding(ref policySheetValidationRef, detail string) F
 	return Finding{
 		CheckID:  policySheetValidationCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s validate row %s: %s", defaultFlowLabel(ref.FlowID), ref.NodeID, ref.EventType, ref.RowLabel(), detail),
-		Location: ref.NodeID,
+		Message:  fmt.Sprintf("flow %s node %s handler %s validate row %s: %s", defaultFlowLabel(ref.Node.FlowID()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Location: ref.Node.Key(),
 	}
 }
 
@@ -92,14 +89,14 @@ func validatePolicySheetValidationValueRow(source semanticview.Source, ref polic
 	} else if !policySheetLookupPathIsSimple(storePath) {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.into %q must be a simple computed.validation.* path", storeAs)))
 	}
-	policy := source.ResolvedPolicyForFlow(ref.FlowID)
+	policy := source.ResolvedPolicyForExecutableNode(ref.Node)
 	set, ok := policy.Validation[strings.TrimSpace(spec.Set)]
 	if !ok {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.set %q does not resolve in policy.validation", strings.TrimSpace(spec.Set))))
 	} else {
 		findings = append(findings, validatePolicySheetValidationDispositionConsumer(ref, handler, rule, storeAs, set)...)
 	}
-	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, ref.RuleIndex, storeAs) {
+	if !policySheetLookupBindingConsumed(source, ref.Node, ref.EventType, handler, ref.RuleIndex, storeAs) {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", storeAs)))
 	}
 	return findings

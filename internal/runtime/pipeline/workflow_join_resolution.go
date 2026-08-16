@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -45,12 +46,12 @@ func ResolveWorkflowJoinOccurrenceDeliveryTarget(
 		return noRecipient, events.RouteIdentity{}, DeliveryTargetHandler{}, false,
 			fmt.Errorf("join lifecycle delivery target requires exact flow, instance, and entity identity")
 	}
-	handler, err := NewDeliveryTargetHandler(executionFlowID, resolution.Ref.NodeID())
+	handler, err := NewDeliveryTargetHandler(resolution.Ref.Node())
 	if err != nil {
 		return noRecipient, events.RouteIdentity{}, DeliveryTargetHandler{}, false, err
 	}
 	handler = handler.ForEvent(events.EventType(resolution.Ref.HandlerEvent()))
-	return events.MustNodeDeliveryRecipient(resolution.Ref.NodeID()), target, handler, true, nil
+	return events.MustNodeDeliveryRecipient(resolution.Ref.Node()), target, handler, true, nil
 }
 
 func resolveWorkflowJoinOccurrence(source semanticview.Source, evt events.Event) (workflowJoinOccurrenceResolution, bool, error) {
@@ -89,7 +90,7 @@ func resolveWorkflowJoinOccurrence(source semanticview.Source, evt events.Event)
 	if !ok {
 		return workflowJoinOccurrenceResolution{}, false, fmt.Errorf("join lifecycle event references an unknown exact declaration")
 	}
-	handler, ok := source.NodeEventHandlers(ref.NodeID())[ref.HandlerEvent()]
+	handler, ok := source.ExecutableNodeEventHandlers(ref.Node())[ref.HandlerEvent()]
 	if !ok || handler.Join == nil {
 		return workflowJoinOccurrenceResolution{}, false, fmt.Errorf("join lifecycle declaration has no executable handler")
 	}
@@ -99,7 +100,7 @@ func resolveWorkflowJoinOccurrence(source semanticview.Source, evt events.Event)
 func workflowJoinDeclarationForExecution(
 	source semanticview.Source,
 	evt events.Event,
-	handlerFlowID, nodeID, handlerEvent string,
+	node runtimeidentity.ExecutableNode, handlerEvent string,
 	handler runtimecontracts.SystemNodeEventHandler,
 ) (timeridentity.JoinRef, error) {
 	if handler.Join == nil {
@@ -110,32 +111,30 @@ func workflowJoinDeclarationForExecution(
 		if err != nil {
 			return timeridentity.JoinRef{}, err
 		}
-		if !ok || resolution.Ref.NodeID() != strings.TrimSpace(nodeID) || resolution.Ref.HandlerEvent() != strings.TrimSpace(handlerEvent) {
+		if !ok || !resolution.Ref.Node().Equal(node) || resolution.Ref.HandlerEvent() != strings.TrimSpace(handlerEvent) {
 			return timeridentity.JoinRef{}, fmt.Errorf("join lifecycle event does not select the exact handler declaration")
 		}
 		return resolution.Ref.Declaration(), nil
 	}
-	return workflowJoinDeclarationRef(source, handlerFlowID, nodeID, handlerEvent, handler)
+	return workflowJoinDeclarationRef(source, node, handlerEvent, handler)
 }
 
-func workflowJoinDeclarationRef(source semanticview.Source, handlerFlowID, nodeID, handlerEvent string, handler runtimecontracts.SystemNodeEventHandler) (timeridentity.JoinRef, error) {
+func workflowJoinDeclarationRef(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEvent string, handler runtimecontracts.SystemNodeEventHandler) (timeridentity.JoinRef, error) {
 	if source == nil || handler.Join == nil {
 		return timeridentity.JoinRef{}, fmt.Errorf("join declaration resolution requires semantic source and join handler")
 	}
-	handlerFlowID = strings.TrimSpace(handlerFlowID)
-	nodeID = strings.TrimSpace(nodeID)
-	if handlerFlowID == "" || nodeID == "" {
+	if !node.Valid() {
 		return timeridentity.JoinRef{}, fmt.Errorf("join handler requires its exact compiled execution scope")
 	}
-	plan, ok := semanticview.WorkflowJoinPlanForExecutionHandler(source, handlerFlowID, nodeID, handlerEvent, *handler.Join)
+	plan, ok := semanticview.WorkflowJoinPlanForExecutionHandler(source, node, handlerEvent, *handler.Join)
 	if !ok {
-		return timeridentity.JoinRef{}, fmt.Errorf("join handler has no declaration in exact flow scope %q", handlerFlowID)
+		return timeridentity.JoinRef{}, fmt.Errorf("join handler has no declaration in exact executable node scope %q", node.Key())
 	}
-	ref, err := timeridentity.NewJoinRef(plan.FlowID, nodeID, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID(), "")
+	ref, err := timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID(), "")
 	if err != nil {
 		return timeridentity.JoinRef{}, err
 	}
-	if resolved, ok := semanticview.WorkflowJoinPlanForRef(source, ref); !ok || strings.TrimSpace(resolved.FlowID) != strings.TrimSpace(plan.FlowID) {
+	if resolved, ok := semanticview.WorkflowJoinPlanForRef(source, ref); !ok || !resolved.Node.Equal(plan.Node) {
 		return timeridentity.JoinRef{}, fmt.Errorf("join handler has no exact semantic declaration")
 	}
 	return ref, nil

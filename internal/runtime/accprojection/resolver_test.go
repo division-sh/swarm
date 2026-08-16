@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -79,7 +80,7 @@ func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
 		t.Fatal("Resolve issues = 0, want global invalid bad-node declaration")
 	}
 
-	bindings, issues := ForHandler(source, "", "valid-node", "score.dimension_complete")
+	bindings, issues := ForExecutableHandler(source, identitytest.RootNode(t, "valid-node"), "score.dimension_complete")
 	if len(issues) != 0 {
 		t.Fatalf("ForHandler valid issues = %#v, want none", issues)
 	}
@@ -87,7 +88,7 @@ func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
 		t.Fatalf("ForHandler valid bindings = %d, want 1", len(bindings))
 	}
 
-	_, issues = ForHandler(source, "", "bad-node", "score.bad_dimension_complete")
+	_, issues = ForExecutableHandler(source, identitytest.RootNode(t, "bad-node"), "score.bad_dimension_complete")
 	if !issuesContain(issues, "missing_buffer") {
 		t.Fatalf("ForHandler bad issues = %#v, want missing_buffer issue", issues)
 	}
@@ -96,7 +97,8 @@ func TestForHandler_FiltersProjectionIssuesToActiveHandler(t *testing.T) {
 func TestForHandler_ResolvesQualifiedRuntimeEventToLocalProjectionBinding(t *testing.T) {
 	source := semanticview.Wrap(loadProjectionFlowBundle(t))
 
-	result := ForHandlerWithAccumulator(source, "scoring", "scoring-node", "scoring/score.dimension_complete", "dimensions_received")
+	node := identitytest.FlowNode(t, "scoring", "scoring-node")
+	result := ForExecutableHandlerWithAccumulator(source, node, "scoring/score.dimension_complete", "dimensions_received")
 	if len(result.Issues) != 0 {
 		t.Fatalf("ForHandler issues = %#v, want none", result.Issues)
 	}
@@ -113,25 +115,27 @@ func TestForHandler_ResolvesQualifiedRuntimeEventToLocalProjectionBinding(t *tes
 
 func TestActiveHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, ""))
-	active := activeHandlerResolution(source, "worker-listener", "producer/task.done")
+	node := identitytest.FlowNode(t, "worker", "worker-listener")
+	active := activeHandlerResolution(source, node, "producer/task.done")
 	if active.AccumulatorName != "" || active.AuthoredEventType != "" || active.CanonicalEventType != "" {
 		t.Fatalf("active handler = %#v, want empty for ungranted sibling event", active)
 	}
-	if handlerEventMatches(source, "worker-listener", "**/task.done", "producer/task.done", active) {
+	if handlerEventMatches(source, node, "**/task.done", "producer/task.done", active) {
 		t.Fatal("handlerEventMatches accepted ungranted sibling event")
 	}
 }
 
 func TestActiveHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, "      observe:\n        - source: producer\n          events: [task.done]\n"))
-	active := activeHandlerResolution(source, "worker-listener", "producer/task.done")
+	node := identitytest.FlowNode(t, "worker", "worker-listener")
+	active := activeHandlerResolution(source, node, "producer/task.done")
 	if got := active.AccumulatorName; got != "tasks" {
 		t.Fatalf("ActiveAccumulatorName = %q, want tasks", got)
 	}
 	if got := active.AuthoredEventType; got != "**/task.done" {
 		t.Fatalf("ActiveAuthoredEventType = %q, want **/task.done", got)
 	}
-	if !handlerEventMatches(source, "worker-listener", "**/task.done", "producer/task.done", active) {
+	if !handlerEventMatches(source, node, "**/task.done", "producer/task.done", active) {
 		t.Fatal("handlerEventMatches denied granted sibling event")
 	}
 }
@@ -146,7 +150,7 @@ func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testin
 			"listener": {"child/task.done": handler},
 		}},
 	}
-	active := activeHandlerResolution(semanticview.Wrap(bundle), "listener", "child/task.done")
+	active := activeHandlerResolution(semanticview.Wrap(bundle), identitytest.RootNode(t, "listener"), "child/task.done")
 	if active.AccumulatorName != "" || active.AuthoredEventType != "" || active.CanonicalEventType != "" {
 		t.Fatalf("qualified exact handler reached accumulator fallback: %#v", active)
 	}

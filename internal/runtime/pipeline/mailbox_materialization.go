@@ -47,7 +47,7 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	if sourceEventID == "" {
 		return fmt.Errorf("mailbox_write requires triggering event id")
 	}
-	nodeID := strings.TrimSpace(execCtx.Request.NodeID.String())
+	nodeID := execCtx.Request.Node.Key()
 	if nodeID == "" {
 		return fmt.Errorf("mailbox_write requires node id")
 	}

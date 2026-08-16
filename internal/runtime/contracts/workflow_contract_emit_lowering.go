@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const (
@@ -12,8 +14,7 @@ const (
 )
 
 type EmitFieldLoweringContext struct {
-	NodeID           string
-	FlowID           string
+	Node             runtimeidentity.ExecutableNode
 	TriggerEventType string
 	Site             string
 }
@@ -23,6 +24,9 @@ func (b *WorkflowContractBundle) LowerEmitSpecFields(ctx EmitFieldLoweringContex
 	ctx = b.normalizeEmitFieldLoweringContext(ctx)
 	if spec.Empty() {
 		return spec, nil
+	}
+	if !ctx.Node.Valid() {
+		return EmitSpec{}, emitLoweringError(ctx, "emit field lowering requires exact executable node identity")
 	}
 	if err := validateEmitFromSource(spec.From); err != nil {
 		return EmitSpec{}, emitLoweringError(ctx, err.Error())
@@ -134,17 +138,10 @@ func bareEmitNamespaceValue(value ExpressionValue) string {
 }
 
 func (b *WorkflowContractBundle) normalizeEmitFieldLoweringContext(ctx EmitFieldLoweringContext) EmitFieldLoweringContext {
-	ctx.NodeID = strings.TrimSpace(ctx.NodeID)
-	ctx.FlowID = strings.TrimSpace(ctx.FlowID)
 	ctx.TriggerEventType = strings.TrimSpace(ctx.TriggerEventType)
 	ctx.Site = strings.TrimSpace(ctx.Site)
 	if ctx.Site == "" {
 		ctx.Site = "emit"
-	}
-	if b != nil && ctx.FlowID == "" && ctx.NodeID != "" {
-		if source, ok := b.NodeContractSource(ctx.NodeID); ok {
-			ctx.FlowID = strings.TrimSpace(source.FlowID)
-		}
 	}
 	return ctx
 }
@@ -153,7 +150,7 @@ func (b *WorkflowContractBundle) emitPayloadTargetFields(ctx EmitFieldLoweringCo
 	if b == nil {
 		return nil, nil, fmt.Errorf("emit field lowering requires a workflow contract bundle")
 	}
-	entry, resolved, ok := b.ResolveFlowEventCatalogEntry(ctx.FlowID, eventType)
+	entry, resolved, ok := b.ResolveFlowEventCatalogEntry(ctx.Node.FlowID(), eventType)
 	if !ok {
 		if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, eventType); platformOK {
 			entry = platformEntry
@@ -178,7 +175,7 @@ func (b *WorkflowContractBundle) emitPayloadTargetFields(ctx EmitFieldLoweringCo
 func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringContext, source string) (map[string]struct{}, error) {
 	switch strings.TrimSpace(source) {
 	case EmitFromEntity:
-		primary, err := b.ResolveFlowPrimaryEntity(ctx.FlowID)
+		primary, err := b.ResolveFlowPrimaryEntity(ctx.Node.FlowID())
 		if err != nil {
 			return nil, fmt.Errorf("emit.from entity requires a primary entity contract: %w", err)
 		}
@@ -191,7 +188,7 @@ func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringCont
 		}
 		return fields, nil
 	case EmitFromPayload:
-		entry, resolved, ok := b.ResolveFlowEventCatalogEntry(ctx.FlowID, ctx.TriggerEventType)
+		entry, resolved, ok := b.ResolveFlowEventCatalogEntry(ctx.Node.FlowID(), ctx.TriggerEventType)
 		if !ok {
 			if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, ctx.TriggerEventType); platformOK {
 				entry = platformEntry

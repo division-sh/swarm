@@ -49,8 +49,8 @@ func accumulatorProjectionWriterConflictFindings(c *checkerContext, binding accp
 		out = append(out, Finding{
 			CheckID:  "accumulator_entity_projection",
 			Severity: SeverityHardInvalidity,
-			Message:  fmt.Sprintf("field %q declares materialize_from but also has authored writer at %s on node %s handler %s; remove the authored writer", binding.TargetField, target.Kind, target.NodeID, target.EventType),
-			Location: target.NodeID,
+			Message:  fmt.Sprintf("field %q declares materialize_from but also has authored writer at %s on node %s handler %s; remove the authored writer", binding.TargetField, target.Kind, target.nodeID(), target.EventType),
+			Location: target.nodeID(),
 		})
 	}
 	for flowID, fields := range wave1AgentExplicitEntityWriteCoverageByFlow(c.source) {

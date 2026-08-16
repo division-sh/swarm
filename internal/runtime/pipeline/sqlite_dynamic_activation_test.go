@@ -56,7 +56,8 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	})); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
-	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, "fanout-node")
+	parentNode := pipelineSourceNode(t, pc.SemanticSource(), "", "fanout-node")
+	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, parentNode)
 	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testWorkflowInstanceRoute(parentPath), identity.NormalizeEntityID(parentEntityID))
 	if err != nil {
 		t.Fatalf("load parent workflow state: %v", err)
@@ -75,10 +76,11 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	if got := bus.publishedCount(); got != 2 {
 		t.Fatalf("published child events = %d, want 2", got)
 	}
-	assertDeliveryStatusCount(t, workflowStore, ctx, parent.ID(), "fanout-node", "delivered", 1)
+	assertDeliveryStatusCount(t, workflowStore, ctx, parent.ID(), parentNode.Key(), "delivered", 1)
 
 	children := []events.Event{bus.publishedEvent(0), bus.publishedEvent(1)}
 	childRoutes := make([]events.DeliveryRoute, len(children))
+	spawnNode := pipelineSourceNode(t, pc.SemanticSource(), "", "spawn-node")
 	for idx, child := range children {
 		if got := strings.TrimSpace(child.ParentEventID()); got != parent.ID() {
 			t.Fatalf("child %s parent_event_id = %q, want %q", child.ID(), got, parent.ID())
@@ -95,7 +97,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		if got, want := strings.TrimSpace(child.RunID()), runtimecorrelation.RunIDFromContext(ctx); got != want {
 			t.Fatalf("child %s run_id = %q, want %q", child.ID(), got, want)
 		}
-		childRoutes[idx] = seedExactOnceEventDelivery(t, pc, ctx, child, "spawn-node")
+		childRoutes[idx] = seedExactOnceEventDelivery(t, pc, ctx, child, spawnNode)
 	}
 
 	for idx, child := range children {
@@ -112,8 +114,8 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	assertSQLiteWorkflowInstancePersisted(t, workflowStore, ctx, "review/component-a")
 	assertSQLiteWorkflowInstancePersisted(t, workflowStore, ctx, "review/component-b")
 	for _, child := range children {
-		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID(), "spawn-node", "delivered", 1)
-		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID(), "spawn-node", "dead_letter", 0)
+		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID(), spawnNode.Key(), "delivered", 1)
+		assertDeliveryStatusCount(t, workflowStore, ctx, child.ID(), spawnNode.Key(), "dead_letter", 0)
 	}
 	if logs := bus.runtimeLogEntries(); len(logs) != 0 {
 		t.Fatalf("runtime logs = %#v, want none", logs)
@@ -161,12 +163,12 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 			}, nil),
 			workflowNodes: []WorkflowNode{
 				{
-					ID:            "fanout-node",
+					Node:          pipelineNode(t, "", "fanout-node"),
 					Subscriptions: []events.EventType{"component_scaffold.batch_requested"},
 					Produces:      []events.EventType{"component_scaffold.spawn_requested"},
 				},
 				{
-					ID:            "spawn-node",
+					Node:          pipelineNode(t, "", "spawn-node"),
 					Subscriptions: []events.EventType{"component_scaffold.spawn_requested"},
 				},
 			},
@@ -256,6 +258,8 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		node.EventHandlers = bundle.Semantics.NodeHandlers[nodeID]
 		bundle.Nodes[nodeID] = node
 	}
+	bundle.FlowTree.Root.Nodes = bundle.Nodes
+	bundle.Events = bundle.FlowTree.Root.Events
 	return bundle
 }
 

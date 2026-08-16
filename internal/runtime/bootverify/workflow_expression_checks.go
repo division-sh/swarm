@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -72,12 +73,12 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 	}
 	c.dataAccumulationExprLoaded = true
 	for _, record := range wave1ScopedNodeRecords(c.source) {
-		nodeID := strings.TrimSpace(record.LogicalID)
-		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeRef, _ := record.Identity()
+		nodeID := nodeRef.Key()
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, flowID, nodeID, eventType, handler) {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
 					continue
 				}
@@ -101,12 +102,12 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 	}
 	c.emitFieldExprLoaded = true
 	for _, record := range wave1ScopedNodeRecords(c.source) {
-		nodeID := strings.TrimSpace(record.LogicalID)
-		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeRef, _ := record.Identity()
+		nodeID := nodeRef.Key()
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, flowID, nodeID, eventType, handler) {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields &&
 					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
 					continue
@@ -133,12 +134,14 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 
 	seen := map[string]struct{}{}
 	for _, record := range wave1ScopedNodeRecords(c.source) {
-		nodeID := strings.TrimSpace(record.LogicalID)
-		flowID := strings.TrimSpace(record.Source.FlowID)
+		nodeRef, _ := record.Identity()
+		nodeID := nodeRef.Key()
+		nodeLabel := executableNodeDiagnostic(nodeRef)
+		flowID := nodeRef.FlowID()
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, flowID, nodeID, eventType, handler) {
+			for _, expr := range handlerExecutableReaderExpressionsForSource(c.source, nodeRef, eventType, handler) {
 				for _, ref := range runtimepipeline.WorkflowEntityReferences(expr.Expression) {
 					ref = strings.TrimSpace(ref)
 					if ref == "" {
@@ -154,7 +157,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: SeverityHardInvalidity,
-							Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s but %v", defaultFlowLabel(flowID), nodeID, eventType, ref, expr.Kind, err),
+							Message:  fmt.Sprintf("%s handler %s references entity.%s in %s but %v", nodeLabel, eventType, ref, expr.Kind, err),
 							Location: nodeID,
 						})
 						continue
@@ -168,7 +171,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 						c.entityRefFindings = append(c.entityRefFindings, Finding{
 							CheckID:  "expression_field_reference_validation",
 							Severity: SeverityHardInvalidity,
-							Message:  fmt.Sprintf("flow %s node %s handler %s query filter path entity.%s must resolve to scalar or enum leaf, got %s", defaultFlowLabel(flowID), nodeID, eventType, ref, leaf.Type),
+							Message:  fmt.Sprintf("%s handler %s query filter path entity.%s must resolve to scalar or enum leaf, got %s", nodeLabel, eventType, ref, leaf.Type),
 							Location: nodeID,
 						})
 					}
@@ -330,7 +333,7 @@ func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []handle
 	return out
 }
 
-func handlerEmitExpressionsForSource(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
 	out := make([]expressionReference, 0, 8)
 	appendSpec := func(kindPrefix, siteKey string, spec runtimecontracts.EmitSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, itemAlias string) {
 		if spec.Empty() {
@@ -338,8 +341,7 @@ func handlerEmitExpressionsForSource(source semanticview.Source, flowID, nodeID,
 		}
 		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
 			lowered, err := bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
-				NodeID:           nodeID,
-				FlowID:           flowID,
+				Node:             node,
 				TriggerEventType: eventType,
 				Site:             siteKey,
 			}, spec)

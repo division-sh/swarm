@@ -17,7 +17,7 @@ import (
 )
 
 func TestNewDeclarativeNode_RequiresExecutor(t *testing.T) {
-	if node := NewDeclarativeNode("node-a", nil); node != nil {
+	if node := NewDeclarativeNode(testRootExecutableNode(t, "node-a"), nil); node != nil {
 		t.Fatalf("expected nil node without executor, got %#v", node)
 	}
 }
@@ -33,7 +33,7 @@ func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	node := NewDeclarativeNode("node-a", exec)
+	node := NewDeclarativeNode(testRootExecutableNode(t, "node-a"), exec)
 	if node == nil {
 		t.Fatal("expected declarative node")
 	}
@@ -63,10 +63,11 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	node := NewDeclarativeNode("node-a", exec)
+	executableNode := testRootExecutableNode(t, "node-a")
+	node := NewDeclarativeNode(executableNode, exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		FlowID:   "flow-1",
+		Node:     executableNode,
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State:    StateSnapshot{CurrentState: "pending"},
 	})
@@ -89,9 +90,11 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	node := NewDeclarativeNode("node-a", exec)
+	executableNode := testRootExecutableNode(t, "node-a")
+	node := NewDeclarativeNode(executableNode, exec)
 	_, err = node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
+		Node:     executableNode,
 		Event:    eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 	})
 	if err != ErrMissingNodeHandler {
@@ -110,9 +113,11 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	node := NewDeclarativeNode("node-a", exec)
+	executableNode := testRootExecutableNode(t, "node-a")
+	node := NewDeclarativeNode(executableNode, exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
+		Node:     executableNode,
 		Event:    eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:  runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
 		State:    StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)},
@@ -127,7 +132,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 
 func TestResolvedExecutionHandler_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := loadEngineImportBoundaryWildcardSource(t, "")
-	resolved := resolvedExecutionHandler(source, "worker-listener", "producer/task.done")
+	resolved := resolvedExecutionHandler(source, testFlowExecutableNode(t, "worker", "worker-listener"), "producer/task.done")
 	if resolved.matched {
 		t.Fatalf("resolvedExecutionHandler matched ungranted sibling event through raw fallback: %#v", resolved)
 	}
@@ -135,7 +140,7 @@ func TestResolvedExecutionHandler_DeniesImportBoundaryWildcardRawFallback(t *tes
 
 func TestResolvedExecutionHandler_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := loadEngineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
-	resolved := resolvedExecutionHandler(source, "worker-listener", "producer/task.done")
+	resolved := resolvedExecutionHandler(source, testFlowExecutableNode(t, "worker", "worker-listener"), "producer/task.done")
 	if !resolved.matched {
 		t.Fatal("resolvedExecutionHandler did not match granted sibling event")
 	}
@@ -157,7 +162,7 @@ func TestResolvedExecutionHandlerRejectsQualifiedExactRawBundleFallback(t *testi
 			"listener": {"child/task.done": handler},
 		}},
 	}
-	if resolved := resolvedExecutionHandler(semanticview.Wrap(bundle), "listener", "child/task.done"); resolved.matched {
+	if resolved := resolvedExecutionHandler(semanticview.Wrap(bundle), testRootExecutableNode(t, "listener"), "child/task.done"); resolved.matched {
 		t.Fatalf("qualified exact handler reached engine fallback: %#v", resolved)
 	}
 }

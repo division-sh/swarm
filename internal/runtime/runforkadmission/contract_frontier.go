@@ -68,7 +68,10 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
-		runtimeOwners := append([]string(nil), req.Source.RuntimeEventOwners(eventName)...)
+		runtimeOwners := make([]string, 0)
+		for _, owner := range req.Source.RuntimeEventOwners(eventName) {
+			runtimeOwners = append(runtimeOwners, owner.Key())
+		}
 		if owner, ok := runfork.RunForkSelectedContractPlatformRuntimeOwner(eventName); ok {
 			runtimeOwners = append(runtimeOwners, owner)
 		}
@@ -381,8 +384,8 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, connectG
 		if recipient.Kind() == runtimepinrouting.ConnectRecipientAgent {
 			typedRecipient = events.MustAgentDeliveryRecipient(recipient.ID())
 		} else {
-			typedRecipient = events.MustNodeDeliveryRecipient(recipient.ID())
-			seenNodes[recipient.ID()] = struct{}{}
+			typedRecipient = events.MustNodeDeliveryRecipient(recipient.Handler().Node())
+			seenNodes[typedRecipient.ID()] = struct{}{}
 		}
 		projected := runfork.NewRunForkContractFrontierRecipient(
 			typedRecipient, recipient.Path(), "connect_route_plan", recipient.AgentIdentity(),
@@ -436,7 +439,7 @@ func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ..
 			if _, ok := wanted[strings.TrimSpace(string(subscription))]; !ok {
 				continue
 			}
-			addString(seen, node.ID)
+			addString(seen, node.Node.Key())
 		}
 	}
 	return sortedSet(seen)

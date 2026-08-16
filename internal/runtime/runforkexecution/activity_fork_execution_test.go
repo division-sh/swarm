@@ -84,6 +84,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			activityNode := mustRunForkPackageNode("activity-fork-proof", "flow_a", "test-node")
 			beforeCalls := connectorCalls.Load()
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -96,15 +97,19 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			sourceGeneration := activation.Generation()
 			sourceFact := activityidentity.Fact{
 				RunID: sourceRunID, SourceEventID: initiatingEventID, EntityID: entityID,
-				FlowID: "flow_a", NodeID: "test-node", HandlerEventKey: "review.requested",
+				Owner: activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a", HandlerEventKey: "review.requested",
 				ActivityID: "connector", Tool: "provider.connector", Attempt: 1,
 				RevisionID: sourceGeneration.RevisionID,
 			}
 			sourceRequestEventID := activityidentity.RequestEventID(sourceFact)
 			routingSource := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
+			activityRoute := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(activityNode),
+				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a"}),
+			}
 			seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 				t, db, sourceRunID, entityID, sourceRequestEventID, "platform.activity_requested", at,
-				selectedExecutionEntitylessNodeRoute("test-node"), nil,
+				activityRoute, nil,
 				routingSource,
 				events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), routingSource.Route()),
 			)
@@ -116,7 +121,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
-				NodeID: "test-node", FlowID: "flow_a", HandlerEventKey: "review.requested",
+				NodeID: activityNode.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
 			})
@@ -158,8 +163,9 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 			forkFact := activityidentity.Fact{
 				RunID: result.Materialization.ForkRunID, SourceEventID: forkRequest.SourceEventID,
-				ParentEventID: forkRequest.ParentEventID, EntityID: entityID, FlowID: "flow_a",
-				NodeID: "test-node", HandlerEventKey: "review.requested", ActivityID: "connector",
+				ParentEventID: forkRequest.ParentEventID, EntityID: entityID,
+				Owner: activityidentity.MustNodeOwner(activityNode), ExecutionFlowID: "flow_a",
+				HandlerEventKey: "review.requested", ActivityID: "connector",
 				Tool: "provider.connector", Attempt: 1, RevisionID: forkRequest.Generation.RevisionID,
 			}
 			forkRequestEventID := activityidentity.RequestEventID(forkFact)
@@ -287,7 +293,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 func selectedContractActivityLoadedSource(source semanticview.Source, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
 	workflow := runtimepipeline.NewWorkflowDefinition("activity-fork-proof", []runtimepipeline.WorkflowStage{{Name: "pending"}}, nil)
 	nodes := []runtimepipeline.WorkflowNode{{
-		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
+		Node: mustRunForkPackageNode("activity-fork-proof", "flow_a", "test-node"), ExecutionType: runtimecontracts.SystemNodeExecutionType,
 	}}
 	fact := testEphemeralBundleSourceFact(runForkTestBundleHash)
 	return LoadedSelectedContractSource{

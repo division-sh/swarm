@@ -5,18 +5,21 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 )
 
 func TestFanOutEffectiveSemantics_DerivesScalarIdentityAndBoundOnce(t *testing.T) {
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	bundle := notifyallchildren.LoadBundle(t, notifyallchildren.Options{})
-	handler, ok := bundle.NodeEventHandler("portfolio-coordinator", notifyallchildren.OwnerTriggerEvent)
+	node := identitytest.FlowNode(t, notifyallchildren.OwnerFlowID, "portfolio-coordinator")
+	handler, ok := source.ExecutableNodeEventHandler(node, notifyallchildren.OwnerTriggerEvent)
 	if !ok || handler.FanOut == nil {
 		t.Fatal("canonical notify handler fan_out missing")
 	}
 
-	effective, err := bundle.ResolveFanOutEffectiveSemantics(notifyallchildren.OwnerFlowID, notifyallchildren.OwnerTriggerEvent, *handler.FanOut)
+	effective, err := bundle.ResolveFanOutEffectiveSemantics(node, notifyallchildren.OwnerTriggerEvent, *handler.FanOut)
 	if err != nil {
 		t.Fatalf("ResolveFanOutEffectiveSemantics: %v", err)
 	}
@@ -29,7 +32,7 @@ func TestFanOutEffectiveSemantics_DerivesScalarIdentityAndBoundOnce(t *testing.T
 
 	explicit := *handler.FanOut
 	explicit.Identity = "account_id"
-	effective, err = bundle.ResolveFanOutEffectiveSemantics(notifyallchildren.OwnerFlowID, notifyallchildren.OwnerTriggerEvent, explicit)
+	effective, err = bundle.ResolveFanOutEffectiveSemantics(node, notifyallchildren.OwnerTriggerEvent, explicit)
 	if err != nil {
 		t.Fatalf("ResolveFanOutEffectiveSemantics explicit identity: %v", err)
 	}
@@ -53,8 +56,10 @@ func TestFanOutEffectiveSemantics_RejectsUndeclaredPayloadSourceWithExplicitIden
 }
 
 func TestFanOutEffectiveSemantics_RejectsMissingEventContractWithExplicitIdentity(t *testing.T) {
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 	bundle := notifyallchildren.LoadBundle(t, notifyallchildren.Options{})
-	handler, ok := bundle.NodeEventHandler("portfolio-coordinator", notifyallchildren.OwnerTriggerEvent)
+	node := identitytest.FlowNode(t, notifyallchildren.OwnerFlowID, "portfolio-coordinator")
+	handler, ok := source.ExecutableNodeEventHandler(node, notifyallchildren.OwnerTriggerEvent)
 	if !ok || handler.FanOut == nil {
 		t.Fatal("canonical notify handler fan_out missing")
 	}
@@ -63,7 +68,7 @@ func TestFanOutEffectiveSemantics_RejectsMissingEventContractWithExplicitIdentit
 	spec.ItemsPath = runtimepaths.Parse(spec.ItemsFrom)
 	spec.Identity = "account_id"
 
-	_, err := bundle.ResolveFanOutEffectiveSemantics(notifyallchildren.OwnerFlowID, "portfolio.undeclared", spec)
+	_, err := bundle.ResolveFanOutEffectiveSemantics(node, "portfolio.undeclared", spec)
 	if err == nil || !strings.Contains(err.Error(), "references undeclared payload field account_ids") || !strings.Contains(err.Error(), "portfolio.undeclared") {
 		t.Fatalf("ResolveFanOutEffectiveSemantics error = %v, want missing event-contract rejection", err)
 	}

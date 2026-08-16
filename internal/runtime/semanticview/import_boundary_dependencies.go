@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const (
@@ -34,14 +35,35 @@ func ResolvePolicyForFlow(source Source, flowID string) runtimecontracts.PolicyD
 	return resolvePolicyForFlowWithRaw(source, flowID, source.ResolvedPolicyForFlow)
 }
 
-func ResolvePolicyForNode(source Source, nodeID string) runtimecontracts.PolicyDocument {
-	if source == nil {
+func ResolvePolicyForExecutableNode(source Source, node runtimeidentity.ExecutableNode) runtimecontracts.PolicyDocument {
+	if source == nil || !node.Valid() {
 		return emptyPolicyDocument()
 	}
-	if nodeSource, ok := source.NodeContractSource(nodeID); ok {
-		return ResolvePolicyForFlow(source, nodeSource.FlowID)
+	doc := clonePolicyDocument(source.ResolvedPolicyForExecutableNode(node))
+	deps, ok := importBoundaryDependencyContextForPackage(source, node.PackageKey(), node.FlowID())
+	if !ok {
+		return doc
 	}
-	return ResolvePolicyForFlow(source, "")
+	parentPolicy := ResolvePolicyForFlow(source, strings.TrimSpace(deps.parent.OwningFlowID))
+	for _, key := range deps.child.Manifest.Requires.Policy {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		deletePolicyValueAtPath(&doc, key)
+		if ref := strings.TrimSpace(deps.site.Bind.Policy[key]); ref != "" {
+			if path, valid := importBoundaryParentPolicyPath(ref); valid {
+				if value, found := policyValueAtPath(parentPolicy, path); found {
+					setPolicyValueAtPath(&doc, key, value)
+				}
+			}
+			continue
+		}
+		if value, found := deps.child.Manifest.Requires.PolicyDefaults[key]; found {
+			setPolicyValueAtPath(&doc, key, value)
+		}
+	}
+	return doc
 }
 
 func CredentialStoreKeyForFlow(source Source, flowID, key string) (string, bool) {
@@ -181,6 +203,30 @@ func importBoundaryDependencyContext(source Source, flowID string) (importBounda
 		return bestPackage, true
 	}
 	return importBoundaryDependencyCtx{}, false
+}
+
+func importBoundaryDependencyContextForPackage(source Source, packageKey, flowID string) (importBoundaryDependencyCtx, bool) {
+	packageKey = normalizeImportPackageKey(packageKey)
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || packageKey == "" || packageKey == runtimeidentity.RootPackageKey {
+		return importBoundaryDependencyCtx{}, false
+	}
+	var best importBoundaryDependencyCtx
+	bestLen := -1
+	for _, deps := range importBoundaryDependencyContexts(source) {
+		childKey := normalizeImportPackageKey(deps.child.Key)
+		if !importBoundaryPackageKeyContains(childKey, packageKey) {
+			continue
+		}
+		if siteFlowID := strings.TrimSpace(deps.site.FlowID); siteFlowID != "" && flowID != "" && siteFlowID != flowID {
+			continue
+		}
+		if len(childKey) > bestLen {
+			best = deps
+			bestLen = len(childKey)
+		}
+	}
+	return best, bestLen >= 0
 }
 
 func importBoundaryPackageKeyContains(parentKey, flowPackageKey string) bool {

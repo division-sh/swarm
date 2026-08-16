@@ -20,7 +20,10 @@ import (
 )
 
 func TestMixedPubsubConnectCompositionSameCoordinateDifferentRoles(t *testing.T) {
-	recipient := events.MustNodeDeliveryRecipient("shared-node")
+	consumerNode := testFlowNode(t, "consumer", "shared-node")
+	producerNode := testFlowNode(t, "producer", "shared-node")
+	consumerRecipient := events.MustNodeDeliveryRecipient(consumerNode)
+	producerRecipient := events.MustNodeDeliveryRecipient(producerNode)
 	producerTarget := events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: "producer", FlowInstance: "producer", EntityID: "00000000-0000-4000-8000-000000000001",
 	})
@@ -30,25 +33,25 @@ func TestMixedPubsubConnectCompositionSameCoordinateDifferentRoles(t *testing.T)
 	connectPlan := newRoutePlan(events.Event{})
 	connectPlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
 	connectPlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
-		Recipient: recipient, TargetOwnership: consumerTarget,
-		Handler:  runtimepipeline.MustDeliveryTargetHandler("consumer", "shared-node").ForEvent("work.accepted"),
+		Recipient: consumerRecipient, TargetOwnership: consumerTarget,
+		Handler:  runtimepipeline.MustDeliveryTargetHandler(consumerNode).ForEvent("work.accepted"),
 		Producer: routeIntentProducerConnectRoutePlan, Persist: true,
 	})
 	connectPlan.RoutedRecipients = []Subscriber{{
-		Recipient: recipient, Path: "consumer", routeSource: subscriberRouteSourceConnectRoutePlan,
-		handlerFlowID: "consumer", handlerNodeID: "shared-node",
-		targetHandler: runtimepipeline.MustDeliveryTargetHandler("consumer", "shared-node"),
+		Recipient: consumerRecipient, Path: "consumer", routeSource: subscriberRouteSourceConnectRoutePlan,
+		handlerNode:   consumerNode,
+		targetHandler: runtimepipeline.MustDeliveryTargetHandler(consumerNode),
 	}}
 	localPlan := newRoutePlan(events.Event{})
 	localPlan.AddDeliveryIntents(RoutePlanDeliveryIntent{
-		Recipient: recipient, TargetOwnership: producerTarget,
-		Handler:  runtimepipeline.MustDeliveryTargetHandler("producer", "shared-node").ForEvent("work.ready"),
+		Recipient: producerRecipient, TargetOwnership: producerTarget,
+		Handler:  runtimepipeline.MustDeliveryTargetHandler(producerNode).ForEvent("work.ready"),
 		Producer: routeIntentProducerConcreteNodeRoute, Persist: true,
 	})
 	localPlan.RoutedRecipients = []Subscriber{{
-		Recipient: recipient, Path: "producer", routeSource: subscriberRouteSourceSubscription,
-		handlerFlowID: "producer", handlerNodeID: "shared-node",
-		targetHandler: runtimepipeline.MustDeliveryTargetHandler("producer", "shared-node"),
+		Recipient: producerRecipient, Path: "producer", routeSource: subscriberRouteSourceSubscription,
+		handlerNode:   producerNode,
+		targetHandler: runtimepipeline.MustDeliveryTargetHandler(producerNode),
 	}}
 	plan := composeIndependentPubsubBranch(connectPlan, localPlan)
 	routes := plan.DeliveryRoutes()
@@ -57,7 +60,7 @@ func TestMixedPubsubConnectCompositionSameCoordinateDifferentRoles(t *testing.T)
 	}
 	seenTargets := map[string]bool{}
 	for _, route := range routes {
-		if route.Recipient.ID() != "shared-node" {
+		if route.Recipient.LocalID() != "shared-node" {
 			t.Fatalf("route recipient = %#v, want shared-node", route.Recipient)
 		}
 		seenTargets[route.Target.Route().FlowInstance] = true
@@ -246,8 +249,8 @@ func assertMixedNodeAgentConnectRoutes(t testing.TB, routes []events.DeliveryRou
 	}
 	seen := map[string]bool{}
 	for _, route := range routes {
-		seen[route.Recipient.Code()+":"+route.Recipient.ID()] = true
-		switch route.Recipient.ID() {
+		seen[route.Recipient.Code()+":"+route.Recipient.LocalID()] = true
+		switch route.Recipient.LocalID() {
 		case "producer-local":
 			if route.Target.Route().FlowInstance != "producer" || !route.ConnectClaim.Empty() {
 				t.Fatalf("local node route = %#v", route)
@@ -366,22 +369,22 @@ func assertMixedRouteSet(t testing.TB, routes []events.DeliveryRoute, want map[s
 		t.Fatalf("delivery routes = %#v, want %d exact routes", routes, len(want))
 	}
 	for _, route := range routes {
-		flowInstance, ok := want[route.Recipient.ID()]
+		flowInstance, ok := want[route.Recipient.LocalID()]
 		if !ok {
 			t.Fatalf("unexpected delivery route %#v", route)
 		}
 		if got := route.Target.Route().FlowInstance; got != flowInstance {
-			t.Fatalf("route %q flow instance = %q, want %q", route.Recipient.ID(), got, flowInstance)
+			t.Fatalf("route %q flow instance = %q, want %q", route.Recipient.LocalID(), got, flowInstance)
 		}
 		if route.Target.Route().EntityID == "" {
-			t.Fatalf("route %q lost exact entity owner: %#v", route.Recipient.ID(), route)
+			t.Fatalf("route %q lost exact entity owner: %#v", route.Recipient.LocalID(), route)
 		}
-		local := strings.HasSuffix(route.Recipient.ID(), "-local") || route.Recipient.ID() == "producer-local"
+		local := strings.HasSuffix(route.Recipient.LocalID(), "-local") || route.Recipient.LocalID() == "producer-local"
 		if local && !route.ConnectClaim.Empty() {
-			t.Fatalf("local route %q acquired a connect claim: %#v", route.Recipient.ID(), route)
+			t.Fatalf("local route %q acquired a connect claim: %#v", route.Recipient.LocalID(), route)
 		}
 		if !local && route.ConnectClaim.Empty() {
-			t.Fatalf("connect route %q lost execution claim: %#v", route.Recipient.ID(), route)
+			t.Fatalf("connect route %q lost execution claim: %#v", route.Recipient.LocalID(), route)
 		}
 	}
 }

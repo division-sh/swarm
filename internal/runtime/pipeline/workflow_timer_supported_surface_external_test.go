@@ -127,7 +127,11 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			if err != nil {
 				t.Fatalf("new authored timer EventBus: %v", err)
 			}
-			deliveries := internalSubscriptionDeliveriesForTest(t, eventBus, "consumer-node")
+			consumerNode := externalPipelineSourceNode(t, source, "consumer", "consumer-node")
+			deliveries := internalSubscriptionDeliveriesForTest(t, eventBus, consumerNode.Key(), "producer/work.ready")
+			if got := eventBus.ResolveSubscribedRecipients("producer/work.ready"); len(got) != 1 || got[0] != consumerNode.Key() {
+				t.Fatalf("workflow timer live recipients = %v, want %s", got, consumerNode.Key())
+			}
 			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
@@ -136,7 +140,6 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 				TimerScheduler: scheduler,
 				WorkOwner:      pipelineExternalTestWorkOwner(t),
 			})
-			eventBus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
@@ -160,14 +163,20 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 					t.Fatalf("delivered timer routing source = %#v, want producer flow-owned control", sourceFact)
 				}
 				route := delivery.HandoffRoute()
-				if route.Recipient.ID() != "consumer-node" || route.ConnectClaim.Empty() {
+				if route.Recipient.ID() != consumerNode.Key() || route.ConnectClaim.Empty() {
 					t.Fatalf("timer delivery route = %#v, want consumer-node with stamped connect claim", route)
 				}
 				if err := delivery.Complete(); err != nil {
 					t.Fatalf("complete authored timer delivery: %v", err)
 				}
+				waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
+					cancel()
+					t.Fatalf("wait authored timer delivery quiescence: %v", err)
+				}
+				cancel()
 			case <-time.After(5 * time.Second):
-				t.Fatal("authored workflow timer did not deliver through compiled connect")
+				t.Fatalf("authored workflow timer did not deliver through compiled connect; trace=%v", workflowTimerDeliveryTrace(t, selected, runID))
 			}
 			waitWorkflowTimerRowStatus(t, selected, runID, entityID, "fired")
 		})
@@ -375,6 +384,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			insertGateRecoveryRun(t, selected, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := workflowTimerRecurringCancellationSource(t)
+			controllerNode := externalPipelineSourceNode(t, source, "", "controller")
 			lifecycleProbe := runtimelifecycleprobe.New()
 			module := proposedEffectProofModule{
 				source: source,
@@ -383,10 +393,10 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 					{Name: "done", Terminal: true},
 				}, []runtimepipeline.WorkflowTransition{{
 					Name: "cancel", From: []runtimepipeline.WorkflowStateID{"waiting"}, To: "done",
-					Trigger: "timer.cancel", Node: "controller",
+					Trigger: "timer.cancel", Node: controllerNode,
 				}}),
 				nodes: []runtimepipeline.WorkflowNode{{
-					ID: "controller", Subscriptions: []events.EventType{"timer-proof/timer.cancel"},
+					Node: controllerNode, Subscriptions: []events.EventType{"timer-proof/timer.cancel"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
 						"timer-proof/timer.cancel": {Consume: true},
@@ -466,7 +476,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatalf("plan timer cancellation transition: %v", err)
 			}
-			if got := plan.DeliveryRoutes; len(got) != 1 || !got[0].Recipient.IsNode() || got[0].Recipient.ID() != "controller" {
+			if got := plan.DeliveryRoutes; len(got) != 1 || !got[0].Recipient.IsNode() || got[0].Recipient.ID() != controllerNode.Key() {
 				t.Fatalf("timer cancellation delivery routes = %#v, want exact controller node route", got)
 			}
 			wantTarget := events.RouteIdentity{FlowID: "timer-proof", FlowInstance: runID, EntityID: entityID}
@@ -481,24 +491,24 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if _, err := lifecycleProbe.WaitForPostCommitDispatchCompleted(probeCtx, cancelEvent.ID()); err != nil {
 				t.Fatalf("wait for timer cancellation post-commit dispatch: %v", err)
 			}
-			if _, err := lifecycleProbe.WaitForDeliveryStatus(probeCtx, cancelEvent.ID(), "node", "controller", "in_progress"); err != nil {
+			if _, err := lifecycleProbe.WaitForDeliveryStatus(probeCtx, cancelEvent.ID(), "node", controllerNode.Key(), "in_progress"); err != nil {
 				t.Fatalf("wait for timer cancellation delivery claim: %v", err)
 			}
-			if _, err := lifecycleProbe.WaitForHandlerStarted(probeCtx, cancelEvent.ID(), "controller"); err != nil {
+			if _, err := lifecycleProbe.WaitForHandlerStarted(probeCtx, cancelEvent.ID(), controllerNode.Key()); err != nil {
 				t.Fatalf("wait for timer cancellation handler start: %v", err)
 			}
-			handlerCompletion, err := lifecycleProbe.WaitForHandlerCompleted(probeCtx, cancelEvent.ID(), "controller")
+			handlerCompletion, err := lifecycleProbe.WaitForHandlerCompleted(probeCtx, cancelEvent.ID(), controllerNode.Key())
 			if err != nil {
 				t.Fatalf("wait for timer cancellation handler completion: %v", err)
 			}
 			if handlerCompletion.Status != "completed" {
-				query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'controller'`
+				query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 				if selected.postgres {
-					query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'controller'`
+					query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
 				}
 				var deliveryStatus string
 				var failure []byte
-				if err := selected.db.QueryRowContext(ctx, query, cancelEvent.ID()).Scan(&deliveryStatus, &failure); err != nil {
+				if err := selected.db.QueryRowContext(ctx, query, cancelEvent.ID(), controllerNode.Key()).Scan(&deliveryStatus, &failure); err != nil {
 					t.Fatalf("timer cancellation handler status = %q and delivery failure readback failed: %v", handlerCompletion.Status, err)
 				}
 				t.Fatalf("timer cancellation handler status = %q, delivery status = %q failure = %s; want completed", handlerCompletion.Status, deliveryStatus, failure)
@@ -952,6 +962,36 @@ func waitWorkflowTimerRowStatus(t *testing.T, selected gateRecoveryStoreCase, ru
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("workflow timer did not reach status %q", status)
+}
+
+func workflowTimerDeliveryTrace(t *testing.T, selected gateRecoveryStoreCase, runID string) []string {
+	t.Helper()
+	query := `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at`
+	if selected.postgres {
+		query = `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at`
+	}
+	rows, err := selected.db.QueryContext(context.Background(), query, runID)
+	if err != nil {
+		return []string{"readback error: " + err.Error()}
+	}
+	defer rows.Close()
+	var trace []string
+	for rows.Next() {
+		var eventName, subscriberID, status string
+		if err := rows.Scan(&eventName, &subscriberID, &status); err != nil {
+			return append(trace, "scan error: "+err.Error())
+		}
+		trace = append(trace, eventName+" subscriber="+subscriberID+" status="+status)
+	}
+	var runtimeLog string
+	logQuery := `SELECT CAST(payload AS TEXT) FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
+	if selected.postgres {
+		logQuery = `SELECT payload::text FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
+	}
+	if err := selected.db.QueryRowContext(context.Background(), logQuery).Scan(&runtimeLog); err == nil {
+		trace = append(trace, "runtime_log="+runtimeLog)
+	}
+	return trace
 }
 
 func waitWorkflowTimerEventCount(t *testing.T, selected gateRecoveryStoreCase, fireErrors <-chan error, runID, eventType string, want int) {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -14,14 +15,13 @@ const policySheetLookupCheckID = "policy_sheet_lookup_value_rows"
 
 func checkPolicySheetLookupValueRows(c *checkerContext) []Finding {
 	findings := make([]Finding, 0)
-	nodes := c.source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(c.source) {
-		node, ok := nodes[nodeID]
-		if !ok {
+	for _, record := range c.source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
 			continue
 		}
-		flowID := nodeFlowID(c.source, nodeID)
-		for eventType, handler := range node.EventHandlers {
+		nodeID := node.Key()
+		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			findings = append(findings, policySheetLookupDuplicateComputedBindings(nodeID, eventType, handler)...)
 			for idx, rule := range handler.Rules {
@@ -29,8 +29,7 @@ func checkPolicySheetLookupValueRows(c *checkerContext) []Finding {
 					continue
 				}
 				ref := policySheetLookupRef{
-					FlowID:    flowID,
-					NodeID:    nodeID,
+					Node:      node,
 					EventType: eventType,
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
@@ -43,8 +42,7 @@ func checkPolicySheetLookupValueRows(c *checkerContext) []Finding {
 }
 
 type policySheetLookupRef struct {
-	FlowID    string
-	NodeID    string
+	Node      runtimeidentity.ExecutableNode
 	EventType string
 	RuleIndex int
 	RuleID    string
@@ -54,8 +52,8 @@ func policySheetLookupFinding(ref policySheetLookupRef, detail string) Finding {
 	return Finding{
 		CheckID:  policySheetLookupCheckID,
 		Severity: SeverityHardInvalidity,
-		Message:  fmt.Sprintf("flow %s node %s handler %s lookup row %s: %s", defaultFlowLabel(ref.FlowID), ref.NodeID, ref.EventType, ref.RowLabel(), detail),
-		Location: ref.NodeID,
+		Message:  fmt.Sprintf("flow %s node %s handler %s lookup row %s: %s", defaultFlowLabel(ref.Node.FlowID()), ref.Node.Key(), ref.EventType, ref.RowLabel(), detail),
+		Location: ref.Node.Key(),
 	}
 }
 
@@ -101,7 +99,7 @@ func validatePolicySheetLookupValueRow(source semanticview.Source, ref policyShe
 		findings = append(findings, policySheetLookupFinding(ref, "lookup.default currently supports only fail"))
 	}
 	findings = append(findings, validatePolicySheetLookupKeyTypes(source, ref, spec)...)
-	if !policySheetLookupBindingConsumed(source, ref.FlowID, ref.NodeID, ref.EventType, handler, ref.RuleIndex, strings.TrimSpace(rule.Compute.StoreAs)) {
+	if !policySheetLookupBindingConsumed(source, ref.Node, ref.EventType, handler, ref.RuleIndex, strings.TrimSpace(rule.Compute.StoreAs)) {
 		findings = append(findings, policySheetLookupFinding(ref, fmt.Sprintf("lookup.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", strings.TrimSpace(rule.Compute.StoreAs))))
 	}
 	return findings
@@ -122,7 +120,7 @@ func policySheetLookupPathIsSimple(path runtimepaths.Path) bool {
 func policySheetLookupDomainsClosedAndExhaustive(source semanticview.Source, ref policySheetLookupRef, spec *runtimecontracts.ComputeLookupSpec, findings *[]Finding) bool {
 	domains := make([][]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
-		kind, closed := policySheetLookupPathDomain(source, ref.FlowID, ref.EventType, path)
+		kind, closed := policySheetLookupPathDomain(source, ref.Node.FlowID(), ref.EventType, path)
 		if kind == "" {
 			kind = "unknown"
 		}
@@ -185,7 +183,7 @@ func validatePolicySheetLookupKeyTypes(source semanticview.Source, ref policyShe
 	findings := make([]Finding, 0)
 	kinds := make([]string, 0, len(spec.OnPaths))
 	for _, path := range spec.OnPaths {
-		kind, _ := policySheetLookupPathDomain(source, ref.FlowID, ref.EventType, path)
+		kind, _ := policySheetLookupPathDomain(source, ref.Node.FlowID(), ref.EventType, path)
 		kinds = append(kinds, kind)
 	}
 	for entryIdx, entry := range spec.Entries {
@@ -245,12 +243,12 @@ func policySheetLookupPathDomain(source semanticview.Source, flowID, eventType s
 	}
 }
 
-func policySheetLookupBindingConsumed(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler, currentRuleIndex int, target string) bool {
+func policySheetLookupBindingConsumed(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler, currentRuleIndex int, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
 		return false
 	}
-	for _, expr := range handlerExecutableReaderExpressionsForSource(source, flowID, nodeID, eventType, handler) {
+	for _, expr := range handlerExecutableReaderExpressionsForSource(source, node, eventType, handler) {
 		if !policySheetBindingReaderExecutesAfter(expr, currentRuleIndex) {
 			continue
 		}

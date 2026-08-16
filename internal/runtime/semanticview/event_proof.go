@@ -6,9 +6,11 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type FlowEventProof struct {
+	Node       runtimeidentity.ExecutableNode `json:"-"`
 	FlowID     string
 	Authored   string
 	Local      string
@@ -16,6 +18,41 @@ type FlowEventProof struct {
 	CatalogKey string
 	Entry      runtimecontracts.EventCatalogEntry
 	HasSchema  bool
+}
+
+func ResolveExecutableNodeEventProof(source Source, node runtimeidentity.ExecutableNode, eventType string) FlowEventProof {
+	authored := runtimeeventidentity.Normalize(eventType)
+	proof := FlowEventProof{Node: node, FlowID: node.FlowID(), Authored: authored, Local: authored, Canonical: authored}
+	if source == nil || !node.Valid() || authored == "" {
+		return proof
+	}
+	if canonical := runtimeeventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, authored)); canonical != "" {
+		proof.Canonical = canonical
+	}
+	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
+		if local := localizeExecutableNodeEventForProof(source, scope, proof.Canonical); local != "" {
+			proof.Local = local
+		}
+	}
+	for _, candidate := range uniqueNormalizedProofCandidates(proof.Local, proof.Authored, proof.Canonical) {
+		entry, key, ok := source.ResolveExecutableNodeEventCatalogEntry(node, candidate)
+		if !ok {
+			continue
+		}
+		proof.Entry, proof.CatalogKey, proof.HasSchema = entry, strings.TrimSpace(key), true
+		break
+	}
+	if !proof.HasSchema {
+		for _, candidate := range uniqueNormalizedProofCandidates(proof.Canonical, proof.Authored, proof.Local) {
+			entry, key, ok := runtimecontracts.PlatformEventCatalogEntry(source.PlatformSpec(), candidate)
+			if !ok {
+				continue
+			}
+			proof.Entry, proof.CatalogKey, proof.Canonical, proof.Local, proof.HasSchema = entry, strings.TrimSpace(key), strings.TrimSpace(key), strings.TrimSpace(key), true
+			break
+		}
+	}
+	return proof
 }
 
 func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventProof {
@@ -130,6 +167,18 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	scope, ok := FlowScopeByID(source, flowID)
 	if !ok {
 		return canonical
+	}
+	localNames := flowScopeEventNamesForProof(scope)
+	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical, localNames); local != "" {
+		return local
+	}
+	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
+}
+
+func localizeExecutableNodeEventForProof(source Source, scope FlowScope, canonical string) string {
+	canonical = runtimeeventidentity.Normalize(canonical)
+	if canonical == "" {
+		return ""
 	}
 	localNames := flowScopeEventNamesForProof(scope)
 	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical, localNames); local != "" {

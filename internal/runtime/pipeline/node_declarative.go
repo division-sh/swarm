@@ -31,12 +31,12 @@ type HandlerExecutionEngine interface {
 }
 
 type declarativeWorkflowNode struct {
-	nodeID      string
+	node        identity.ExecutableNode
 	coordinator *PipelineCoordinator
 }
 
 type DeclarativeNode struct {
-	nodeID   string
+	node     identity.ExecutableNode
 	contract SystemNodeContract
 	source   semanticview.Source
 	policies map[string]WorkflowEventPolicy
@@ -51,8 +51,10 @@ type ProductHookRegistry struct {
 	actions map[string]ActionHandler
 }
 
-func NewNode(contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine, hooks *ProductHookRegistry) NodeExecutor {
-	nodeID := strings.TrimSpace(contract.ID)
+func NewNode(node identity.ExecutableNode, contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine, hooks *ProductHookRegistry) NodeExecutor {
+	if !node.Valid() {
+		return nil
+	}
 	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(contract)
 	subscriptions := make([]events.EventType, 0, len(effectiveSubscriptions))
 	for _, evt := range effectiveSubscriptions {
@@ -63,27 +65,27 @@ func NewNode(contract SystemNodeContract, source semanticview.Source, engine Han
 		subscriptions = append(subscriptions, events.EventType(evt))
 	}
 	return &DeclarativeNode{
-		nodeID:   nodeID,
+		node:     node,
 		contract: contract,
 		source:   source,
-		policies: buildWorkflowNodePolicies(source, nodeID, subscriptions),
+		policies: buildWorkflowNodePolicies(source, node, subscriptions),
 		engine:   engine,
 		hooks:    hooks,
 	}
 }
 
-func (n *declarativeWorkflowNode) NodeID() string {
+func (n *declarativeWorkflowNode) ExecutableNode() identity.ExecutableNode {
 	if n == nil {
-		return ""
+		return identity.ExecutableNode{}
 	}
-	return strings.TrimSpace(n.nodeID)
+	return n.node
 }
 
 func (n *declarativeWorkflowNode) Subscriptions() []events.EventType {
 	if n == nil || n.coordinator == nil {
 		return nil
 	}
-	return workflowNodeSubscriptions(n.coordinator.WorkflowNodes(), n.NodeID())
+	return workflowNodeSubscriptions(n.coordinator.WorkflowNodes(), n.ExecutableNode())
 }
 
 func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.Event) (bool, bool) {
@@ -94,10 +96,10 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 	if eventType == "" {
 		eventType = strings.TrimSpace(string(evt.Type()))
 	}
-	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), eventType)
+	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.ExecutableNode(), eventType)
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.coordinator.SemanticSource(), evt); err == nil && refOK && resolution.Ref.NodeID() == n.NodeID() {
-			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.NodeID(), resolution.Ref.HandlerEvent())
+		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.coordinator.SemanticSource(), evt); err == nil && refOK && resolution.Ref.Node().Equal(n.ExecutableNode()) {
+			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.ExecutableNode(), resolution.Ref.HandlerEvent())
 		}
 	}
 	if !ok {
@@ -110,17 +112,14 @@ func (n *declarativeWorkflowNode) Handle(ctx context.Context, evt events.Event) 
 	if n == nil || n.coordinator == nil {
 		return false
 	}
-	return n.coordinator.executeNodeHandlerPlan(ctx, n.NodeID(), evt)
+	return n.coordinator.executeNodeHandlerPlan(ctx, n.ExecutableNode(), evt)
 }
 
-func (n *DeclarativeNode) NodeID() string {
+func (n *DeclarativeNode) ExecutableNode() identity.ExecutableNode {
 	if n == nil {
-		return ""
+		return identity.ExecutableNode{}
 	}
-	if nodeID := strings.TrimSpace(n.nodeID); nodeID != "" {
-		return nodeID
-	}
-	return strings.TrimSpace(n.contract.ID)
+	return n.node
 }
 
 func (n *DeclarativeNode) Subscriptions() []events.EventType {
@@ -130,7 +129,7 @@ func (n *DeclarativeNode) Subscriptions() []events.EventType {
 	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(n.contract)
 	out := make([]events.EventType, 0, len(effectiveSubscriptions))
 	for _, evt := range effectiveSubscriptions {
-		aliases, err := workflowNodeSubscriptionAliases(n.source, n.NodeID(), evt)
+		aliases, err := workflowNodeSubscriptionAliases(n.source, n.node, evt)
 		if err != nil {
 			continue
 		}
@@ -153,7 +152,7 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	}
 	policy, ok := n.policies[eventType]
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt); err == nil && refOK && resolution.Ref.NodeID() == n.NodeID() {
+		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt); err == nil && refOK && resolution.Ref.Node().Equal(n.node) {
 			policy, ok = n.policies[resolution.Ref.HandlerEvent()]
 		}
 	}
@@ -174,20 +173,20 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	}
 	eventType := strings.TrimSpace(string(evt.Type()))
 	handlerEventKey := eventType
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, n.source, n.NodeID(), evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, n.source, n.node, evt)
 	if resolved.Failure != "" {
-		return nil, fmt.Errorf("resolve workflow handler for node %s: %s", n.NodeID(), resolved.Failure)
+		return nil, fmt.Errorf("resolve workflow handler for node %s: %s", n.node.Key(), resolved.Failure)
 	}
 	handler, ok := resolved.Handler, resolved.Matched
 	if ok {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, n.source, n.NodeID(), evt)
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, n.source, n.node, evt)
 	}
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 		resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt)
 		if err != nil {
 			return nil, err
 		}
-		if refOK && resolution.Ref.NodeID() == n.NodeID() {
+		if refOK && resolution.Ref.Node().Equal(n.node) {
 			handler = resolution.Handler
 			handlerEventKey = resolution.Ref.HandlerEvent()
 			ok = true
@@ -197,7 +196,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		return nil, nil
 	}
 	if n.engine == nil {
-		return nil, fmt.Errorf("declarative node %s has no handler execution engine", n.NodeID())
+		return nil, fmt.Errorf("declarative node %s has no handler execution engine", n.node.Key())
 	}
 	outcome, err := n.engine.ExecuteHandlerSteps(ctx, handler, evt, handlerEventKey)
 	if err != nil {
@@ -210,7 +209,7 @@ func (n *DeclarativeNode) resolvedHandlerForDelivery(evt Event) (SystemNodeEvent
 	if n == nil || n.source == nil {
 		return SystemNodeEventHandler{}, false
 	}
-	resolved := workflowNodeEventHandlerResolutionForDelivery(n.source, n.NodeID(), evt)
+	resolved := workflowNodeEventHandlerResolutionForDelivery(n.source, n.node, evt)
 	return resolved.Handler, resolved.Matched
 }
 
@@ -258,19 +257,19 @@ func (r *ProductHookRegistry) Get(actionID string) (ActionHandler, bool) {
 }
 
 type coordinatorHandlerExecutionEngine struct {
-	nodeID      string
+	nodeRef     identity.ExecutableNode
 	coordinator *PipelineCoordinator
 	executor    *runtimeengine.Executor
 	node        *runtimeengine.DeclarativeNode
 	err         error
 }
 
-func newCoordinatorHandlerExecutionEngine(pc *PipelineCoordinator, nodeID string) HandlerExecutionEngine {
-	if pc == nil {
+func newCoordinatorHandlerExecutionEngine(pc *PipelineCoordinator, node identity.ExecutableNode) HandlerExecutionEngine {
+	if pc == nil || !node.Valid() {
 		return nil
 	}
 	engine := &coordinatorHandlerExecutionEngine{
-		nodeID:      strings.TrimSpace(nodeID),
+		nodeRef:     node,
 		coordinator: pc,
 	}
 	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
@@ -279,7 +278,7 @@ func newCoordinatorHandlerExecutionEngine(pc *PipelineCoordinator, nodeID string
 		return engine
 	}
 	engine.executor = exec
-	engine.node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(nodeID), exec)
+	engine.node = runtimeengine.NewDeclarativeNode(node, exec)
 	return engine
 }
 
@@ -293,12 +292,13 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if e.executor == nil || e.node == nil {
 		return nil, fmt.Errorf("handler execution engine is not configured")
 	}
-	if e.nodeID == "" || strings.TrimSpace(string(evt.Type())) == "" {
+	if !e.nodeRef.Valid() || strings.TrimSpace(string(evt.Type())) == "" {
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	source := e.coordinator.SemanticSource()
 	entityID := workflowEventEntityID(evt)
-	flowID := workflowNodeFlowID(source, e.nodeID)
+	handlerFact := MustDeliveryTargetHandler(e.nodeRef)
+	flowID := handlerFact.ExecutionFlowID(source)
 	if handler.Join != nil {
 		if executionFlowID := strings.TrimSpace(pipelineFlowScope(ctx)); executionFlowID != "" {
 			flowID = executionFlowID
@@ -318,7 +318,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		hasSelectedState = strings.TrimSpace(selectedState.EntityID) != ""
 	}
 	if !exactDelivery && handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
-		selected, err := e.coordinator.selectHandlerEntityForFlow(ctx, flowID, e.nodeID, handler, evt)
+		selected, err := e.coordinator.selectHandlerEntityForFlow(ctx, flowID, e.nodeRef.Key(), handler, evt)
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +328,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		hasSelectedState = true
 	}
 	if !exactDelivery && handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
-		selected, err := e.coordinator.selectOrCreateHandlerEntityForFlow(ctx, flowID, e.nodeID, handler, evt)
+		selected, err := e.coordinator.selectOrCreateHandlerEntityForFlow(ctx, flowID, e.nodeRef.Key(), handler, evt)
 		if err != nil {
 			return nil, err
 		}
@@ -378,7 +378,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	node := e.node
 	handlerEventKey = strings.TrimSpace(handlerEventKey)
 	if handlerEventKey == "" {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeID, evt)
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeRef, evt)
 	}
 	workflowVersion := ""
 	if source != nil {
@@ -388,18 +388,17 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
-	producerSource, err := workflowNodeProducerSource(ctx, source, e.nodeID, flowID, entityID, evt.RoutingSource())
+	producerSource, err := workflowNodeProducerSource(ctx, source, e.nodeRef, flowID, entityID, evt.RoutingSource())
 	if err != nil {
 		return nil, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
-	joinDeclaration, err := workflowJoinDeclarationForExecution(source, evt, flowID, e.nodeID, handlerEventKey, handler)
+	joinDeclaration, err := workflowJoinDeclarationForExecution(source, evt, e.nodeRef, handlerEventKey, handler)
 	if err != nil {
 		return nil, err
 	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID(entityID),
-		NodeID:          identity.NormalizeNodeID(e.nodeID),
-		FlowID:          identity.NormalizeFlowID(flowID),
+		Node:            e.nodeRef,
 		Route:           stateRoute,
 		Event:           evt,
 		ProducerSource:  producerSource,
@@ -409,11 +408,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		Handler:         handler,
 		State:           stateSnapshot,
 	})
-	logComputeModuleReplayEvidence(ctx, e.coordinator.bus, e.nodeID, evt, result.ComputeModuleTraces)
+	logComputeModuleReplayEvidence(ctx, e.coordinator.bus, e.nodeRef.Key(), evt, result.ComputeModuleTraces)
 	if err != nil {
 		return nil, err
 	}
-	e.coordinator.recordInterceptedEmitDeadLetters(ctx, evt, e.nodeID, &handlerExecutionOutcome{
+	e.coordinator.recordInterceptedEmitDeadLetters(ctx, evt, e.nodeRef.Key(), &handlerExecutionOutcome{
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
 	}, nil)
 	return &HandlerOutcome{

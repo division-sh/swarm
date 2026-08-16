@@ -115,14 +115,15 @@ func assertSealedFlowPackageDependencies(t *testing.T, source semanticview.Sourc
 
 func assertSealedFlowPackageWildcardScope(t *testing.T, source semanticview.Source) {
 	t.Helper()
+	consumerNode := testFlowNode(t, "consumer", "consumer-node")
 
 	if owners := source.RuntimeEventOwners("producer/audit.seen"); len(owners) != 0 {
 		t.Fatalf("RuntimeEventOwners(producer/audit.seen) = %#v, want no consumer wildcard sibling leakage", owners)
 	}
-	if _, ok := source.NodeEventHandler("consumer-node", "producer/audit.seen"); ok {
+	if resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, consumerNode, "producer/audit.seen"); resolution.Matched {
 		t.Fatal("consumer handler matched producer/audit.seen through raw sibling wildcard fallback")
 	}
-	if _, ok := source.NodeEventHandler("consumer-node", "consumer/audit.seen"); !ok {
+	if resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, consumerNode, "consumer/audit.seen"); !resolution.Matched {
 		t.Fatal("consumer handler did not match its own package-subtree wildcard event")
 	}
 }
@@ -170,7 +171,7 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 	}),
@@ -290,7 +291,7 @@ func (s *sealedFlowPackageRouteStore) ListEventDeliveryRecipients(_ context.Cont
 	var out []string
 	for _, route := range events.NormalizeDeliveryRoutes(s.routes[eventID]) {
 		if route.Recipient.IsAgent() {
-			out = append(out, route.Recipient.ID())
+			out = append(out, route.Recipient.LocalID())
 		}
 	}
 	return out, nil
@@ -320,7 +321,7 @@ func sealedFlowPackageDeliveryRoutesContain(routes []events.DeliveryRoute, want 
 
 func sealedFlowPackageSubscriberListContains(subscribers []runtimebus.Subscriber, id, path, source string) bool {
 	for _, subscriber := range subscribers {
-		if subscriber.Recipient.ID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == source {
+		if subscriber.Recipient.LocalID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == source {
 			return true
 		}
 	}

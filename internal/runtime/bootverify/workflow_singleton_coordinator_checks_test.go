@@ -163,7 +163,7 @@ func TestBuildSingletonCoordinatorDemandProjection_UsesExactTypedConsumers(t *te
 		if demand.Field == "unused_index" {
 			t.Fatalf("unused typed field created coordinator demand: %#v", demand)
 		}
-		if demand.Field != "audit_log" || demand.NodeID != "coordinator-indexer" || demand.EventType != "lead.observed" || demand.SourceFile == "" {
+		if demand.Field != "audit_log" || demand.Node.NodeID() != "coordinator-indexer" || demand.EventType != "lead.observed" || demand.SourceFile == "" {
 			continue
 		}
 		if demand.Kind == "handler.data_accumulation" {
@@ -272,7 +272,7 @@ pins:
 `, tc.entities, "", tc.nodes)
 			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
 			for _, demand := range demands {
-				if demand.Kind == tc.wantKind && demand.Target == tc.wantTarget && demand.FlowID == "coordinator" && demand.NodeID == "coordinator-node" && demand.SourceFile != "" {
+				if demand.Kind == tc.wantKind && demand.Target == tc.wantTarget && demand.FlowID == "coordinator" && demand.Node.NodeID() == "coordinator-node" && demand.SourceFile != "" {
 					return
 				}
 			}
@@ -290,7 +290,7 @@ func TestBuildSingletonCoordinatorDemandProjection_PreservesDuplicateScopedNodeI
 	}
 	demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
 	for _, demand := range demands {
-		if demand.FlowID == "a" && demand.NodeID == "shared-node" && demand.Field == "items" && demand.SourceFile != "" {
+		if demand.FlowID == "a" && demand.Node.NodeID() == "shared-node" && demand.Field == "items" && demand.SourceFile != "" {
 			return
 		}
 	}
@@ -339,7 +339,7 @@ coordinator-node:
 	})
 
 	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
-		if demand.FlowID == "coordinator" && demand.NodeID == "nested-reader" && demand.Kind == "entity_read.fan_out.items_from" && demand.Target == "entity.verticals" && demand.SourceFile == "flows/coordinator/nested/nodes.yaml" {
+		if demand.FlowID == "coordinator" && demand.Node.NodeID() == "nested-reader" && demand.Kind == "entity_read.fan_out.items_from" && demand.Target == "entity.verticals" && demand.SourceFile == "flows/coordinator/nested/nodes.yaml" {
 			return
 		}
 	}

@@ -17,7 +17,7 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 		Module: handlerEngineProjectNodeModule(),
 	})
 
-	engine := newCoordinatorHandlerExecutionEngine(pc, "node-a")
+	engine := newCoordinatorHandlerExecutionEngine(pc, pipelineNode(t, "", "node-a"))
 	if engine == nil {
 		t.Fatal("expected engine")
 	}

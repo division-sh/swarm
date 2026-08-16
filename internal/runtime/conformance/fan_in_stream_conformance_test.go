@@ -63,7 +63,8 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	handler, ok := source.NodeEventHandler(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	receiverNode := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
+	handler, ok := source.ExecutableNodeEventHandler(receiverNode, templatefanin.ReceiverEvent)
 	if !ok {
 		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
@@ -236,7 +237,8 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	handler, ok := source.NodeEventHandler(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	receiverNode := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
+	handler, ok := source.ExecutableNodeEventHandler(receiverNode, templatefanin.ReceiverEvent)
 	if !ok {
 		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
@@ -392,8 +394,7 @@ func fanInStreamPublishAndExecute(
 	executionState := state
 	executionState.EntityID = ""
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		NodeID:          runtimeidentity.NodeID(templatefanin.ReceiverNodeID),
-		FlowID:          runtimeidentity.FlowID(templatefanin.ReceiverFlowID),
+		Node:            conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID),
 		Event:           delivered,
 		HandlerEventKey: templatefanin.ReceiverEvent,
 		Handler:         handler,
@@ -460,9 +461,13 @@ func fanInStreamRoutesContain(routes []events.DeliveryRoute, target events.Route
 
 func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteIdentity) (events.RouteIdentity, bool) {
 	target = target.Normalized()
+	receiver, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
+	if err != nil {
+		return events.RouteIdentity{}, false
+	}
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		owner := route.Target.Route()
-		if route.Recipient.IsNode() && route.Recipient.ID() == templatefanin.ReceiverNodeID &&
+		if route.Recipient.IsNode() && route.Recipient.ID() == receiver.Key() &&
 			owner.FlowID == target.FlowID && owner.FlowInstance == target.FlowInstance &&
 			owner.EntityID == target.EntityID {
 			return owner, true
@@ -473,8 +478,9 @@ func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteId
 
 func fanInStreamAccumulatorItemCount(t *testing.T, buckets map[string]map[string]any, window string) int {
 	t.Helper()
-	key := timeridentity.NewAccumulatorWindowBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, window).Key()
-	nodeBucket, ok := buckets[templatefanin.ReceiverNodeID]
+	node := conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID)
+	key := timeridentity.NewAccumulatorWindowBucketRef(node, templatefanin.ReceiverEvent, window).Key()
+	nodeBucket, ok := buckets[node.Key()]
 	if !ok {
 		t.Fatalf("receiver node bucket missing from %#v", buckets)
 	}

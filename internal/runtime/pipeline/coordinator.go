@@ -466,8 +466,8 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if evt.Type() == workflowGateDecisionEventType {
-		emitted, outcome, err := pc.handleWorkflowGateDecisionEvent(ctx, evt)
-		return false, emitted, outcome, err
+		emitted, outcome, _ := pc.handleWorkflowGateDecisionEvent(ctx, evt)
+		return false, emitted, outcome, nil
 	}
 	if evt.Type() == decisionCardDeferredEventType {
 		emitted, err := pc.handleDecisionCardDeferredEvent(ctx, evt)
@@ -501,7 +501,7 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		if !exactDeliveryBoundary && !consume {
 			return true, emitted, runtimepipelineobligation.Continue(), nil
 		}
-		return false, emitted, outcome, nil
+		return false, emitted, outcome, err
 	}
 	if evt.Type() == activityRequestEventType && err != nil {
 		return false, emitted, runtimepipelineobligation.Continue(), err
@@ -517,6 +517,9 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 	}
 	if !handled {
 		return true, nil, runtimepipelineobligation.Continue(), nil
+	}
+	if exactDeliveryBoundary {
+		return false, emitted, outcome, nil
 	}
 	return !consume, emitted, outcome, nil
 }
@@ -562,21 +565,20 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 	return handled, runtimepipelineobligation.DeadLetterExecution("handler_terminal_failure", &failure), nil
 }
 
-func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
-	handled, _ := pc.executeNodeHandlerPlanResult(ctx, nodeID, evt)
+func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event) bool {
+	handled, _ := pc.executeNodeHandlerPlanResult(ctx, node, evt)
 	return handled
 }
 
-func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
-	return pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, nodeID, evt, nil)
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, node identity.ExecutableNode, evt events.Event) (bool, error) {
+	return pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node, evt, nil)
 }
 
-func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, nodeID string, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
 	if pc == nil {
 		return false, nil
 	}
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
+	if !node.Valid() {
 		return false, nil
 	}
 	source := pc.SemanticSource()
@@ -587,27 +589,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	if trigger == "" {
 		return false, nil
 	}
-	resolved := workflowNodeEventHandlerResolution{}
-	if isJoinLifecycleEvent(events.EventType(trigger)) {
-		resolution, refOK, err := resolveWorkflowJoinOccurrence(source, evt)
-		if err != nil {
-			return false, err
-		}
-		if refOK && resolution.Ref.NodeID() == nodeID {
-			handlerFlowID := resolution.Ref.FlowID()
-			if handlerFlowID == "" {
-				handlerFlowID = semanticview.RootExecutionFlowID(source)
-			}
-			resolved = workflowNodeEventHandlerResolution{
-				Handler: resolution.Handler, HandlerEventKey: resolution.Ref.HandlerEvent(),
-				FlowID: handlerFlowID, Matched: true,
-			}
-		}
-	} else {
-		resolved = workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, nodeID, evt)
-		if resolved.Failure != "" {
-			return false, fmt.Errorf("resolve workflow handler for node %s: %s", nodeID, resolved.Failure)
-		}
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, node, evt)
+	if resolved.Failure != "" {
+		return false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Key(), resolved.Failure)
 	}
 	if !resolved.Matched {
 		return false, nil
@@ -619,24 +603,25 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		return false, fmt.Errorf("workflow node delivery lifecycle owner is required")
 	}
 	route, routeOK := runtimedelivery.RouteFromContext(ctx)
-	if !routeOK || !route.Recipient.IsNode() || route.Recipient.ID() != nodeID {
-		return false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", nodeID)
+	recipientNode, recipientOK := route.Recipient.Node()
+	if !routeOK || !recipientOK || !recipientNode.Equal(node) {
+		return false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", node.Key())
 	}
 	nodeFlowID := strings.TrimSpace(resolved.FlowID)
 	if nodeFlowID == "" {
-		nodeFlowID = workflowNodeFlowID(source, nodeID)
+		nodeFlowID = node.FlowID()
 	}
-	handlerFact, err := NewDeliveryTargetHandler(nodeFlowID, nodeID)
+	handlerFact, err := NewDeliveryTargetHandler(node)
 	if err != nil {
-		return false, fmt.Errorf("workflow node %s target handler: %w", nodeID, err)
+		return false, fmt.Errorf("workflow node %s target handler: %w", node.Key(), err)
 	}
 	handlerFact = handlerFact.ForEvent(events.EventType(handlerEventKey))
 	if err := ValidateStampedDeliveryTargetOwnership(source, evt, route.Recipient, handlerFact, handler, route.Target); err != nil {
-		return false, fmt.Errorf("workflow node %s target ownership: %w", nodeID, err)
+		return false, fmt.Errorf("workflow node %s target ownership: %w", node.Key(), err)
 	}
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
-	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != nodeID) {
-		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", nodeID, claim.SubscriberClass(), claim.SubscriberID())
+	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != node.Key()) {
+		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
 	}
 	recoveryClaim := claimed
 	for {
@@ -647,7 +632,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			}
 			reportCarrierFailure := func(err error) {
 				diaglog.ProcessLog(diaglog.LevelError, "pipeline", "workflow node delivery carrier transfer failed",
-					"node_id", nodeID, "event_id", evt.ID(), "error", err.Error())
+					"node_id", node.Key(), "event_id", evt.ID(), "error", err.Error())
 			}
 			admission, err := admitWorkflowNodeDelivery(ctx, evt, route, authorityProvider, deliveryStore, reportCarrierFailure)
 			if err != nil {
@@ -659,12 +644,12 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			claim = admission.claim
 		}
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
-		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(runtimedelivery.StatusInProgress))
+		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(runtimedelivery.StatusInProgress))
 		attemptCtx = withPipelineFlowScope(attemptCtx, nodeFlowID)
-		if err := pc.notifyTestWorkflowNodeHandlerStarting(attemptCtx, nodeID, evt); err != nil {
+		if err := pc.notifyTestWorkflowNodeHandlerStarting(attemptCtx, node.Key(), evt); err != nil {
 			return false, err
 		}
-		pc.notifyTestLifecycleHandlerStarted(attemptCtx, nodeID, evt)
+		pc.notifyTestLifecycleHandlerStarted(attemptCtx, node.Key(), evt)
 		started := time.Now()
 		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
 		if heartbeatErr != nil {
@@ -687,7 +672,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				return false, err
 			}
 		}
-		result, err := pc.executeNodeContractHandler(executionCtx, nodeID, handler, workflowTriggerContext{
+		result, err := pc.executeNodeContractHandler(executionCtx, node, handler, workflowTriggerContext{
 			Event:           evt,
 			HandlerEventKey: handlerEventKey,
 			State:           currentState,
@@ -696,7 +681,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			for _, emitted := range result.Emissions {
 				emissions.appendEvent(emitted)
 			}
-			pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "completed")
+			pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed")
 			sideEffects := []string{"handler_completed"}
 			settlementGuard, settleErr := heartbeat.BeginSettlement()
 			if settleErr != nil {
@@ -717,10 +702,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
 				return false, fmt.Errorf("settle workflow node delivery: %w", err)
 			}
-			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, "delivered")
+			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
 			return result.Handled, nil
 		}
-		pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "failed")
+		pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "failed")
 		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
 		disposition := runtimedelivery.FailureRetry
 		reason := "handler_failure"
@@ -757,9 +742,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
 			return false, fmt.Errorf("settle failed workflow node delivery: %w", err)
 		}
-		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, nodeID, evt, string(snapshot.Status))
+		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(snapshot.Status))
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
-			pc.recordWorkflowHandlerFailure(attemptCtx, evt, nodeID, err)
+			pc.recordWorkflowHandlerFailure(attemptCtx, evt, node.Key(), err)
 			if recoveryClaim {
 				// The recovered handler failure is now durable terminal evidence.
 				// Only claim or settlement failures make readiness unsafe.

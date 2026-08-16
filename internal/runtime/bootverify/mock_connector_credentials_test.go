@@ -198,8 +198,14 @@ func TestCredentialChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) 
 
 func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing.T) {
 	source, plan := scopedAliasMockConnectorFixture(t, false)
-	if _, flattened := source.NodeEntries()["shared-sender"]; flattened {
-		t.Fatal("ambiguous shared-sender unexpectedly survived in flattened node aliases")
+	sharedSenderCount := 0
+	for _, record := range source.ExecutableNodeRecords() {
+		if node, err := record.Identity(); err == nil && node.NodeID() == "shared-sender" {
+			sharedSenderCount++
+		}
+	}
+	if sharedSenderCount != 4 {
+		t.Fatalf("exact shared-sender declaration count = %d, want four scoped declarations", sharedSenderCount)
 	}
 	addScopedAliasActivities(t, source)
 
@@ -209,8 +215,8 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 	}
 	sites := strings.Join(reachability.LiveWorkflowActivitySites("provider.send"), "\n")
 	for _, want := range []string{
-		"project packages/project-live node shared-sender handler provider.requested",
-		"flow flow-live node shared-sender handler provider.requested",
+		"package packages/project-live node shared-sender handler provider.requested",
+		"package . flow flow-live node shared-sender handler provider.requested",
 	} {
 		if !strings.Contains(sites, want) {
 			t.Fatalf("scoped activity sites = %q, want %q", sites, want)
@@ -221,8 +227,8 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 		EffectReachability: reachability,
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") ||
-		!credentialFindingContains(findings, "provider_credential", "project packages/project-live node shared-sender") ||
-		!credentialFindingContains(findings, "provider_credential", "flow flow-live node shared-sender") {
+		!credentialFindingContains(findings, "provider_credential", "package packages/project-live node shared-sender") ||
+		!credentialFindingContains(findings, "provider_credential", "package . flow flow-live node shared-sender") {
 		t.Fatalf("credential findings = %#v, want both hidden scoped activity declarations", findings)
 	}
 }

@@ -1,6 +1,10 @@
 package contracts
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+)
 
 func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing.T) {
 	joinA := JoinSpec{
@@ -13,13 +17,14 @@ func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing
 		OnComplete: HandlerRuleEntry{AdvancesTo: "complete-b"},
 		Timeout:    JoinTimeoutSpec{After: "2h", Outcome: HandlerRuleEntry{AdvancesTo: "timeout-b"}},
 	}
+	joinNode := identitytest.RootNode(t, "join-node")
 	topology := BuildWorkflowStageTopology(
 		"", "waiting",
 		[]string{"waiting", "awaiting-a", "complete-a", "timeout-a", "awaiting-b", "complete-b", "timeout-b"},
 		[]string{"complete-a", "timeout-a", "complete-b", "timeout-b"},
 		[]HandlerTransitionSemantic{
-			{NodeID: "join-node", EventType: "join.a.requested", Join: &joinA},
-			{NodeID: "join-node", EventType: "join.b.requested", Join: &joinB},
+			{Node: joinNode, EventType: "join.a.requested", Join: &joinA},
+			{Node: joinNode, EventType: "join.b.requested", Join: &joinB},
 		},
 		nil,
 		nil,
@@ -27,7 +32,7 @@ func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing
 
 	assertTargets := func(handler string, want ...string) {
 		t.Helper()
-		got := topology.HandlerTargets("join-node", handler)
+		got := topology.HandlerTargets(joinNode, handler)
 		if len(got) != len(want) {
 			t.Fatalf("HandlerTargets(%q) = %v, want %v", handler, got, want)
 		}
@@ -54,13 +59,14 @@ func TestWorkflowStageTopologyPreservesHandlerOriginAndEffectiveEvent(t *testing
 }
 
 func TestWorkflowStageTopologyStampsLoopAndTimerOrigins(t *testing.T) {
+	reviewNode := identitytest.RootNode(t, "review-node")
 	topology := BuildWorkflowStageTopology(
 		"", "drafting", []string{"drafting", "review", "exhausted", "expired"}, []string{"exhausted", "expired"},
 		nil,
 		[]WorkflowTimerContract{{ID: "review.expire", Stage: "review", StageOwned: true, Event: WorkflowStageTimerInternalEvent, AdvancesTo: "expired"}},
 		[]WorkflowLoopPlan{{
 			ID: "revision", Escape: LoopEscapeSpec{AdvancesTo: "exhausted"},
-			Operations: []WorkflowLoopOperationPlan{{NodeID: "review-node", HandlerEvent: "review.revision_requested", Kind: LoopOperationRepeat, From: "review"}},
+			Operations: []WorkflowLoopOperationPlan{{Node: reviewNode, HandlerEvent: "review.revision_requested", Kind: LoopOperationRepeat, From: "review"}},
 		}},
 	)
 	for _, edge := range topology.Edges {
@@ -79,8 +85,9 @@ func TestWorkflowStageTopologyStampsLoopAndTimerOrigins(t *testing.T) {
 
 func TestTopologyEdgeIdentityIncludesHandlerOrigin(t *testing.T) {
 	stages := map[string]struct{}{"waiting": {}, "done": {}}
-	edges := appendTopologyEdge(nil, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", NodeID: "node", HandlerEvent: "a", EventType: "platform.join_timeout"})
-	edges = appendTopologyEdge(edges, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", NodeID: "node", HandlerEvent: "b", EventType: "platform.join_timeout"})
+	node := identitytest.RootNode(t, "node")
+	edges := appendTopologyEdge(nil, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", Node: node, HandlerEvent: "a", EventType: "platform.join_timeout"})
+	edges = appendTopologyEdge(edges, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", Node: node, HandlerEvent: "b", EventType: "platform.join_timeout"})
 	if len(edges) != 2 {
 		t.Fatalf("edges = %#v, want distinct handler origins", edges)
 	}

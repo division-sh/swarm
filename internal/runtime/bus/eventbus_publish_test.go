@@ -623,7 +623,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	agentID := "account-agent"
 	var agentIdentity runtimeagentidentity.Identity
 	for _, subscriber := range eb.RouteTable().Resolve("account/one/account.ready") {
-		if subscriber.Recipient.IsAgent() && subscriber.Recipient.ID() == agentID {
+		if subscriber.Recipient.IsAgent() && subscriber.Recipient.LocalID() == agentID {
 			agentIdentity = subscriber.AgentIdentity
 			break
 		}
@@ -655,7 +655,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Recipient.IsAgent() || plan.DeliveryRoutes[0].Recipient.ID() != agentID {
+	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Recipient.IsAgent() || plan.DeliveryRoutes[0].Recipient.LocalID() != agentID {
 		t.Fatalf("preflight failure/routes = %q/%#v, want agent-only connect route", plan.TargetFailure, plan.DeliveryRoutes)
 	}
 	if err := eb.Publish(ctx, evt); err != nil {
@@ -979,7 +979,7 @@ func (s *descriptorAwareEventStore) CommitPublication(_ context.Context, command
 	s.deliveries = s.deliveries[:0]
 	for _, route := range command.Commit.DeliveryRoutes {
 		if route.Recipient.IsAgent() {
-			s.deliveries = append(s.deliveries, route.Recipient.ID())
+			s.deliveries = append(s.deliveries, route.Recipient.LocalID())
 		}
 	}
 	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
@@ -3217,6 +3217,14 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
+	rootExecutionFlowID := semanticview.RootExecutionFlowID(module.SemanticSource())
+	if rootExecutionFlowID != bundle.WorkflowName() {
+		t.Fatalf("root execution flow = %q, want workflow %q", rootExecutionFlowID, bundle.WorkflowName())
+	}
+	rootCollector := testRootNode(t, "root-collector")
+	if !slices.ContainsFunc(module.WorkflowNodes(), func(node runtimepipeline.WorkflowNode) bool { return node.Node.Equal(rootCollector) }) {
+		t.Fatalf("runtime workflow nodes = %#v, want exact root collector %s", module.WorkflowNodes(), rootCollector.Key())
+	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -3297,7 +3305,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	}
 	var childRoute events.DeliveryRoute
 	for _, route := range plan.DeliveryRoutes {
-		if route.Recipient.ID() == "child-relay" {
+		if route.Recipient.LocalID() == "child-relay" {
 			childRoute = route
 			break
 		}
@@ -3305,16 +3313,16 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if childRoute.Recipient.Empty() {
 		t.Fatalf("completion routes = %#v, want child-relay", plan.DeliveryRoutes)
 	}
-	claimFlow, claimNode, claimEvent, claimed := childRoute.ConnectClaim.NodeHandlerOwner("child-relay")
-	if !claimed || claimFlow != "child" || claimNode != "child-relay" || claimEvent != "micro.done" {
-		t.Fatalf("completion connect claim = flow:%q node:%q event:%q admitted:%v, want child/child-relay/micro.done", claimFlow, claimNode, claimEvent, claimed)
+	claimNode, claimEvent, claimed := childRoute.ConnectClaim.NodeHandlerOwner()
+	if !claimed || claimNode.FlowID() != "child" || claimNode.NodeID() != "child-relay" || claimEvent != "micro.done" {
+		t.Fatalf("completion connect claim = node:%s event:%q admitted:%v, want child/child-relay/micro.done", claimNode.Key(), claimEvent, claimed)
 	}
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
 		completion.ID(), "micro.done", "cataloge2e", "", completion.Payload(), 0, eventBusTestRunID,
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, childRoute.Target.Route()), grandchildSource, completion.CreatedAt(),
 	)
 	if _, err := runtimepipeline.PreviewContractHandlerExecution(
-		runtimedelivery.WithRoute(ctx, childRoute), bundle, "child-relay", previewEvent,
+		runtimedelivery.WithRoute(ctx, childRoute), bundle, claimNode, previewEvent,
 		runtimepipeline.WorkflowState{EntityID: childEntityID, Stage: "delegated", Metadata: map[string]any{
 			"flow_path": childRoute.Target.Route().FlowInstance, "parent_flow_id": bundle.WorkflowName(),
 			"parent_flow_instance": eventBusTestRunID, "parent_entity_id": rootEntityID,
@@ -3410,18 +3418,20 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	const rootEntityID = "11111111-1111-1111-1111-222222222222"
 	const childEntityID = "11111111-1111-1111-1111-333333333333"
 	rootTarget := events.RouteIdentity{FlowID: "mixed-route", FlowInstance: eventBusTestRunID, EntityID: rootEntityID}
-	rootRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("project-observer"), Target: events.MustExistingEntityTarget(rootTarget)}
+	rootNode := testRootNode(t, "project-observer")
+	rootRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(rootNode), Target: events.MustExistingEntityTarget(rootTarget)}
 	childTarget := events.RouteIdentity{
 		FlowID:       "child",
 		FlowInstance: "child",
 		EntityID:     childEntityID,
 	}
-	targetRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("child-intake"), Target: events.MustExistingEntityTarget(childTarget)}
-	rootHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, "mixed-route", "project-observer")
+	childNode := testFlowNode(t, "child", "child-intake")
+	targetRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(childNode), Target: events.MustExistingEntityTarget(childTarget)}
+	rootHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, rootNode)
 	if err != nil {
 		t.Fatalf("admit root route handler: %v", err)
 	}
-	childHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, "child", "child-intake")
+	childHandler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, childNode)
 	if err != nil {
 		t.Fatalf("admit child route handler: %v", err)
 	}
@@ -3535,7 +3545,11 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}
 	root := runtimecontracts.FlowContractView{
 		Path:  "",
-		Paths: runtimecontracts.FlowContractPaths{ID: "mixed-route"},
+		Paths: runtimecontracts.FlowContractPaths{},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Name: "mixed-route",
+			Mode: runtimecontracts.FlowModeStatic,
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"route.start": {},
 		},
@@ -3578,7 +3592,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"mixed-route": {},
+			"mixed-route": root.Schema,
 			"child":       child.Schema,
 		},
 	}
@@ -3590,14 +3604,14 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		}, nil),
 		workflowNodes: []runtimepipeline.WorkflowNode{
 			{
-				ID:            "project-observer",
+				Node:          testRootNode(t, "project-observer"),
 				Subscriptions: []events.EventType{"route.start"},
 				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
 					"route.start": {Consume: true},
 				},
 			},
 			{
-				ID:            "child-intake",
+				Node:          testFlowNode(t, "child", "child-intake"),
 				Subscriptions: []events.EventType{"route.start"},
 				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
 					"route.start": {Consume: true},
@@ -3780,7 +3794,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if rootConnectPlan.TargetFailure != "" || len(rootConnectPlan.DeliveryRoutes) == 0 {
 		t.Fatalf("root connect preflight failure=%q routes=%#v", rootConnectPlan.TargetFailure, rootConnectPlan.DeliveryRoutes)
 	}
-	if got := rootConnectPlan.DeliveryRoutes[0]; got.Recipient.ID() != "child-relay" {
+	if got := rootConnectPlan.DeliveryRoutes[0]; got.Recipient.LocalID() != "child-relay" {
 		t.Fatalf("root connect preflight route=%#v, want child-relay", got)
 	}
 	childTarget := rootConnectPlan.DeliveryRoutes[0].Target.Route().Normalized()
@@ -3790,7 +3804,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
 		eventBusTestRunID, previewEnvelope, rootSource, time.Now().UTC())
 	childPreviewCtx := runtimedelivery.WithRoute(ctx, rootConnectPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, "child-relay", previewEvent, runtimepipeline.WorkflowState{
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testFlowNode(t, "child", "child-relay"), previewEvent, runtimepipeline.WorkflowState{
 		EntityID: childTarget.EntityID,
 		Stage:    "waiting",
 	}, nil); err != nil {
@@ -3818,6 +3832,10 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 	grandchildTarget := grandchildConnectPlan.DeliveryRoutes[0].Target.Route().Normalized()
 	grandchildOwnership := grandchildConnectPlan.DeliveryRoutes[0].Target
+	grandchildNode, grandchildEvent, claimed := grandchildConnectPlan.DeliveryRoutes[0].ConnectClaim.NodeHandlerOwner()
+	if !claimed || grandchildNode.NodeID() != "grandchild-worker" || grandchildEvent != "micro.start" {
+		t.Fatalf("grandchild connect claim = node:%s event:%q admitted:%v, want grandchild-worker/micro.start", grandchildNode.Key(), grandchildEvent, claimed)
+	}
 	storedGrandchild, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(grandchildTarget.FlowInstance))
 	if err != nil {
 		t.Fatalf("load grandchild connect target: %v", err)
@@ -3834,7 +3852,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	grandchildPreviewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
 		eventBusTestRunID, grandchildPreviewEnvelope, childSource, time.Now().UTC())
 	grandchildPreviewCtx := runtimedelivery.WithRoute(ctx, grandchildConnectPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(grandchildPreviewCtx, bundle, "grandchild-worker", grandchildPreviewEvent, runtimepipeline.WorkflowState{
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(grandchildPreviewCtx, bundle, grandchildNode, grandchildPreviewEvent, runtimepipeline.WorkflowState{
 		EntityID: grandchildTarget.EntityID,
 		Stage:    "ready",
 	}, nil); err != nil {
@@ -3864,12 +3882,13 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("root return preflight failure=%q routes=%#v", rootReturnPlan.TargetFailure, rootReturnPlan.DeliveryRoutes)
 	}
 	rootReturnIndex := slices.IndexFunc(rootReturnPlan.DeliveryRoutes, func(route events.DeliveryRoute) bool {
-		return route.Recipient.ID() == "root-collector"
+		return route.Recipient.LocalID() == "root-collector"
 	})
 	if rootReturnIndex < 0 {
 		t.Fatalf("root return preflight routes = %#v, want root-collector", rootReturnPlan.DeliveryRoutes)
 	}
 	rootReturnOwnership := rootReturnPlan.DeliveryRoutes[rootReturnIndex].Target
+	rootReturnRecipientID := rootReturnPlan.DeliveryRoutes[rootReturnIndex].Recipient.ID()
 	wantRootReturn := wantRootOwnership
 	if rootReturnOwnership != wantRootReturn {
 		t.Fatalf("root return target = %s %#v, want %s %#v", rootReturnOwnership.Code(), rootReturnOwnership.Route(), wantRootReturn.Code(), wantRootReturn.Route())
@@ -3896,11 +3915,15 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if initialPlan.TargetFailure != "" || len(initialPlan.DeliveryRoutes) != 1 {
 		t.Fatalf("initial root preflight failure=%q routes=%#v, want one root-dispatcher route", initialPlan.TargetFailure, initialPlan.DeliveryRoutes)
 	}
-	if got := initialPlan.DeliveryRoutes[0]; got.Recipient.ID() != "root-dispatcher" || got.Target != wantRootReturn {
+	if got := initialPlan.DeliveryRoutes[0]; got.Recipient.LocalID() != "root-dispatcher" || got.Target != wantRootReturn {
 		t.Fatalf("initial root route = %#v, want root-dispatcher with target %s %#v", got, wantRootReturn.Code(), wantRootReturn.Route())
 	}
+	initialNode, ok := initialPlan.DeliveryRoutes[0].Recipient.Node()
+	if !ok {
+		t.Fatalf("initial root route recipient = %#v, want exact node", initialPlan.DeliveryRoutes[0].Recipient)
+	}
 	initialPreviewCtx := runtimedelivery.WithRoute(ctx, initialPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(initialPreviewCtx, bundle, "root-dispatcher", initial, runtimepipeline.WorkflowState{
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(initialPreviewCtx, bundle, initialNode, initial, runtimepipeline.WorkflowState{
 		EntityID: rootEntityID,
 		Stage:    "idle",
 	}, nil); err != nil {
@@ -3912,32 +3935,32 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, initial.ID(), "root-dispatcher", "delivered")
-	assertNodeDeliveryTarget(t, db, initial.ID(), "root-dispatcher", wantRootReturn)
+	assertNodeDeliveryStatus(t, db, initial.ID(), initialPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, db, initial.ID(), initialPlan.DeliveryRoutes[0].Recipient.ID(), wantRootReturn)
 	var stepBeginEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'step.begin' ORDER BY created_at DESC LIMIT 1`).Scan(&stepBeginEventID); err != nil {
 		t.Fatalf("load step.begin event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, stepBeginEventID, "child-relay", "delivered")
-	assertNodeDeliveryTarget(t, db, stepBeginEventID, "child-relay", childOwnership)
+	assertNodeDeliveryStatus(t, db, stepBeginEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, db, stepBeginEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), childOwnership)
 	var microStartEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.start' ORDER BY created_at DESC LIMIT 1`).Scan(&microStartEventID); err != nil {
 		t.Fatalf("load child/micro.start event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, microStartEventID, "grandchild-worker", "delivered")
-	assertNodeDeliveryTarget(t, db, microStartEventID, "grandchild-worker", grandchildOwnership)
+	assertNodeDeliveryStatus(t, db, microStartEventID, grandchildConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, db, microStartEventID, grandchildConnectPlan.DeliveryRoutes[0].Recipient.ID(), grandchildOwnership)
 	var microDoneEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/grandchild/micro.done' ORDER BY created_at DESC LIMIT 1`).Scan(&microDoneEventID); err != nil {
 		t.Fatalf("load child/grandchild/micro.done event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, microDoneEventID, "child-relay", "delivered")
-	assertNodeDeliveryTarget(t, db, microDoneEventID, "child-relay", childOwnership)
+	assertNodeDeliveryStatus(t, db, microDoneEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, db, microDoneEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), childOwnership)
 	var microRelayedEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.relayed' ORDER BY created_at DESC LIMIT 1`).Scan(&microRelayedEventID); err != nil {
 		t.Fatalf("load child/micro.relayed event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, microRelayedEventID, "root-collector", "delivered")
-	assertNodeDeliveryTarget(t, db, microRelayedEventID, "root-collector", wantRootReturn)
+	assertNodeDeliveryStatus(t, db, microRelayedEventID, rootReturnRecipientID, "delivered")
+	assertNodeDeliveryTarget(t, db, microRelayedEventID, rootReturnRecipientID, wantRootReturn)
 
 	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
@@ -4066,15 +4089,16 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 	var deadLettered int
+	routerNode := testRootNode(t, "router")
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries d
 		JOIN events e ON e.event_id = d.event_id
 		WHERE e.event_name = 'validate.requested'
 		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = 'router'
+		  AND d.subscriber_id = $1
 		  AND d.status = 'dead_letter'
-	`).Scan(&deadLettered); err != nil {
+	`, routerNode.Key()).Scan(&deadLettered); err != nil {
 		t.Fatalf("count dead-lettered exact delivery: %v", err)
 	}
 	if deadLettered != 1 {

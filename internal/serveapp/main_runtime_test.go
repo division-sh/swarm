@@ -44,6 +44,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -1054,7 +1055,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
 	entityID := servedJoinTarget(t, db, initial.RunID)
 
@@ -1063,7 +1064,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
 		"idempotency_key": "join-failure-arrival-" + uuid.NewString(),
 	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "dead_letter", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "dead_letter", 1)
 	waitServedDeliveryOutcomeCount(t, db, "postgres", arrival.EventID, "node", "join-node", "dead_letter", 1)
 
 	type failureReadback struct {
@@ -1111,20 +1112,20 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
 		"idempotency_key": "join-fork-run-" + uuid.NewString(),
 	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
 	entityID := servedJoinTarget(t, db, initial.RunID)
 	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID,
 		"payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString(),
 	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, dispatched.EventID, "node", "dispatcher", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, dispatched.EventID, "node", identitytest.RootNode(t, "dispatcher").Key(), "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
 	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID,
 		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
 		"idempotency_key": "join-fork-arrival-" + uuid.NewString(),
 	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", "join-node", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, initial.RunID)
 	waitServedRunDeliveryQuiescence(t, db, "postgres", initial.RunID)
@@ -1356,18 +1357,20 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 		t.Fatalf("load selected-contract execution lineage: %v", err)
 	}
 	var targetSubscriberDeliveries, sourceSubscriberDeliveries int
+	targetNode := identitytest.RootNode(t, "test-node").Key()
+	sourceNode := identitytest.RootNode(t, "complete-task").Key()
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries
-		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = 'test-node'
-	`, rpcResult.ForkRunID, forkEventID).Scan(&targetSubscriberDeliveries); err != nil {
+		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = $3
+	`, rpcResult.ForkRunID, forkEventID, targetNode).Scan(&targetSubscriberDeliveries); err != nil {
 		t.Fatalf("count target subscriber deliveries: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries
-		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = 'complete-task'
-	`, rpcResult.ForkRunID, forkEventID).Scan(&sourceSubscriberDeliveries); err != nil {
+		WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_id = $3
+	`, rpcResult.ForkRunID, forkEventID, sourceNode).Scan(&sourceSubscriberDeliveries); err != nil {
 		t.Fatalf("count source subscriber deliveries: %v", err)
 	}
 	if targetSubscriberDeliveries == 0 || sourceSubscriberDeliveries != 0 {
@@ -2992,7 +2995,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	if queued.RunID != runID || queued.OperatorReferenceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "item-observer", "pending", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 
 	continueKey := keyPrefix + "-run-continue"
@@ -3007,7 +3010,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"idempotency_key": continueKey,
 	})
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "item-observer", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
@@ -3820,7 +3823,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 					hookMu.Unlock()
 					return fmt.Errorf("served sqlite SQLDB is required for dynamic event.publish proof")
 				}
-				hook = servedEventPublishBlockingHandlerAuthorityHook(servedDB, "sqlite", "portfolio-node", "opco.spinup_requested", blocked, release)
+				hook = servedEventPublishBlockingHandlerAuthorityHook(servedDB, "sqlite", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release)
 			}
 			h := hook
 			hookMu.Unlock()
@@ -3855,7 +3858,7 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 		SelfCheck:                        true,
 		RequireBundleMatch:               false,
 		Verbose:                          true,
-		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", "portfolio-node", "opco.spinup_requested", blocked, release),
+		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release),
 		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
@@ -3910,7 +3913,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
 
 	releaseOnce.Do(func() { close(release) })
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
 	waitServedDeliveryOutcomeCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", "portfolio-node")
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", "portfolio-node")
@@ -3998,7 +4001,7 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
 		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, "item-handler", rt.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
 	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
 	return result.RunID, result.EventID, entityID
@@ -5378,7 +5381,7 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 
 func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *lifecycletest.Probe) {
 	t.Helper()
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, eventID, "item-handler", probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, eventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 }
 
 const (
@@ -5410,10 +5413,10 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
 	}
-	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, "item-handler"); got == 0 {
+	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key()); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/item-handler authority", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, "item-handler", probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", "item-handler")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
@@ -5441,7 +5444,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, "item-observer", probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
@@ -5539,11 +5542,11 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if spinup["run_id"] != runID || spinup["new_run_created"] != "false" || spinup["deliveries"] == "0" || spinupEventID == "" {
 		t.Fatalf("spinup target-route event publish fields = %#v, want selected existing run with delivery", spinup)
 	}
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinupEventID, "node", "portfolio-node", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinupEventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
 
 	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", "lifecycle-orchestrator", "delivered", 1)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
 	entityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
 	if entityID == "" {
 		t.Fatalf("%s child auto event %s has no entity_id\n%s", backend, autoEventID, servedEventPublishDebugSummary(t, db, backend, runID))
@@ -5569,8 +5572,8 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 		t.Fatalf("target-route event publish fields = %#v, want selected existing run with delivery", targeted)
 	}
 	requireServedEventPublishTargetRouteRow(t, db, backend, targetEventID, "operating/opco.product_review_requested", targetFlowInstance, entityID)
-	requireServedEventPublishDeliveryTargetRoute(t, db, backend, targetEventID, "node", "lifecycle-orchestrator", targetFlowInstance, entityID)
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, targetEventID, "node", "lifecycle-orchestrator", "delivered", 1)
+	requireServedEventPublishDeliveryTargetRoute(t, db, backend, targetEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), targetFlowInstance, entityID)
+	waitServedEventPublishDeliveryStatusCount(t, db, backend, targetEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "ready")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "ready")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
@@ -5605,7 +5608,7 @@ func runServedEventPublishActiveLoadProof(
 	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
 		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, "item-handler", probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
 	holdStart := time.Now()
@@ -5703,12 +5706,12 @@ func runServedEventPublishActiveLoadProof(
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	requireServedEventPublishDeliveryTargetRoute(t, db, backend, followUp.EventID, "node", "item-observer", runID, entityID)
+	requireServedEventPublishDeliveryTargetRoute(t, db, backend, followUp.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), runID, entityID)
 	requireServedEventReadback(t, endpoint, followUp.EventID, runID, "", "item.processed", "item-observer")
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, "item-observer", probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", "item-observer")
@@ -8399,7 +8402,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
 		[]events.DeliveryRoute{{
-			Recipient: events.MustNodeDeliveryRecipient(subscriberID),
+			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)),
 			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 				FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(subscriberID),
 			}),

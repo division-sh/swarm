@@ -219,23 +219,6 @@ func cloneWorkflowSchemaValue(value any) any {
 	}
 }
 
-func workflowNodeFlowID(source semanticview.Source, nodeID string) string {
-	if source == nil {
-		return ""
-	}
-	contractSource, ok := source.NodeContractSource(nodeID)
-	if !ok {
-		return ""
-	}
-	if flowID := strings.TrimSpace(contractSource.FlowID); flowID != "" {
-		return flowID
-	}
-	if strings.TrimSpace(contractSource.Layer) == "project" {
-		return strings.TrimSpace(source.WorkflowName())
-	}
-	return ""
-}
-
 func runtimecontractsHandlerPatternMatches(pattern, eventType string) bool {
 	pattern = strings.TrimSpace(pattern)
 	eventType = strings.TrimSpace(eventType)

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,7 +20,7 @@ func TestLowerEmitSpecFieldsLowersFromAndBareNamespaceValues(t *testing.T) {
 	}
 
 	lowered, err := bundle.LowerEmitSpecFields(EmitFieldLoweringContext{
-		NodeID:           "bucket-node",
+		Node:             identitytest.RootNode(t, "bucket-node"),
 		TriggerEventType: "account.scored",
 		Site:             "handler.emit",
 	}, spec)
@@ -48,7 +49,7 @@ func TestLowerEmitSpecFieldsExplicitFieldsWinAndOptionalsRemainExplicit(t *testi
 	}
 
 	lowered, err := bundle.LowerEmitSpecFields(EmitFieldLoweringContext{
-		NodeID:           "bucket-node",
+		Node:             identitytest.RootNode(t, "bucket-node"),
 		TriggerEventType: "account.scored",
 		Site:             "handler.emit",
 	}, spec)
@@ -100,7 +101,7 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := emitFieldLoweringTestBundle().LowerEmitSpecFields(EmitFieldLoweringContext{
-				NodeID:           "bucket-node",
+				Node:             identitytest.RootNode(t, "bucket-node"),
 				TriggerEventType: "account.scored",
 				Site:             "handler.emit",
 			}, tc.spec)

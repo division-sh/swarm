@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -56,7 +57,7 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			readers := handlerExecutableReaderExpressionsForSource(nil, "coordinator", "node", "event", tc.handler)
+			readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "coordinator", "node"), "event", tc.handler)
 			for _, reader := range readers {
 				if reader.Expression == "entity.verticals" || reader.Expression == "size(entity.verticals) > 0" {
 					return
@@ -116,7 +117,7 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if readers := handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", tc.handler); len(readers) != 0 {
+			if readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", tc.handler); len(readers) != 0 {
 				t.Fatalf("unevaluated field entered executable reader census: %#v", readers)
 			}
 		})
@@ -148,7 +149,7 @@ func TestExecutableReaderCensusHonorsItemsFromPrecedence(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			readers := handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", tc.handler)
+			readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", tc.handler)
 			if len(readers) != 1 || readers[0].Kind != tc.wantKind || readers[0].Expression != "payload.items" {
 				t.Fatalf("reader census = %#v, want only %s payload.items", readers, tc.wantKind)
 			}
@@ -161,7 +162,7 @@ func TestExecutableReaderCensusHonorsGuardChecksPrecedence(t *testing.T) {
 		Check:  "entity.verticals",
 		Checks: []runtimecontracts.GuardCheck{{ID: "ready", Check: "payload.ready"}},
 	}}
-	readers := handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", handler)
+	readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler)
 	if len(readers) != 1 || readers[0].Kind != "guard.checks[0]" || readers[0].Expression != "payload.ready" {
 		t.Fatalf("reader census = %#v, want only guard.checks[0] payload.ready", readers)
 	}
@@ -176,7 +177,7 @@ func TestExecutableReaderCensusTreatsQuerySelectAsLiteralFields(t *testing.T) {
 		Source: "payload.items",
 		Select: []string{"entity.status"},
 	}}
-	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", handler) {
+	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
 		if reader.Expression == "entity.status" || strings.HasPrefix(reader.Kind, "query.select") {
 			t.Fatalf("query select literal entered executable reader census: %#v", reader)
 		}
@@ -199,7 +200,7 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		"fan_out.items_from":       runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
 		"on_complete[0].condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
 	}
-	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, "flow", "node", "event", handler) {
+	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
 		phase, ok := want[reader.Kind]
 		if !ok {
 			continue
@@ -312,13 +313,13 @@ func TestHandBuiltScopedNodeRecordsReachReaderAndWriteConsumers(t *testing.T) {
 		t.Fatalf("entity reader coverage = %#v, want root entity.status", coverage)
 	}
 	operations := wave1ContainedStateOperations(source)
-	if len(operations) != 1 || operations[0].FlowID != "" || operations[0].NodeID != "root-reader" || operations[0].SourceFile != "root/nodes.yaml" || operations[0].Write.Target() != "entity.items" {
+	if len(operations) != 1 || operations[0].Node.FlowID() != "" || operations[0].Node.NodeID() != "root-reader" || operations[0].SourceFile != "root/nodes.yaml" || operations[0].Write.Target() != "entity.items" {
 		t.Fatalf("contained operations = %#v, want exact hand-built root scope", operations)
 	}
 	writes := wave1AllEntityWriteTargets(source)
 	foundDirectWrite := false
 	for _, write := range writes {
-		if write.FlowID == "" && write.NodeID == "root-reader" && write.SourceFile == "root/nodes.yaml" && write.Target == "entity.status" {
+		if write.Node.FlowID() == "" && write.Node.NodeID() == "root-reader" && write.SourceFile == "root/nodes.yaml" && write.Target == "entity.status" {
 			foundDirectWrite = true
 		}
 	}

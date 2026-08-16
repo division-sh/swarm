@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -44,8 +45,9 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 		time.Now().UTC(),
 	)
 	seedSingletonCoordinatorPilotEvent(t, db, ctx, evt)
-	seedSingletonCoordinatorPilotNodeDelivery(t, db, ctx, evt.ID(), singletoncoordinatorpilot.NodeID, target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(singletoncoordinatorpilot.NodeID), Target: events.MustExistingEntityTarget(target)}
+	node := pipelineSourceNode(t, source, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID)
+	seedSingletonCoordinatorPilotNodeDelivery(t, db, ctx, evt.ID(), node, target)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {
@@ -99,7 +101,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if !ok || thirdAudit["ref"] != "lead-42" || thirdAudit["action"] != "queued" {
 		t.Fatalf("audit_log[2] = %#v, want queued lead-42 entry", auditLog[2])
 	}
-	assertSingletonCoordinatorPilotDeliveryStatus(t, db, evt.ID(), singletoncoordinatorpilot.NodeID, "delivered")
+	assertSingletonCoordinatorPilotDeliveryStatus(t, db, evt.ID(), node.Key(), "delivered")
 	assertNoSingletonCoordinatorPilotContainedRouteRows(t, db, "coordinator/lead-42")
 	assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t, db, workflowStore, ctx, "coordinator/lead-42")
 }
@@ -116,7 +118,7 @@ func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *
 		FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
 		EntityID:     uuid.NewString(),
 	}
-	if pc.workflowNodeMatchesDeliveryTarget(singletoncoordinatorpilot.NodeID, containedTarget) {
+	if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), containedTarget) {
 		t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
 	}
 }
@@ -177,9 +179,9 @@ func seedSingletonCoordinatorPilotEvent(t *testing.T, db *sql.DB, ctx context.Co
 	seedPipelineEventRecord(t, ctx, db, evt)
 }
 
-func seedSingletonCoordinatorPilotNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID, nodeID string, target events.RouteIdentity) {
+func seedSingletonCoordinatorPilotNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) {
 	t.Helper()
-	seedPipelineTestNodeDelivery(t, ctx, db, eventID, nodeID, target)
+	seedPipelineTestNodeDelivery(t, ctx, db, eventID, node, target)
 }
 
 func assertSingletonCoordinatorPilotDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {

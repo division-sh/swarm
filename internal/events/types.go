@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -586,20 +587,24 @@ func (p *DeliveryPayloadProjection) UnmarshalJSON(raw []byte) error {
 }
 
 type DeliveryRecipient struct {
-	kind deliveryRecipientKind
-	id   string
+	kind    deliveryRecipientKind
+	node    runtimeidentity.ExecutableNode
+	agentID string
 }
 
-func NewNodeDeliveryRecipient(id string) (DeliveryRecipient, error) {
-	return newDeliveryRecipient(deliveryRecipientNode, id)
+func NewNodeDeliveryRecipient(node runtimeidentity.ExecutableNode) (DeliveryRecipient, error) {
+	if !node.Valid() {
+		return DeliveryRecipient{}, fmt.Errorf("node delivery recipient requires exact executable node identity")
+	}
+	return DeliveryRecipient{kind: deliveryRecipientNode, node: node}, nil
 }
 
 func NewAgentDeliveryRecipient(id string) (DeliveryRecipient, error) {
 	return newDeliveryRecipient(deliveryRecipientAgent, id)
 }
 
-func MustNodeDeliveryRecipient(id string) DeliveryRecipient {
-	recipient, err := NewNodeDeliveryRecipient(id)
+func MustNodeDeliveryRecipient(node runtimeidentity.ExecutableNode) DeliveryRecipient {
+	recipient, err := NewNodeDeliveryRecipient(node)
 	if err != nil {
 		panic(err)
 	}
@@ -616,17 +621,48 @@ func MustAgentDeliveryRecipient(id string) DeliveryRecipient {
 
 func newDeliveryRecipient(kind deliveryRecipientKind, id string) (DeliveryRecipient, error) {
 	id = strings.TrimSpace(id)
-	if (kind != deliveryRecipientNode && kind != deliveryRecipientAgent) || id == "" {
+	if kind != deliveryRecipientNode && kind != deliveryRecipientAgent {
 		return DeliveryRecipient{}, fmt.Errorf("delivery recipient kind and id are required")
 	}
-	return DeliveryRecipient{kind: kind, id: id}, nil
+	if kind == deliveryRecipientNode {
+		node, err := runtimeidentity.ParseExecutableNodeKey(id)
+		if err != nil {
+			return DeliveryRecipient{}, fmt.Errorf("node delivery recipient identity: %w", err)
+		}
+		return NewNodeDeliveryRecipient(node)
+	}
+	if id == "" {
+		return DeliveryRecipient{}, fmt.Errorf("delivery recipient kind and id are required")
+	}
+	return DeliveryRecipient{kind: kind, agentID: id}, nil
 }
 
-func (r DeliveryRecipient) Empty() bool   { return r.kind == 0 && r.id == "" }
-func (r DeliveryRecipient) IsNode() bool  { return r.kind == deliveryRecipientNode && r.id != "" }
-func (r DeliveryRecipient) IsAgent() bool { return r.kind == deliveryRecipientAgent && r.id != "" }
-func (r DeliveryRecipient) ID() string    { return r.id }
-func (r DeliveryRecipient) Code() string  { return r.kind.storageCode() }
+func (r DeliveryRecipient) Empty() bool { return r.kind == 0 && r.node.Empty() && r.agentID == "" }
+func (r DeliveryRecipient) IsNode() bool {
+	return r.kind == deliveryRecipientNode && r.node.Valid() && r.agentID == ""
+}
+func (r DeliveryRecipient) IsAgent() bool {
+	return r.kind == deliveryRecipientAgent && r.agentID != "" && r.node.Empty()
+}
+func (r DeliveryRecipient) ID() string {
+	if r.IsNode() {
+		return r.node.Key()
+	}
+	if r.IsAgent() {
+		return r.agentID
+	}
+	return ""
+}
+func (r DeliveryRecipient) Node() (runtimeidentity.ExecutableNode, bool) {
+	return r.node, r.IsNode()
+}
+func (r DeliveryRecipient) LocalID() string {
+	if r.IsNode() {
+		return r.node.NodeID()
+	}
+	return r.ID()
+}
+func (r DeliveryRecipient) Code() string { return r.kind.storageCode() }
 
 type DeliveryRoute struct {
 	Recipient         DeliveryRecipient         `json:"-"`
@@ -693,8 +729,7 @@ type ConnectExecutionClaim struct {
 	receiverPinDigest [sha256.Size]byte
 	recipientKind     deliveryRecipientKind
 	recipientID       string
-	handlerFlowID     string
-	handlerNodeID     string
+	handlerNode       runtimeidentity.ExecutableNode
 	handlerEvent      string
 	present           bool
 }
@@ -709,7 +744,7 @@ const (
 // AdmitConnectExecutionClaim accepts a digest produced by the compiled
 // connect owner. Raw edge, pin, handler, and recipient strings never cross
 // this boundary.
-func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, recipient DeliveryRecipient, handlerFlowID, handlerNodeID string, handlerEvent EventType) (ConnectExecutionClaim, error) {
+func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, recipient DeliveryRecipient, handlerNode runtimeidentity.ExecutableNode, handlerEvent EventType) (ConnectExecutionClaim, error) {
 	kind := recipient.kind
 	if recipient.Empty() {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires an admitted node or agent recipient")
@@ -718,18 +753,16 @@ func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, rec
 	if handler == "" || handler != string(handlerEvent) {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires a canonical handler event")
 	}
-	handlerFlowID = strings.TrimSpace(handlerFlowID)
-	handlerNodeID = strings.TrimSpace(handlerNodeID)
-	if recipient.IsNode() && (handlerFlowID == "" || handlerNodeID == "") {
+	if recipient.IsNode() && !handlerNode.Valid() {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect node execution claim requires an exact handler owner")
 	}
-	if recipient.IsAgent() && (handlerFlowID != "" || handlerNodeID != "") {
+	if recipient.IsAgent() && !handlerNode.Empty() {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect agent execution claim cannot carry a node handler owner")
 	}
 	return ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: receiverPinDigest,
-		recipientKind: kind, recipientID: recipient.ID(), handlerFlowID: handlerFlowID,
-		handlerNodeID: handlerNodeID, handlerEvent: handler, present: true,
+		recipientKind: kind, recipientID: recipient.ID(), handlerNode: handlerNode,
+		handlerEvent: handler, present: true,
 	}, nil
 }
 
@@ -749,38 +782,44 @@ func (c ConnectExecutionClaim) Equal(other ConnectExecutionClaim) bool {
 	return c.present == other.present && (!c.present ||
 		(c.digest == other.digest && c.receiverPinDigest == other.receiverPinDigest &&
 			c.recipientKind == other.recipientKind && c.recipientID == other.recipientID &&
-			c.handlerFlowID == other.handlerFlowID && c.handlerNodeID == other.handlerNodeID && c.handlerEvent == other.handlerEvent))
+			c.handlerNode.Equal(other.handlerNode) && c.handlerEvent == other.handlerEvent))
 }
 
-func (c ConnectExecutionClaim) NodeHandlerEvent(nodeID string) (EventType, bool) {
-	_, _, eventType, ok := c.NodeHandlerOwner(nodeID)
+func (c ConnectExecutionClaim) NodeHandlerEvent(node runtimeidentity.ExecutableNode) (EventType, bool) {
+	owner, eventType, ok := c.NodeHandlerOwner()
+	if !ok || !owner.Equal(node) {
+		return "", false
+	}
 	return eventType, ok
 }
 
-func (c ConnectExecutionClaim) NodeHandlerOwner(recipientID string) (string, string, EventType, bool) {
-	if !c.present || c.recipientKind != deliveryRecipientNode || c.recipientID != strings.TrimSpace(recipientID) ||
-		c.handlerFlowID == "" || c.handlerNodeID == "" || c.handlerEvent == "" {
-		return "", "", "", false
+func (c ConnectExecutionClaim) NodeHandlerOwner() (runtimeidentity.ExecutableNode, EventType, bool) {
+	if !c.present || c.recipientKind != deliveryRecipientNode || !c.handlerNode.Valid() || c.handlerEvent == "" {
+		return runtimeidentity.ExecutableNode{}, "", false
 	}
-	return c.handlerFlowID, c.handlerNodeID, EventType(c.handlerEvent), true
+	return c.handlerNode, EventType(c.handlerEvent), true
 }
 
 func (c ConnectExecutionClaim) MarshalJSON() ([]byte, error) {
 	if c.Empty() {
 		return []byte(`{}`), nil
 	}
+	handlerNode := (*runtimeidentity.ExecutableNode)(nil)
+	if c.recipientKind == deliveryRecipientNode {
+		node := c.handlerNode
+		handlerNode = &node
+	}
 	return json.Marshal(struct {
-		Digest            string `json:"sha256"`
-		ReceiverPinDigest string `json:"receiver_pin_sha256"`
-		RecipientKind     string `json:"recipient_kind"`
-		RecipientID       string `json:"recipient_id"`
-		HandlerFlowID     string `json:"handler_flow_id,omitempty"`
-		HandlerNodeID     string `json:"handler_node_id,omitempty"`
-		HandlerEvent      string `json:"handler_event"`
+		Digest            string                          `json:"sha256"`
+		ReceiverPinDigest string                          `json:"receiver_pin_sha256"`
+		RecipientKind     string                          `json:"recipient_kind"`
+		RecipientID       string                          `json:"recipient_id"`
+		HandlerNode       *runtimeidentity.ExecutableNode `json:"handler_node,omitempty"`
+		HandlerEvent      string                          `json:"handler_event"`
 	}{
 		Digest: hex.EncodeToString(c.digest[:]), ReceiverPinDigest: hex.EncodeToString(c.receiverPinDigest[:]),
 		RecipientKind: c.recipientKind.storageCode(), RecipientID: c.recipientID,
-		HandlerFlowID: c.handlerFlowID, HandlerNodeID: c.handlerNodeID, HandlerEvent: c.handlerEvent,
+		HandlerNode: handlerNode, HandlerEvent: c.handlerEvent,
 	})
 }
 
@@ -789,13 +828,12 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("connect execution claim destination is nil")
 	}
 	var encoded struct {
-		Digest            string `json:"sha256"`
-		ReceiverPinDigest string `json:"receiver_pin_sha256"`
-		RecipientKind     string `json:"recipient_kind"`
-		RecipientID       string `json:"recipient_id"`
-		HandlerFlowID     string `json:"handler_flow_id"`
-		HandlerNodeID     string `json:"handler_node_id"`
-		HandlerEvent      string `json:"handler_event"`
+		Digest            string                          `json:"sha256"`
+		ReceiverPinDigest string                          `json:"receiver_pin_sha256"`
+		RecipientKind     string                          `json:"recipient_kind"`
+		RecipientID       string                          `json:"recipient_id"`
+		HandlerNode       *runtimeidentity.ExecutableNode `json:"handler_node"`
+		HandlerEvent      string                          `json:"handler_event"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
@@ -833,18 +871,25 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || eventidentity.Normalize(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
 		return fmt.Errorf("connect execution claim recipient or handler event is invalid")
 	}
-	handlerFlowID := strings.TrimSpace(encoded.HandlerFlowID)
-	handlerNodeID := strings.TrimSpace(encoded.HandlerNodeID)
-	if kind == deliveryRecipientNode && (handlerFlowID == "" || handlerNodeID == "") {
+	handlerNode := runtimeidentity.ExecutableNode{}
+	if encoded.HandlerNode != nil {
+		handlerNode = *encoded.HandlerNode
+	}
+	if kind == deliveryRecipientNode && !handlerNode.Valid() {
 		return fmt.Errorf("connect node execution claim handler owner is invalid")
 	}
-	if kind == deliveryRecipientAgent && (handlerFlowID != "" || handlerNodeID != "") {
+	if kind == deliveryRecipientAgent && !handlerNode.Empty() {
 		return fmt.Errorf("connect agent execution claim cannot carry a node handler owner")
+	}
+	if kind == deliveryRecipientNode {
+		if recipient, err := runtimeidentity.ParseExecutableNodeKey(strings.TrimSpace(encoded.RecipientID)); err != nil || !recipient.Equal(handlerNode) {
+			return fmt.Errorf("connect node execution claim recipient contradicts handler owner")
+		}
 	}
 	*c = ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: pinDigest, recipientKind: kind,
-		recipientID: strings.TrimSpace(encoded.RecipientID), handlerFlowID: handlerFlowID,
-		handlerNodeID: handlerNodeID, handlerEvent: encoded.HandlerEvent, present: true,
+		recipientID: strings.TrimSpace(encoded.RecipientID), handlerNode: handlerNode,
+		handlerEvent: encoded.HandlerEvent, present: true,
 	}
 	return nil
 }

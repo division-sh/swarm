@@ -586,12 +586,12 @@ func (s connectorPackSource) EventEntry(eventType string) (runtimecontracts.Even
 func (s connectorPackSource) generatedActivityEventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	out := map[string]runtimecontracts.EventCatalogEntry{}
 	tools := s.ToolEntries()
-	for nodeID := range s.NodeEntries() {
-		flowID := ""
-		if owner, ok := s.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(owner.FlowID)
+	for _, record := range s.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
 		}
-		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, s.NodeEventHandlers(nodeID)) {
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, s.ExecutableNodeEventHandlers(node)) {
 			tool, ok := tools[strings.TrimSpace(site.Spec.Tool)]
 			if !ok {
 				continue

@@ -23,8 +23,9 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if len(platformPlans) != 69 {
 		t.Fatalf("platform table plan count = %d, want 69", len(platformPlans))
 	}
-	statePlans, err := GenerateNodeStateTableDDLs(map[string]runtimecontracts.SystemNodeContract{
-		"planner": {
+	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
+		LogicalID: "planner",
+		Entry: runtimecontracts.SystemNodeContract{
 			StateTable: "planner_state",
 			StateSchema: runtimecontracts.NodeStateSchema{
 				Fields: []runtimecontracts.NodeStateField{
@@ -33,7 +34,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 				},
 			},
 		},
-	})
+		Source: runtimecontracts.ContractItemSource{PackageKey: ".", Layer: "project"},
+	}})
 	if err != nil {
 		t.Fatalf("GenerateNodeStateTableDDLs: %v", err)
 	}

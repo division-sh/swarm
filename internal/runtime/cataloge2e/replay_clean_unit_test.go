@@ -318,7 +318,7 @@ func createdRootEvent(id, eventType, producer, taskID, payload, runID string, en
 
 func replayProjectionDelivery(t testing.TB, id string) operatorread.OperatorEventDelivery {
 	t.Helper()
-	recipient, err := events.NewNodeDeliveryRecipient("node-1")
+	recipient, err := events.NewNodeDeliveryRecipient(catalogRootNode(t, "node-1"))
 	if err != nil {
 		t.Fatal(err)
 	}

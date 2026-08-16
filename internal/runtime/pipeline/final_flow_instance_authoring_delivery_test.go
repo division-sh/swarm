@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -56,8 +57,9 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 		time.Now().UTC(),
 	)
 	seedFinalFlowInstanceAuthoringEvent(t, db, ctx, evt)
-	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(finalflowinstanceauthoring.TemplateNodeID), Target: events.MustExistingEntityTarget(target)}
+	node := pipelineSourceNode(t, source, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateNodeID)
+	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), node, target)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 	if err != nil {
@@ -79,7 +81,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	if loaded.Fields["account_id"] != "acct-42" || loaded.Fields["score"] != "91" || loaded.Fields["decision"] != "approved" {
 		t.Fatalf("loaded account_case fields = %#v, want account_id/score/decision from routed payload", loaded.Fields)
 	}
-	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, "delivered")
+	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), node.Key(), "delivered")
 }
 
 func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
@@ -117,9 +119,9 @@ func seedFinalFlowInstanceAuthoringEvent(t *testing.T, db *sql.DB, ctx context.C
 	seedPipelineEventRecord(t, ctx, db, evt)
 }
 
-func seedFinalFlowInstanceAuthoringNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID, nodeID string, target events.RouteIdentity) {
+func seedFinalFlowInstanceAuthoringNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) {
 	t.Helper()
-	seedPipelineTestNodeDelivery(t, ctx, db, eventID, nodeID, target)
+	seedPipelineTestNodeDelivery(t, ctx, db, eventID, node, target)
 }
 
 func assertFinalFlowInstanceAuthoringDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {

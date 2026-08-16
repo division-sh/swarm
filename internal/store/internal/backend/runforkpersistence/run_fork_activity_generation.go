@@ -300,9 +300,13 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	if request.Attempt <= 0 {
 		request.Attempt = 1
 	}
+	owner, err := activityidentity.ParseOwnerKey(request.NodeID)
+	if err != nil {
+		return fmt.Errorf("fork activity %s owner identity: %w", request.ActivityID, err)
+	}
 	fact := activityidentity.Fact{
 		RunID: forkRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
-		EntityID: request.EntityID, FlowID: request.FlowID, NodeID: request.NodeID,
+		EntityID: request.EntityID, Owner: owner, ExecutionFlowID: request.FlowID,
 		HandlerEventKey: request.HandlerEventKey, ActivityID: request.ActivityID, Tool: request.Tool,
 		Attempt: request.Attempt, RevisionID: generation.RevisionID,
 	}

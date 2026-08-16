@@ -6,12 +6,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func workflowNodeProducerSource(ctx context.Context, source semanticview.Source, nodeID, flowID, entityID string, admittedSource events.RoutingSource) (events.RoutingSource, error) {
+func workflowNodeProducerSource(ctx context.Context, source semanticview.Source, node runtimeidentity.ExecutableNode, flowID, entityID string, admittedSource events.RoutingSource) (events.RoutingSource, error) {
 	route := admittedSource.Route().Normalized()
 	if route.Empty() {
 		route = events.RouteIdentity{FlowID: strings.TrimSpace(flowID), EntityID: strings.TrimSpace(entityID)}
@@ -22,7 +23,7 @@ func workflowNodeProducerSource(ctx context.Context, source semanticview.Source,
 		route = delivery.Target.Route()
 		route.EntityID = strings.TrimSpace(entityID)
 	}
-	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, flowID, nodeID, route)
+	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, node, flowID, route)
 }
 
 func actionResultFlowPath(source semanticview.Source, flowID string) string {

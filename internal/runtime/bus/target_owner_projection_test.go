@@ -108,13 +108,14 @@ func testRootStaticStructuralOwnerProof(t testing.TB, entityID string) runtimepi
 
 func TestStructuralTargetOwnerProofDuplicateAgreementFailsClosed(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource()
-	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, "consumer", "consumer-node")
+	consumerNode := testFlowNode(t, "consumer", "consumer-node")
+	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, consumerNode)
 	if err != nil {
 		t.Fatalf("admit consumer handler: %v", err)
 	}
 	proof := testRootStaticStructuralOwnerProof(t, eventtest.UUID("structural-proof-owner-a"))
 	intent := RoutePlanDeliveryIntent{
-		Recipient: events.MustNodeDeliveryRecipient("consumer-node"), TargetBlueprint: proof.TargetBlueprint(),
+		Recipient: events.MustNodeDeliveryRecipient(consumerNode), TargetBlueprint: proof.TargetBlueprint(),
 		Handler: handler.ForEvent("root.ready"), Producer: routeIntentProducerConnectRoutePlan,
 		StructuralOwnerProof: proof, Persist: true,
 	}
@@ -170,7 +171,7 @@ func TestSelectedTargetOwnerPrecedesStructuralFallback(t *testing.T) {
 func TestRouteTargetOwnerResolutionFailsClosedBeforeMutation(t *testing.T) {
 	blueprint := events.RouteIdentity{FlowID: "portfolio", FlowInstance: "portfolio"}
 	basePlan := RoutePlan{DeliveryIntents: []RoutePlanDeliveryIntent{{
-		Recipient:       events.MustNodeDeliveryRecipient("portfolio-collector"),
+		Recipient:       events.MustNodeDeliveryRecipient(testRootNode(t, "portfolio-collector")),
 		TargetBlueprint: blueprint,
 		Producer:        routeIntentProducerConnectRoutePlan,
 		Persist:         true,

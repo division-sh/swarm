@@ -26,9 +26,11 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		t.Fatal(err)
 	}
 	sourceGeneration := activation.Generation()
+	writerOwner := activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "writer"))
 	fact := activityidentity.Fact{
-		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowID: "flow-a",
-		NodeID: "writer", HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write",
+		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID,
+		Owner: writerOwner, ExecutionFlowID: "flow-a",
+		HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write",
 		Attempt: 1, RevisionID: sourceGeneration.RevisionID,
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
@@ -44,7 +46,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		"effect_class":  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"success_event": "write.succeeded", "failure_event": "write.failed",
 		"fork_policy": string(runtimecontracts.ActivityForkReuseRecordedResult),
-		"entity_id":   entityID, "node_id": "writer", "flow_id": "flow-a", "handler_event_key": "review.accepted",
+		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "handler_event_key": "review.accepted",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	}
@@ -76,11 +78,11 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 			result_event_id, result_event_type, result_payload, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'writer', 'review.accepted',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', $9, 'review.accepted',
 			'commit', 'provider.write', 'non_idempotent_write', 1, 'succeeded', 'write.succeeded', 'write.failed',
 			$5::uuid, 'write.succeeded', $6::jsonb, 'input-hash', $7::jsonb, 'review', $8, $8, $8
 		)
-	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), forkTestJSON(t, sourceGeneration), at); err != nil {
+	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), forkTestJSON(t, sourceGeneration), at, writerOwner.Key()); err != nil {
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -107,7 +109,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	forkFact := activityidentity.Fact{
 		RunID: materialized.ForkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
-		EntityID: entityID, FlowID: "flow-a", NodeID: "writer", HandlerEventKey: "review.accepted",
+		EntityID: entityID, Owner: writerOwner, ExecutionFlowID: "flow-a", HandlerEventKey: "review.accepted",
 		ActivityID: "commit", Tool: "provider.write", Attempt: 1, RevisionID: forkPayload.Generation.RevisionID,
 	}
 	forkRequestID := activityidentity.RequestEventID(forkFact)
@@ -143,9 +145,11 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 		t.Fatal(err)
 	}
 	sourceGeneration := activation.Generation()
+	readerOwner := activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "reader"))
 	fact := activityidentity.Fact{
-		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowID: "flow-a",
-		NodeID: "reader", HandlerEventKey: "review.inspect", ActivityID: "inspect", Tool: "provider.read",
+		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID,
+		Owner: readerOwner, ExecutionFlowID: "flow-a",
+		HandlerEventKey: "review.inspect", ActivityID: "inspect", Tool: "provider.read",
 		Attempt: 1, RevisionID: sourceGeneration.RevisionID,
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
@@ -162,7 +166,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 		"effect_class":  string(runtimecontracts.ActivityEffectClassReadOnly),
 		"success_event": "read.succeeded", "failure_event": "read.failed",
 		"fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),
-		"entity_id":   entityID, "node_id": "reader", "flow_id": "flow-a", "handler_event_key": "review.inspect",
+		"entity_id":   entityID, "node_id": readerOwner.Key(), "flow_id": "flow-a", "handler_event_key": "review.inspect",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	})
@@ -199,7 +203,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	}
 	forkFact := activityidentity.Fact{
 		RunID: materialized.ForkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
-		EntityID: entityID, FlowID: "flow-a", NodeID: "reader", HandlerEventKey: "review.inspect",
+		EntityID: entityID, Owner: readerOwner, ExecutionFlowID: "flow-a", HandlerEventKey: "review.inspect",
 		ActivityID: "inspect", Tool: "provider.read", Attempt: 1, RevisionID: forkPayload.Generation.RevisionID,
 	}
 	var attempts int
@@ -221,9 +225,11 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	generation := activation.Generation()
+	writerOwner := activityidentity.MustNodeOwner(mustPersistenceNode("flow-a", "writer"))
 	fact := activityidentity.Fact{
-		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowID: "flow-a",
-		NodeID: "writer", HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write",
+		RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID,
+		Owner: writerOwner, ExecutionFlowID: "flow-a",
+		HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write",
 		Attempt: 1, RevisionID: generation.RevisionID,
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
@@ -240,7 +246,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		"effect_class":  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"success_event": "write.succeeded", "failure_event": "write.failed",
 		"fork_policy": string(runtimecontracts.ActivityForkReuseRecordedResult),
-		"entity_id":   entityID, "node_id": "writer", "flow_id": "flow-a", "handler_event_key": "review.accepted",
+		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "handler_event_key": "review.accepted",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": generation, "loop_stage": "review",
 	})
@@ -283,11 +289,11 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'writer', 'review.accepted',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', $10, 'review.accepted',
 			'commit', 'provider.write', 'non_idempotent_write', 1, 'failed', 'write.succeeded', 'write.failed',
 			$5::uuid, 'write.failed', $6::jsonb, $7::jsonb, 'input-hash', $8::jsonb, 'review', $9, $9, $9
 		)
-	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), failure, forkTestJSON(t, generation), at); err != nil {
+	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), failure, forkTestJSON(t, generation), at, writerOwner.Key()); err != nil {
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -308,7 +314,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	forkFact := activityidentity.Fact{
 		RunID: materialized.ForkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
-		EntityID: entityID, FlowID: "flow-a", NodeID: "writer", HandlerEventKey: "review.accepted",
+		EntityID: entityID, Owner: writerOwner, ExecutionFlowID: "flow-a", HandlerEventKey: "review.accepted",
 		ActivityID: "commit", Tool: "provider.write", Attempt: 1, RevisionID: forkPayload.Generation.RevisionID,
 	}
 	var rawFailure []byte

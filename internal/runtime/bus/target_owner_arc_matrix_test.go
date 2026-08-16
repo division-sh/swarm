@@ -230,7 +230,7 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 	}
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("source-node"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "source-node")),
 		Target:    currentOwner,
 	})
 	eventID := uuid.NewString()
@@ -299,7 +299,8 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 	if err != nil {
 		t.Fatalf("load committed replay route: %v", err)
 	}
-	if !containsString(live, "arc-receiver") || !containsString(internal, "arc-receiver") || len(replayRoutes) != 1 {
+	wantRecipientKey := persisted[0].Recipient.ID()
+	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v", live, internal, replayRoutes)
 	}
 	assertTargetOwnerArcRoute(t, replayRoutes[0], wantOwner)
@@ -347,14 +348,14 @@ func assertTargetOwnerArcRoute(t *testing.T, route events.DeliveryRoute, want ev
 	if route.ConnectClaim.Empty() {
 		t.Fatal("delivery route is missing its exact connect execution claim")
 	}
-	flowID, nodeID, eventType, ok := route.ConnectClaim.NodeHandlerOwner("arc-receiver")
-	if !ok || flowID != "receiver" || nodeID != "arc-receiver" || strings.TrimSpace(string(eventType)) == "" {
-		t.Fatalf("connect claim handler owner = %q/%q/%q/%t, want receiver/arc-receiver/exact event", flowID, nodeID, eventType, ok)
+	node, eventType, ok := route.ConnectClaim.NodeHandlerOwner()
+	if !ok || node.FlowID() != "receiver" || node.NodeID() != "arc-receiver" || strings.TrimSpace(string(eventType)) == "" {
+		t.Fatalf("connect claim handler owner = %s/%q/%t, want receiver/arc-receiver/exact event", node.Key(), eventType, ok)
 	}
 }
 
 func targetOwnerArcRouteIdentityError(route events.DeliveryRoute, want events.DeliveryTargetOwnership) error {
-	if route.Recipient.ID() != "arc-receiver" || route.Target != want {
+	if route.Recipient.LocalID() != "arc-receiver" || route.Target != want {
 		return fmt.Errorf("delivery route = %#v, want arc-receiver at %s %#v", route, want.Code(), want.Route())
 	}
 	return nil
@@ -365,7 +366,7 @@ func TestTargetOwnerArcProofRejectsRecipientOnlyMatch(t *testing.T) {
 		FlowID: "receiver", FlowInstance: "child", EntityID: eventtest.UUID("receiver-owned-target"),
 	})
 	wrong := events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("arc-receiver"),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "arc-receiver")),
 		Target: events.MustExistingEntityTarget(events.RouteIdentity{
 			FlowID: "receiver", FlowInstance: "child", EntityID: eventtest.UUID("source-owned-target"),
 		}),
@@ -537,11 +538,11 @@ func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemai
 	if err != nil {
 		t.Fatalf("create boomerang EventBus: %v", err)
 	}
-	childDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, "boomerang-worker")
-	rootDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, "root-boomerang")
+	childDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, testFlowNode(t, "boomerang", "boomerang-worker").Key(), events.EventType(pingEvent))
+	rootDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, testRootNode(t, "root-boomerang").Key(), events.EventType("boomerang/"+pongEvent))
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	rootCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("root-fan-out"), Target: events.MustExistingEntityTarget(rootRoute),
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-fan-out")), Target: events.MustExistingEntityTarget(rootRoute),
 	})
 	childCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{Target: events.MustExistingEntityTarget(childRoute)})
 	rootSource, err := events.NewRootRoutingSource(rootRoute.EntityID)
@@ -695,7 +696,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		}),
 	}
 	for _, route := range plan.DeliveryRoutes {
-		want, ok := wantOwners[route.Recipient.ID()]
+		want, ok := wantOwners[route.Recipient.LocalID()]
 		if !ok || route.Target != want || route.ConnectClaim.Empty() {
 			t.Fatalf("legal mixed-owner route = %#v, want exact classified owner from %#v", route, wantOwners)
 		}
@@ -710,7 +711,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		t.Fatalf("persisted legal mixed-owner routes = %#v, want 3", routes)
 	} else {
 		for _, route := range routes {
-			if want := wantOwners[route.Recipient.ID()]; route.Target != want || route.ConnectClaim.Empty() {
+			if want := wantOwners[route.Recipient.LocalID()]; route.Target != want || route.ConnectClaim.Empty() {
 				t.Fatalf("persisted legal mixed-owner route = %#v, want exact classified owner", route)
 			}
 		}
@@ -806,13 +807,14 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	}
 
 	var branchDeliveryIDs []string
+	branchWorker := testFlowNode(t, "branch", "branch-worker")
 	for _, parent := range parents {
 		parentSource, err := events.NewConcreteTemplateInstanceRoutingSource(parent.route)
 		if err != nil {
 			t.Fatalf("construct %s concrete branch source: %v", parent.name, err)
 		}
 		parentCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient("branch-worker-" + parent.name), Target: events.MustExistingEntityTarget(parent.route),
+			Recipient: events.MustNodeDeliveryRecipient(branchWorker), Target: events.MustExistingEntityTarget(parent.route),
 		})
 		eventID := uuid.NewString()
 		branchDeliveryIDs = append(branchDeliveryIDs, eventID)
@@ -834,12 +836,12 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			if route.ConnectClaim.Empty() {
 				t.Fatalf("%s second-level route lacks exact connect claim: %#v", parent.name, route)
 			}
-			if strings.Contains(route.Recipient.ID(), "static-result") {
+			if strings.Contains(route.Recipient.LocalID(), "static-result") {
 				staticSeen = true
 				if route.Target.Code() != "existing_entity" || route.Target.Route().EntityID != parent.route.EntityID || route.Target.Route().FlowInstance != "branch/static-result" {
 					t.Fatalf("%s nested static target = %s %#v, want parent-shared existing owner %#v", parent.name, route.Target.Code(), route.Target.Route(), parent.route)
 				}
-			} else if strings.Contains(route.Recipient.ID(), "singleton-result") {
+			} else if strings.Contains(route.Recipient.LocalID(), "singleton-result") {
 				singletonSeen = true
 				wantPath := "branch/singleton-result"
 				if route.Target.Code() != "materializing_entity" || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
@@ -862,7 +864,7 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			t.Fatalf("persisted %s second-level routes = %#v, want 2", parent.name, routes)
 		} else {
 			for _, route := range routes {
-				if route.ConnectClaim.Empty() || strings.Contains(route.Recipient.ID(), "hostile") {
+				if route.ConnectClaim.Empty() || strings.Contains(route.Recipient.LocalID(), "hostile") {
 					t.Fatalf("persisted %s route captured hostile receiver or lost claim: %#v", parent.name, route)
 				}
 			}
@@ -875,7 +877,7 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			t.Fatalf("construct %s convergence source: %v", parent.name, err)
 		}
 		parentCtx := runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient("branch-worker-" + parent.name), Target: events.MustExistingEntityTarget(parent.route),
+			Recipient: events.MustNodeDeliveryRecipient(branchWorker), Target: events.MustExistingEntityTarget(parent.route),
 		})
 		for branch := 0; branch < 2; branch++ {
 			eventID := uuid.NewString()

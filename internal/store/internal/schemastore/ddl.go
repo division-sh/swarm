@@ -96,30 +96,35 @@ func GeneratePlatformTableDDLs(spec runtimecontracts.PlatformSpecDocument) ([]Sc
 	return platformschema.GeneratePlatformTableDDLs(spec)
 }
 
-func GenerateNodeStateTableDDLs(nodes map[string]runtimecontracts.SystemNodeContract) ([]SchemaTableDDL, error) {
-	if len(nodes) == 0 {
+func GenerateNodeStateTableDDLs(records []runtimecontracts.ScopedNodeRecord) ([]SchemaTableDDL, error) {
+	if len(records) == 0 {
 		return nil, nil
 	}
-	nodeIDs := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		nodeIDs = append(nodeIDs, nodeID)
-	}
-	sort.Strings(nodeIDs)
-	plans := make([]SchemaTableDDL, 0, len(nodeIDs))
+	sort.Slice(records, func(i, j int) bool {
+		left, _ := records[i].Identity()
+		right, _ := records[j].Identity()
+		return left.Key() < right.Key()
+	})
+	plans := make([]SchemaTableDDL, 0, len(records))
 	tableOwners := map[string]string{}
-	for _, nodeID := range nodeIDs {
-		node := nodes[nodeID]
+	for _, record := range records {
+		identity, err := record.Identity()
+		if err != nil {
+			return nil, fmt.Errorf("state schema has invalid executable node identity: %w", err)
+		}
+		nodeID := identity.Key()
+		node := record.Entry
 		if strings.TrimSpace(node.StateTable) == "" {
 			continue
 		}
-		tableName, err := validateSchemaDDLIdentifier(node.StateTable, fmt.Sprintf("node %s state_table", strings.TrimSpace(nodeID)))
+		tableName, err := validateSchemaDDLIdentifier(node.StateTable, fmt.Sprintf("node %s state_table", nodeID))
 		if err != nil {
 			return nil, err
 		}
 		if owner, exists := tableOwners[tableName]; exists {
 			return nil, fmt.Errorf("state table %s declared by multiple nodes: %s, %s", tableName, owner, strings.TrimSpace(nodeID))
 		}
-		tableOwners[tableName] = strings.TrimSpace(nodeID)
+		tableOwners[tableName] = nodeID
 
 		columnDefs := []string{
 			`"entity_id" UUID NOT NULL`,

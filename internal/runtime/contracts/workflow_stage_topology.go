@@ -3,6 +3,8 @@ package contracts
 import (
 	"sort"
 	"strings"
+
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 // BuildWorkflowStageTopology lowers every lifecycle transition carrier through
@@ -32,7 +34,7 @@ func BuildWorkflowStageTopology(
 		TerminalStages: sortedStringSet(terminalSet),
 	}
 	for _, transition := range transitions {
-		if strings.TrimSpace(transition.FlowID) != flowID {
+		if transition.Node.FlowID() != flowID {
 			continue
 		}
 		handlerStages := append([]string{}, nonTerminal...)
@@ -46,7 +48,7 @@ func BuildWorkflowStageTopology(
 			handlerStages = []string{initial}
 		}
 		topology.Handlers = append(topology.Handlers, WorkflowHandlerStageScope{
-			NodeID:    strings.TrimSpace(transition.NodeID),
+			Node:      transition.Node,
 			EventType: strings.TrimSpace(transition.EventType),
 			Stages:    normalizedStrings(handlerStages),
 		})
@@ -73,7 +75,7 @@ func BuildWorkflowStageTopology(
 					From:          sourceStage,
 					To:            strings.TrimSpace(carrier.AdvancesTo),
 					Source:        edgeSource,
-					NodeID:        strings.TrimSpace(transition.NodeID),
+					Node:          transition.Node,
 					HandlerEvent:  strings.TrimSpace(transition.EventType),
 					EventType:     eventType,
 					LoopID:        loopID,
@@ -97,7 +99,7 @@ func BuildWorkflowStageTopology(
 				From:          strings.TrimSpace(operation.From),
 				To:            strings.TrimSpace(plan.Escape.AdvancesTo),
 				Source:        "loop.escape",
-				NodeID:        strings.TrimSpace(operation.NodeID),
+				Node:          operation.Node,
 				HandlerEvent:  strings.TrimSpace(operation.HandlerEvent),
 				EventType:     strings.TrimSpace(operation.HandlerEvent),
 				LoopID:        strings.TrimSpace(plan.ID),
@@ -110,14 +112,14 @@ func BuildWorkflowStageTopology(
 			continue
 		}
 		topology.Edges = appendTopologyEdge(topology.Edges, stageSet, WorkflowStageTopologyEdge{
-			From:      strings.TrimSpace(timer.Stage),
-			To:        strings.TrimSpace(timer.AdvancesTo),
-			Source:    "timer",
-			NodeID:    "runtime",
-			EventType: "timer:" + strings.TrimSpace(timer.ID),
-			TimerID:   strings.TrimSpace(timer.ID),
-			After:     strings.TrimSpace(timer.Delay),
-			Timed:     true,
+			From:          strings.TrimSpace(timer.Stage),
+			To:            strings.TrimSpace(timer.AdvancesTo),
+			Source:        "timer",
+			InternalOwner: "runtime",
+			EventType:     "timer:" + strings.TrimSpace(timer.ID),
+			TimerID:       strings.TrimSpace(timer.ID),
+			After:         strings.TrimSpace(timer.Delay),
+			Timed:         true,
 		})
 	}
 	if len(gates) > 0 {
@@ -128,7 +130,7 @@ func BuildWorkflowStageTopology(
 			for verdict, outcome := range gate.Outcomes {
 				topology.Edges = appendTopologyEdge(topology.Edges, stageSet, WorkflowStageTopologyEdge{
 					From: strings.TrimSpace(gate.Stage), To: strings.TrimSpace(outcome.AdvancesTo), Source: "gate",
-					NodeID: "runtime", EventType: "mailbox.card_decided", DecisionID: strings.TrimSpace(gate.Decision), Verdict: strings.TrimSpace(verdict),
+					InternalOwner: "runtime", EventType: "mailbox.card_decided", DecisionID: strings.TrimSpace(gate.Decision), Verdict: strings.TrimSpace(verdict),
 				})
 			}
 		}
@@ -139,7 +141,7 @@ func BuildWorkflowStageTopology(
 	})
 	sort.Slice(topology.Handlers, func(i, j int) bool {
 		left, right := topology.Handlers[i], topology.Handlers[j]
-		return left.NodeID+"\x00"+left.EventType < right.NodeID+"\x00"+right.EventType
+		return left.Node.Key()+"\x00"+left.EventType < right.Node.Key()+"\x00"+right.EventType
 	})
 	return topology
 }
@@ -177,21 +179,21 @@ func (t WorkflowStageTopology) StageCanReenter(stage string) bool {
 	return len(t.StronglyConnectedComponent(stage)) > 1
 }
 
-func (t WorkflowStageTopology) HandlerStages(nodeID, eventType string) []string {
-	nodeID, eventType = strings.TrimSpace(nodeID), strings.TrimSpace(eventType)
+func (t WorkflowStageTopology) HandlerStages(node runtimeidentity.ExecutableNode, eventType string) []string {
+	eventType = strings.TrimSpace(eventType)
 	for _, handler := range t.Handlers {
-		if handler.NodeID == nodeID && handler.EventType == eventType {
+		if handler.Node.Equal(node) && handler.EventType == eventType {
 			return append([]string{}, handler.Stages...)
 		}
 	}
 	return nil
 }
 
-func (t WorkflowStageTopology) HandlerTargets(nodeID, handlerEvent string) []string {
-	nodeID, handlerEvent = strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
+func (t WorkflowStageTopology) HandlerTargets(node runtimeidentity.ExecutableNode, handlerEvent string) []string {
+	handlerEvent = strings.TrimSpace(handlerEvent)
 	targets := map[string]struct{}{}
 	for _, edge := range t.Edges {
-		if strings.TrimSpace(edge.NodeID) != nodeID || strings.TrimSpace(edge.HandlerEvent) != handlerEvent {
+		if !edge.Node.Equal(node) || strings.TrimSpace(edge.HandlerEvent) != handlerEvent {
 			continue
 		}
 		if target := strings.TrimSpace(edge.To); target != "" {
@@ -273,7 +275,7 @@ func joinTimerDelay(transition HandlerTransitionSemantic, carrier HandlerAdvance
 }
 
 func topologyEdgeSortKey(edge WorkflowStageTopologyEdge) string {
-	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.NodeID, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict}, "\x00")
+	return strings.Join([]string{edge.From, edge.To, edge.Source, edge.Node.Key(), edge.InternalOwner, edge.HandlerEvent, edge.EventType, edge.LoopID, string(edge.LoopOperation), edge.TimerID, edge.After, edge.DecisionID, edge.Verdict}, "\x00")
 }
 
 func normalizedStringSet(values []string) map[string]struct{} {

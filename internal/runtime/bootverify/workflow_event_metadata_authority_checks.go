@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -100,11 +101,14 @@ func eventMetadataInternalActorNames(source semanticview.Source) eventMetadataNa
 	names := eventMetadataNameIndex{}
 	names.add("runtime", "runtime")
 	names.add("sys:runtime", "runtime")
-	for nodeKey, node := range source.NodeEntries() {
-		nodeKey = strings.TrimSpace(nodeKey)
-		names.add(nodeKey, fmt.Sprintf("system node %s", nodeKey))
-		if id := runtimecontracts.EffectiveSystemNodeID(nodeKey, node); id != "" {
-			names.add(id, fmt.Sprintf("system node %s", id))
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		names.add(node.Key(), fmt.Sprintf("system node %s", node.Key()))
+		if id := runtimecontracts.EffectiveSystemNodeID(node.NodeID(), record.Entry); id != "" {
+			names.add(id, fmt.Sprintf("system node %s", node.Key()))
 		}
 	}
 	for _, declaration := range semanticview.AgentDeclarations(source) {
@@ -219,6 +223,9 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 }
 
 func endpointMatchesDeadEventDeclaration(endpoint semanticview.AuthoredEventEndpoint, decl deadEventDeclaration) bool {
+	if normalizeEventMetadataPackageKey(endpoint.PackageKey) != normalizeEventMetadataPackageKey(decl.PackageKey) {
+		return false
+	}
 	if eventidentity.Normalize(endpoint.Event.Canonical) != eventidentity.Normalize(decl.Canonical) {
 		return false
 	}
@@ -235,13 +242,13 @@ func eventMetadataAddEndpointRole(source semanticview.Source, names eventMetadat
 		if endpoint.Direction == semanticview.EventEndpointProducer {
 			role = "handler emits"
 		}
-		eventMetadataAddNodeRole(names, endpoint.NodeID, source.NodeEntries()[endpoint.NodeID], role)
+		eventMetadataAddNodeRole(source, names, endpoint.Node, role)
 	case semanticview.EventEndpointNodeGenerated:
 		role := "effective subscriptions"
 		if endpoint.Direction == semanticview.EventEndpointProducer {
 			role = "effective produces"
 		}
-		eventMetadataAddNodeRole(names, endpoint.NodeID, source.NodeEntries()[endpoint.NodeID], role)
+		eventMetadataAddNodeRole(source, names, endpoint.Node, role)
 	case semanticview.EventEndpointAgent:
 		role := "subscriptions"
 		if endpoint.Direction == semanticview.EventEndpointProducer {
@@ -270,16 +277,31 @@ func eventMetadataAddEndpointRole(source semanticview.Source, names eventMetadat
 	}
 }
 
-func eventMetadataAddNodeRole(names eventMetadataNameIndex, nodeKey string, node runtimecontracts.SystemNodeContract, role string) {
-	nodeKey = strings.TrimSpace(nodeKey)
+func eventMetadataAddNodeRole(source semanticview.Source, names eventMetadataNameIndex, nodeRef runtimeidentity.ExecutableNode, role string) {
+	if source == nil || !nodeRef.Valid() {
+		return
+	}
+	record, ok := source.ExecutableNode(nodeRef)
+	if !ok {
+		return
+	}
+	nodeKey := nodeRef.Key()
 	role = strings.TrimSpace(role)
 	if role == "" {
 		role = "topology"
 	}
 	names.add(nodeKey, fmt.Sprintf("system node %s %s", nodeKey, role))
-	if id := runtimecontracts.EffectiveSystemNodeID(nodeKey, node); id != "" {
+	if id := runtimecontracts.EffectiveSystemNodeID(nodeRef.NodeID(), record.Entry); id != "" {
 		names.add(id, fmt.Sprintf("system node %s %s", id, role))
 	}
+}
+
+func normalizeEventMetadataPackageKey(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), "/")
+	if value == "" {
+		return runtimeidentity.RootPackageKey
+	}
+	return value
 }
 
 func eventMetadataAddAgentRole(names eventMetadataNameIndex, agentKey, agentRole, role string) {

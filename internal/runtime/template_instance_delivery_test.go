@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -36,6 +37,16 @@ import (
 )
 
 const templateInstanceDeliveryRunID = "99999999-9999-4999-8999-999999999901"
+
+func templateInstanceRootNodeID(t testing.TB, nodeID string) string {
+	t.Helper()
+	return identitytest.RootNode(t, nodeID).Key()
+}
+
+func templateInstanceFlowNodeID(t testing.TB, flowID, nodeID string) string {
+	t.Helper()
+	return identitytest.FlowNode(t, flowID, nodeID).Key()
+}
 
 func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately(t *testing.T) {
 	bundle := loadRuntimeTempBundle(t, templateInstanceDeliveryFixtureFiles())
@@ -91,15 +102,17 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("Publish: %v", err)
 	}
 
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, eventID, "lifecycle-orchestrator")
+	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
+	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, eventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, eventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, eventID, workflowRuntimeNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
-	`, 1, eventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, eventID, lifecycleNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, eventID)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM events
@@ -152,16 +165,16 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	}
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
-	`, 1, eventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, eventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, eventID, templateInstanceRootNodeID(t, "workflow-runtime"))
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
-	`, 0, eventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
 }
 
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
@@ -228,36 +241,39 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	if activationCalls != 1 || activationErr != nil {
 		t.Fatalf("flow activation calls = %d, error = %v; want one successful activation", activationCalls, activationErr)
 	}
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinup.ID(), "portfolio-node")
+	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
+	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
+	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinup.ID(), portfolioNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
-	`, 1, spinup.ID())
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, spinup.ID(), portfolioNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 		  AND settled_at IS NOT NULL AND created_at < settled_at
-	`, 1, spinup.ID())
+	`, 1, spinup.ID(), portfolioNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, spinup.ID())
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, spinup.ID())
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, spinup.ID(), workflowRuntimeNodeID)
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, "lifecycle-orchestrator")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
-	`, 1, autoEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, autoEventID, lifecycleNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, autoEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, autoEventID, workflowRuntimeNodeID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/component_scaffold.spawn_requested'
@@ -503,51 +519,55 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		t.Fatalf("PublishAcknowledged mailbox: %v", err)
 	}
 
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), "approval-router")
+	approvalNodeID := templateInstanceRootNodeID(t, "approval-router")
+	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
+	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
+	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), approvalNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
-	`, 1, mailbox.ID())
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, mailbox.ID(), approvalNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 		  AND settled_at IS NOT NULL AND created_at < settled_at
-	`, 1, mailbox.ID())
+	`, 1, mailbox.ID(), approvalNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, mailbox.ID())
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, mailbox.ID(), workflowRuntimeNodeID)
 
 	spinupEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'opco.spinup_requested'
 	`, nil)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, "portfolio-node")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, portfolioNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
-	`, 1, spinupEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, spinupEventID, portfolioNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 		  AND settled_at IS NOT NULL AND created_at < settled_at
-	`, 1, spinupEventID)
+	`, 1, spinupEventID, portfolioNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, spinupEventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, spinupEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, spinupEventID, workflowRuntimeNodeID)
 
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, "lifecycle-orchestrator")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
-	`, 1, autoEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, autoEventID, lifecycleNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
@@ -622,37 +642,41 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatalf("Publish mailbox: %v", err)
 	}
 
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), "approval-router")
+	approvalNodeID := templateInstanceRootNodeID(t, "approval-router")
+	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
+	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
+	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), approvalNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'approval-router'
-	`, 1, mailbox.ID())
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, mailbox.ID(), approvalNodeID)
 
 	spinupEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'opco.spinup_requested'
 	`, nil)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, "portfolio-node")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, portfolioNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'portfolio-node'
-	`, 1, spinupEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, spinupEventID, portfolioNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, spinupEventID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'workflow-runtime'
-	`, 0, spinupEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 0, spinupEventID, workflowRuntimeNodeID)
 
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, "lifecycle-orchestrator")
+	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'lifecycle-orchestrator'
-	`, 1, autoEventID)
+		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+	`, 1, autoEventID, lifecycleNodeID)
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events

@@ -318,7 +318,7 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 	}
 	for _, route := range s.routes[eventID] {
 		if route.Recipient.IsAgent() {
-			s.deliveries[eventID] = append(s.deliveries[eventID], route.Recipient.ID())
+			s.deliveries[eventID] = append(s.deliveries[eventID], route.Recipient.LocalID())
 		}
 	}
 	if len(s.active) > 0 {
@@ -1181,10 +1181,10 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
 	}}
-	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient("target-node"), Target: events.RouteIdentity{
+	wantBlueprint := runtimebus.DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")), Target: events.RouteIdentity{
 		FlowID:       "review",
 		FlowInstance: "review/inst-1",
-	}, Handler: runtimepipeline.MustDeliveryTargetHandler("review", "target-node").ForEvent("task.started")}
+	}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent("task.started")}
 	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustEntitylessReceiverTarget(wantBlueprint.Target)}
 	guardSawMaterializedRoute := false
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
@@ -1584,7 +1584,7 @@ func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *
 		settlements: map[string]events.RouteSettlement{intent.Event.ID(): settlement},
 		deliveries:  map[string][]string{intent.Event.ID(): {"agent-a"}},
 		routes: map[string][]events.DeliveryRoute{intent.Event.ID(): {{
-			Recipient: events.MustNodeDeliveryRecipient("node-only"),
+			Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "node-only")),
 			Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 				FlowID: "root", FlowInstance: "root",
 			}),

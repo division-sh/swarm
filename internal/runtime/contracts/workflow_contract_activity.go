@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"gopkg.in/yaml.v3"
 )
@@ -21,8 +22,7 @@ const (
 )
 
 type ActivitySite struct {
-	FlowID          string
-	NodeID          string
+	Node            runtimeidentity.ExecutableNode
 	HandlerEventKey string
 	Source          string
 	RuleID          string
@@ -86,9 +86,10 @@ func ActivityForkPolicyForEffectClass(effectClass ActivityEffectClass) ActivityF
 	}
 }
 
-func ActivitySitesForNode(flowID, nodeID string, handlers map[string]SystemNodeEventHandler) []ActivitySite {
-	flowID = strings.TrimSpace(flowID)
-	nodeID = strings.TrimSpace(nodeID)
+func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[string]SystemNodeEventHandler) []ActivitySite {
+	if !node.Valid() {
+		return nil
+	}
 	handlerKeys := make([]string, 0, len(handlers))
 	for handlerEventKey := range handlers {
 		if strings.TrimSpace(handlerEventKey) != "" {
@@ -101,8 +102,7 @@ func ActivitySitesForNode(flowID, nodeID string, handlers map[string]SystemNodeE
 		handler := handlers[handlerEventKey]
 		if !handler.Activity.Empty() {
 			out = append(out, ActivitySite{
-				FlowID:          flowID,
-				NodeID:          nodeID,
+				Node:            node,
 				HandlerEventKey: handlerEventKey,
 				Source:          "handler.activity",
 				RuleIndex:       -1,
@@ -114,8 +114,7 @@ func ActivitySitesForNode(flowID, nodeID string, handlers map[string]SystemNodeE
 				continue
 			}
 			out = append(out, ActivitySite{
-				FlowID:          flowID,
-				NodeID:          nodeID,
+				Node:            node,
 				HandlerEventKey: handlerEventKey,
 				Source:          indexedHandlerEmitSiteKey("handler.rules", idx, "activity"),
 				RuleID:          strings.TrimSpace(rule.ID),
@@ -130,10 +129,10 @@ func ActivitySitesForNode(flowID, nodeID string, handlers map[string]SystemNodeE
 func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
 	activityID := strings.TrimSpace(site.Spec.ID)
 	if activityID == "" {
-		activityID = DefaultActivityID(site.NodeID, site.HandlerEventKey, site.RuleID, site.RuleIndex, site.Spec.Tool)
+		activityID = DefaultActivityID(site.Node.NodeID(), site.HandlerEventKey, site.RuleID, site.RuleIndex, site.Spec.Tool)
 	}
 	base := activityID
-	flowID := strings.TrimSpace(site.FlowID)
+	flowID := site.Node.FlowID()
 	if flowID != "" && !strings.HasPrefix(base, flowID+"/") {
 		base = flowID + "/" + base
 	}
@@ -175,10 +174,10 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 		}
 	}
 	return EventCatalogEntry{
-		Swarm: EventSwarmMetadata{Note: note, Source: "contract_derived_activity_approval", Producer: []string{strings.TrimSpace(site.NodeID)}, Status: "generated"},
-		Note:  note, Emitter: EventEmitterRef{NodeID: strings.TrimSpace(site.NodeID)}, EmitterType: "system_node",
-		Producer: []string{strings.TrimSpace(site.NodeID)}, Source: "contract_derived_activity_approval", Status: "generated",
-		OwningNode: strings.TrimSpace(site.NodeID), Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required}, Required: required,
+		Swarm: EventSwarmMetadata{Note: note, Source: "contract_derived_activity_approval", Producer: []string{site.Node.Key()}, Status: "generated"},
+		Note:  note, Emitter: EventEmitterRef{NodeID: site.Node.Key()}, EmitterType: "system_node",
+		Producer: []string{site.Node.Key()}, Source: "contract_derived_activity_approval", Status: "generated",
+		OwningNode: site.Node.Key(), Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required}, Required: required,
 		Consumer: []string{},
 	}
 }
@@ -252,16 +251,16 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 		Swarm: EventSwarmMetadata{
 			Note:     description,
 			Source:   "contract_derived_activity",
-			Producer: []string{strings.TrimSpace(site.NodeID)},
+			Producer: []string{site.Node.Key()},
 			Status:   "generated",
 		},
 		Note:        description,
-		Emitter:     EventEmitterRef{NodeID: strings.TrimSpace(site.NodeID)},
+		Emitter:     EventEmitterRef{NodeID: site.Node.Key()},
 		EmitterType: "system_node",
-		Producer:    []string{strings.TrimSpace(site.NodeID)},
+		Producer:    []string{site.Node.Key()},
 		Source:      "contract_derived_activity",
 		Status:      "generated",
-		OwningNode:  strings.TrimSpace(site.NodeID),
+		OwningNode:  site.Node.Key(),
 		Payload: EventPayloadSpec{
 			Type:       "object",
 			Properties: properties,
@@ -397,28 +396,19 @@ func (b *WorkflowContractBundle) ActivitySites() []ActivitySite {
 	if b == nil {
 		return nil
 	}
-	nodes := b.NodeEntries()
-	nodeIDs := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID != "" {
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-	}
-	sort.Strings(nodeIDs)
 	out := []ActivitySite{}
-	for _, nodeID := range nodeIDs {
-		flowID := ""
-		if source, ok := b.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(source.FlowID)
+	for _, record := range b.ScopedNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			continue
 		}
-		for _, site := range ActivitySitesForNode(flowID, nodeID, b.NodeEventHandlers(nodeID)) {
-			handler := b.NodeEventHandlers(nodeID)[site.HandlerEventKey]
+		for _, site := range ActivitySitesForNode(node, record.Entry.EventHandlers) {
+			handler := record.Entry.EventHandlers[site.HandlerEventKey]
 			if handler.Loop != nil {
 				_, loopID, err := handler.Loop.Operation()
 				if err == nil {
 					for _, plan := range b.WorkflowLoops() {
-						if strings.TrimSpace(plan.FlowID) == flowID && strings.TrimSpace(plan.ID) == loopID {
+						if strings.TrimSpace(plan.FlowID) == node.FlowID() && strings.TrimSpace(plan.ID) == loopID {
 							site.RevisionField = strings.TrimSpace(plan.RevisionField)
 							break
 						}
@@ -431,14 +421,13 @@ func (b *WorkflowContractBundle) ActivitySites() []ActivitySite {
 	return out
 }
 
-func (b *WorkflowContractBundle) generatedActivityEventsForNode(nodeID string) []string {
-	nodeID = strings.TrimSpace(nodeID)
-	if b == nil || nodeID == "" {
+func (b *WorkflowContractBundle) GeneratedActivityEventsForExecutableNode(node runtimeidentity.ExecutableNode) []string {
+	if b == nil || !node.Valid() {
 		return nil
 	}
 	out := []string{}
 	for _, site := range b.ActivitySites() {
-		if strings.TrimSpace(site.NodeID) != nodeID {
+		if !site.Node.Equal(node) {
 			continue
 		}
 		events := ActivityResultEventsForSite(site)

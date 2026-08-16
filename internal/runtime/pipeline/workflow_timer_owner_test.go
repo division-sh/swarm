@@ -263,23 +263,27 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				t.Fatalf("source B timer rows all/active = %d/%d, want 5/3: %#v", len(allRows), len(activeRows), allRows)
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
-			if activeByDeclaration["waiting.keep"].Ref != sourceAByDeclaration["waiting.keep"].Ref {
+			keepKey := workflowTimerStageDeclarationKey("", "waiting.keep")
+			changedKey := workflowTimerStageDeclarationKey("", "waiting.changed")
+			removedKey := workflowTimerStageDeclarationKey("", "waiting.removed")
+			addedKey := workflowTimerStageDeclarationKey("", "waiting.added")
+			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged declaration did not preserve its exact activation")
 			}
-			if _, found := activeByDeclaration["waiting.removed"]; found {
+			if _, found := activeByDeclaration[removedKey]; found {
 				t.Fatal("removed declaration remains active")
 			}
-			if activeByDeclaration["waiting.changed"].Ref == sourceAByDeclaration["waiting.changed"].Ref {
+			if activeByDeclaration[changedKey].Ref == sourceAByDeclaration[changedKey].Ref {
 				t.Fatal("changed declaration reused its stale activation identity")
 			}
-			if activeByDeclaration["waiting.added"].Ref.ActivationID == "" {
+			if activeByDeclaration[addedKey].Ref.ActivationID == "" {
 				t.Fatal("added declaration has no active activation")
 			}
-			if activeByDeclaration["waiting.changed"].EventType != "timer.changed.v2" ||
-				!activeByDeclaration["waiting.changed"].FireAt.Equal(createdAt.Add(2*time.Hour)) {
-				t.Fatalf("changed declaration facts = %#v", activeByDeclaration["waiting.changed"])
+			if activeByDeclaration[changedKey].EventType != "timer.changed.v2" ||
+				!activeByDeclaration[changedKey].FireAt.Equal(createdAt.Add(2*time.Hour)) {
+				t.Fatalf("changed declaration facts = %#v", activeByDeclaration[changedKey])
 			}
-			for _, declaration := range []string{"waiting.changed", "waiting.removed"} {
+			for _, declaration := range []string{changedKey, removedKey} {
 				old := sourceAByDeclaration[declaration]
 				persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, old.Ref.ActivationID)
 				if persisted.Status != workflowTimerStatusCancelled {
@@ -291,7 +295,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				return active == 3 && draining == 0
 			}, "source B replacement wakeups")
 
-			stale := sourceAByDeclaration["waiting.changed"]
+			stale := sourceAByDeclaration[changedKey]
 			if err := pcB.workflowTimers.ReconcileWakeup(ctx, stale.Ref); err != nil {
 				t.Fatalf("retire stale source A wakeup: %v", err)
 			}
@@ -417,17 +421,22 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 				t.Fatalf("progressed source B rows all/active = %d/%d, want 3/1: %#v", len(allRows), len(activeRows), allRows)
 			}
 			activeByDeclaration := workflowTimerActivationsByDeclaration(activeRows)
-			if activeByDeclaration["waiting.keep"].Ref != sourceAByDeclaration["waiting.keep"].Ref {
+			timerNode := pipelineNode(t, "", "timer-owner")
+			keepKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.keep")
+			changedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.changed")
+			removedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.removed")
+			addedKey := workflowTimerNodeDeclarationKey(timerNode, "waiting.added")
+			if activeByDeclaration[keepKey].Ref != sourceAByDeclaration[keepKey].Ref {
 				t.Fatal("unchanged progressed declaration did not preserve its exact activation")
 			}
-			for _, declaration := range []string{"waiting.changed", "waiting.removed"} {
+			for _, declaration := range []string{changedKey, removedKey} {
 				old := sourceAByDeclaration[declaration]
 				persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, old.Ref.ActivationID)
 				if persisted.Status != workflowTimerStatusCancelled {
 					t.Fatalf("progressed old %s status = %q, want cancelled", declaration, persisted.Status)
 				}
 			}
-			if _, found := activeByDeclaration["waiting.added"]; found {
+			if _, found := activeByDeclaration[addedKey]; found {
 				t.Fatal("new initial declaration was retroactively armed after initial entry")
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -597,9 +606,17 @@ func workflowTimerActivationsByDeclaration(
 ) map[string]WorkflowTimerActivation {
 	byDeclaration := make(map[string]WorkflowTimerActivation, len(activations))
 	for _, activation := range activations {
-		byDeclaration[activation.Ref.Declaration] = activation
+		byDeclaration[activation.Ref.DeclarationKey] = activation
 	}
 	return byDeclaration
+}
+
+func workflowTimerStageDeclarationKey(flowID, id string) string {
+	return (runtimecontracts.WorkflowTimerContract{ID: id, FlowID: flowID, StageOwned: true}).SemanticKey()
+}
+
+func workflowTimerNodeDeclarationKey(node identity.ExecutableNode, id string) string {
+	return (runtimecontracts.WorkflowTimerContract{ID: id, Node: node}).SemanticKey()
 }
 
 func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
@@ -882,8 +899,9 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 				t.Fatalf("activate state-entry timer: %v", err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
-			if len(active) != 1 || active[0].Ref.Declaration != "waiting.state_entry" {
-				t.Fatalf("initial active timers = %#v, want waiting.state_entry", active)
+			stateEntryKey := workflowTimerStageDeclarationKey("", "waiting.state_entry")
+			if len(active) != 1 || active[0].Ref.DeclarationKey != stateEntryKey {
+				t.Fatalf("initial active timers = %#v, want %s", active, stateEntryKey)
 			}
 			stateTimer := active[0]
 			execute := func(eventType string, eventAt time.Time) {
@@ -895,7 +913,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 					runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, "observer", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "workflow-timer-owner-test", "observer"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
 					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID),
 				}, false)
 				if err != nil {
@@ -921,13 +939,14 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			}
 			activationByDeclaration := make(map[string]WorkflowTimerActivation, len(all))
 			for _, activation := range all {
-				activationByDeclaration[activation.Ref.Declaration] = activation
+				activationByDeclaration[activation.Ref.DeclarationKey] = activation
 			}
-			persistedStateTimer := activationByDeclaration["waiting.state_entry"]
+			persistedStateTimer := activationByDeclaration[stateEntryKey]
 			if persistedStateTimer.Ref != stateTimer.Ref || persistedStateTimer.Status != workflowTimerStatusActive {
 				t.Fatalf("state-entry timer after event-only handlers = %#v, want original active activation %#v", persistedStateTimer, stateTimer.Ref)
 			}
-			if got := activationByDeclaration["waiting.event_armed"].Status; got != workflowTimerStatusActive {
+			eventArmedKey := workflowTimerNodeDeclarationKey(pipelineNode(t, "workflow-timer-owner-test", "observer"), "waiting.event_armed")
+			if got := activationByDeclaration[eventArmedKey].Status; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status = %q, want active without state-trigger cancellation", got)
 			}
 
@@ -943,7 +962,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			if got := loadWorkflowTimerOwnerActivation(t, store, ctx, stateTimer.Ref.ActivationID).Status; got != workflowTimerStatusFired {
 				t.Fatalf("state-entry timer status after fire = %q, want fired", got)
 			}
-			if got := loadWorkflowTimerOwnerActivation(t, store, ctx, activationByDeclaration["waiting.event_armed"].Ref.ActivationID).Status; got != workflowTimerStatusActive {
+			if got := loadWorkflowTimerOwnerActivation(t, store, ctx, activationByDeclaration[eventArmedKey].Ref.ActivationID).Status; got != workflowTimerStatusActive {
 				t.Fatalf("event-armed timer status after state timer fire = %q, want active", got)
 			}
 		})
@@ -983,7 +1002,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 					eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runtimecorrelation.RunIDFromContext(ctx), entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
+				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "workflow-timer-owner-test", "observer"), handler, workflowTriggerContext{
 					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID),
 				}, false)
 				if err != nil {
@@ -995,10 +1014,11 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 			}
 			declarations := func(id string) []WorkflowTimerActivation {
 				t.Helper()
+				declarationKey := workflowTimerNodeDeclarationKey(pipelineNode(t, "workflow-timer-owner-test", "observer"), id)
 				all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 				matched := make([]WorkflowTimerActivation, 0, 1)
 				for _, activation := range all {
-					if activation.Ref.Declaration == id {
+					if activation.Ref.DeclarationKey == declarationKey {
 						matched = append(matched, activation)
 					}
 				}
@@ -1096,7 +1116,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 					handlerTestWorkflowEnvelope("workflow-timer-owner-test", runID, entityID), eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
+				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, "workflow-timer-owner-test", "observer"), handler, workflowTriggerContext{
 					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(runID), entityID),
 				}, false)
 				if err != nil {
@@ -1178,8 +1198,10 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			bundle := workflowTimerOwnerBundle(false)
+			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{"timer-owner": {ID: "timer-owner", ExecutionType: "system_node"}}
 			bundle.Semantics.Timers[0].Stage = ""
 			bundle.Semantics.Timers[0].StageOwned = false
+			bundle.Semantics.Timers[0].Node = pipelineNode(t, "", "timer-owner")
 			bundle.Semantics.Timers[0].StartOn = "event:work.created"
 			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
@@ -1513,7 +1535,7 @@ func TestWorkflowTimerLifecycleRejectsMissingAndMismatchedCallbacksOnBothStores(
 			}
 
 			mismatchedRef := activation.Ref
-			mismatchedRef.Declaration = "different.timer"
+			mismatchedRef.DeclarationKey = "different.timer"
 			mismatchedOccurrence := timeridentity.WorkflowTimerOccurrenceRef{Activation: mismatchedRef, DueAt: activation.FireAt}
 			mismatched := WorkflowTimerWakeup{family: workflowTimerActivationWakeup, occurrence: mismatchedOccurrence, dueAt: activation.FireAt}
 			outcome, err = fireTypedWorkflowTimerTestWakeup(ctx, pc, mismatched)
@@ -2480,9 +2502,10 @@ func workflowTimerFirstDeclarationRevisionBundle(revised bool) *runtimecontracts
 }
 
 func workflowTimerProgressedSourceRevisionBundle(revised bool) *runtimecontracts.WorkflowContractBundle {
+	timerNode := mustPipelineNode("", "timer-owner")
 	timer := func(id, event, delay string) runtimecontracts.WorkflowTimerContract {
 		return runtimecontracts.WorkflowTimerContract{
-			ID: id, Owner: "runtime", Event: event, StartOn: "state:waiting", Delay: delay,
+			ID: id, Node: timerNode, Owner: "runtime", Event: event, StartOn: "state:waiting", Delay: delay,
 		}
 	}
 	timers := []runtimecontracts.WorkflowTimerContract{
@@ -2497,22 +2520,27 @@ func workflowTimerProgressedSourceRevisionBundle(revised bool) *runtimecontracts
 			timer("waiting.added", "timer.added", "30m"),
 		}
 	}
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+		"timer-owner": {ID: "timer-owner", ExecutionType: "system_node"},
+	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-progressed-revision", Version: "1.0.0", InitialStage: "waiting",
 		Timers: timers,
 	}}
 }
 
 func workflowTimerInitialAndEventBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+	timerNode := mustPipelineNode("", "timer-owner")
+	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+		"timer-owner": {ID: "timer-owner", ExecutionType: "system_node"},
+	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-initial-event", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{
 			{
-				ID: "waiting.initial", Owner: "runtime", Event: "timer.initial",
+				ID: "waiting.initial", Stage: "waiting", StageOwned: true, Owner: "runtime", Event: "timer.initial",
 				StartOn: "state:waiting", Delay: "2h",
 			},
 			{
-				ID: "waiting.event", Owner: "runtime", Event: "timer.event",
+				ID: "waiting.event", Node: timerNode, Owner: "runtime", Event: "timer.event",
 				StartOn: "event:timer.arm", Delay: "2h",
 			},
 		},
@@ -2521,10 +2549,15 @@ func workflowTimerInitialAndEventBundle() *runtimecontracts.WorkflowContractBund
 
 func workflowTimerFlowScopedBundle() *runtimecontracts.WorkflowContractBundle {
 	timer := func(flowID, id, event, startOn string) runtimecontracts.WorkflowTimerContract {
-		return runtimecontracts.WorkflowTimerContract{
-			ID: id, FlowID: flowID, Owner: "runtime", Event: event,
-			StartOn: startOn, Delay: "2h",
+		declaration := runtimecontracts.WorkflowTimerContract{ID: id, FlowID: flowID, Owner: "runtime", Event: event, StartOn: startOn, Delay: "2h"}
+		if strings.HasPrefix(startOn, "state:") {
+			declaration.Stage = strings.TrimPrefix(startOn, "state:")
+			declaration.StageOwned = true
+		} else {
+			declaration.FlowID = ""
+			declaration.Node = mustPipelineNode(flowID, "timer-owner")
 		}
+		return declaration
 	}
 	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "timer-flow-scope-root", Version: "1.0.0", InitialStage: "waiting",
@@ -2543,6 +2576,8 @@ func workflowTimerFlowScopedBundle() *runtimecontracts.WorkflowContractBundle {
 func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"observer": {ID: "observer", ExecutionType: "system_node"},
+	}, Events: map[string]runtimecontracts.EventCatalogEntry{
+		"timer.state_entry": {}, "timer.event_armed": {},
 	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{
@@ -2551,7 +2586,7 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 				StartOn: "state:waiting", Delay: "1h",
 			},
 			{
-				ID: "waiting.event_armed", Owner: "runtime", Event: "timer.event_armed",
+				ID: "waiting.event_armed", Node: mustPipelineNode("workflow-timer-owner-test", "observer"), Owner: "runtime", Event: "timer.event_armed",
 				StartOn: "event:timer.arm", CancelOn: "state:waiting", Delay: "1h",
 			},
 		},
@@ -2561,6 +2596,8 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"observer": {ID: "observer", ExecutionType: "system_node"},
+	}, Events: map[string]runtimecontracts.EventCatalogEntry{
+		"timer.event_armed": {},
 	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "escaped"}},
@@ -2569,7 +2606,7 @@ func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 			Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"}, EntryStage: "waiting", RegionStages: []string{"waiting"},
 		}},
 		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.event_armed", Owner: "runtime", Event: "timer.event_armed",
+			ID: "waiting.event_armed", Node: mustPipelineNode("workflow-timer-owner-test", "observer"), Owner: "runtime", Event: "timer.event_armed",
 			StartOn: "event:timer.arm", Delay: "1h",
 		}},
 	}}
@@ -2578,21 +2615,26 @@ func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
 func workflowTimerHandledOutcomeBundle() *runtimecontracts.WorkflowContractBundle {
 	timer := func(id, startOn, cancelOn string) runtimecontracts.WorkflowTimerContract {
 		return runtimecontracts.WorkflowTimerContract{
-			ID: id, Owner: "runtime", Event: "timer." + id, StartOn: startOn, CancelOn: cancelOn, Delay: "1h",
+			ID: id, Node: mustPipelineNode("workflow-timer-owner-test", "observer"), Owner: "runtime", Event: "timer." + id, StartOn: startOn, CancelOn: cancelOn, Delay: "1h",
 		}
+	}
+	timers := []runtimecontracts.WorkflowTimerContract{
+		timer("accepted", "event:accepted.start", "event:accepted.cancel"),
+		timer("reject.start", "event:guard.reject", ""),
+		timer("reject.target", "event:reject.target", "event:guard.reject"),
+		timer("discard.start", "event:guard.discard", ""),
+		timer("discard.target", "event:discard.target", "event:guard.discard"),
+		timer("dedup.start", "event:dedup.event", "event:dedup.reset"),
+		timer("dedup.target", "event:dedup.target", "event:dedup.event"),
+	}
+	events := make(map[string]runtimecontracts.EventCatalogEntry, len(timers))
+	for _, declaration := range timers {
+		events[declaration.Event] = runtimecontracts.EventCatalogEntry{}
 	}
 	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"observer": {ID: "observer", ExecutionType: "system_node"},
-	}, Semantics: runtimecontracts.WorkflowSemanticView{
+	}, Events: events, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
-		Timers: []runtimecontracts.WorkflowTimerContract{
-			timer("accepted", "event:accepted.start", "event:accepted.cancel"),
-			timer("reject.start", "event:guard.reject", ""),
-			timer("reject.target", "event:reject.target", "event:guard.reject"),
-			timer("discard.start", "event:guard.discard", ""),
-			timer("discard.target", "event:discard.target", "event:guard.discard"),
-			timer("dedup.start", "event:dedup.event", "event:dedup.reset"),
-			timer("dedup.target", "event:dedup.target", "event:dedup.event"),
-		},
+		Timers: timers,
 	}}
 }

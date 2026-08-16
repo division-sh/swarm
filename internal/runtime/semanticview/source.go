@@ -2,6 +2,7 @@ package semanticview
 
 import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 )
 
@@ -18,10 +19,10 @@ type Source interface {
 	WorkflowInitialStage() string
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowJoins() []runtimecontracts.WorkflowJoinPlan
-	ResolveFanOutEffectiveSemantics(flowID, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error)
+	ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error)
 	WorkflowGates() []runtimecontracts.WorkflowGatePlan
 	WorkflowGateForStage(flowID, stage string) (runtimecontracts.WorkflowGatePlan, bool)
-	WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool)
+	WorkflowStageTimerByID(flowID, id string) (runtimecontracts.WorkflowTimerContract, bool)
 	GuardInstructions() []runtimeregistry.GuardInstruction
 	GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool)
 	ActionInstructions() []runtimeregistry.ActionInstruction
@@ -51,18 +52,21 @@ type Source interface {
 	RequiredAgents() []runtimecontracts.FlowRequiredAgent
 	FlowRequiredAgents(flowID string) []runtimecontracts.FlowRequiredAgent
 	ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument
-	ResolvedPolicyForNode(nodeID string) runtimecontracts.PolicyDocument
+	ResolvedPolicyForExecutableNode(node runtimeidentity.ExecutableNode) runtimecontracts.PolicyDocument
 	ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry
 	ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool)
 	DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic
-	RuntimeEventOwners(eventType string) []string
-	NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool)
-	ResolveNodeEventReference(nodeID, eventType string) string
-	NodeRuntimeSubscriptions(nodeID string) []string
-	NodeHandlerSubscriptions(nodeID string) []string
-	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
-	NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool)
-	NodeEntries() map[string]runtimecontracts.SystemNodeContract
+	RuntimeEventOwners(eventType string) []runtimeidentity.ExecutableNode
+	ExecutableNodeRecords() []runtimecontracts.ScopedNodeRecord
+	ExecutableNode(node runtimeidentity.ExecutableNode) (runtimecontracts.ScopedNodeRecord, bool)
+	ExecutableNodeSource(node runtimeidentity.ExecutableNode) (runtimecontracts.ContractItemSource, bool)
+	ExecutableNodeEventHandlers(node runtimeidentity.ExecutableNode) map[string]runtimecontracts.SystemNodeEventHandler
+	ExecutableNodeEventHandler(node runtimeidentity.ExecutableNode, eventType string) (runtimecontracts.SystemNodeEventHandler, bool)
+	ResolveExecutableNodeEventReference(node runtimeidentity.ExecutableNode, eventType string) string
+	ResolveExecutableNodeEventPattern(node runtimeidentity.ExecutableNode, pattern string) string
+	ResolveExecutableNodeEventCatalogEntry(node runtimeidentity.ExecutableNode, eventType string) (runtimecontracts.EventCatalogEntry, string, bool)
+	ExecutableNodeRuntimeSubscriptions(node runtimeidentity.ExecutableNode) []string
+	ExecutableNodeEffectiveProduces(node runtimeidentity.ExecutableNode) []string
 	AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool)

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -43,22 +44,34 @@ func TestFanInBarrierContractDerivesEffectiveJoinPlan(t *testing.T) {
 
 func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *testing.T) {
 	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
+	root, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "join-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orders, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/orders", "orders", "join-node")
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: []runtimecontracts.WorkflowJoinPlan{
-		{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec},
-		{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec},
+		{Node: root, HandlerEvent: "item.completed", Spec: spec},
+		{Node: orders, HandlerEvent: "item.completed", Spec: spec},
 	}}}
 	source := semanticview.Wrap(bundle)
-	for _, flowID := range []string{"", "orders"} {
-		ref, err := timeridentity.NewJoinRef(flowID, "join-node", "item.completed", "awaiting", "awaiting", "")
+	for _, node := range []runtimeidentity.ExecutableNode{root, orders} {
+		ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting", "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		plan, ok := semanticview.WorkflowJoinPlanForRef(source, ref)
-		if !ok || plan.FlowID != flowID {
-			t.Fatalf("plan for flow %q = %#v, ok=%v", flowID, plan, ok)
+		if !ok || !plan.Node.Equal(node) {
+			t.Fatalf("plan for node %#v = %#v, ok=%v", node, plan, ok)
 		}
 	}
-	hostile, err := timeridentity.NewJoinRef("unrelated", "join-node", "item.completed", "awaiting", "awaiting", "")
+	hostileNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/unrelated", "unrelated", "join-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostile, err := timeridentity.NewJoinRef(hostileNode, "item.completed", "awaiting", "awaiting", "")
 	if err != nil {
 		t.Fatal(err)
 	}

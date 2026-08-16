@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
@@ -154,7 +155,7 @@ func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing
 		},
 	})
 
-	resolved := ResolveNodeSubscriptionHandler(source, "listener", "child/task.completed")
+	resolved := ResolveExecutableNodeSubscriptionHandler(source, identitytest.FlowNode(t, "child", "listener"), "child/task.completed")
 	if !resolved.Matched || resolved.HandlerEventKey != "task.completed" {
 		t.Fatalf("resolved handler = %#v, want exact task.completed before wildcard", resolved)
 	}
@@ -177,7 +178,7 @@ func TestResolveFlowNodeSubscriptionHandlerRejectsBareSubscriptionAsExecutableHa
 		},
 	})
 
-	resolved := ResolveFlowNodeSubscriptionHandler(source, "child", "listener", "child/task.requested")
+	resolved := ResolveExecutableNodeSubscriptionHandler(source, identitytest.FlowNode(t, "child", "listener"), "child/task.requested")
 	if resolved.Matched {
 		t.Fatalf("resolved handler = %#v, want routing-only subscription to remain non-executable", resolved)
 	}
@@ -208,10 +209,11 @@ func TestResolveNodeSubscriptionHandlerScopesLocalWildcardToOwnerFlow(t *testing
 				},
 			}})
 
-			if got := ResolveNodeSubscriptionHandler(source, "listener", "child/task.done"); !got.Matched || got.HandlerEventKey != authored {
+			node := identitytest.FlowNode(t, "child", "listener")
+			if got := ResolveExecutableNodeSubscriptionHandler(source, node, "child/task.done"); !got.Matched || got.HandlerEventKey != authored {
 				t.Fatalf("local resolution = %#v, want handler %q", got, authored)
 			}
-			if got := ResolveNodeSubscriptionHandler(source, "listener", "sibling/task.done"); got.Matched {
+			if got := ResolveExecutableNodeSubscriptionHandler(source, node, "sibling/task.done"); got.Matched {
 				t.Fatalf("sibling resolution = %#v, want no cross-scope handler", got)
 			}
 		})

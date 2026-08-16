@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 func TestTier11FlowCompositionCanonicalRoutingOwnership(t *testing.T) {
@@ -41,6 +42,8 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	}
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	nodeID = strings.TrimSpace(nodeID)
+	flowID := strings.Split(flowInstance, "/")[0]
+	nodeID = identitytest.FlowNode(t, flowID, nodeID).Key()
 	wantEntityID := runtimeflowidentity.EntityID(flowInstance)
 	var eventID, targetFlowInstance, targetEntityID, targetSet string
 	eventQuery := `

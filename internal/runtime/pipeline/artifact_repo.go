@@ -253,7 +253,7 @@ func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.Exe
 		return runtimeengine.EmitIntent{}, fmt.Errorf("artifact result requires admitted execution producer source")
 	}
 	sourceRoute := routingSource.Route()
-	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.FlowID.String(), eventType, sourceRoute)
+	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.Node.FlowID(), eventType, sourceRoute)
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
 	envelope := events.EventEnvelope{
@@ -401,8 +401,8 @@ func SourceUsesArtifactRepoCommit(source semanticview.Source) bool {
 	if source == nil {
 		return false
 	}
-	for _, node := range source.NodeEntries() {
-		for _, handler := range node.EventHandlers {
+	for _, record := range source.ExecutableNodeRecords() {
+		for _, handler := range record.Entry.EventHandlers {
 			if artifactActionSpecIsCommit(handler.Action) {
 				return true
 			}
@@ -1257,7 +1257,7 @@ func (pc *PipelineCoordinator) validateArtifactRepoResultPayload(execCtx runtime
 	if eventType == "" {
 		return nil
 	}
-	if err := validatePipelineEmitPayload(pc.SemanticSource(), execCtx.Request.FlowID.String(), eventType, payload, nil, runtimeengine.EmitSurfaceAction); err != nil {
+	if err := validatePipelineEmitPayload(pc.SemanticSource(), execCtx.Request.Node.FlowID(), eventType, payload, nil, runtimeengine.EmitSurfaceAction); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "artifact_repo_result_schema_invalid", "artifact-repo", "validate_result_event", map[string]any{"event_type": eventType}, err)
 	}
 	return nil

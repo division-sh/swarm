@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -56,9 +57,9 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 
 	persisted := first.ComputeModuleTraces[0]
 	persisted.OutputHash = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	persistComputeModuleReplayEvidenceForExecution(t, ctx, sqliteStore, req.Event.ID(), string(req.NodeID), persisted)
+	persistComputeModuleReplayEvidenceForExecution(t, ctx, sqliteStore, req.Event.ID(), req.Node.Key(), persisted)
 
-	loaded, err := sqliteStore.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, req.Event.ID(), string(req.NodeID))
+	loaded, err := sqliteStore.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, req.Event.ID(), req.Node.Key())
 	if err != nil {
 		t.Fatalf("LoadComputeModuleReplayEvidenceForExecution: %v", err)
 	}
@@ -218,8 +219,7 @@ func computeModuleReplayExecutionRequest(t *testing.T) runtimeengine.ExecutionRe
 	t.Helper()
 	return runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		NodeID:   identity.NormalizeNodeID("render-node"),
-		FlowID:   identity.NormalizeFlowID("render"),
+		Node:     identitytest.FlowNode(t, "render", "render-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			events.EventType("render.requested"),

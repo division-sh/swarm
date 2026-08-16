@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -47,6 +48,7 @@ stages:
 }
 
 func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T) {
+	joinNode := identitytest.RootNode(t, "join-node")
 	joinA := runtimecontracts.JoinSpec{
 		ID: "join-a", Stage: "awaiting-a",
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "complete-a"},
@@ -62,8 +64,8 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 		"join.b.requested": {Join: &joinB},
 	}
 	transitions := []runtimecontracts.HandlerTransitionSemantic{
-		{NodeID: "join-node", EventType: "join.a.requested", Join: &joinA},
-		{NodeID: "join-node", EventType: "join.b.requested", Join: &joinB},
+		{Node: joinNode, EventType: "join.a.requested", Join: &joinA},
+		{Node: joinNode, EventType: "join.b.requested", Join: &joinB},
 	}
 	stages := []string{"waiting", "awaiting-a", "complete-a", "timeout-a", "awaiting-b", "complete-b", "timeout-b"}
 	topology := runtimecontracts.BuildWorkflowStageTopology("", "waiting", stages, []string{"complete-a", "timeout-a", "complete-b", "timeout-b"}, transitions, nil, nil)
@@ -102,6 +104,8 @@ func TestTimerActivationUsesExactHandlerOriginForTwoJoinsOnOneNode(t *testing.T)
 }
 
 func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
+	exactNode := identitytest.RootNode(t, "exact-node")
+	patternNode := identitytest.RootNode(t, "pattern-node")
 	stages := []string{"waiting", "exact-target", "pattern-target"}
 	handlers := map[string]runtimecontracts.SystemNodeContract{
 		"exact-node": {
@@ -118,8 +122,8 @@ func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
 	topology := runtimecontracts.BuildWorkflowStageTopology(
 		"", "waiting", stages, []string{"exact-target", "pattern-target"},
 		[]runtimecontracts.HandlerTransitionSemantic{
-			{NodeID: "exact-node", EventType: "work.requested", AdvancesTo: "exact-target"},
-			{NodeID: "pattern-node", EventType: "*.requested", AdvancesTo: "pattern-target"},
+			{Node: exactNode, EventType: "work.requested", AdvancesTo: "exact-target"},
+			{Node: patternNode, EventType: "*.requested", AdvancesTo: "pattern-target"},
 		},
 		nil,
 		nil,
@@ -151,6 +155,7 @@ func TestTimerActivationUnionsMultipleMatchingHandlerTopologies(t *testing.T) {
 }
 
 func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
+	node := identitytest.RootNode(t, "node")
 	tests := []struct {
 		name       string
 		handler    runtimecontracts.SystemNodeEventHandler
@@ -174,7 +179,7 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 			},
 			loops: []runtimecontracts.WorkflowLoopPlan{{
 				ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
-				Operations: []runtimecontracts.WorkflowLoopOperationPlan{{NodeID: "node", HandlerEvent: "work", Kind: runtimecontracts.LoopOperationRepeat, From: "working"}},
+				Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Node: node, HandlerEvent: "work", Kind: runtimecontracts.LoopOperationRepeat, From: "working"}},
 			}},
 			want: []string{"escaped", "working"},
 		},
@@ -188,7 +193,7 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 				}
 			}
 			transition := tc.transition
-			transition.NodeID = "node"
+			transition.Node = node
 			transition.EventType = "work"
 			topology := runtimecontracts.BuildWorkflowStageTopology("", "waiting", stages, []string{"done"}, []runtimecontracts.HandlerTransitionSemantic{transition}, nil, tc.loops)
 			handlers := map[string]runtimecontracts.SystemNodeEventHandler{"work": tc.handler}
@@ -218,6 +223,9 @@ func TestTimerActivationConsumesEveryCanonicalHandlerCarrier(t *testing.T) {
 }
 
 func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOtherCarrier(t *testing.T) {
+	workNode := identitytest.RootNode(t, "work-node")
+	joinNode := identitytest.RootNode(t, "join-node")
+	reviewNode := identitytest.RootNode(t, "review-node")
 	join := &runtimecontracts.JoinSpec{
 		ID: "approval", Stage: "joining",
 		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "joined"},
@@ -230,13 +238,13 @@ func TestLifecycleReachabilityConsumesLoopEscapeAndTimerCancelPreservesEveryOthe
 	topology := runtimecontracts.BuildWorkflowStageTopology(
 		"", "waiting", stages, []string{"joined", "join-timed-out", "expired", "escaped"},
 		[]runtimecontracts.HandlerTransitionSemantic{
-			{NodeID: "work-node", EventType: "work.started", AdvancesTo: "review"},
-			{NodeID: "join-node", EventType: "approval.requested", AdvancesTo: "joining", Join: join},
+			{Node: workNode, EventType: "work.started", AdvancesTo: "review"},
+			{Node: joinNode, EventType: "approval.requested", AdvancesTo: "joining", Join: join},
 		},
 		[]runtimecontracts.WorkflowTimerContract{{ID: "review.expire", Stage: "review", StageOwned: true, Event: runtimecontracts.WorkflowStageTimerInternalEvent, AdvancesTo: "expired"}},
 		[]runtimecontracts.WorkflowLoopPlan{{
 			ID: "revision", Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escaped"},
-			Operations: []runtimecontracts.WorkflowLoopOperationPlan{{NodeID: "review-node", HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review"}},
+			Operations: []runtimecontracts.WorkflowLoopOperationPlan{{Node: reviewNode, HandlerEvent: "review.revision_requested", Kind: runtimecontracts.LoopOperationRepeat, From: "review"}},
 		}},
 	)
 	handlers := map[string]runtimecontracts.SystemNodeContract{

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -131,11 +132,12 @@ func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {
 			authoredLocation: "package.yaml:10",
 		}
 	}
-	route := ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+	consumerNode := identitytest.FlowNode(t, "consumer", "consumer-node")
+	route := ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(consumerNode), Target: events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 		EntityID:     flowidentity.EntityID("consumer"),
-	}, Handler: MustConnectReceiverHandler("consumer", "consumer-node"),
+	}, Handler: MustConnectReceiverHandler(consumerNode),
 	}
 	var admission ConnectReceiverPinAdmission
 	if err := admission.Admit(plan("accepted", "work.accepted"), []ConnectDeliveryRoute{route}); err != nil {
@@ -148,7 +150,7 @@ func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {
 	if len(collisions) != 1 || len(collisions[0].ReceiverPinDiagnostics()) != 2 {
 		t.Fatalf("receiver-pin collisions = %#v, want one typed two-pin collision", collisions)
 	}
-	if !strings.Contains(collisions[0].Message(), "consumer-node") || !strings.Contains(collisions[0].Message(), "multiple receiver pins") {
+	if !strings.Contains(collisions[0].Message(), consumerNode.Key()) || !strings.Contains(collisions[0].Message(), "multiple receiver pins") {
 		t.Fatalf("collision diagnostic = %q", collisions[0].Message())
 	}
 }
@@ -287,11 +289,11 @@ func TestConnectExecutionClaimIncludesReceiverMode(t *testing.T) {
 		target: events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver"},
 	}
 	route := ConnectDeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient("receiver-node"),
+		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "receiver", "receiver-node")),
 		Target: events.RouteIdentity{
 			FlowID: "receiver", FlowInstance: "receiver", EntityID: eventtest.UUID("receiver-owner"),
 		},
-		Handler: MustConnectReceiverHandler("receiver", "receiver-node"),
+		Handler: MustConnectReceiverHandler(identitytest.FlowNode(t, "receiver", "receiver-node")),
 	}
 	staticClaim, err := ConnectExecutionClaim(plan, route)
 	if err != nil {

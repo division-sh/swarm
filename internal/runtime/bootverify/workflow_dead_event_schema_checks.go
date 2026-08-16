@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -105,24 +106,28 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 				continue
 			}
 			out = append(out, deadEventDeclaration{
-				Canonical: canonical,
-				File:      deadEventProjectFileLabel(scope.Key),
-				Entry:     entry,
+				Canonical:  canonical,
+				PackageKey: scope.Key,
+				FlowID:     scope.OwningFlowID,
+				File:       deadEventProjectFileLabel(scope.Key),
+				Entry:      entry,
 			})
 		}
 	}
 	for _, scope := range semanticview.FlowScopes(source) {
 		flowID := strings.TrimSpace(scope.ID)
 		for eventName, entry := range scope.Events {
-			canonical := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventName))
+			scopeNode, _ := runtimeidentity.AdmitExecutableNodeDeclaration(scope.PackageKey, flowID, "__event_schema__")
+			canonical := eventidentity.Normalize(source.ResolveExecutableNodeEventReference(scopeNode, eventName))
 			if canonical == "" {
 				continue
 			}
 			out = append(out, deadEventDeclaration{
-				Canonical: canonical,
-				FlowID:    flowID,
-				File:      deadEventSchemaFileLabel("", flowID),
-				Entry:     entry,
+				Canonical:  canonical,
+				PackageKey: scope.PackageKey,
+				FlowID:     flowID,
+				File:       deadEventSchemaFileLabel("", flowID),
+				Entry:      entry,
 			})
 		}
 	}
@@ -138,10 +143,11 @@ func deadEventProjectFileLabel(packageKey string) string {
 }
 
 type deadEventDeclaration struct {
-	Canonical string
-	FlowID    string
-	File      string
-	Entry     runtimecontracts.EventCatalogEntry
+	Canonical  string
+	PackageKey string
+	FlowID     string
+	File       string
+	Entry      runtimecontracts.EventCatalogEntry
 }
 
 func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) deadEventSchemaUsage {
@@ -194,11 +200,13 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 
 func deadEventTypedConsumerMatches(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, decl deadEventDeclaration) []semanticview.TypedPubSubConsumerMatch {
 	producer := semanticview.AuthoredEventEndpoint{
-		ID:        "dead-event-schema:" + strings.TrimSpace(decl.FlowID) + ":" + eventidentity.Normalize(decl.Canonical),
-		Direction: semanticview.EventEndpointProducer,
-		FlowID:    strings.TrimSpace(decl.FlowID),
-		Event:     semanticview.ResolveFlowEventProof(source, decl.FlowID, decl.Canonical),
+		ID:         "dead-event-schema:" + strings.TrimSpace(decl.PackageKey) + ":" + strings.TrimSpace(decl.FlowID) + ":" + eventidentity.Normalize(decl.Canonical),
+		Direction:  semanticview.EventEndpointProducer,
+		FlowID:     strings.TrimSpace(decl.FlowID),
+		PackageKey: strings.TrimSpace(decl.PackageKey),
 	}
+	scopeNode, _ := runtimeidentity.AdmitExecutableNodeDeclaration(decl.PackageKey, decl.FlowID, "__event_schema__")
+	producer.Event = semanticview.ResolveExecutableNodeEventProof(source, scopeNode, decl.Canonical)
 	matches, _ := census.ResolveTypedPubSubConsumerMatches(producer)
 	return matches
 }

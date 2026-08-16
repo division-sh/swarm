@@ -22,8 +22,8 @@ func TestBuildSelectedContractRouteTopologyConsumesRouteAdmissionAsPrerequisite(
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID:           "source-event",
 			EventName:               "work.begin",
-			RuntimeEventOwners:      []string{"alpha-intake"},
-			WorkflowNodeSubscribers: []string{"beta-intake"},
+			RuntimeEventOwners:      []string{mustRunForkNode("flow-a", "alpha-intake").Key()},
+			WorkflowNodeSubscribers: []string{mustRunForkNode("flow-b", "beta-intake").Key()},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
 				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
 			},
@@ -122,7 +122,7 @@ func TestBuildSelectedContractRouteTopologyRequiresFrontierCorroborationForDynam
 			SourceEventID: "source-event",
 			EventName:     "review/inst-1/task.started",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("reviewer-inst-1", "review/inst-1", "selected_contracts"),
+				testNodeFrontierRecipient("reviewer", "review/inst-1", "selected_contracts"),
 			},
 		}},
 	}
@@ -132,7 +132,7 @@ func TestBuildSelectedContractRouteTopologyRequiresFrontierCorroborationForDynam
 		SourceEventID: "source-event",
 		EventName:     "review/inst-1/task.started",
 		DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-			testNodeFrontierRecipient("reviewer-inst-1", "review/inst-1", "selected_contracts"),
+			testNodeFrontierRecipient("reviewer", "review/inst-1", "selected_contracts"),
 		},
 		Disposition: runfork.RunForkSelectedContractDispositionEvidenceOnly,
 	}}
@@ -172,7 +172,7 @@ func TestBuildSelectedContractRouteTopologyProvesDynamicFlowInstancesFromForkLoc
 			EventName:           "review/inst-1/task.started",
 			SourceFlowInstances: []string{"review/inst-1"},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("reviewer-inst-1", "review/inst-1", "selected_contracts"),
+				testNodeFrontierRecipient("reviewer", "review/inst-1", "selected_contracts"),
 			},
 		}},
 	}
@@ -182,7 +182,7 @@ func TestBuildSelectedContractRouteTopologyProvesDynamicFlowInstancesFromForkLoc
 		SourceEventID: "source-event",
 		EventName:     "review/inst-1/task.started",
 		DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-			testNodeFrontierRecipient("reviewer-inst-1", "review/inst-1", "selected_contracts"),
+			testNodeFrontierRecipient("reviewer", "review/inst-1", "selected_contracts"),
 		},
 		Disposition: runfork.RunForkSelectedContractDispositionEvidenceOnly,
 	}}
@@ -210,7 +210,7 @@ func TestBuildSelectedContractRouteTopologyProvesDynamicFlowInstancesFromForkLoc
 	if proof.FlowInstance != "review/inst-1" ||
 		proof.Disposition != runfork.RunForkSelectedContractDispositionForkLocalTruth ||
 		len(proof.DerivedRecipients) != 1 ||
-		proof.DerivedRecipients[0].Recipient.ID() != "reviewer-inst-1" {
+		proof.DerivedRecipients[0].Recipient.ID() != mustRunForkNode("review", "reviewer").Key() {
 		t.Fatalf("dynamic proof = %#v", proof)
 	}
 	if !executionBoundaryHas(topology.RequiredEvidence, "selected_contract_dynamic_route_topology", runfork.RunForkSelectedContractDispositionPrerequisite) {
@@ -236,8 +236,8 @@ func TestBuildSelectedContractRecipientPlanningConsumesRouteTopology(t *testing.
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID:           "source-event",
 			EventName:               "work.begin",
-			RuntimeEventOwners:      []string{"alpha-intake"},
-			WorkflowNodeSubscribers: []string{"beta-intake"},
+			RuntimeEventOwners:      []string{mustRunForkNode("flow-a", "alpha-intake").Key()},
+			WorkflowNodeSubscribers: []string{mustRunForkNode("flow-b", "beta-intake").Key()},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
 				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
 			},
@@ -265,7 +265,7 @@ func TestBuildSelectedContractRecipientPlanningConsumesRouteTopology(t *testing.
 		planning.RecipientPlanEvents[0].SourceEventID != "source-event" ||
 		planning.RecipientPlanEvents[0].EventName != "work.begin" ||
 		len(planning.RecipientPlanEvents[0].Recipients) != 1 ||
-		planning.RecipientPlanEvents[0].Recipients[0].Recipient.ID() != "alpha-intake" {
+		planning.RecipientPlanEvents[0].Recipients[0].Recipient.ID() != mustRunForkNode("flow-a", "alpha-intake").Key() {
 		t.Fatalf("recipient plan events = %#v", planning.RecipientPlanEvents)
 	}
 	if !executionBoundaryHas(planning.RequiredEvidence, "selected_contract_route_topology", runfork.RunForkSelectedContractDispositionPrerequisite) {
@@ -299,7 +299,7 @@ func TestBuildSelectedContractRecipientPlanningConsumesProvenDynamicTopology(t *
 			EventName:           "review/inst-1/task.started",
 			SourceFlowInstances: []string{"review/inst-1"},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				testNodeFrontierRecipient("reviewer-inst-1", "review/inst-1", "selected_contracts"),
+				testNodeFrontierRecipient("reviewer", "review/inst-1", "selected_contracts"),
 			},
 		}},
 	}
@@ -309,7 +309,7 @@ func TestBuildSelectedContractRecipientPlanningConsumesProvenDynamicTopology(t *
 		SourceEventID: "source-event",
 		EventName:     "review/inst-1/task.started",
 		DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-			testNodeFrontierRecipient("reviewer-inst-1", "review/inst-1", "selected_contracts"),
+			testNodeFrontierRecipient("reviewer", "review/inst-1", "selected_contracts"),
 		},
 		Disposition: runfork.RunForkSelectedContractDispositionEvidenceOnly,
 	}}
@@ -389,8 +389,8 @@ func TestBuildSelectedContractExecutionModelConsumesRouteTopologyAsTruth(t *test
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID:           "source-event",
 			EventName:               "work.begin",
-			RuntimeEventOwners:      []string{"alpha-intake"},
-			WorkflowNodeSubscribers: []string{"beta-intake"},
+			RuntimeEventOwners:      []string{mustRunForkNode("flow-a", "alpha-intake").Key()},
+			WorkflowNodeSubscribers: []string{mustRunForkNode("flow-b", "beta-intake").Key()},
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
 				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
 			},

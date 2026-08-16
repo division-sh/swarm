@@ -215,7 +215,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
 			Type:        "node",
-			ID:          "node-a",
+			ID:          mustPersistenceRootNode("node-a").Key(),
 			Path:        "flow-a/node-a",
 			RouteSource: "selected_contracts",
 		}},
@@ -280,7 +280,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	if err := guard.Authorize(ctx, evt, runtimebus.PublishRecipientPlan{
 		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{{
 			Type:        "node",
-			ID:          "node-a",
+			ID:          mustPersistenceRootNode("node-a").Key(),
 			Path:        "flow-a/node-a",
 			RouteSource: "selected_contracts",
 		}},
@@ -410,7 +410,7 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 			SourceEventID: eventID,
 			EventName:     "item.received",
 			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
-				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient("node-a"), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
+				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
@@ -431,7 +431,7 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 			SourceEventID: eventID,
 			EventName:     "item.received",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient("node-a"), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
+				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient(mustPersistenceRootNode("node-a")), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},

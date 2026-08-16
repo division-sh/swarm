@@ -212,7 +212,7 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 				FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: sourceEntityID,
 			}.Normalized()
 			ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
-				Recipient: events.MustNodeDeliveryRecipient("root-producer"),
+				Recipient: events.MustNodeDeliveryRecipient(conformanceNode(t, "", "root-producer")),
 				Target:    events.MustExistingEntityTarget(sourceRoute),
 			})
 			routingSource, err := events.NewRootRoutingSource(sourceEntityID)
@@ -403,7 +403,7 @@ type fanInBarrierRouteProofSink struct {
 
 func newFanInBarrierRouteProofSink(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, eventType events.EventType) *fanInBarrierRouteProofSink {
 	t.Helper()
-	subscription, err := eventBus.SubscribeInternal(ctx, "portfolio-collector", eventType)
+	subscription, err := eventBus.SubscribeInternal(ctx, conformanceNode(t, "portfolio", "portfolio-collector").Key(), eventType)
 	if err != nil {
 		t.Fatalf("subscribe fan-in proof sink: %v", err)
 	}
@@ -524,7 +524,8 @@ func requireFanInBarrierRouteProof(
 	if err != nil {
 		t.Fatalf("load fan-in proof routes: %v", err)
 	}
-	if len(routes) != 1 || routes[0].Recipient.ID() != "portfolio-collector" || !routes[0].Target.ExistingEntity() || routes[0].Target.Route().Normalized() != wantTarget.Normalized() {
+	portfolioCollector := conformanceNode(t, "portfolio", "portfolio-collector").Key()
+	if len(routes) != 1 || routes[0].Recipient.ID() != portfolioCollector || !routes[0].Target.ExistingEntity() || routes[0].Target.Route().Normalized() != wantTarget.Normalized() {
 		t.Fatalf("fan-in proof routes = %#v, want portfolio-collector at %#v", routes, wantTarget.Normalized())
 	}
 	query := `SELECT route_settlement::text FROM events WHERE event_id = $1::uuid`
@@ -556,7 +557,7 @@ func requireFanInBarrierRouteProof(
 		}
 		candidateMatched := false
 		for _, candidate := range plan.Candidates() {
-			candidateMatched = candidateMatched || (candidate.Recipient().ID() == "portfolio-collector" && candidate.Outcome() == events.ConnectCandidateAccepted)
+			candidateMatched = candidateMatched || (candidate.Recipient().ID() == portfolioCollector && candidate.Outcome() == events.ConnectCandidateAccepted)
 		}
 		matched = matched || (targetMatched && candidateMatched)
 	}
@@ -586,7 +587,7 @@ func requireFanInBarrierPublicRouteProof(
 		t.Fatalf("public fan-in settlement = deliveries:%#v no_delivery:%#v", view.Deliveries, view.NoDelivery)
 	}
 	delivery := view.Deliveries[0]
-	if delivery.SubscriberID != "portfolio-collector" || delivery.Target.Kind != "existing_entity" || delivery.Target.FlowID != wantTarget.FlowID ||
+	if delivery.SubscriberID != conformanceNode(t, "portfolio", "portfolio-collector").Key() || delivery.Target.Kind != "existing_entity" || delivery.Target.FlowID != wantTarget.FlowID ||
 		delivery.Target.FlowInstance != wantTarget.FlowInstance || delivery.Target.EntityID != wantTarget.EntityID {
 		t.Fatalf("public fan-in delivery = %#v, want exact target %#v", delivery, wantTarget.Normalized())
 	}
@@ -817,7 +818,7 @@ func requireFanInBarrierReportTargets(
 		}
 		matched := false
 		for _, route := range routes {
-			if route.Recipient.ID() == "portfolio-collector" && route.Target.Route().Normalized() == wantTarget.Normalized() {
+			if route.Recipient.ID() == conformanceNode(t, "portfolio", "portfolio-collector").Key() && route.Target.Route().Normalized() == wantTarget.Normalized() {
 				matched = true
 			}
 		}
@@ -909,7 +910,7 @@ func loadFanInBarrierActivation(t *testing.T, instance runtimepipeline.WorkflowI
 		t.Fatalf("load portfolio state carrier: %v", err)
 	}
 	key := joinruntime.ActivationKey("awaiting", "awaiting", periodID)
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, "portfolio-collector", key)
+	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformanceNode(t, "portfolio", "portfolio-collector"), key)
 	if err != nil || !ok {
 		t.Fatalf("load portfolio barrier activation %q = found:%v err:%v", key, ok, err)
 	}

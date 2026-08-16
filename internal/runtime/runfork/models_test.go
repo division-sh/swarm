@@ -7,11 +7,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
 func TestRunForkContractFrontierRecipientUsesPrivateTypedWireCodec(t *testing.T) {
 	want := NewRunForkContractFrontierRecipient(
-		events.MustNodeDeliveryRecipient("worker"), "review/inst-1", "compiled_connect_evaluation", agentidentity.Identity{},
+		events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "review", "worker")), "review/inst-1", "compiled_connect_evaluation", agentidentity.Identity{},
 	)
 	raw, err := json.Marshal(want)
 	if err != nil {

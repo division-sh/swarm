@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 )
 
@@ -56,8 +57,8 @@ func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract 
 func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 	return effectiveWorkflowJoins(s, s.bundle.WorkflowJoins())
 }
-func (s bundleSource) ResolveFanOutEffectiveSemantics(flowID, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error) {
-	return s.bundle.ResolveFanOutEffectiveSemantics(flowID, eventType, spec)
+func (s bundleSource) ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error) {
+	return s.bundle.ResolveFanOutEffectiveSemantics(node, eventType, spec)
 }
 func (s bundleSource) WorkflowGates() []runtimecontracts.WorkflowGatePlan {
 	return s.bundle.WorkflowGates()
@@ -103,8 +104,8 @@ func WorkflowStageTopology(source Source, flowID string) (runtimecontracts.Workf
 	}
 	return runtimecontracts.WorkflowStageTopology{}, false
 }
-func (s bundleSource) WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool) {
-	return s.bundle.WorkflowTimerByID(id)
+func (s bundleSource) WorkflowStageTimerByID(flowID, id string) (runtimecontracts.WorkflowTimerContract, bool) {
+	return s.bundle.WorkflowStageTimerByID(flowID, id)
 }
 func (s bundleSource) GuardInstructions() []runtimeregistry.GuardInstruction {
 	entries := s.bundle.GuardEntries()
@@ -166,6 +167,23 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 		return nil
 	}
 	views := s.bundle.ProjectViews()
+	if len(views) == 0 && s.bundle.FlowTree.Root != nil && strings.TrimSpace(s.bundle.FlowTree.Root.Paths.ID) == "" &&
+		(len(s.bundle.FlowTree.Root.Nodes) > 0 || len(s.bundle.FlowTree.Root.Events) > 0) {
+		root := s.bundle.FlowTree.Root
+		packageKey := strings.Trim(strings.TrimSpace(root.Paths.PackageKey), "/")
+		if packageKey == "" {
+			packageKey = runtimeidentity.RootPackageKey
+		}
+		return []ProjectScope{{
+			Key:      packageKey,
+			Manifest: s.bundle.Package,
+			Nodes:    root.Nodes,
+			Events:   root.Events,
+			Agents:   runtimecontracts.EffectiveAgentRegistryEntries(root.Agents),
+			Tools:    toolEntryMapSnapshot(root.Tools),
+			Policy:   root.Policy,
+		}}
+	}
 	out := make([]ProjectScope, 0, len(views))
 	for _, view := range views {
 		out = append(out, ProjectScope{
@@ -333,8 +351,8 @@ func (s bundleSource) FlowRequiredAgents(flowID string) []runtimecontracts.FlowR
 func (s bundleSource) ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument {
 	return ResolvePolicyForFlow(s, flowID)
 }
-func (s bundleSource) ResolvedPolicyForNode(nodeID string) runtimecontracts.PolicyDocument {
-	return ResolvePolicyForNode(s, nodeID)
+func (s bundleSource) ResolvedPolicyForExecutableNode(node runtimeidentity.ExecutableNode) runtimecontracts.PolicyDocument {
+	return s.bundle.ResolvedPolicyForExecutableNode(node)
 }
 func (s bundleSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.ResolvedEventCatalog()
@@ -345,30 +363,60 @@ func (s bundleSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (ru
 func (s bundleSource) DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic {
 	return s.bundle.DerivedHandlerTransitions()
 }
-func (s bundleSource) RuntimeEventOwners(eventType string) []string {
+func (s bundleSource) RuntimeEventOwners(eventType string) []runtimeidentity.ExecutableNode {
 	return RuntimeEventOwners(s, eventType)
 }
-func (s bundleSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
-	return s.bundle.NodeContractSource(nodeID)
+func (s bundleSource) ExecutableNodeRecords() []runtimecontracts.ScopedNodeRecord {
+	return s.bundle.ScopedNodeRecords()
 }
-func (s bundleSource) ResolveNodeEventReference(nodeID, eventType string) string {
-	return s.bundle.ResolveNodeEventReference(nodeID, eventType)
+func (s bundleSource) ExecutableNode(node runtimeidentity.ExecutableNode) (runtimecontracts.ScopedNodeRecord, bool) {
+	return s.bundle.ExecutableNode(node)
 }
-func (s bundleSource) NodeRuntimeSubscriptions(nodeID string) []string {
-	return s.bundle.NodeRuntimeSubscriptions(nodeID)
+func (s bundleSource) ExecutableNodeSource(node runtimeidentity.ExecutableNode) (runtimecontracts.ContractItemSource, bool) {
+	record, ok := s.bundle.ExecutableNode(node)
+	return record.Source, ok
 }
-func (s bundleSource) NodeHandlerSubscriptions(nodeID string) []string {
-	return s.bundle.NodeHandlerSubscriptions(nodeID)
+func (s bundleSource) ExecutableNodeEventHandlers(node runtimeidentity.ExecutableNode) map[string]runtimecontracts.SystemNodeEventHandler {
+	record, ok := s.bundle.ExecutableNode(node)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]runtimecontracts.SystemNodeEventHandler, len(record.Entry.EventHandlers))
+	for eventType, handler := range record.Entry.EventHandlers {
+		handler = runtimecontracts.DefaultSystemNodeHandlerSourceEvent(handler, eventType)
+		out[eventType] = s.bundle.ExternalizeExecutableNodeHandler(node, handler)
+	}
+	return out
 }
-func (s bundleSource) NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler {
-	return s.bundle.NodeEventHandlers(nodeID)
-}
-func (s bundleSource) NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool) {
-	resolved := ResolveNodeSubscriptionHandler(s, nodeID, eventType)
+func (s bundleSource) ExecutableNodeEventHandler(node runtimeidentity.ExecutableNode, eventType string) (runtimecontracts.SystemNodeEventHandler, bool) {
+	resolved := ResolveExecutableNodeSubscriptionHandler(s, node, strings.TrimSpace(eventType))
 	return resolved.Handler, resolved.Matched
 }
-func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContract {
-	return s.bundle.NodeEntries()
+func (s bundleSource) ResolveExecutableNodeEventReference(node runtimeidentity.ExecutableNode, eventType string) string {
+	return s.bundle.ResolveExecutableNodeEventReference(node, eventType)
+}
+func (s bundleSource) ResolveExecutableNodeEventPattern(node runtimeidentity.ExecutableNode, pattern string) string {
+	return s.bundle.ResolveExecutableNodeEventPattern(node, pattern)
+}
+func (s bundleSource) ResolveExecutableNodeEventCatalogEntry(node runtimeidentity.ExecutableNode, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
+	return s.bundle.ResolveExecutableNodeEventCatalogEntry(node, eventType)
+}
+func (s bundleSource) ExecutableNodeRuntimeSubscriptions(node runtimeidentity.ExecutableNode) []string {
+	record, ok := s.bundle.ExecutableNode(node)
+	if !ok {
+		return nil
+	}
+	return runtimecontracts.EffectiveSystemNodeSubscriptions(record.Entry)
+}
+func (s bundleSource) ExecutableNodeEffectiveProduces(node runtimeidentity.ExecutableNode) []string {
+	record, ok := s.bundle.ExecutableNode(node)
+	if !ok {
+		return nil
+	}
+	return append(
+		runtimecontracts.EffectiveSystemNodeProduces(record.Entry),
+		s.bundle.GeneratedActivityEventsForExecutableNode(node)...,
+	)
 }
 func (s bundleSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.AuthoredEventEntries()

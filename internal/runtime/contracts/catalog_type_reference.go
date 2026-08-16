@@ -3,6 +3,8 @@ package contracts
 import (
 	"fmt"
 	"strings"
+
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 type CatalogTypeKind string
@@ -123,4 +125,26 @@ func ResolveEventFieldType(bundle *WorkflowContractBundle, flowID, eventType, fi
 		return CatalogTypeReference{}, false
 	}
 	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(catalog)}, true
+}
+
+func ResolveExecutableNodeEventFieldType(bundle *WorkflowContractBundle, node runtimeidentity.ExecutableNode, eventType, field string) (CatalogTypeReference, bool) {
+	field = strings.TrimSpace(field)
+	if bundle == nil || !node.Valid() || field == "" {
+		return CatalogTypeReference{}, false
+	}
+	entry, _, ok := bundle.ResolveExecutableNodeEventCatalogEntry(node, eventType)
+	if !ok {
+		entry, _, ok = PlatformEventCatalogEntry(bundle.Platform, eventType)
+	}
+	if !ok {
+		return CatalogTypeReference{}, false
+	}
+	decl, ok := entry.Payload.Properties[field]
+	if !ok || strings.TrimSpace(decl.Type) == "" {
+		return CatalogTypeReference{}, false
+	}
+	return CatalogTypeReference{
+		Type:    strings.TrimSpace(decl.Type),
+		Catalog: cloneTypeCatalogDocument(bundle.ResolvedTypeCatalogForFlow(node.FlowID())),
+	}, true
 }

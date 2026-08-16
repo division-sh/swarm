@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -140,7 +142,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 func TestRun_JoinValidationRequiresExactDeclarationFlow(t *testing.T) {
 	t.Run("same-leaf sibling cannot replace root", func(t *testing.T) {
 		bundle := joinValidationBundle()
-		bundle.Semantics.Joins[0].FlowID = "orders"
+		bundle.Semantics.Joins[0].Node = identitytest.FlowNode(t, "orders", "join-node")
 		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 		if !reportContains(report.HardInvalidities(), joinValidationCheckID, "no effective WorkflowJoinPlan") {
 			t.Fatalf("hard invalidities = %#v", report.HardInvalidities())
@@ -150,7 +152,7 @@ func TestRun_JoinValidationRequiresExactDeclarationFlow(t *testing.T) {
 	t.Run("root remains exact beside same-leaf sibling", func(t *testing.T) {
 		bundle := joinValidationBundle()
 		sibling := bundle.Semantics.Joins[0]
-		sibling.FlowID = "orders"
+		sibling.Node = identitytest.FlowNode(t, "orders", "join-node")
 		bundle.Semantics.Joins = append(bundle.Semantics.Joins, sibling)
 		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 		if reportContains(report.HardInvalidities(), joinValidationCheckID, "no effective WorkflowJoinPlan") {
@@ -164,7 +166,8 @@ func TestJoinMembersContributeCanonicalEntityReaderCoverage(t *testing.T) {
 	source := semanticview.Wrap(bundle)
 	handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 	var memberReference *expressionReference
-	for _, ref := range handlerExecutableReaderExpressionsForSource(source, "", "join-node", "item.completed", handler) {
+	joinNode := identitytest.RootNode(t, "join-node")
+	for _, ref := range handlerExecutableReaderExpressionsForSource(source, joinNode, "item.completed", handler) {
 		if ref.Kind == "join.members.from" {
 			candidate := ref
 			memberReference = &candidate
@@ -272,9 +275,13 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 	transitions := []runtimecontracts.HandlerTransitionSemantic{}
 	joins := []runtimecontracts.WorkflowJoinPlan{}
 	for nodeID, node := range bundle.Nodes {
+		nodeRef, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", nodeID)
+		if err != nil {
+			continue
+		}
 		for eventType, handler := range node.EventHandlers {
 			transitions = append(transitions, runtimecontracts.HandlerTransitionSemantic{
-				NodeID:       nodeID,
+				Node:         nodeRef,
 				EventType:    eventType,
 				CreateEntity: handler.CreateEntity,
 				AdvancesTo:   handler.AdvancesTo,
@@ -286,7 +293,7 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 			})
 			if handler.Join != nil {
 				resultType, _ := runtimecontracts.ResolveEventFieldType(bundle, "", eventType, "result")
-				joins = append(joins, runtimecontracts.WorkflowJoinPlan{NodeID: nodeID, HandlerEvent: eventType, Spec: *handler.Join, ResultType: resultType})
+				joins = append(joins, runtimecontracts.WorkflowJoinPlan{Node: nodeRef, HandlerEvent: eventType, Spec: *handler.Join, ResultType: resultType})
 			}
 		}
 	}

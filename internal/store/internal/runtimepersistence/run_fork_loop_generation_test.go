@@ -22,7 +22,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	joinRef, err := timeridentity.NewJoinRefForGeneration("", "review-node", "review.result", "review", "review", "", activation.Generation())
+	joinRef, err := timeridentity.NewJoinRefForGeneration(mustPersistenceRootNode("review-node"), "review.result", "review", "review", "", activation.Generation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +37,10 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 	if err := joinruntime.Store(buckets, join); err != nil {
 		t.Fatal(err)
 	}
-	accumulatorRef := timeridentity.NewAccumulatorBucketRefForGeneration("review-node", "review.result", "", activation.Generation())
-	buckets["review-node"]["handler_accumulators"] = map[string]any{accumulatorRef.Key(): map[string]any{"count": 1}}
+	accumulatorRef := timeridentity.NewAccumulatorBucketRefForGeneration(mustPersistenceRootNode("review-node"), "review.result", "", activation.Generation())
+	nodeBucketKey := mustPersistenceRootNode("review-node").Key()
+	buckets[nodeBucketKey] = map[string]any{}
+	buckets[nodeBucketKey]["handler_accumulators"] = map[string]any{accumulatorRef.Key(): map[string]any{"count": 1}}
 	raw := runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
 	forkedRaw, err := forkAttemptGenerationState(raw, "fork-run", "entity-1")
 	if err != nil {
@@ -64,7 +66,7 @@ func TestForkAttemptGenerationRemintsJoinHandleIdentity(t *testing.T) {
 		forkedJoins[0].TimerHandle().TaskID() != forkedJoins[0].TimerTaskID() {
 		t.Fatalf("fork remint left stale declaration/task facts: source=%#v fork=%#v", join.JoinRef(), forkedJoins[0].JoinRef())
 	}
-	forkedAccumulators, _ := forkedCarrier.StateBuckets["review-node"]["handler_accumulators"].(map[string]any)
+	forkedAccumulators, _ := forkedCarrier.StateBuckets[nodeBucketKey]["handler_accumulators"].(map[string]any)
 	if len(forkedAccumulators) != 1 {
 		t.Fatalf("forked accumulators = %#v", forkedAccumulators)
 	}

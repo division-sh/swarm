@@ -241,10 +241,15 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			`, forkRunID, continuation.EntityID, now); err != nil {
 				t.Fatal(err)
 			}
+			owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			resultEventID := activityidentity.ResultEventID(activityidentity.Fact{
 				RunID: sourceRunID, SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID,
-				FlowID: continuation.FlowID, NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey,
-				ActivityID: continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,
+				Owner: owner, ExecutionFlowID: continuation.FlowID,
+				HandlerEventKey: continuation.HandlerEventKey,
+				ActivityID:      continuation.ActivityID, Tool: continuation.Tool, Attempt: 1,
 			}, continuation.SuccessEvent)
 			var storedResultEventID any = resultEventID
 			var resultEventType any = continuation.SuccessEvent
@@ -310,9 +315,13 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			if err := json.Unmarshal(prepared.Payload, &forkPayload); err != nil {
 				t.Fatal(err)
 			}
+			forkOwner, err := activityidentity.ParseOwnerKey(forkPayload.NodeID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			forkRequestID := activityidentity.RequestEventID(activityidentity.Fact{
 				RunID: forkRunID, SourceEventID: forkPayload.SourceEventID, ParentEventID: forkPayload.ParentEventID,
-				EntityID: forkPayload.EntityID, FlowID: forkPayload.FlowID, NodeID: forkPayload.NodeID,
+				EntityID: forkPayload.EntityID, Owner: forkOwner, ExecutionFlowID: forkPayload.FlowID,
 				HandlerEventKey: forkPayload.HandlerEventKey, ActivityID: forkPayload.ActivityID, Tool: forkPayload.Tool, Attempt: 1,
 			})
 			var copiedStatus string

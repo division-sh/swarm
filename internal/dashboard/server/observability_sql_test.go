@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -30,9 +31,10 @@ func dashboardObservabilityAgentRoute(t testing.TB, agentID string) events.Deliv
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentidentitytest.RootRuntime(t, agentID, "dashboard-observability-test")}
 }
 
-func dashboardObservabilityNodeRoute(nodeID string) events.DeliveryRoute {
+func dashboardObservabilityNodeRoute(t testing.TB, nodeID string) events.DeliveryRoute {
+	t.Helper()
 	return events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(nodeID),
+		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "fixture", nodeID)),
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
 		}),
@@ -177,7 +179,7 @@ func TestObservabilityProjection_ListEvents_FiltersTypedSubscriberIdentity(t *te
 			events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
 		routes := make([]events.DeliveryRoute, 0, len(deliveries))
 		for _, delivery := range deliveries {
-			route := dashboardObservabilityNodeRoute(delivery.subscriberID)
+			route := dashboardObservabilityNodeRoute(t, delivery.subscriberID)
 			if delivery.subscriberType == "agent" {
 				route = dashboardObservabilityAgentRoute(t, delivery.subscriberID)
 			}

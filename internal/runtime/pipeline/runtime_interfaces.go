@@ -26,7 +26,7 @@ type WorkflowRuntime interface {
 }
 
 type WorkflowNodeExecutor interface {
-	NodeID() string
+	ExecutableNode() identity.ExecutableNode
 	Subscriptions() []events.EventType
 	InterceptPolicy(eventType string, evt events.Event) (consume bool, handled bool)
 	Handle(ctx context.Context, evt events.Event) bool

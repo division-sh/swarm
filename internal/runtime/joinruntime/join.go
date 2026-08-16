@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
@@ -132,7 +133,7 @@ func (a Activation) Key() string {
 
 func ReplaceGeneration(buckets map[string]map[string]any, activation Activation, generation attemptgeneration.Generation) error {
 	oldKey := activation.Key()
-	oldNodeID := activation.NodeID()
+	oldNode := activation.JoinRef().Node()
 	ref, ok := activation.handle.JoinRef()
 	if !ok {
 		return fmt.Errorf("join activation is missing its typed declaration handle")
@@ -149,7 +150,7 @@ func ReplaceGeneration(buckets map[string]map[string]any, activation Activation,
 		return err
 	}
 	if oldKey != activation.Key() {
-		if nodeBucket := buckets[oldNodeID]; nodeBucket != nil {
+		if nodeBucket := buckets[joinNodeBucketKey(oldNode)]; nodeBucket != nil {
 			if joins, ok := nodeBucket[bucketKey].(map[string]any); ok {
 				delete(joins, oldKey)
 			}
@@ -344,8 +345,11 @@ func (a *Activation) CloseForStageExit() bool {
 	return true
 }
 
-func Load(stateBuckets map[string]map[string]any, nodeID, key string) (Activation, bool, error) {
-	node := stateBuckets[strings.TrimSpace(nodeID)]
+func Load(stateBuckets map[string]map[string]any, nodeRef runtimeidentity.ExecutableNode, key string) (Activation, bool, error) {
+	if !nodeRef.Valid() {
+		return Activation{}, false, fmt.Errorf("join load requires exact executable node identity")
+	}
+	node := stateBuckets[joinNodeBucketKey(nodeRef)]
 	joins, _ := node[bucketKey].(map[string]any)
 	raw, ok := joins[strings.TrimSpace(key)]
 	if !ok {
@@ -372,14 +376,15 @@ func Store(stateBuckets map[string]map[string]any, activation Activation) error 
 	if err := activation.Validate(); err != nil {
 		return err
 	}
-	nodeID := activation.NodeID()
+	nodeRef := activation.JoinRef().Node()
 	if stateBuckets == nil {
 		return fmt.Errorf("join state bucket set is nil")
 	}
-	node := stateBuckets[nodeID]
+	nodeKey := joinNodeBucketKey(nodeRef)
+	node := stateBuckets[nodeKey]
 	if node == nil {
 		node = map[string]any{}
-		stateBuckets[nodeID] = node
+		stateBuckets[nodeKey] = node
 	}
 	joins, _ := node[bucketKey].(map[string]any)
 	if joins == nil {
@@ -442,16 +447,34 @@ func List(stateBuckets map[string]map[string]any) ([]Activation, error) {
 	for nodeID, node := range stateBuckets {
 		joins, _ := node[bucketKey].(map[string]any)
 		for key := range joins {
-			activation, ok, err := Load(stateBuckets, nodeID, key)
+			encoded, err := json.Marshal(joins[key])
 			if err != nil {
 				return nil, err
 			}
-			if ok {
-				out = append(out, activation)
+			var activation Activation
+			if err := decodeStrictJSON(encoded, &activation); err != nil {
+				return nil, fmt.Errorf("decode join activation in bucket %s: %w", nodeID, err)
 			}
+			if activation.Outputs == nil {
+				activation.Outputs = map[string]MemberOutput{}
+			}
+			if err := activation.Validate(); err != nil {
+				return nil, err
+			}
+			if joinNodeBucketKey(activation.JoinRef().Node()) != nodeID {
+				return nil, fmt.Errorf("join activation node identity contradicts its state bucket")
+			}
+			out = append(out, activation)
 		}
 	}
 	return out, nil
+}
+
+func joinNodeBucketKey(node runtimeidentity.ExecutableNode) string {
+	if !node.Valid() {
+		return ""
+	}
+	return "handler_joins:" + node.Key()
 }
 
 func normalizeMembers(members []string) ([]string, error) {

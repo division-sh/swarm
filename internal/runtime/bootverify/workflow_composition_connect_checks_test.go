@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
@@ -98,7 +99,7 @@ func TestCreateSyntheticCarryRejectsStaticallyAuthoredProducerCollision(t *testi
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "producer producer-node emit field validation_case_id conflicts with receiver-owned carry generated.uuid") {
+	if !reportContains(report.Errors(), "composition_connect_validation", "emit field validation_case_id conflicts with receiver-owned carry generated.uuid") {
 		t.Fatalf("expected producer/synthetic carry collision blocker, got %#v", report.Errors())
 	}
 }
@@ -522,8 +523,8 @@ func runFanInBarrierMutation(t *testing.T, mutation canonicalrouting.FanInNegati
 func applyFanInMultipleJoinPlan(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	for _, plan := range bundle.Semantics.Joins {
-		if plan.FlowID == "portfolio" && plan.NodeID == "portfolio-collector" && plan.HandlerEvent == "operating.reported" {
-			plan.NodeID = "portfolio-collector-duplicate"
+		if plan.Node.FlowID() == "portfolio" && plan.Node.NodeID() == "portfolio-collector" && plan.HandlerEvent == "operating.reported" {
+			plan.Node = identitytest.FlowNode(t, "portfolio", "portfolio-collector-duplicate")
 			bundle.Semantics.Joins = append(bundle.Semantics.Joins, plan)
 			return
 		}
