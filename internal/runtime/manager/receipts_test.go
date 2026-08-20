@@ -16,12 +16,16 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -126,6 +130,111 @@ func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 
 type outputRecordingAgent struct {
 	calls int
+}
+
+type drainedCompletionObservationAgent struct {
+	id         string
+	withOutput bool
+}
+
+func (a drainedCompletionObservationAgent) ID() string                      { return a.id }
+func (drainedCompletionObservationAgent) Type() string                      { return "llm" }
+func (drainedCompletionObservationAgent) Subscriptions() []events.EventType { return nil }
+func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
+	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("manager-drain-observation"), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := handle.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("managed capability surface missing")
+	}
+	surfaceJSON, err := json.Marshal(surface)
+	if err != nil {
+		return nil, err
+	}
+	target := handle.Attempt().Authority.Target
+	input, output := int64(1), int64(1)
+	err = handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled},
+		Usage: runtimeeffects.CompletionUsage{
+			ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,
+			InputTokens: &input, OutputTokens: &output,
+		},
+		AgentTurn: &runtimeeffects.CompletionAgentTurn{
+			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+			Memory:   target.Memory, FlowInstance: target.FlowInstance,
+			CapabilitySurfaceID: surface.ID, CapabilitySurface: surfaceJSON,
+		},
+		Spend: runtimeeffects.CompletionSpend{
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			Model: "test-model", BackendProfile: "anthropic", Provider: "anthropic", Transport: "http",
+			ResolvedModel: "test-model", InvocationType: "task",
+		},
+		Now: time.Now().UTC(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !a.withOutput {
+		return nil, nil
+	}
+	return []events.Event{eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "late.output", a.id, "", nil, 0, target.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)}, nil
+}
+
+func TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		withOutput bool
+		wantErr    string
+	}{
+		{name: "settled_without_output"},
+		{name: "late_output_rejected", withOutput: true, wantErr: "drained_completion_output_forbidden"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := effecttest.New()
+			harness.SettleOrigin = true
+			bus := &recordingReceiptBus{}
+			deliveryStore := newManagerDeliveryTestStore(t)
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+			evt := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), "work.requested", "source", "", nil, 0,
+				"33333333-3333-4333-8333-333333333333", "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput}
+			base := testAuthorActivityContext(harness.CompletionContext(t.Name()))
+			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
+			claim, ok := runtimedelivery.ClaimFromContext(ctx)
+			if !ok {
+				t.Fatal("claimed delivery context is missing")
+			}
+
+			result := am.processEventDetailed(ctx, agent, evt)
+			if test.wantErr == "" {
+				if result.err != nil || result.record.Outcome != startupManagerReplayOutcomeReplayed {
+					t.Fatalf("process result=%+v err=%v, want replayed", result.record, result.err)
+				}
+			} else if result.err == nil || !strings.Contains(result.err.Error(), test.wantErr) {
+				t.Fatalf("process error=%v, want %s", result.err, test.wantErr)
+			}
+			if len(bus.published) != 0 {
+				t.Fatalf("published outputs=%d, want none", len(bus.published))
+			}
+			snapshot, err := deliveryStore.Snapshot(context.Background(), claim.DeliveryID())
+			if err != nil {
+				t.Fatalf("load origin delivery: %v", err)
+			}
+			if snapshot.Status != runtimedelivery.StatusInProgress {
+				t.Fatalf("origin status=%s, want unchanged in_progress proof that Manager did not settle twice", snapshot.Status)
+			}
+		})
+	}
 }
 
 type partialOutputRetryStore struct {
