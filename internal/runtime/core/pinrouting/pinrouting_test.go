@@ -123,6 +123,39 @@ func TestAdmitNodeExecutionRoutingSourcePreservesEntitylessSelectedRun(t *testin
 	}
 }
 
+func TestAdmitNodeExecutionRoutingSourceUsesNestedPackageOwningFlow(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{
+		Path: "orders", Paths: runtimecontracts.FlowContractPaths{ID: "orders", PackageKey: "root/flows/orders"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Children: []runtimecontracts.FlowContractView{{
+			Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"},
+			Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {ID: "shared"}},
+		}},
+	}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "root"}, Children: []runtimecontracts.FlowContractView{flow}}
+	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
+		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]},
+	}}
+	source := semanticview.Wrap(bundle)
+	node := identitytest.ExecutableNode(t, "packages/a", "orders", "shared")
+	owner, ok := source.ExecutableNodeSource(node)
+	if !ok || owner.Layer != "project" || owner.FlowID != "orders" {
+		t.Fatalf("nested package owner = %#v, ok=%v", owner, ok)
+	}
+	route := events.RouteIdentity{FlowID: "orders", FlowInstance: "orders/one", EntityID: "entity-one"}
+	got, err := AdmitNodeExecutionRoutingSource(source, node, "orders", route)
+	if err != nil {
+		t.Fatalf("AdmitNodeExecutionRoutingSource: %v", err)
+	}
+	if got.Kind() != events.RoutingSourceConcreteTemplateInstance || got.Route() != route {
+		t.Fatalf("nested package routing source = %s %#v, want concrete route %#v", got.Kind().StorageCode(), got.Route(), route)
+	}
+	hostile := identitytest.ExecutableNode(t, "packages/b", "orders", "shared")
+	if _, err := AdmitNodeExecutionRoutingSource(source, hostile, "orders", route); err == nil || !strings.Contains(err.Error(), "requires declared node") {
+		t.Fatalf("undeclared package sibling error = %v", err)
+	}
+}
+
 func TestPinDeclaredOutputRecognizesExactRootOutputOnly(t *testing.T) {
 	source := testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil)
 	if !PinDeclaredOutput(source, "", "root.ready") {

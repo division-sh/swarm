@@ -132,6 +132,29 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 	})
 }
 
+func TestRetiredFlattenedExecutableNodeReadersStayAbsent(t *testing.T) {
+	forbidden := map[string]struct{}{
+		"NodeEntries":        {},
+		"NodeEventHandlers":  {},
+		"NodeContractSource": {},
+		"NodeEntry":          {},
+	}
+	inspectProductionGo(t, func(path string, file *ast.File) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if name := calledFunctionName(call.Fun); name != "" {
+				if _, retired := forbidden[name]; retired {
+					t.Errorf("%s calls retired flattened executable-node reader %s", path, name)
+				}
+			}
+			return true
+		})
+	})
+}
+
 func TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization(t *testing.T) {
 	closed := map[string]reflect.Type{
 		"ToolInputSchema":               reflect.TypeOf(runtimecontracts.ToolInputSchema{}),

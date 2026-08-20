@@ -3,6 +3,7 @@ package bootverify
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -241,6 +242,58 @@ shared-node:
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !findingContainsAll(report.HardInvalidities(), joinValidationCheckID, "flow a", "shared-node", `unknown stage "missing"`) {
 		t.Fatalf("join findings = %#v, want exact invalid scoped join rejection", report.HardInvalidities())
+	}
+}
+
+func TestRun_JoinValidationAttributesSameFlowPackageFailureExactlyInEitherOrder(t *testing.T) {
+	validNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/a", "", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/b", "", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reverse := range []bool{false, true} {
+		bundle := joinValidationBundle()
+		validSpec := *bundle.Nodes["join-node"].EventHandlers["item.completed"].Join
+		invalidSpec := validSpec
+		invalidSpec.Stage = "missing"
+		validView := runtimecontracts.FlowContractView{
+			Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"},
+			Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &validSpec}}}},
+		}
+		invalidView := runtimecontracts.FlowContractView{
+			Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/b", NodesFile: "packages/b/nodes.yaml"},
+			Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &invalidSpec}}}},
+		}
+		children := []runtimecontracts.FlowContractView{validView, invalidView}
+		plans := []runtimecontracts.WorkflowJoinPlan{
+			{Node: validNode, HandlerEvent: "item.completed", Spec: validSpec},
+			{Node: invalidNode, HandlerEvent: "item.completed", Spec: invalidSpec},
+		}
+		if reverse {
+			children[0], children[1] = children[1], children[0]
+			plans[0], plans[1] = plans[1], plans[0]
+		}
+		root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "root"}, Children: children}
+		bundle.FlowTree = runtimecontracts.FlowTree{Root: &root}
+		bundle.Nodes = nil
+		bundle.Semantics.Joins = plans
+
+		report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+		matched := false
+		for _, finding := range report.HardInvalidities() {
+			if finding.CheckID == joinValidationCheckID && finding.Location == invalidNode.Key() && strings.Contains(finding.Message, `unknown stage "missing"`) {
+				matched = true
+			}
+			if finding.CheckID == joinValidationCheckID && finding.Location == validNode.Key() && strings.Contains(finding.Message, `unknown stage "missing"`) {
+				t.Fatalf("invalid package finding attributed to valid sibling: %#v", finding)
+			}
+		}
+		if !matched {
+			t.Fatalf("reverse=%v findings = %#v, want exact package-qualified invalid location %q", reverse, report.HardInvalidities(), invalidNode.Key())
+		}
 	}
 }
 

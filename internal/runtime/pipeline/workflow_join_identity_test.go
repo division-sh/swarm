@@ -561,6 +561,115 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 	}
 }
 
+func TestSameFlowPackageJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *testing.T) {
+	for _, storeCase := range workflowJoinStoreCases() {
+		for _, order := range []struct {
+			name    string
+			reverse bool
+		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
+			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
+				store, ctx := storeCase.open(t)
+				bundle := workflowJoinLifecycleBundle()
+				orders := bundle.FlowTree.ByID["orders"]
+				handler := orders.Nodes["join-node"].EventHandlers["item.completed"]
+				first := pipelinePackageNode(t, "packages/a", "orders", "shared")
+				second := pipelinePackageNode(t, "packages/b", "orders", "shared")
+				children := []runtimecontracts.FlowContractView{
+					{Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"}, Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": handler}}}},
+					{Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/b", NodesFile: "packages/b/nodes.yaml"}, Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": handler}}}},
+				}
+				plan := bundle.Semantics.Joins[0]
+				firstPlan, secondPlan := plan, plan
+				firstPlan.Node, secondPlan.Node = first, second
+				plans := []runtimecontracts.WorkflowJoinPlan{firstPlan, secondPlan}
+				if order.reverse {
+					children[0], children[1] = children[1], children[0]
+					plans[0], plans[1] = plans[1], plans[0]
+				}
+				orders.Children = children
+				source := exactWorkflowJoinSource{Source: semanticview.Wrap(bundle), plans: plans}
+				schedules := &recordingGenericScheduleWakeupOwner{}
+				newCoordinator := func() *PipelineCoordinator {
+					return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+						Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules,
+					})
+				}
+				pc := newCoordinator()
+				path := "orders/" + uuid.NewString()
+				route := testWorkflowInstanceRoute(path)
+				entityID := FlowInstanceEntityID(path)
+				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+					InstanceID: route.InstanceID, StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
+					CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
+						"entity_id": entityID, "flow_path": path, "instance_id": route.InstanceID, "expected": []any{"a", "b"},
+					},
+				})); err != nil {
+					t.Fatal(err)
+				}
+				transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, route, entityID, "dispatch.completed")
+				if err := pc.persistWorkflowStateForTest(transitionCtx, route, entityID, "awaiting", "dispatch.completed"); err != nil {
+					t.Fatalf("arm package joins: %v", err)
+				}
+				upserts, _ := committedWorkflowSchedulesForTest(t, store)
+				if len(upserts) != 2 || upserts[0].Command.TaskID == upserts[1].Command.TaskID {
+					t.Fatalf("package join schedules = %#v, want two exact declarations", upserts)
+				}
+				load := func() map[string]joinruntime.Activation {
+					t.Helper()
+					instance, found, err := store.Load(ctx, route)
+					if err != nil || !found {
+						t.Fatalf("load package join instance: found=%v err=%v", found, err)
+					}
+					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+					if err != nil {
+						t.Fatal(err)
+					}
+					items, err := joinruntime.List(carrier.StateBuckets)
+					if err != nil {
+						t.Fatal(err)
+					}
+					out := map[string]joinruntime.Activation{}
+					for _, item := range items {
+						out[item.JoinRef().Node().Key()] = item
+					}
+					return out
+				}
+				if activations := load(); len(activations) != 2 || activations[first.Key()].Completed() != 0 || activations[second.Key()].Completed() != 0 {
+					t.Fatalf("armed package activations = %#v", activations)
+				}
+				deliver := func(node runtimeidentity.ExecutableNode, eventID string) error {
+					event := eventtest.RunCreatingRootIngress(
+						eventID, events.EventType("item.completed"), "operator", "", mustJSON(map[string]any{"member_id": "a", "result": map[string]any{"value": node.PackageKey()}}), 0,
+						runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC(),
+					)
+					persistExactJoinEvent(t, store, ctx, event)
+					deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
+						Recipient: events.MustNodeDeliveryRecipient(node),
+						Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "orders", FlowInstance: path, EntityID: entityID}),
+					})
+					_, err := pc.executeNodeContractHandler(deliveryCtx, node, source.ExecutableNodeEventHandlers(node)["item.completed"], workflowTriggerContext{
+						Event: event, State: mustCurrentWorkflowState(t, pc, ctx, route, entityID), HandlerEventKey: "item.completed",
+					}, false)
+					return err
+				}
+				if err := deliver(first, uuid.NewString()); err != nil {
+					t.Fatal(err)
+				}
+				if activations := load(); activations[first.Key()].Completed() != 1 || activations[second.Key()].Completed() != 0 {
+					t.Fatalf("first package arrival crossed declarations: %#v", activations)
+				}
+				pc = newCoordinator()
+				if err := deliver(second, uuid.NewString()); err != nil {
+					t.Fatal(err)
+				}
+				if activations := load(); activations[first.Key()].Completed() != 1 || activations[second.Key()].Completed() != 1 {
+					t.Fatalf("restarted package arrivals = %#v", activations)
+				}
+			})
+		}
+	}
+}
+
 func TestRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStores(t *testing.T) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {

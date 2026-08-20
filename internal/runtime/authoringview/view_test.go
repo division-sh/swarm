@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -145,6 +146,40 @@ func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 	if join.MembersBy != "payload.operating_id" || join.MembersBySource != "resolution.dedup_by" ||
 		join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" || join.FanInPin != "operating_reported" {
 		t.Fatalf("effective join readback = %#v", join)
+	}
+}
+
+func TestBuildStageGraphShowsSameFlowPackageQualifiedJoins(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{Path: "orders", Paths: runtimecontracts.FlowContractPaths{ID: "orders", PackageKey: "root/flows/orders"}}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/a", "orders", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/b", "orders", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]}},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowStates: map[string][]string{"orders": {"awaiting", "done"}},
+			Joins: []runtimecontracts.WorkflowJoinPlan{
+				{Node: second, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "second", Stage: "awaiting"}},
+				{Node: first, HandlerEvent: "item.completed", Spec: runtimecontracts.JoinSpec{ID: "first", Stage: "awaiting"}},
+			},
+		},
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(view.StageGraphs) != 1 || len(view.StageGraphs[0].Joins) != 2 {
+		t.Fatalf("stage graphs = %#v, want both package-qualified joins", view.StageGraphs)
+	}
+	joins := view.StageGraphs[0].Joins
+	if joins[0].PackageKey != "packages/a" || joins[0].NodeID != "shared" || joins[1].PackageKey != "packages/b" || joins[1].NodeID != "shared" {
+		t.Fatalf("package-qualified join readback = %#v", joins)
 	}
 }
 

@@ -13,3 +13,11 @@ func mustPersistenceNode(flowID, nodeID string) runtimeidentity.ExecutableNode {
 	}
 	return node
 }
+
+func mustPersistencePackageNode(packageKey, flowID, nodeID string) runtimeidentity.ExecutableNode {
+	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(packageKey, flowID, nodeID)
+	if err != nil {
+		panic(err)
+	}
+	return node
+}

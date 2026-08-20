@@ -25,6 +25,10 @@ func checkJoinValidation(c *checkerContext) []Finding {
 		nodeID := strings.TrimSpace(record.LogicalID)
 		flowID := strings.TrimSpace(record.Source.FlowID)
 		nodeRef, nodeErr := record.Identity()
+		declarationLocation := nodeID
+		if nodeErr == nil {
+			declarationLocation = nodeRef.Key()
+		}
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
@@ -32,141 +36,141 @@ func checkJoinValidation(c *checkerContext) []Finding {
 				continue
 			}
 			if err := runtimecontracts.ValidateJoinHandlerIsolation(handler); err != nil {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, err.Error()))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, err.Error()))
 			}
 			if nodeErr != nil {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has incomplete executable node identity: "+nodeErr.Error()))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, "join has incomplete executable node identity: "+nodeErr.Error()))
 				continue
 			}
 			ref, refErr := timeridentity.NewJoinRef(nodeRef, eventType, handler.Join.Stage, handler.Join.EffectiveID(), "")
 			if refErr != nil {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has incomplete declaration identity: "+refErr.Error()))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, "join has incomplete declaration identity: "+refErr.Error()))
 				continue
 			}
 			plan, ok := semanticview.WorkflowJoinPlanForRef(c.source, ref)
 			if !ok {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, "join has no effective WorkflowJoinPlan; reload the workflow contract and declare exactly one canonical join row"))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, "join has no effective WorkflowJoinPlan; reload the workflow contract and declare exactly one canonical join row"))
 				continue
 			}
 			spec := plan.Spec
 			resultType := plan.ResultType
 			prefix := fmt.Sprintf("join %s", spec.EffectiveID())
 			if !flowUsesAuthoredStages(c.source, flowID) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
 			}
 			if spec.Stage == "" || !containsString(c.source.FlowStates(flowID), spec.Stage) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("%s references unknown stage %q", prefix, spec.Stage)))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s references unknown stage %q", prefix, spec.Stage)))
 			}
 			identityKey := strings.Join([]string{nodeRef.Key(), spec.Stage, spec.EffectiveID()}, "|")
-			location := nodeID + ":" + eventType
+			duplicateLocation := nodeID + ":" + eventType
 			if prior, duplicate := seenIDs[identityKey]; duplicate {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("%s has duplicate effective identity; already declared at %s (add explicit unique id values)", prefix, prior)))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s has duplicate effective identity; already declared at %s (add explicit unique id values)", prefix, prior)))
 			} else {
-				seenIDs[identityKey] = location
+				seenIDs[identityKey] = duplicateLocation
 			}
-			findings = append(findings, c.validateJoinPaths(flowID, nodeID, eventType, spec)...)
+			findings = append(findings, c.validateJoinPaths(declarationLocation, flowID, nodeID, eventType, spec)...)
 			if spec.Window == nil && joinStageCanReenter(c.source, flowID, spec.Stage) {
 				detail := prefix + " stage is re-entrant; add window.from and window.by, or make the stage provably non-reentrant"
 				if strings.TrimSpace(plan.Derivation.FanInPin) != "" {
 					detail = prefix + " stage is re-entrant; add resolution.window on input pin " + plan.Derivation.FanInPin + " plus join.window.from, or make the stage provably non-reentrant"
 				}
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, detail))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, detail))
 			}
 			if spec.HasCustomCompletion() {
 				if spec.Remaining != runtimecontracts.JoinRemainingIgnore {
-					findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" complete_when requires remaining: ignore"))
+					findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" complete_when requires remaining: ignore"))
 				}
-				findings = append(findings, validateJoinExpression(flowID, nodeID, eventType, "complete_when", spec.CompleteWhen, true, resultType)...)
+				findings = append(findings, validateJoinExpression(declarationLocation, flowID, nodeID, eventType, "complete_when", spec.CompleteWhen, true, resultType)...)
 			} else if spec.Remaining != "" {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" remaining is forbidden when complete_when is omitted"))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" remaining is forbidden when complete_when is omitted"))
 			}
 			if !spec.OnCompleteFound || joinRuleEmpty(spec.OnComplete) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" requires a non-empty on_complete outcome"))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" requires a non-empty on_complete outcome"))
 			}
 			if !spec.TimeoutFound || strings.TrimSpace(spec.Timeout.After) == "" || joinRuleEmpty(spec.Timeout.Outcome) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, prefix+" requires timeout.after and a non-empty timeout outcome; bare joins are invalid"))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" requires timeout.after and a non-empty timeout outcome; bare joins are invalid"))
 			} else if !joinDelayValid(c.source, flowID, spec.Timeout.After) {
-				findings = append(findings, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("%s timeout.after %q must be a positive duration or resolved policy-scalar duration", prefix, spec.Timeout.After)))
+				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s timeout.after %q must be a positive duration or resolved policy-scalar duration", prefix, spec.Timeout.After)))
 			}
-			findings = append(findings, validateJoinOutcome(flowID, nodeID, eventType, "on_complete", spec.OnComplete, c.source.FlowStates(flowID), resultType)...)
-			findings = append(findings, validateJoinOutcome(flowID, nodeID, eventType, "timeout", spec.Timeout.Outcome, c.source.FlowStates(flowID), resultType)...)
+			findings = append(findings, validateJoinOutcome(declarationLocation, flowID, nodeID, eventType, "on_complete", spec.OnComplete, c.source.FlowStates(flowID), resultType)...)
+			findings = append(findings, validateJoinOutcome(declarationLocation, flowID, nodeID, eventType, "timeout", spec.Timeout.Outcome, c.source.FlowStates(flowID), resultType)...)
 		}
 	}
 	return findings
 }
 
-func (c *checkerContext) validateJoinPaths(flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) []Finding {
+func (c *checkerContext) validateJoinPaths(location, flowID, nodeID, eventType string, spec runtimecontracts.JoinSpec) []Finding {
 	out := make([]Finding, 0, 5)
 	view := wave1EntityContractForFlow(c.source, flowID)
 	memberField := joinPathField(spec.Members.From, "entity")
 	if memberField == "" {
-		out = append(out, joinFinding(flowID, nodeID, eventType, "join.members.from must be a top-level entity.<field> path"))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.members.from must be a top-level entity.<field> path"))
 	} else if field, ok := view.Contract.Fields[memberField]; !view.Defined || !ok {
-		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.members.from references undeclared entity field %s", memberField)))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.members.from references undeclared entity field %s", memberField)))
 	} else if !joinTextListType(field.Type) {
-		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.members.from field %s must be ordered list<text>, got %q", memberField, field.Type)))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.members.from field %s must be ordered list<text>, got %q", memberField, field.Type)))
 	}
 	proof := semanticview.ResolveFlowEventProof(c.source, flowID, eventType)
 	memberBy := joinPathField(spec.Members.By, "payload")
 	if memberBy == "" {
-		out = append(out, joinFinding(flowID, nodeID, eventType, "join.members.by must be a top-level payload.<field> path"))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.members.by must be a top-level payload.<field> path"))
 	} else if field, ok := proof.Entry.Payload.Properties[memberBy]; !proof.HasSchema || !ok || !joinTextType(field.Type) {
-		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.members.by must reference a declared text payload field %s", memberBy)))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.members.by must reference a declared text payload field %s", memberBy)))
 	}
 	output := joinPathField(spec.Output, "payload")
 	if output == "" {
-		out = append(out, joinFinding(flowID, nodeID, eventType, "join.output must be a top-level payload.<field> path"))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.output must be a top-level payload.<field> path"))
 	} else if _, ok := proof.Entry.Payload.Properties[output]; !proof.HasSchema || !ok {
-		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.output references undeclared payload field %s", output)))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.output references undeclared payload field %s", output)))
 	}
 	if spec.Window != nil {
 		windowFrom := joinPathField(spec.Window.From, "entity")
 		if field, ok := view.Contract.Fields[windowFrom]; windowFrom == "" || !view.Defined || !ok || !joinTextType(field.Type) {
-			out = append(out, joinFinding(flowID, nodeID, eventType, "join.window.from must reference a declared top-level text entity field"))
+			out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.window.from must reference a declared top-level text entity field"))
 		}
 		windowBy := joinPathField(spec.Window.By, "payload")
 		if field, ok := proof.Entry.Payload.Properties[windowBy]; windowBy == "" || !proof.HasSchema || !ok || !joinTextType(field.Type) {
-			out = append(out, joinFinding(flowID, nodeID, eventType, "join.window.by must reference a declared top-level text payload field"))
+			out = append(out, joinFinding(location, flowID, nodeID, eventType, "join.window.by must reference a declared top-level text payload field"))
 		}
 	}
 	return out
 }
 
-func validateJoinOutcome(flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string, resultType runtimecontracts.CatalogTypeReference) []Finding {
+func validateJoinOutcome(location, flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string, resultType runtimecontracts.CatalogTypeReference) []Finding {
 	out := make([]Finding, 0)
 	if target := strings.TrimSpace(rule.AdvancesTo); target != "" && !containsString(states, target) {
-		out = append(out, joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s advances_to references unknown stage %s", label, target)))
+		out = append(out, joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s advances_to references unknown stage %s", label, target)))
 	}
 	for field, expr := range rule.Emit.Fields {
 		if text := joinExpressionText(expr); text != "" {
-			out = append(out, validateJoinExpression(flowID, nodeID, eventType, label+" emit.fields."+field, text, false, resultType)...)
+			out = append(out, validateJoinExpression(location, flowID, nodeID, eventType, label+" emit.fields."+field, text, false, resultType)...)
 		}
 	}
 	for idx, write := range rule.DataAccumulation.Writes {
 		if text := joinExpressionText(write.Value); text != "" {
-			out = append(out, validateJoinExpression(flowID, nodeID, eventType, fmt.Sprintf("%s data_accumulation.writes[%d]", label, idx), text, false, resultType)...)
+			out = append(out, validateJoinExpression(location, flowID, nodeID, eventType, fmt.Sprintf("%s data_accumulation.writes[%d]", label, idx), text, false, resultType)...)
 		}
 	}
 	return out
 }
 
-func validateJoinExpression(flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType runtimecontracts.CatalogTypeReference) []Finding {
+func validateJoinExpression(location, flowID, nodeID, eventType, label, expression string, joinOnly bool, resultType runtimecontracts.CatalogTypeReference) []Finding {
 	if err := workflowexpr.ValidateValueExpressionWithOptions(expression, workflowexpr.ValueExpressionOptions{AllowJoin: true, RequireBool: joinOnly, JoinResultType: resultType}); err != nil {
-		return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
+		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s expression %q is invalid: %v", label, expression, err))}
 	}
 	for _, root := range []string{"payload", "event", "policy", "computed", "fan_out", "accumulated", "_entity"} {
 		if workflowexpr.ExpressionReferencesRoot(expression, root) {
-			return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s may not reference %s.*", label, root))}
+			return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s may not reference %s.*", label, root))}
 		}
 	}
 	if joinOnly && workflowexpr.ExpressionReferencesRoot(expression, "entity") {
-		return []Finding{joinFinding(flowID, nodeID, eventType, fmt.Sprintf("join.%s may reference only join.*", label))}
+		return []Finding{joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s may reference only join.*", label))}
 	}
 	return nil
 }
 
-func joinFinding(flowID, nodeID, eventType, detail string) Finding {
-	return NewHardInvalidityFinding(joinValidationCheckID, nodeID,
+func joinFinding(location, flowID, nodeID, eventType, detail string) Finding {
+	return NewHardInvalidityFinding(joinValidationCheckID, location,
 		fmt.Sprintf("flow %s node %s handler %s: %s", defaultFlowLabel(flowID), nodeID, eventType, detail),
 		"Use the canonical staged handler.join contract with typed membership, mandatory timeout, and supported entity/join outcome expressions.")
 }
