@@ -160,6 +160,22 @@ func TestReleaseDockerExecAdmissionRejectsCredentialTargetAndClaudeMutations(t *
 			}
 		})
 	}
+	for name, mutate := range map[string]func([]string) []string{
+		"missing managed model": func(args []string) []string {
+			return removeReleaseOptionPair(args, "--model", "")
+		},
+		"wrong managed model": func(args []string) []string {
+			replaceReleaseArgValue(args, "--model", "hostile-model")
+			return args
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := mutate(append([]string(nil), valid...))
+			if _, err := validateReleaseDockerExec(args, []byte("complete the authored work")); err == nil {
+				t.Fatalf("live invocation with %s was accepted: %q", name, args)
+			}
+		})
+	}
 }
 
 func TestReleaseContainerMCPAdmissionRejectsRawEndpointMutations(t *testing.T) {
@@ -249,6 +265,7 @@ func validReleaseClaudeDockerExecArgs(t *testing.T, rawURL string) []string {
 		"--allowedTools", strings.Join(releaseE2EStartupAllowedTools(), ","),
 		"--mcp-config", string(rawConfig),
 		"--strict-mcp-config",
+		"--model", releaseE2EManagedModel,
 	}
 }
 
@@ -291,7 +308,7 @@ func validReleaseEvidence() []fakeDockerRecord {
 		},
 		{
 			Class:     "claude_live",
-			Args:      []string{"claude", "--tools", strings.Join(releaseE2EBuiltinTools(), ","), "--allowedTools", strings.Join(releaseE2ELiveAllowedTools(), ",")},
+			Args:      []string{"claude", "--tools", strings.Join(releaseE2EBuiltinTools(), ","), "--allowedTools", strings.Join(releaseE2ELiveAllowedTools(), ","), "--model", releaseE2EManagedModel},
 			SessionID: "22222222-2222-2222-2222-222222222222",
 			RawMCPURL: releaseE2ERawMCPURL,
 			MCPURL:    releaseE2EHostMCPURL,

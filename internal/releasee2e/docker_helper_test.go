@@ -28,6 +28,7 @@ const (
 	releaseE2EWorkspaceImage   = "swarm-workspace:latest"
 	releaseE2ENetwork          = "mas_default"
 	releaseE2EAgentWorkdir     = "/workspace"
+	releaseE2EManagedModel     = "sonnet"
 	releaseE2EAgentFingerprint = "1f16a79924a40cd1e6e42105063bd4b8d5e3332769c777508831bb193986d791"
 	releaseE2EAgentContainer   = "swarm-agent-" + releaseE2EAgentFingerprint
 	releaseE2EAgentVolume      = "workspaces_agent_" + releaseE2EAgentFingerprint
@@ -781,6 +782,7 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 		"--tools":         true,
 		"--allowedTools":  true,
 		"--mcp-config":    true,
+		"--model":         true,
 	}
 	boolNames := map[string]bool{
 		"-p":                         true,
@@ -834,6 +836,9 @@ func validateReleaseClaudeArgs(args []string, startup bool) error {
 	}
 	if strings.TrimSpace(valueFlags["--mcp-config"]) == "" {
 		return fmt.Errorf("Claude invocation omitted --mcp-config")
+	}
+	if !startup && valueFlags["--model"] != releaseE2EManagedModel {
+		return fmt.Errorf("Claude --model = %q, want sealed managed model %q", valueFlags["--model"], releaseE2EManagedModel)
 	}
 	return nil
 }

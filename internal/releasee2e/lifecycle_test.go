@@ -186,6 +186,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			}
 		case "claude_live":
 			liveIndex, liveSession = index, record.SessionID
+			if model := dockerOptionValue(record.Args, "--model"); model != releaseE2EManagedModel {
+				return fmt.Errorf("live managed model = %q, want sealed model %q", model, releaseE2EManagedModel)
+			}
 			if selected := splitAllowedTools(dockerOptionValue(record.Args, "--tools")); !equalStrings(selected, releaseE2EBuiltinTools()) {
 				return fmt.Errorf("live selected builtins = %q, want exact fixture builtin surface", selected)
 			}
