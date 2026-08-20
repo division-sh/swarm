@@ -72,7 +72,7 @@ def handle(input):
 	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"echo","schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
 	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{{
 		Name: "echo", Schema: map[string]any{"type": "object", "required": []any{"text"}, "properties": map[string]any{"text": map[string]any{"type": "string"}}, "additionalProperties": false},
-	}}, request, "mock-frame-model")
+	}}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"})
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}
@@ -121,6 +121,7 @@ def handle(input):
 		t.Fatalf("response = %#v, want done", response)
 	}
 	settlements := harness.CompletionSettlementsForAdapter("mock_python")
+	requireManagedSettlementProviderSelection(t, settlements)
 	var input mockCompletionInput
 	if len(settlements) == 1 && settlements[0].AgentTurn != nil {
 		_ = json.Unmarshal(settlements[0].AgentTurn.RequestPayload, &input)

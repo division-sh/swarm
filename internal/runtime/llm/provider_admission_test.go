@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -223,6 +224,42 @@ func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
 	}
 	release()
 	_, err = registry.Admit(unmanagedLLMTestContext(), profile, cheap)
+	requireProviderAdmissionRateLimited(t, err)
+}
+
+func TestManagedProviderAdmissionUsesFrameModelAlias(t *testing.T) {
+	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
+	managed := managedProviderCall{provider: agentframe.Provider{
+		RuntimeMode: profile.RuntimeMode,
+		Provider:    profile.Provider,
+		Transport:   profile.Transport,
+		ModelAlias:  testManagedModelAlias,
+		Model:       "test-model",
+	}}
+	resolved, err := managed.resolvedModel(profile)
+	if err != nil {
+		t.Fatalf("resolve managed provider model: %v", err)
+	}
+	if resolved.ModelAlias != testManagedModelAlias || resolved.ConcreteModel != "test-model" {
+		t.Fatalf("managed provider model = %#v", resolved)
+	}
+
+	registry := NewProviderAdmissionRegistry(&config.Config{LLM: config.LLMConfig{
+		ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+			llmselection.BackendAnthropic: {
+				Models: map[string]config.LLMProviderLimitPolicy{
+					testManagedModelAlias: {MaxConcurrency: 1, MaxConcurrencyMaxWait: "0s"},
+				},
+			},
+		},
+	}})
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{Model: "hostile-mutated-alias"})
+	release, err := registry.Admit(ctx, profile, resolved)
+	if err != nil {
+		t.Fatalf("first alias-only Admit: %v", err)
+	}
+	defer release()
+	_, err = registry.Admit(ctx, profile, resolved)
 	requireProviderAdmissionRateLimited(t, err)
 }
 

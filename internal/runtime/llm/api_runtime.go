@@ -347,7 +347,11 @@ func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile l
 		return nil, anthropicResponse{}, nil, err
 	}
 	defer release()
-	return r.sendRequest(ctx, payload)
+	raw, response, dispatch, err := r.sendRequest(ctx, payload)
+	if dispatch != nil {
+		dispatch.providerModel = model
+	}
+	return raw, response, dispatch, err
 }
 
 func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Session) {

@@ -54,6 +54,7 @@ type SessionSeed struct {
 	RuntimeMode    string
 	Provider       string
 	Transport      string
+	ModelAlias     string
 	Model          string
 }
 
@@ -72,6 +73,9 @@ func (s SessionSeed) Validate() error {
 	}
 	if strings.TrimSpace(s.RuntimeMode) == "" || strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.Transport) == "" {
 		return fmt.Errorf("provider runtime mode, provider, and transport are required")
+	}
+	if err := validateProviderModelSelection(s.ModelAlias, s.Model); err != nil {
+		return err
 	}
 	return nil
 }
@@ -99,6 +103,7 @@ type Provider struct {
 	RuntimeMode string `json:"runtime_mode"`
 	Provider    string `json:"provider"`
 	Transport   string `json:"transport"`
+	ModelAlias  string `json:"model_alias,omitempty"`
 	Model       string `json:"model,omitempty"`
 }
 
@@ -302,7 +307,7 @@ func completeSession(seed SessionSeed, bundleHash, bundleSource string) (Session
 		Criteria: Criteria{References: append([]string(nil), seed.Criteria...), Identity: criteriaIdentity},
 		Provider: Provider{
 			RuntimeMode: strings.TrimSpace(seed.RuntimeMode), Provider: strings.TrimSpace(seed.Provider),
-			Transport: strings.TrimSpace(seed.Transport), Model: strings.TrimSpace(seed.Model),
+			Transport: strings.TrimSpace(seed.Transport), ModelAlias: seed.ModelAlias, Model: seed.Model,
 		},
 		ProviderPrompt: prompt,
 	}, nil
@@ -563,6 +568,12 @@ func (f Frame) Validate() error {
 	if err := f.Session.AgentIdentity.Validate(); err != nil {
 		return fmt.Errorf("execution frame agent identity: %w", err)
 	}
+	if strings.TrimSpace(f.Session.Provider.RuntimeMode) == "" || strings.TrimSpace(f.Session.Provider.Provider) == "" || strings.TrimSpace(f.Session.Provider.Transport) == "" {
+		return fmt.Errorf("execution frame provider contract is incomplete")
+	}
+	if err := validateProviderModelSelection(f.Session.Provider.ModelAlias, f.Session.Provider.Model); err != nil {
+		return fmt.Errorf("execution frame provider selection: %w", err)
+	}
 	if !f.Turn.Kind.Valid() || f.Turn.Capability.SurfaceID == "" || f.Turn.Capability.PlanFingerprint == "" {
 		return fmt.Errorf("execution frame turn is incomplete")
 	}
@@ -595,6 +606,16 @@ func (f Frame) Validate() error {
 	sum := sha256.Sum256(canonical)
 	if f.ContentHash != contentHashPrefix+hex.EncodeToString(sum[:]) {
 		return fmt.Errorf("execution frame content hash does not match canonical content")
+	}
+	return nil
+}
+
+func validateProviderModelSelection(alias, model string) error {
+	if alias != strings.TrimSpace(alias) || model != strings.TrimSpace(model) {
+		return fmt.Errorf("provider model alias and concrete model must be exact")
+	}
+	if (alias == "") != (model == "") {
+		return fmt.Errorf("provider model alias and concrete model must be present together")
 	}
 	return nil
 }

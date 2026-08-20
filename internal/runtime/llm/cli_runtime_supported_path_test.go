@@ -195,6 +195,7 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 		t.Fatalf("allowed tools = %#v", allowedTools)
 	}
 	settlements := effects.CompletionSettlementsForAdapter("claude_cli")
+	requireManagedSettlementProviderSelection(t, settlements)
 	if len(settlements) != 2 || settlements[0].AgentTurn == nil || settlements[1].AgentTurn == nil {
 		t.Fatalf("completion settlements = %#v, want two atomic agent turns", settlements)
 	}

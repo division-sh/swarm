@@ -23,9 +23,10 @@ import (
 )
 
 type completionDispatch struct {
-	handle   *runtimeeffects.Handle
-	state    runtimeeffects.State
-	evidence map[string]any
+	handle        *runtimeeffects.Handle
+	state         runtimeeffects.State
+	evidence      map[string]any
+	providerModel llmselection.ResolvedModel
 }
 
 const (
@@ -248,6 +249,11 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	if dispatch == nil || dispatch.handle == nil {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
+	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
+		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
+		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
+		return fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
+	}
 	// The dispatch state can narrow a provider-call failure to a proven
 	// prelaunch failure. A successful transport does not make later response
 	// conversion, usage validation, or target persistence successful.
@@ -275,7 +281,7 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	settlement := runtimeeffects.CompletionSettlement{
 		Settlement:   runtimeeffects.Settlement{State: state, Failure: failure, Evidence: evidence},
 		Usage:        usage,
-		Spend:        completionSpendForContext(ctx, profile, turn, usage),
+		Spend:        completionSpendForContext(ctx, profile, turn, usage, dispatch.providerModel),
 		ProviderHead: providerHead,
 		Now:          time.Now().UTC(),
 	}
@@ -322,8 +328,8 @@ func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.
 	}
 }
 
-func completionSpendForContext(ctx context.Context, profile llmselection.Profile, turn AgentTurnRecord, usage runtimeeffects.CompletionUsage) runtimeeffects.CompletionSpend {
-	meta := usageMetadataForContext(ctx, profile, usage.ResolvedModel)
+func completionSpendForContext(ctx context.Context, profile llmselection.Profile, turn AgentTurnRecord, usage runtimeeffects.CompletionUsage, providerModel llmselection.ResolvedModel) runtimeeffects.CompletionSpend {
+	meta := usageMetadataForProvider(profile, providerModel)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	flowInstance := strings.TrimSpace(turn.FlowInstance)
 	if !turn.Identity.Agent.IsZero() {

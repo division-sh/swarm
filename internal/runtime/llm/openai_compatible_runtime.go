@@ -378,7 +378,11 @@ func (r *OpenAICompatibleRuntime) sendAdmittedRequest(ctx context.Context, profi
 		return nil, openAICompatibleResponse{}, nil, err
 	}
 	defer release()
-	return r.sendRequest(ctx, payload)
+	raw, response, dispatch, err := r.sendRequest(ctx, payload)
+	if dispatch != nil {
+		dispatch.providerModel = model
+	}
+	return raw, response, dispatch, err
 }
 
 func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Session) {

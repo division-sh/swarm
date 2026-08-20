@@ -14,10 +14,14 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 )
 
-const testAgentFrameBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const (
+	testAgentFrameBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testManagedModelAlias    = "frame-alias"
+)
 
 func testManagedSessionSeed(t testing.TB, identity agentidentity.Identity, role string, runtime Runtime) agentframe.SessionSeed {
 	t.Helper()
@@ -51,6 +55,7 @@ func testManagedSessionSeed(t testing.TB, identity agentidentity.Identity, role 
 		RuntimeMode:    contract.RuntimeMode,
 		Provider:       contract.Provider,
 		Transport:      string(contract.Transport),
+		ModelAlias:     testManagedModelAlias,
 		Model:          "test-model",
 	}
 }
@@ -99,4 +104,16 @@ func testManagedConversationContext(t testing.TB, harness *effecttest.Harness, a
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	return llmTestWorkContext(t, ctx)
+}
+
+func requireManagedSettlementProviderSelection(t testing.TB, settlements []runtimeeffects.CompletionSettlement) {
+	t.Helper()
+	if len(settlements) == 0 {
+		t.Fatal("managed completion produced no settlements")
+	}
+	for index, settlement := range settlements {
+		if settlement.Usage.ResolvedModel != "test-model" || settlement.Spend.ModelAlias != testManagedModelAlias || settlement.Spend.ResolvedModel != "test-model" {
+			t.Fatalf("managed settlement %d provider selection = usage %#v spend %#v", index, settlement.Usage, settlement.Spend)
+		}
+	}
 }

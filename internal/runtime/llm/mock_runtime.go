@@ -181,7 +181,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		return nil, err
 	}
 	start := time.Now()
-	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, completionModel)
+	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, providerModel)
 	latency := time.Since(start)
 	if response != nil {
 		if surface, ok := managedcapabilities.FromContext(ctx); ok {
@@ -285,12 +285,13 @@ type mockUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, model string) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
+func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
+	model := strings.TrimSpace(providerModel.ConcreteModel)
 	attempt, err := runtimeeffects.BeginCompletion(ctx, "mock_python", request, nil)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), nil, err
 	}
-	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateTerminalFailure}
+	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateTerminalFailure, providerModel: providerModel}
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err

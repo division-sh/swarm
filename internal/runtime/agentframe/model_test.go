@@ -114,12 +114,15 @@ func TestExecutionFrameContentHashBindsCanonicalSemanticFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	changedProviderAlias := seed
+	changedProviderAlias.ModelAlias = "frontier"
 
 	variants := map[string]Frame{
-		"intent":   completeTestFrame(t, changedIntent, TurnDraft{Kind: TurnInitial, Event: event}, surface),
-		"criteria": completeTestFrame(t, changedCriteria, TurnDraft{Kind: TurnInitial, Event: event}, surface),
-		"actor":    completeTestFrame(t, changedActor, TurnDraft{Kind: TurnInitial, Event: event}, actorSurface),
-		"event":    completeTestFrame(t, seed, TurnDraft{Kind: TurnInitial, Event: changedEvent}, surface),
+		"intent":         completeTestFrame(t, changedIntent, TurnDraft{Kind: TurnInitial, Event: event}, surface),
+		"criteria":       completeTestFrame(t, changedCriteria, TurnDraft{Kind: TurnInitial, Event: event}, surface),
+		"actor":          completeTestFrame(t, changedActor, TurnDraft{Kind: TurnInitial, Event: event}, actorSurface),
+		"event":          completeTestFrame(t, seed, TurnDraft{Kind: TurnInitial, Event: changedEvent}, surface),
+		"provider alias": completeTestFrame(t, changedProviderAlias, TurnDraft{Kind: TurnInitial, Event: event}, surface),
 		"kind and parent": completeTestFrame(t, seed, TurnDraft{
 			Kind: TurnToolContinuation, Event: event,
 			ParentFrameID: "agent-frame:v1:00000000-0000-4000-8000-000000000099",
@@ -159,6 +162,24 @@ func TestExecutionFrameConsumesAdmittedProviderTriggerEventFactsWithoutNormaliza
 	}
 	if got.RoutingSource.Route.FlowID != route.FlowID || got.RoutingSource.Route.EntityID != route.EntityID || string(got.Payload) != `{"message":"hello","provider_update_id":"42"}` {
 		t.Fatalf("provider trigger facts were normalized or inferred: %#v", got)
+	}
+}
+
+func TestExecutionFrameRequiresPairedExactProviderModelSelection(t *testing.T) {
+	seed, event, surface := testExecutionFrameInputs(t)
+	for name, mutate := range map[string]func(*SessionSeed){
+		"missing alias":      func(seed *SessionSeed) { seed.ModelAlias = "" },
+		"missing model":      func(seed *SessionSeed) { seed.Model = "" },
+		"non-exact alias":    func(seed *SessionSeed) { seed.ModelAlias = " regular " },
+		"non-exact concrete": func(seed *SessionSeed) { seed.Model = " test-model " },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := seed
+			mutate(&candidate)
+			if _, err := Complete(candidate, TurnDraft{Kind: TurnInitial, Event: event}, Completion{BundleHash: testBundleHash, BundleSource: "persisted", Surface: surface}); err == nil {
+				t.Fatal("execution frame accepted an incomplete or non-exact provider model selection")
+			}
+		})
 	}
 }
 
@@ -338,7 +359,7 @@ func testExecutionFrameInputs(t testing.TB) (SessionSeed, events.Event, managedc
 	}
 	seed := SessionSeed{
 		AgentIdentity: identity, Role: "worker", Intent: intent, ProviderPrompt: providerPrompt,
-		RuntimeMode: "api", Provider: "anthropic", Transport: "api", Model: "test-model",
+		RuntimeMode: "api", Provider: "anthropic", Transport: "api", ModelAlias: "regular", Model: "test-model",
 	}
 	runID := "00000000-0000-4000-8000-000000000001"
 	event := eventtest.RunCreatingRootIngress(

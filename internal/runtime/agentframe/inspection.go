@@ -166,6 +166,9 @@ func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSee
 		if strings.TrimSpace(provider.RuntimeMode) == "" || strings.TrimSpace(provider.Provider) == "" || strings.TrimSpace(provider.Transport) == "" {
 			return Inspection{}, fmt.Errorf("resolved provider contract is incomplete")
 		}
+		if err := validateProviderModelSelection(provider.ModelAlias, provider.Model); err != nil {
+			return Inspection{}, fmt.Errorf("resolved provider selection: %w", err)
+		}
 		session.Provider = present(provider)
 	}
 	return Inspection{

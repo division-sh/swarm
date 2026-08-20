@@ -244,7 +244,11 @@ func (c managedProviderCall) resolvedModel(profile llmselection.Profile) (llmsel
 	if c.provider.RuntimeMode != profile.RuntimeMode || c.provider.Provider != profile.Provider || c.provider.Transport != profile.Transport {
 		return llmselection.ResolvedModel{}, fmt.Errorf("managed call frame provider contract does not match profile %q", profile.ID)
 	}
+	if c.provider.ModelAlias == "" || c.provider.Model == "" {
+		return llmselection.ResolvedModel{}, fmt.Errorf("managed call frame requires authored model alias and concrete model")
+	}
 	return llmselection.ResolvedModel{
+		ModelAlias:    c.provider.ModelAlias,
 		ConcreteModel: c.provider.Model,
 		Backend:       profile.ID,
 		Provider:      c.provider.Provider,

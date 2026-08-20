@@ -52,7 +52,7 @@ func TestOperatorAgentFrameInspectionScopesUseCanonicalProjection(t *testing.T) 
 	resolver := &agentFrameEffectiveResolverStub{result: runtimemanager.AgentFrameConfig{
 		BundleHash: bundleHash, BundleSource: "persisted",
 		Config: runtimeactors.AgentConfig{
-			ID: "reviewer", Identity: identity, Role: "reviewer", FlowID: "root", Intent: intent,
+			ID: "reviewer", Identity: identity, Role: "reviewer", FlowID: "root", Intent: intent, Model: "regular",
 			Prompt: agentFrameTestDerivedPrompt(t, intent), ResolvedLLMBackend: "claude_api",
 			ResolvedLLMProvider: "anthropic", ResolvedLLMTransport: "api", ResolvedModel: "claude-sonnet",
 		},
@@ -83,6 +83,9 @@ func TestOperatorAgentFrameInspectionScopesUseCanonicalProjection(t *testing.T) 
 	}
 	if effective.Session.BundleSource.Value == nil || *effective.Session.BundleSource.Value != "persisted" {
 		t.Fatalf("effective bundle source = %#v", effective.Session.BundleSource)
+	}
+	if effective.Session.Provider.Value.ModelAlias != "regular" || effective.Session.Provider.Value.Model != "claude-sonnet" {
+		t.Fatalf("effective provider selection = %#v", effective.Session.Provider.Value)
 	}
 	assertAgentFrameOccurrenceUnresolved(t, effective)
 }

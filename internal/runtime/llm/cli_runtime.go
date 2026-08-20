@@ -317,7 +317,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if err != nil {
 		return nil, err
 	}
-	dispatch := &completionDispatch{handle: attempt}
+	dispatch := &completionDispatch{handle: attempt, providerModel: providerModel}
 	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)

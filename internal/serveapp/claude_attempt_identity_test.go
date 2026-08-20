@@ -171,6 +171,7 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 			RuntimeMode:    providerContract.RuntimeMode,
 			Provider:       providerContract.Provider,
 			Transport:      string(providerContract.Transport),
+			ModelAlias:     a.config.Model,
 			Model:          a.config.ResolvedModel,
 		}, a.config.CanonicalFlowPath(), nil, a.config.Memory, 25, a.runtime)
 		if err != nil {

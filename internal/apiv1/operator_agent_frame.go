@@ -275,9 +275,10 @@ func effectiveAgentFrameProvider(cfg runtimeactors.AgentConfig) (agentframe.Prov
 		RuntimeMode: strings.TrimSpace(cfg.ResolvedLLMBackend),
 		Provider:    strings.TrimSpace(cfg.ResolvedLLMProvider),
 		Transport:   strings.TrimSpace(cfg.ResolvedLLMTransport),
+		ModelAlias:  strings.TrimSpace(cfg.Model),
 		Model:       strings.TrimSpace(cfg.ResolvedModel),
 	}
-	if provider.RuntimeMode == "" || provider.Provider == "" || provider.Transport == "" {
+	if provider.RuntimeMode == "" || provider.Provider == "" || provider.Transport == "" || provider.ModelAlias == "" || provider.Model == "" {
 		return agentframe.Provider{}, fmt.Errorf("effective agent frame provider selection is incomplete")
 	}
 	return provider, nil
