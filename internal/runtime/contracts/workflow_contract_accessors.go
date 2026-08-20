@@ -315,17 +315,10 @@ func (b *WorkflowContractBundle) ExecutableFlowViewPackageKey(view *FlowContract
 	return b.executableFlowViewPackageKey(view)
 }
 
-func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode) eventidentity.Scope {
-	if b == nil || !ref.Valid() {
-		return eventidentity.Scope{}
-	}
-	scope, err := b.ExecutableNodeSemanticScope(ref)
-	if err != nil {
-		return eventidentity.Scope{}
-	}
+func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode, semanticScope ExecutableNodeSemanticScope) eventidentity.Scope {
 	if ref.FlowID() == "" {
 		localEvents := b.rootLocalEvents()
-		if declaration, ok := scope.DeclarationView(); ok {
+		if declaration, ok := semanticScope.DeclarationView(); ok {
 			for eventType := range declaration.Events {
 				localEvents = append(localEvents, strings.TrimSpace(eventType))
 			}
@@ -336,7 +329,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 			OutputEvents: b.FlowOutputEvents(""),
 		}
 	}
-	view, ok := scope.OwningFlow()
+	view, ok := semanticScope.OwningFlow()
 	if !ok {
 		return eventidentity.Scope{}
 	}
@@ -344,7 +337,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 	for eventType := range view.Events {
 		localEvents = append(localEvents, strings.TrimSpace(eventType))
 	}
-	if declaration, ok := scope.DeclarationView(); ok && declaration != view {
+	if declaration, ok := semanticScope.DeclarationView(); ok && declaration != view {
 		for eventType := range declaration.Events {
 			localEvents = append(localEvents, strings.TrimSpace(eventType))
 		}
@@ -362,12 +355,8 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 	}
 }
 
-func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeidentity.ExecutableNode) []eventidentity.DescendantScope {
-	scope, err := b.ExecutableNodeSemanticScope(ref)
-	if err != nil {
-		return nil
-	}
-	view, ok := scope.OwningFlow()
+func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope ExecutableNodeSemanticScope) []eventidentity.DescendantScope {
+	view, ok := semanticScope.OwningFlow()
 	if !ok {
 		return nil
 	}
@@ -399,34 +388,67 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeident
 	return out
 }
 
-func (b *WorkflowContractBundle) ResolveExecutableNodeEventReference(ref runtimeidentity.ExecutableNode, eventType string) string {
+type executableNodeEventResolution struct {
+	semanticScope ExecutableNodeSemanticScope
+	eventScope    eventidentity.Scope
+	descendants   []eventidentity.DescendantScope
+}
+
+func (b *WorkflowContractBundle) resolveExecutableNodeEvents(ref runtimeidentity.ExecutableNode) (executableNodeEventResolution, bool) {
 	if b == nil || !ref.Valid() {
+		return executableNodeEventResolution{}, false
+	}
+	semanticScope, err := b.ExecutableNodeSemanticScope(ref)
+	if err != nil {
+		return executableNodeEventResolution{}, false
+	}
+	return executableNodeEventResolution{
+		semanticScope: semanticScope,
+		eventScope:    b.executableNodeEventScope(ref, semanticScope),
+		descendants:   b.executableNodeEventDescendants(semanticScope),
+	}, true
+}
+
+func (r executableNodeEventResolution) resolveEvent(eventType string) string {
+	return r.eventScope.ResolveEvent(eventType, r.descendants)
+}
+
+func (b *WorkflowContractBundle) ResolveExecutableNodeEventReference(ref runtimeidentity.ExecutableNode, eventType string) string {
+	resolution, ok := b.resolveExecutableNodeEvents(ref)
+	if !ok {
 		return eventidentity.Normalize(eventType)
 	}
-	return b.executableNodeEventScope(ref).ResolveEvent(eventType, b.executableNodeEventDescendants(ref))
+	return resolution.resolveEvent(eventType)
 }
 
 func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, bool) {
 	if b == nil || !ref.Valid() {
 		return EventCatalogEntry{}, "", false
 	}
+	resolution, resolvedScope := b.resolveExecutableNodeEvents(ref)
 	authored := eventidentity.Normalize(eventType)
-	canonical := b.ResolveExecutableNodeEventReference(ref, authored)
+	canonical := authored
+	if resolvedScope {
+		canonical = resolution.resolveEvent(authored)
+	}
 	lookup := func(entries map[string]EventCatalogEntry) (EventCatalogEntry, string, bool) {
 		for key, entry := range entries {
 			key = eventidentity.Normalize(key)
 			if key == "" {
 				continue
 			}
-			resolved := b.ResolveExecutableNodeEventReference(ref, key)
+			resolved := key
+			if resolvedScope {
+				resolved = resolution.resolveEvent(key)
+			}
 			if key == authored || key == canonical || resolved == canonical {
 				return entry, resolved, true
 			}
 		}
 		return EventCatalogEntry{}, "", false
 	}
-	if scope, err := b.ExecutableNodeSemanticScope(ref); err == nil {
-		view, ok := scope.OwningFlow()
+	if resolvedScope {
+		view, ok := resolution.semanticScope.OwningFlow()
 		if ok {
 			owningPackageKey := b.executableFlowViewPackageKey(view)
 			for current := view; current != nil; current = current.Parent {
@@ -439,7 +461,7 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runt
 				}
 			}
 		}
-		if project, ok := scope.PackageView(); ok {
+		if project, ok := resolution.semanticScope.PackageView(); ok {
 			if entry, key, found := lookup(project.Events); found {
 				return entry, key, true
 			}
@@ -461,16 +483,19 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeid
 		return eventidentity.Normalize(pattern)
 	}
 	pattern = eventidentity.Normalize(pattern)
-	scope := b.executableNodeEventScope(ref)
-	resolved := strings.TrimSpace(scope.ResolveSubscriptionPattern(pattern, b.executableNodeEventDescendants(ref)))
+	resolution, ok := b.resolveExecutableNodeEvents(ref)
+	if !ok {
+		return pattern
+	}
+	resolved := strings.TrimSpace(resolution.eventScope.ResolveSubscriptionPattern(pattern, resolution.descendants))
 	if resolved == "" || resolved != pattern || strings.Contains(pattern, "/") {
 		return resolved
 	}
-	path := eventidentity.Normalize(scope.Path)
+	path := eventidentity.Normalize(resolution.eventScope.Path)
 	if path == "" {
 		return resolved
 	}
-	for _, localEvent := range scope.LocalEvents {
+	for _, localEvent := range resolution.eventScope.LocalEvents {
 		if eventidentity.MatchPattern(pattern, localEvent) {
 			return path + "/" + pattern
 		}
@@ -479,9 +504,14 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventPattern(ref runtimeid
 }
 
 func (b *WorkflowContractBundle) ExternalizeExecutableNodeHandler(ref runtimeidentity.ExecutableNode, handler SystemNodeEventHandler) SystemNodeEventHandler {
+	resolution, resolved := b.resolveExecutableNodeEvents(ref)
 	externalize := func(spec EmitSpec) EmitSpec {
 		spec = cloneEmitSpec(spec)
-		spec.Event = b.ResolveExecutableNodeEventReference(ref, spec.Event)
+		if resolved {
+			spec.Event = resolution.resolveEvent(spec.Event)
+		} else {
+			spec.Event = eventidentity.Normalize(spec.Event)
+		}
 		return spec
 	}
 	handler.Emit = externalize(handler.Emit)

@@ -37,24 +37,12 @@ func ResolveExecutableNodeSemanticScope(source Source, node runtimeidentity.Exec
 	if source == nil || !node.Valid() {
 		return ExecutableNodeSemanticScope{}, fmt.Errorf("executable node semantic scope requires exact declaration identity")
 	}
-	records := make([]runtimecontracts.ScopedNodeRecord, 0, 1)
-	for _, record := range source.ExecutableNodeRecords() {
-		candidate, err := record.Identity()
-		if err == nil && candidate.Equal(node) {
-			records = append(records, record)
-		}
-	}
-	if len(records) != 1 {
-		return ExecutableNodeSemanticScope{}, fmt.Errorf("executable node %q requires exactly one declaration record, found %d", node.Key(), len(records))
-	}
-	record := records[0]
-	result := ExecutableNodeSemanticScope{Node: node, Declaration: record}
-
 	if bundle, ok := Bundle(source); ok {
 		contractScope, err := bundle.ExecutableNodeSemanticScope(node)
 		if err != nil {
 			return ExecutableNodeSemanticScope{}, err
 		}
+		result := ExecutableNodeSemanticScope{Node: node, Declaration: contractScope.Declaration}
 		if _, found := contractScope.PackageView(); found {
 			project, err := exactExecutableNodeProjectScope(source, node.PackageKey())
 			if err != nil {
@@ -69,6 +57,19 @@ func ResolveExecutableNodeSemanticScope(source Source, node runtimeidentity.Exec
 		}
 		return result, nil
 	}
+
+	records := make([]runtimecontracts.ScopedNodeRecord, 0, 1)
+	for _, record := range source.ExecutableNodeRecords() {
+		candidate, err := record.Identity()
+		if err == nil && candidate.Equal(node) {
+			records = append(records, record)
+		}
+	}
+	if len(records) != 1 {
+		return ExecutableNodeSemanticScope{}, fmt.Errorf("executable node %q requires exactly one declaration record, found %d", node.Key(), len(records))
+	}
+	record := records[0]
+	result := ExecutableNodeSemanticScope{Node: node, Declaration: record}
 
 	project, projectErr := exactExecutableNodeProjectScope(source, node.PackageKey())
 	if projectErr == nil {
