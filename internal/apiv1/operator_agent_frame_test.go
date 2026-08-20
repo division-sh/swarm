@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -87,6 +88,17 @@ func TestOperatorAgentFrameInspectionScopesUseCanonicalProjection(t *testing.T) 
 	if effective.Session.Provider.Value.ModelAlias != "regular" || effective.Session.Provider.Value.Model != "claude-sonnet" {
 		t.Fatalf("effective provider selection = %#v", effective.Session.Provider.Value)
 	}
+	root := repoRoot(t)
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
+	encoded, err := json.Marshal(effective)
+	if err != nil {
+		t.Fatalf("marshal effective inspection: %v", err)
+	}
+	var schemaResult any
+	if err := json.Unmarshal(encoded, &schemaResult); err != nil {
+		t.Fatalf("decode effective inspection: %v", err)
+	}
+	newOpenRPCResultSchemaValidator(t, openRPC).validateMethodResult(t, "agent.frame", schemaResult)
 	assertAgentFrameOccurrenceUnresolved(t, effective)
 }
 

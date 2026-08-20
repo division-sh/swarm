@@ -28545,12 +28545,13 @@ api_specification:
       AgentFrameProvider:
         type: object
         additionalProperties: false
-        required: [runtime_mode, provider, transport]
+        required: [runtime_mode, provider, transport, model_alias, model]
         properties:
           runtime_mode: {type: string, minLength: 1}
           provider: {type: string, minLength: 1}
           transport: {type: string, minLength: 1}
-          model: {type: string}
+          model_alias: {type: string, minLength: 1}
+          model: {type: string, minLength: 1}
       AgentFrameProviderPresence:
         type: object
         additionalProperties: false
