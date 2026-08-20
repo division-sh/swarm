@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
@@ -432,6 +433,47 @@ func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {
 	var decoded DeliveryRoute
 	if err := json.Unmarshal(raw, &decoded); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("route decode error = %v, want recipient mismatch", err)
+	}
+}
+
+func TestDeliveryRoutesAndConnectClaimsPreserveSameFlowPackageOwners(t *testing.T) {
+	first := identitytest.ExecutableNode(t, "packages/a", "review", "shared")
+	second := identitytest.ExecutableNode(t, "packages/b", "review", "shared")
+	digest := sha256.Sum256([]byte("connect-edge"))
+	pinDigest := sha256.Sum256([]byte("receiver-pin"))
+	routes := make([]DeliveryRoute, 0, 2)
+	target := MustEntitylessReceiverTarget(RouteIdentity{FlowID: "review", FlowInstance: "review/one"})
+	for _, node := range []runtimeidentity.ExecutableNode{first, second} {
+		recipient := MustNodeDeliveryRecipient(node)
+		claim, err := AdmitConnectExecutionClaim(digest, pinDigest, recipient, node, EventType("review.received"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes = append(routes, DeliveryRoute{Recipient: recipient, Target: target, ConnectClaim: claim})
+	}
+	if routes[0].Recipient.ID() == routes[1].Recipient.ID() || routes[0].ConnectClaim.Equal(routes[1].ConnectClaim) {
+		t.Fatalf("same-flow package routes collapsed: %#v", routes)
+	}
+	if err := ValidateDeliveryRoutes(routes); err != nil {
+		t.Fatalf("validate distinct package routes: %v", err)
+	}
+	for index, route := range routes {
+		raw, err := json.Marshal(route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded DeliveryRoute
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if !SameDeliveryRouteIdentity(decoded, route) {
+			t.Fatalf("route %d round trip = %#v, want %#v", index, decoded, route)
+		}
+	}
+	hostile := routes[0]
+	hostile.Recipient = routes[1].Recipient
+	if _, err := hostile.Identity(); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("cross-package recipient/claim mismatch = %v", err)
 	}
 }
 

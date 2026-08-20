@@ -55,6 +55,25 @@ func TestDeliveryRouteEqualityValidationStoreParity(t *testing.T) {
 				assertDeliveryRouteEqualityCommitCounts(t, ctx, fixture, event.ID(), 0, 0)
 			})
 
+			t.Run("same_flow_package_nodes_persist_as_distinct_routes", func(t *testing.T) {
+				event := deliveryRouteEqualityEvent(runID, "package-node-siblings")
+				target := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"})
+				routes := []events.DeliveryRoute{
+					{Recipient: events.MustNodeDeliveryRecipient(mustPersistencePackageNode("packages/a", "review", "shared")), Target: target},
+					{Recipient: events.MustNodeDeliveryRecipient(mustPersistencePackageNode("packages/b", "review", "shared")), Target: target},
+				}
+				if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes); err != nil {
+					t.Fatalf("commit package-qualified node routes: %v", err)
+				}
+				assertDeliveryRouteEqualityCommitCounts(t, ctx, fixture, event.ID(), 1, 2)
+				for _, route := range routes {
+					snapshot := loadDeliverySnapshotFixture(t, ctx, fixture.store.(deliveryFixtureStore), event.ID(), route)
+					if !events.SameDeliveryRouteIdentity(snapshot.Route, route) {
+						t.Fatalf("persisted route = %#v, want exact package route %#v", snapshot.Route, route)
+					}
+				}
+			})
+
 			for _, contradiction := range []struct {
 				name   string
 				first  events.DeliveryTargetOwnership

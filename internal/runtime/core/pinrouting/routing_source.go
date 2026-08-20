@@ -24,11 +24,18 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeide
 	if _, ok := source.ExecutableNode(node); !ok {
 		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared node %q", node.Key())
 	}
-	owner := runtimecontracts.ContractItemSource{PackageKey: node.PackageKey(), Layer: "flow", FlowID: node.FlowID()}
-	if node.FlowID() == "" {
-		owner.Layer = "project"
+	owner, ok := source.ExecutableNodeSource(node)
+	if !ok {
+		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared source for %q", node.Key())
 	}
 	route = route.Normalized()
+	if strings.TrimSpace(owner.Layer) == "project" && strings.TrimSpace(owner.FlowID) != "" {
+		scope, ok := semanticview.FlowScopeByID(source, owner.FlowID)
+		if !ok {
+			return events.RoutingSource{}, fmt.Errorf("project node %q routing source references missing owning flow %q", node.Key(), owner.FlowID)
+		}
+		return admitFlowExecutionRoutingSource(source, "node", node.Key(), owner, route, scope)
+	}
 	if strings.TrimSpace(owner.Layer) == "project" && route.EntityID == "" {
 		if route.FlowID != strings.TrimSpace(source.WorkflowName()) || route.FlowInstance == "" {
 			return events.RoutingSource{}, fmt.Errorf("project node %q entityless routing source requires the exact selected-run flow route", node.Key())

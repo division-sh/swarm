@@ -64,7 +64,7 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 					{
 						Paths: FlowContractPaths{PackageKey: "root/flows/b/child", NodesFile: "flows/b/child/nodes.yaml"},
 						Nodes: map[string]SystemNodeContract{
-							"package-child": {
+							"shared": {
 								EventHandlers: map[string]SystemNodeEventHandler{"item.received": joinHandler("b-child-active")},
 								Timers:        []WorkflowTimerContract{{ID: "b-child-timer", Event: "b.child.tick"}},
 							},
@@ -107,12 +107,12 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 		{logicalID: "package-node", layer: "project", file: "root/nodes.yaml"},
 		{logicalID: "shared", flowID: "a", layer: "flow", file: "flows/a/nodes.yaml"},
 		{logicalID: "shared", flowID: "b", layer: "flow", file: "flows/b/nodes.yaml"},
-		{logicalID: "package-child", flowID: "b", layer: "project", file: "flows/b/child/nodes.yaml"},
+		{logicalID: "shared", flowID: "b", layer: "project", file: "flows/b/child/nodes.yaml"},
 	}
 	for index, expected := range want {
 		got := records[index]
 		wantPackage := "root"
-		if expected.logicalID == "package-child" {
+		if expected.file == "flows/b/child/nodes.yaml" {
 			wantPackage = "root/flows/b/child"
 		}
 		if got.LogicalID != expected.logicalID || got.Source.PackageKey != wantPackage || got.Source.FlowID != expected.flowID || got.Source.Layer != expected.layer || got.Source.File != expected.file {
@@ -134,6 +134,38 @@ func TestWorkflowContractBundleScopedNodeRecordsPreserveExportedTreeScopes(t *te
 	for _, flowID := range []string{"", "a", "b"} {
 		if !seenFlow[flowID] {
 			t.Fatalf("exported-tree joins = %#v, missing flow %q", bundle.Semantics.Joins, flowID)
+		}
+	}
+	wantNodes := map[string]bool{}
+	wantTimers := map[string]bool{}
+	for _, record := range records {
+		node, err := record.Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantNodes[node.Key()] = false
+		wantTimers[node.Key()] = false
+	}
+	for _, join := range bundle.Semantics.Joins {
+		if _, ok := wantNodes[join.Node.Key()]; ok {
+			wantNodes[join.Node.Key()] = true
+		}
+	}
+	for _, timer := range bundle.Semantics.Timers {
+		if timer.StageOwned {
+			continue
+		}
+		if _, ok := wantTimers[timer.Node.Key()]; !ok {
+			t.Fatalf("timer node = %q, want one of %#v", timer.Node.Key(), wantTimers)
+		}
+		wantTimers[timer.Node.Key()] = true
+	}
+	for key, found := range wantNodes {
+		if !found {
+			t.Fatalf("exported-tree joins missing exact node %q: %#v", key, bundle.Semantics.Joins)
+		}
+		if !wantTimers[key] {
+			t.Fatalf("exported-tree timers missing exact node %q: %#v", key, bundle.Semantics.Timers)
 		}
 	}
 }

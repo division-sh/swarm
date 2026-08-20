@@ -125,6 +125,91 @@ func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing
 	}
 }
 
+func TestWorkflowTimerLifecyclePreservesSameFlowPackageDeclarationsAcrossRestartOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		for _, order := range []struct {
+			name    string
+			reverse bool
+		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
+			t.Run(tc.name+"/"+order.name, func(t *testing.T) {
+				store, ctx := tc.open(t)
+				entityID := uuid.NewString()
+				route := workflowTimerRootRoute(ctx)
+				createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
+				if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, route.InstancePath, WorkflowInstance{
+					WorkflowName: "workflow-timer-package-identity", WorkflowVersion: "1.0.0",
+					CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+				})); err != nil {
+					t.Fatal(err)
+				}
+				first := pipelinePackageNode(t, "packages/a", "", "shared")
+				second := pipelinePackageNode(t, "packages/b", "", "shared")
+				timers := []runtimecontracts.WorkflowTimerContract{
+					{ID: "same", Node: first, Owner: "runtime", Event: "timer.a", StartOn: "event:timer.arm", Delay: "2h"},
+					{ID: "same", Node: second, Owner: "runtime", Event: "timer.b", StartOn: "event:timer.arm", Delay: "2h"},
+				}
+				if order.reverse {
+					timers[0], timers[1] = timers[1], timers[0]
+				}
+				bundle := &runtimecontracts.WorkflowContractBundle{
+					Events: map[string]runtimecontracts.EventCatalogEntry{"timer.a": {}, "timer.b": {}},
+					Semantics: runtimecontracts.WorkflowSemanticView{
+						Name: "workflow-timer-package-identity", Version: "1.0.0", InitialStage: "waiting",
+						Timers: timers,
+					},
+				}
+				source := semanticview.Wrap(bundle)
+				owner := pipelineTestWorkOwner(t)
+				scheduler := newWorkflowTimerTestScheduler(t, owner)
+				pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
+					WorkOwner: owner, TimerScheduler: scheduler,
+				})
+				if err := reconcileWorkflowTimerForTest(ctx, pc, route, entityID, "waiting", "waiting", workflowTimerCause{
+					Kind: workflowTimerCauseEvent, EventID: uuid.NewString(), EventType: "timer.arm",
+					OccurredAt: createdAt, ExecutionMode: executionmode.Live,
+				}); err != nil {
+					t.Fatalf("arm package timers: %v", err)
+				}
+				active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
+				if len(active) != 2 {
+					t.Fatalf("active package timers = %#v, want two", active)
+				}
+				byDeclaration := workflowTimerActivationsByDeclaration(active)
+				for _, key := range []string{workflowTimerNodeDeclarationKey(first, "same"), workflowTimerNodeDeclarationKey(second, "same")} {
+					if activation, ok := byDeclaration[key]; !ok || activation.Ref.ActivationID == "" {
+						t.Fatalf("package timer %q = %#v, want exact durable activation", key, activation)
+					}
+				}
+				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				if err := pc.StopWorkflowTimerLifecycle(stopCtx); err != nil {
+					cancel()
+					t.Fatalf("stop predecessor timer lifecycle: %v", err)
+				}
+				cancel()
+
+				restartedOwner := pipelineTestWorkOwner(t)
+				restartedScheduler := newWorkflowTimerTestScheduler(t, restartedOwner)
+				restarted := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
+					WorkOwner: restartedOwner, TimerScheduler: restartedScheduler,
+				})
+				t.Cleanup(func() {
+					stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					_ = restarted.StopWorkflowTimerLifecycle(stopCtx)
+				})
+				if err := restarted.RestoreWorkflowTimers(ctx); err != nil {
+					t.Fatalf("restore package timers: %v", err)
+				}
+				if registered, draining := workflowTimerScheduledCounts(restartedScheduler); registered != 2 || draining != 0 {
+					t.Fatalf("restored package wakeups active=%d draining=%d, want 2/0", registered, draining)
+				}
+			})
+		}
+	}
+}
+
 func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {

@@ -80,6 +80,34 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 	}
 }
 
+func TestWorkflowJoinPlanForRefPreservesSameFlowPackageDeclarationsInEitherOrder(t *testing.T) {
+	spec := runtimecontracts.JoinSpec{ID: "awaiting", Stage: "awaiting"}
+	first, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/a", "orders", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtimeidentity.AdmitExecutableNodeDeclaration("packages/b", "orders", "shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plans := range [][]runtimecontracts.WorkflowJoinPlan{
+		{{Node: first, HandlerEvent: "item.completed", Spec: spec}, {Node: second, HandlerEvent: "item.completed", Spec: spec}},
+		{{Node: second, HandlerEvent: "item.completed", Spec: spec}, {Node: first, HandlerEvent: "item.completed", Spec: spec}},
+	} {
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: plans}})
+		for _, node := range []runtimeidentity.ExecutableNode{first, second} {
+			ref, err := timeridentity.NewJoinRef(node, "item.completed", "awaiting", "awaiting", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, ok := semanticview.WorkflowJoinPlanForRef(source, ref)
+			if !ok || !plan.Node.Equal(node) {
+				t.Fatalf("plan for %s = %#v, ok=%v", node.Key(), plan, ok)
+			}
+		}
+	}
+}
+
 func requireSingleJoinPlan(t *testing.T, plans []runtimecontracts.WorkflowJoinPlan) runtimecontracts.WorkflowJoinPlan {
 	t.Helper()
 	if len(plans) != 1 {
