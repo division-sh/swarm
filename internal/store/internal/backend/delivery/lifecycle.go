@@ -334,6 +334,34 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginFailureTx(
 	return s.RecordDeadLetterTx(ctx, tx, story, diagnostic, true)
 }
 
+func (s *DeliveryPostgresOwner) SettleProviderOriginRecoveryFailureTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	settlement runtimedelivery.Settlement,
+) error {
+	disposition, err := postgresDeliveryAdapter.providerOriginRecoveryDisposition(ctx, tx, claim)
+	if err != nil || disposition == providerOriginRecoveryAlreadyTerminal {
+		return err
+	}
+	return s.SettleProviderOriginFailureTx(ctx, tx, story, claim, settlement)
+}
+
+func (s *DeliverySQLiteOwner) SettleProviderOriginRecoveryFailureTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	settlement runtimedelivery.Settlement,
+) error {
+	disposition, err := sqliteDeliveryAdapter.providerOriginRecoveryDisposition(ctx, tx, claim)
+	if err != nil || disposition == providerOriginRecoveryAlreadyTerminal {
+		return err
+	}
+	return s.SettleProviderOriginFailureTx(ctx, tx, story, claim, settlement)
+}
+
 func (s *DeliverySQLiteOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {

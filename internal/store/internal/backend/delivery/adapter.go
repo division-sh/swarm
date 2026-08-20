@@ -72,6 +72,13 @@ type deliveryRecord struct {
 	bundleHash string
 }
 
+type providerOriginRecoveryDisposition uint8
+
+const (
+	providerOriginRecoveryCurrent providerOriginRecoveryDisposition = iota + 1
+	providerOriginRecoveryAlreadyTerminal
+)
+
 func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority ExecutionAuthority) ([]DurableHandoffProof, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery initial commit transaction is required")
@@ -839,6 +846,58 @@ func (a *Adapter) ValidateCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cl
 	}
 	_, _, err := a.requireCurrentClaim(ctx, tx, claim)
 	return err
+}
+
+func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql.Tx, claim Claim) (providerOriginRecoveryDisposition, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("provider origin recovery transaction is required")
+	}
+	if claim.Validate() != nil {
+		return 0, fmt.Errorf("provider origin recovery requires an exact claim")
+	}
+	record, err := a.loadByID(ctx, tx, claim.DeliveryID(), true)
+	if err != nil {
+		return 0, err
+	}
+	if record.RunID != claim.RunID() || events.EncodeDeliveryRouteIdentity(record.RouteIdentity) != claim.RouteIdentity() ||
+		record.SubscriberClass != claim.SubscriberClass() || record.SubscriberID != claim.SubscriberID() {
+		return 0, fmt.Errorf("%w: provider origin recovery claim identity is stale", ErrConflict)
+	}
+	now, err := a.databaseNow(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if record.Status == StatusInProgress && record.claimToken == claim.PersistenceToken() && record.ClaimVersion == claim.Version() &&
+		!record.ClaimExpiresAt.IsZero() && record.ClaimExpiresAt.After(now) {
+		return providerOriginRecoveryCurrent, nil
+	}
+	if !record.Status.Terminal() || record.ClaimVersion != claim.Version() {
+		return 0, fmt.Errorf("%w: provider origin recovery claim is stale", ErrConflict)
+	}
+	query := `
+		SELECT COUNT(*)
+		FROM event_delivery_attempts a
+		JOIN event_delivery_outcomes o
+		  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
+		WHERE a.delivery_id=$1::uuid AND a.claim_version=$2 AND a.claim_token=$3::uuid
+		  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
+	if a.dialect == DialectSQLite {
+		query = `
+			SELECT COUNT(*)
+			FROM event_delivery_attempts a
+			JOIN event_delivery_outcomes o
+			  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
+			WHERE a.delivery_id=? AND a.claim_version=? AND a.claim_token=?
+			  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
+	}
+	var exactSettlements int
+	if err := tx.QueryRowContext(ctx, query, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()).Scan(&exactSettlements); err != nil {
+		return 0, fmt.Errorf("load provider origin recovery settlement: %w", err)
+	}
+	if exactSettlements != 1 {
+		return 0, fmt.Errorf("%w: provider origin recovery terminal claim lacks exact settlement", ErrConflict)
+	}
+	return providerOriginRecoveryAlreadyTerminal, nil
 }
 
 func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {

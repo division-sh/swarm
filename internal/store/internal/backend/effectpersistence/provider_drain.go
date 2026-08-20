@@ -394,7 +394,7 @@ func settleProviderDrainRecovery(
 	postgres bool,
 	delivery providerDrainDeliveryOwner,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, delivery); err != nil {
+	if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, permit.Origin, delivery); err != nil {
 		return nil, err
 	}
 	state := "settled"
@@ -446,6 +446,36 @@ func settleProviderDrainOrigin(
 		reason = settlement.Settlement.Failure.Detail.Code
 	}
 	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, claim, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureDeadLetter,
+		ReasonCode:  reason,
+		Failure:     settlement.Settlement.Failure,
+		Duration:    duration,
+	})
+}
+
+func settleProviderDrainOriginRecovery(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	settlement runtimeeffects.CompletionSettlement,
+	claim runtimedelivery.Claim,
+	delivery providerDrainDeliveryOwner,
+) error {
+	if delivery == nil {
+		return fmt.Errorf("provider-drain delivery owner is not bound")
+	}
+	if settlement.Settlement.State == runtimeeffects.StateSettled || settlement.Settlement.Failure == nil {
+		return fmt.Errorf("provider drain recovery requires a failed or uncertain completion settlement")
+	}
+	duration := time.Duration(0)
+	if settlement.AgentTurn != nil && settlement.AgentTurn.LatencyMS > 0 {
+		duration = time.Duration(settlement.AgentTurn.LatencyMS) * time.Millisecond
+	}
+	reason := "provider_attempt_drained_without_confirmed_success"
+	if code := strings.TrimSpace(settlement.Settlement.Failure.Detail.Code); code != "" {
+		reason = code
+	}
+	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  reason,
 		Failure:     settlement.Settlement.Failure,

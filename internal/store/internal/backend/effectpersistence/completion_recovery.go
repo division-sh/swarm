@@ -287,7 +287,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				if _, err := settleProviderDrainRecovery(ctx, tx, story, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-			} else if err := settleProviderDrainOrigin(ctx, tx, story, settlement, attempt.OriginDelivery, delivery); err != nil {
+			} else if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, attempt.OriginDelivery, delivery); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}

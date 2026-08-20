@@ -12779,7 +12779,7 @@ platform_tables:
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
-      - Agent lifecycle operations, transition facts, diagnostic outbox rows, and external-effect operation/attempt evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry.
+      - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, and provider-attempt drain evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry.
       - Generated node-state tables remain split-preserved under their contract-owned identity. Runtime boot may create a
         missing generated node-state table only after platform-schema acceptance.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
@@ -12853,6 +12853,7 @@ platform_tables:
         - runtime_generation_grants
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
+        - runtime_provider_attempt_drains
         - run_fork_selected_contract_runtime_executions
         - budget_admission_scopes
         - runtime_effect_budget_reservations
@@ -34386,7 +34387,7 @@ managed_external_effect_authority:
       forbidden: [provider redispatch, provider-head mutation, session or conversation mutation, watchdog mutation, output publication, successor projection, inferred event-to-delivery lookup, latest-claim lookup, stale-error fallback, compatibility settlement]
   recovery:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
-    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact originating delivery and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. Delivery recovery starts only after this phase reaches explicit completion.
+    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact originating delivery and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. If the same origin claim token/version already has a terminal attempt and outcome, recovery verifies and preserves that exact settlement; a newer claim, nonterminal outcome, or identity mismatch fails closed. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   invariant_ids:
     runtime.provider_attempt.origin_claim_exact:
@@ -34404,7 +34405,7 @@ managed_external_effect_authority:
     runtime.provider_attempt.recovery_no_redispatch:
       owner: selected-store external-effect recovery before delivery recovery
       rule: Every captured or crash-stranded provider attempt converges to exact terminal evidence and origin outcome without provider dispatch, and repeated recovery is idempotent.
-      negative_proof: TestProviderAttemptDrainStartupRecoveryParity
+      negative_proof: TestProviderAttemptDrainStartupRecoveryParity and TestClaudeProviderHeadCommitFailureSettlesUncertain
     runtime.provider_attempt.mock_tail_timing:
       owner: generation-owned mockperformance Performance and mock runtime
       rule: Authored deterministic post-tool tail latency delays response observation on tool-result rounds and remains cancellation-aware.
