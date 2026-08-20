@@ -33527,8 +33527,9 @@ agent_topology_authority:
     grants: >-
       Exact revocable grants bind one runtime instance/generation, bundle source coordinate,
       and source-set revision. Readiness, grant-state changes, execution admission, and every
-      durable lifecycle mutation re-prove the retained session. Retained-session failure
-      retires the process capability, every grant, and runtime readiness before return.
+      durable lifecycle mutation re-prove the retained session and that the grant's source-set
+      revision is still the complete current head. Retained-session failure retires the process
+      capability, every grant, and runtime readiness before return.
     forbidden: >-
       Runtime acquisition or release, memory fallback, copied-evidence authority, borrowed
       SQL handles, compatibility adoption, and parallel lifecycle persistence owners.
