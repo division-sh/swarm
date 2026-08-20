@@ -1,12 +1,10 @@
 package llm
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -54,8 +52,7 @@ func TestAnthropicAPIRuntimeBuildRequest_DeliversUsageInToolDescription(t *testi
 		}},
 	}
 
-	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular"})
-	req, err := runtime.buildRequest(ctx, session, Message{Role: "user", Content: "continue"})
+	req, err := runtime.buildRequest(session, Message{Role: "user", Content: "continue"}, "test-model")
 	if err != nil {
 		t.Fatalf("buildRequest: %v", err)
 	}

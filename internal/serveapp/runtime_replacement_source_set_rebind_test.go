@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
@@ -328,7 +327,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				fact := mustServeTestEphemeralBundleSourceFact(hash)
 				rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(stores, cfg, runtimepkg.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
-					LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true,
+					LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,
 					BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
 				}))

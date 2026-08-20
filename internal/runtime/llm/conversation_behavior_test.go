@@ -38,15 +38,25 @@ func newTestConversation(agentID, taskID, systemPrompt string, tools []ToolDefin
 	} else {
 		switch typed := runtime.(type) {
 		case *AnthropicAPIRuntime:
-			continueTest = typed.continueSession
+			continueTest = func(ctx context.Context, session *Session, message Message) (*Response, error) {
+				return typed.continueSession(ctx, session, message, nil)
+			}
 		case *OpenAICompatibleRuntime:
-			continueTest = typed.continueSession
+			continueTest = func(ctx context.Context, session *Session, message Message) (*Response, error) {
+				return typed.continueSession(ctx, session, message, nil)
+			}
 		case *OpenAIResponsesRuntime:
-			continueTest = typed.continueSession
+			continueTest = func(ctx context.Context, session *Session, message Message) (*Response, error) {
+				return typed.continueSession(ctx, session, message, nil)
+			}
 		case *ClaudeCLIRuntime:
-			continueTest = typed.continueSession
+			continueTest = func(ctx context.Context, session *Session, message Message) (*Response, error) {
+				return typed.continueSession(ctx, session, message, nil)
+			}
 		case *MockRuntime:
-			continueTest = typed.continueSession
+			continueTest = func(ctx context.Context, session *Session, message Message) (*Response, error) {
+				return typed.continueSession(ctx, session, message, nil)
+			}
 		default:
 			panic("test runtime has no behavior continuation implementation")
 		}

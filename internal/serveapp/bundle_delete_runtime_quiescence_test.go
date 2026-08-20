@@ -9,7 +9,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -60,7 +59,7 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
-					LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true,
+					LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,
 					BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
 				}))

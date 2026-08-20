@@ -36,7 +36,7 @@ func requireClaudeExecutionTarget(target *workspace.Target) (workspace.Execution
 	return execTarget, fmt.Errorf("%w: %s", ErrClaudeWorkspaceRequired, execTarget.UnsupportedMessage(workspace.ExecutionCapabilityClaudeCLI))
 }
 
-func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle) (resp *Response, retErr error) {
+func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle, profile llmselection.Profile, model llmselection.ResolvedModel) (resp *Response, retErr error) {
 	if attempt == nil {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "claude-cli-adapter", "run", nil)
 	}
@@ -44,7 +44,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	if _, err := requireClaudeExecutionTarget(target); err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "resolve_execution_target", map[string]any{"prelaunch": true})
 	}
-	release, err := r.admitProviderDispatch(ctx)
+	release, err := r.admitProviderDispatch(ctx, profile, model)
 	if err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "provider_admission", map[string]any{"prelaunch": true})
 	}

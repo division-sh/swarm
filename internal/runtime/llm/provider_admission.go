@@ -87,19 +87,11 @@ func admitProviderRequest(ctx context.Context, registry *ProviderAdmissionRegist
 	return registry.Admit(ctx, profile, resolvedModel)
 }
 
-func resolveProviderAdmissionModel(ctx context.Context, cfg *config.Config, registry *ProviderAdmissionRegistry, profile llmselection.Profile) (llmselection.ResolvedModel, error) {
-	if registry == nil || !registry.configuredFor(profile) {
-		return llmselection.ResolvedModel{}, nil
+func resolveProviderModelForCall(ctx context.Context, cfg *config.Config, profile llmselection.Profile, managed *managedProviderCall) (llmselection.ResolvedModel, error) {
+	if managed != nil {
+		return managed.resolvedModel(profile)
 	}
 	return resolveAdmissionModel(ctx, cfg, profile)
-}
-
-func (r *ProviderAdmissionRegistry) configuredFor(profile llmselection.Profile) bool {
-	if r == nil || r.cfg == nil || len(r.cfg.LLM.ProviderLimits) == 0 {
-		return false
-	}
-	policy, ok := r.cfg.LLM.ProviderLimits[profile.ID]
-	return ok && providerAdmissionPolicyDeclared(policy)
 }
 
 func providerAdmissionPolicyDeclared(policy config.LLMProviderLimitPolicy) bool {

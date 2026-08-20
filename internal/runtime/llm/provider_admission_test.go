@@ -46,9 +46,6 @@ func TestProviderAdmissionEmptyProfilePolicyDoesNotRequireModel(t *testing.T) {
 	}
 	registry := NewProviderAdmissionRegistry(cfg)
 
-	if _, err := resolveProviderAdmissionModel(unmanagedLLMTestContext(), cfg, registry, profile); err != nil {
-		t.Fatalf("resolveProviderAdmissionModel: %v", err)
-	}
 	release, err := registry.Admit(unmanagedLLMTestContext(), profile, llmselection.ResolvedModel{})
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
@@ -273,7 +270,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	if _, err := runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}); err == nil {
+	if _, err := runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil); err == nil {
 		t.Fatal("ContinueSession succeeded after ambiguous provider status")
 	}
 	if got := requests.Load(); got != 1 {
@@ -411,7 +408,7 @@ printf '%s\n' '{"result":"done"}'
 	defer release()
 
 	harness, completionCtx, attempt := beginClaudeTestCompletion(t, ctx, "hello")
-	_, err = runtime.runWithPreparedInput(completionCtx, nil, target, "hello", MonitorTurnMeta{}, attempt)
+	_, err = runtime.runWithPreparedInput(completionCtx, nil, target, "hello", MonitorTurnMeta{}, attempt, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, completionCtx, attempt, err)
 	requireProviderAdmissionRateLimited(t, err)
 	if got := readProviderAdmissionFakeDockerInvocations(t, countFile); got != 0 {
@@ -447,9 +444,11 @@ printf '%s\n' '{"result":"done"}'
 `)
 	cfg.Workspace.DockerBin = scriptPath
 	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
+	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 
 	harness, completionCtx, attempt := beginClaudeTestCompletion(t, ctx, "hello")
-	_, fallback, err := runtime.runWithPreparedPrompt(completionCtx, []string{"--print"}, target, "hello", MonitorTurnMeta{}, attempt)
+	_, fallback, err := runtime.runWithPreparedPrompt(completionCtx, []string{"--print"}, target, "hello", MonitorTurnMeta{}, attempt, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, completionCtx, attempt, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {

@@ -14,6 +14,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -90,7 +91,8 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 	}
 
 	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
-	_, err := runtime.runWithPreparedInput(ctx, nil, nil, "hello", MonitorTurnMeta{}, attempt)
+	profile, model := testClaudeProviderSelection(t)
+	_, err := runtime.runWithPreparedInput(ctx, nil, nil, "hello", MonitorTurnMeta{}, attempt, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("expected ErrClaudeWorkspaceRequired, got %v", err)
@@ -107,7 +109,8 @@ func TestClaudeCLIRuntimeRejectsHostWorkspaceBackend(t *testing.T) {
 	}
 
 	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
-	_, err := runtime.runWithPreparedInput(ctx, nil, target, "hello", MonitorTurnMeta{}, attempt)
+	profile, model := testClaudeProviderSelection(t)
+	_, err := runtime.runWithPreparedInput(ctx, nil, target, "hello", MonitorTurnMeta{}, attempt, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceRequired", err)
@@ -196,7 +199,8 @@ exit 127
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
-	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt)
+	profile, model := testClaudeProviderSelection(t)
+	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt, profile, model)
 	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
@@ -250,11 +254,18 @@ exit 1
 			runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 			harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
-			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt)
+			profile, model := testClaudeProviderSelection(t)
+			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt, profile, model)
 			settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
 			assertClaudeAuthenticationFailure(t, err)
 		})
 	}
+}
+
+func testClaudeProviderSelection(t *testing.T) (llmselection.Profile, llmselection.ResolvedModel) {
+	t.Helper()
+	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
+	return profile, mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 }
 
 func assertClaudeAuthenticationFailure(t *testing.T, err error) {

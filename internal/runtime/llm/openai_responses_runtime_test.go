@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -37,8 +38,8 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 		w.Header().Set("content-type", "application/json")
 		switch len(requests) {
 		case 1:
-			if req.Model != "gpt-5.4-nano" {
-				t.Fatalf("first request model = %q, want cheap model", req.Model)
+			if req.Model != "test-model" {
+				t.Fatalf("first request model = %q, want sealed frame model", req.Model)
 			}
 			if !strings.Contains(req.Instructions, "Complete the admitted business work") {
 				t.Fatalf("instructions = %q, want canonical provider prompt", req.Instructions)
@@ -56,6 +57,9 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 				"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}
 			}`))
 		case 2:
+			if req.Model != "test-model" {
+				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
+			}
 			if !openAIResponsesRequestHasContinuationFrame(req.Input) {
 				t.Fatalf("second request input missing canonical continuation frame: %#v", req.Input)
 			}
@@ -81,6 +85,7 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	harness := effecttest.New()
 	setEffectHarnessAgent(t, harness, "agent-1", "support/inst-1")
 	cfg := openAIResponsesTestConfig(server.URL)
+	cfg.LLM.Models = llmselection.ModelAliases{"cheap": {llmselection.BackendOpenAIResponses: "hostile-config-model"}}
 	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)}
 	runtime, err := RuntimeFactory{
 		Cfg:                  cfg,
@@ -101,6 +106,10 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	ctx := testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	actor.Model = "cheap"
+	actor.ResolvedModel = "hostile-actor-model"
+	actor.ResolvedLLMBackend = "hostile-backend"
+	actor.ResolvedLLMProvider = "hostile-provider"
+	actor.ResolvedLLMTransport = "hostile-transport"
 	actor.EntityID = "entity-1"
 	ctx = runtimeactors.WithActor(ctx, actor)
 	tools := []ToolDefinition{{
@@ -140,10 +149,10 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	if conversations.record.SessionID == "" || conversations.record.Identity != testMemoryIdentity("agent-1", "support/inst-1") {
 		t.Fatalf("conversation record = %#v, want exact reusable-memory snapshot", conversations.record)
 	}
-	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-5.4-nano" {
+	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "test-model" {
 		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
 	}
-	if settlements[1].Spend.BackendProfile != "openai_responses" || settlements[1].Spend.Provider != "openai" || settlements[1].Spend.Transport != "api" || settlements[1].Spend.ResolvedModel != "gpt-5.4-nano" {
+	if settlements[1].Spend.BackendProfile != "openai_responses" || settlements[1].Spend.Provider != "openai" || settlements[1].Spend.Transport != "api" || settlements[1].Spend.ResolvedModel != "test-model" {
 		t.Fatalf("completion spend = %#v, want backend/provider/transport/model facts", settlements[1].Spend)
 	}
 }
@@ -168,7 +177,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
@@ -190,11 +199,12 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	ctx := withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-1", "")
+	ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular"})
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("ContinueSession failure = %#v, want authentication required", failure)

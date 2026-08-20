@@ -210,11 +210,11 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 }
 
 func (r *ClaudeCLIRuntime) ContinueManagedSession(ctx context.Context, s *Session, call ManagedCall) (*Response, error) {
-	message, err := validateManagedCall(ctx, s, call)
+	managed, err := validateManagedProviderCall(ctx, s, call, r.ProviderContract())
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, s, message)
+	return r.continueSession(ctx, s, managed.message, &managed)
 }
 
 func (r *ClaudeCLIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -222,10 +222,10 @@ func (r *ClaudeCLIRuntime) ContinueForkChatSession(ctx context.Context, s *Sessi
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, s, message)
+	return r.continueSession(ctx, s, message, nil)
 }
 
-func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, message Message, managed *managedProviderCall) (*Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -258,6 +258,13 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
 	}
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
+	if err != nil {
+		return nil, err
+	}
+	completionModel := strings.TrimSpace(providerModel.ConcreteModel)
+	usageModel := coalesce(completionModel, "unknown")
 	toolProjection, err := projectClaudeInvocationTools(ctx, actor, s.Tools)
 	if err != nil {
 		return nil, err
@@ -295,6 +302,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		"confirmed_provider_head": confirmedHead,
 		"memory_enabled":          resolved.Enabled(),
 		"mcp_enabled":             mcpEnabled,
+		"model":                   completionModel,
 		"output_format":           configuredCLIOutputFormat(r.cfg),
 		"permission_tools":        toolProjection.PermissionAdmission,
 		"permission_mode_args":    permissionModeArgs(),
@@ -314,13 +322,6 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
 	}
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-	completionModel := strings.TrimSpace(actor.ResolvedModel)
-	if completionModel == "" {
-		completionModel, _ = llmselection.ResolveModelName(profile, llmselection.ModelResolution{Model: actor.Model})
-	}
-	completionModel = coalesce(completionModel, "unknown")
-
 	var args []string
 	if s.TurnCount == 0 {
 		args = []string{
@@ -354,6 +355,9 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
 	}
+	if completionModel != "" {
+		args = append(args, "--model", completionModel)
+	}
 
 	start := time.Now()
 	longRunningAfter, noOutputAfter := conversationWatchdogThresholds(r.effectiveCLITimeout(ctx))
@@ -374,7 +378,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			return target.Container
 		}(),
 	}
-	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, attempt)
+	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, attempt, profile, providerModel)
 	if mcpContextToken != "" {
 		if listedSurface, ok := r.mcpTurns.ResolveManagedCapabilitySurface(mcpContextToken); ok {
 			ctx = managedcapabilities.WithContext(ctx, listedSurface)
@@ -393,7 +397,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
 		state := claudeCompletionFailureState(err)
-		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(completionModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
@@ -410,9 +414,11 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		}
 		return nil, err
 	}
-	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, completionModel)
+	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, usageModel)
 	if usageErr != nil {
-		usage = unavailableCompletionUsage(completionModel)
+		usage = unavailableCompletionUsage(usageModel)
+	} else {
+		usage.ResolvedModel = usageModel
 	}
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
 		observed, observeErr := observeCLIResponse(surface, resp)
@@ -508,12 +514,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	return resp, nil
 }
 
-func (r *ClaudeCLIRuntime) admitProviderDispatch(ctx context.Context) (func(), error) {
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-	resolvedModel, err := resolveProviderAdmissionModel(ctx, r.cfg, r.providerAdmission, profile)
-	if err != nil {
-		return noopProviderAdmissionRelease, err
-	}
+func (r *ClaudeCLIRuntime) admitProviderDispatch(ctx context.Context, profile llmselection.Profile, resolvedModel llmselection.ResolvedModel) (func(), error) {
 	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, resolvedModel)
 	if err != nil {
 		return noopProviderAdmissionRelease, err
