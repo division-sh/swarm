@@ -25,6 +25,7 @@ type Harness struct {
 	HeartbeatFailAfter int
 	MarkErr            error
 	SettleErr          error
+	SettleOrigin       bool
 	Heartbeats         map[string]int
 	Attempts           map[string]runtimeeffects.Attempt
 	States             map[string]runtimeeffects.State
@@ -228,6 +229,7 @@ func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Att
 	h.States[attempt.AttemptID] = settlement.Settlement.State
 	return runtimeeffects.CompletionSettlementResult{
 		Committed: true, SpendRecorded: true, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
+		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: h.SettleOrigin,
 	}, nil
 }
 
