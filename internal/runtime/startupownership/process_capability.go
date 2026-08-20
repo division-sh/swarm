@@ -465,6 +465,12 @@ func (g *generationGrant) SourceSetPlan(ctx context.Context) (runtimeagenttopolo
 	if evidence.State == GrantRetired {
 		return runtimeagenttopology.SourceSetPlan{}, errors.New("runtime generation grant is retired")
 	}
+	return g.requireCurrentSourceSetLocked(ctx, evidence)
+}
+
+// requireCurrentSourceSetLocked is called while the process operation lock is
+// held, so the source-set head cannot change between this proof and a mutation.
+func (g *generationGrant) requireCurrentSourceSetLocked(ctx context.Context, evidence GrantEvidence) (runtimeagenttopology.SourceSetPlan, error) {
 	plan, exists, err := g.owner.session.LoadSourceSet(ctx)
 	if err != nil {
 		g.owner.retireOnPossessionFailure(err)
@@ -486,11 +492,13 @@ func (g *generationGrant) ProveCurrent(ctx context.Context) error {
 		return err
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.evidence.State == GrantRetired {
+	evidence := g.evidence
+	g.mu.Unlock()
+	if evidence.State == GrantRetired {
 		return errors.New("runtime generation grant is retired")
 	}
-	return nil
+	_, err := g.requireCurrentSourceSetLocked(ctx, evidence)
+	return err
 }
 
 func (g *generationGrant) MarkProbesSettled(ctx context.Context, surfaceIDs []string) (GrantEvidence, error) {
@@ -508,6 +516,15 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 	g.owner.opMu.Lock()
 	defer g.owner.opMu.Unlock()
 	if err := g.owner.proveCurrent(ctx); err != nil {
+		return GrantEvidence{}, err
+	}
+	g.mu.Lock()
+	evidence := g.evidence
+	g.mu.Unlock()
+	if evidence.State == GrantRetired {
+		return GrantEvidence{}, errors.New("runtime generation grant is retired")
+	}
+	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
 		return GrantEvidence{}, err
 	}
 	g.mu.Lock()
@@ -550,6 +567,9 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 	g.mu.Unlock()
 	if evidence.State == GrantRetired {
 		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("runtime generation grant is retired")
+	}
+	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	if req.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
 		static := req.Topology.Authority.Static

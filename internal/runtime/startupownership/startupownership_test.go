@@ -15,6 +15,7 @@ import (
 )
 
 const startupBundleHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const startupBundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 type retainedSessionProbe struct {
 	mu             sync.Mutex
@@ -185,6 +186,79 @@ func TestGenerationGrantProjectsExactBundleScopeForLifecycleCommit(t *testing.T)
 	want := runtimeauthoractivity.BundleScope(session.authority.RuntimeInstanceID, startupBundleHashA)
 	if scope != want {
 		t.Fatalf("lifecycle scope = %#v, want %#v", scope, want)
+	}
+}
+
+func TestGenerationGrantRejectsEveryAuthorityUseAfterSourceSetChanges(t *testing.T) {
+	capability, session, plan := testCapability(t)
+	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
+		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("IssueGenerationGrant: %v", err)
+	}
+	grantToAdmit, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
+		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("IssueGenerationGrant for admission: %v", err)
+	}
+	if _, err := grantToAdmit.MarkProbesSettled(context.Background(), []string{"startup"}); err != nil {
+		t.Fatalf("MarkProbesSettled before source-set replacement: %v", err)
+	}
+	replacement, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{
+		{BundleHash: startupBundleHashA, BundleSource: "ephemeral"},
+		{BundleHash: startupBundleHashB, BundleSource: "ephemeral"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewSourceSetPlan: %v", err)
+	}
+	if _, err := capability.ReplaceSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: replacement,
+	}); err != nil {
+		t.Fatalf("ReplaceSourceSet: %v", err)
+	}
+
+	if err := grant.ProveCurrent(context.Background()); err == nil {
+		t.Fatal("ProveCurrent accepted a superseded source-set revision")
+	}
+	if _, err := grant.SourceSetPlan(context.Background()); err == nil {
+		t.Fatal("SourceSetPlan returned a superseded source-set revision")
+	}
+	if _, err := grant.MarkProbesSettled(context.Background(), nil); err == nil {
+		t.Fatal("MarkProbesSettled admitted a superseded source-set revision")
+	}
+	if _, err := grantToAdmit.AdmitExecution(context.Background()); err == nil {
+		t.Fatal("AdmitExecution admitted a superseded source-set revision")
+	}
+	flowTopology, err := runtimeagenttopology.FlowReadinessAdmission(uuid.NewString(), "flow/instance", "plan-v1")
+	if err != nil {
+		t.Fatalf("FlowReadinessAdmission: %v", err)
+	}
+	if _, err := grant.CommitAgentLifecycleTransition(context.Background(), runtimemanager.AgentLifecycleTransition{Topology: flowTopology}); err == nil {
+		t.Fatal("CommitAgentLifecycleTransition accepted flow readiness through a superseded grant")
+	}
+	if _, err := capability.RestoreSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
+		OperationID: uuid.NewString(), ExpectedRevision: replacement.Revision, Plan: plan,
+	}); err != nil {
+		t.Fatalf("RestoreSourceSet: %v", err)
+	}
+	if err := grant.ProveCurrent(context.Background()); err != nil {
+		t.Fatalf("ProveCurrent after restoring exact source-set revision: %v", err)
+	}
+	if _, err := grant.MarkProbesSettled(context.Background(), []string{"startup"}); err != nil {
+		t.Fatalf("MarkProbesSettled after restoring exact source-set revision: %v", err)
+	}
+	if _, err := grantToAdmit.AdmitExecution(context.Background()); err != nil {
+		t.Fatalf("AdmitExecution after restoring exact source-set revision: %v", err)
+	}
+	if err := grant.Retire(context.Background()); err != nil {
+		t.Fatalf("Retire restored prepared grant: %v", err)
+	}
+	if err := grantToAdmit.Retire(context.Background()); err != nil {
+		t.Fatalf("Retire restored admitted grant: %v", err)
 	}
 }
 
