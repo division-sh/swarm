@@ -115,7 +115,7 @@ func TestForHandler_ResolvesQualifiedRuntimeEventToLocalProjectionBinding(t *tes
 
 func TestActiveHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, ""))
-	node := identitytest.FlowNode(t, "worker", "worker-listener")
+	node := identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener")
 	active := activeHandlerResolution(source, node, "producer/task.done")
 	if active.AccumulatorName != "" || active.AuthoredEventType != "" || active.CanonicalEventType != "" {
 		t.Fatalf("active handler = %#v, want empty for ungranted sibling event", active)
@@ -127,7 +127,7 @@ func TestActiveHandlerResolution_DeniesImportBoundaryWildcardRawFallback(t *test
 
 func TestActiveHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := semanticview.Wrap(loadProjectionImportBoundaryWildcardBundle(t, "      observe:\n        - source: producer\n          events: [task.done]\n"))
-	node := identitytest.FlowNode(t, "worker", "worker-listener")
+	node := identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener")
 	active := activeHandlerResolution(source, node, "producer/task.done")
 	if got := active.AccumulatorName; got != "tasks" {
 		t.Fatalf("ActiveAccumulatorName = %q, want tasks", got)

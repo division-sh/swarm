@@ -159,7 +159,8 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
 	}
-	if !runForkPlanHasString(admission.FrontierEvents[0].RuntimeEventOwners, "alpha-intake") {
+	alphaIntake := identitytest.ExecutableNode(t, "flows/flow-a", "flow-a", "alpha-intake").Key()
+	if !runForkPlanHasString(admission.FrontierEvents[0].RuntimeEventOwners, alphaIntake) {
 		t.Fatalf("runtime event owners = %#v, want alpha-intake from selected contract", admission.FrontierEvents[0].RuntimeEventOwners)
 	}
 	if !runForkPlanHasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {

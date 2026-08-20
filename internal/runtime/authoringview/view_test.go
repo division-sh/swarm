@@ -109,7 +109,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 		t.Fatalf("approval points = %#v, want one", view.ApprovalPoints)
 	}
 	got := view.ApprovalPoints[0]
-	if got.NodeID != "support" || got.HandlerEvent != "support.reply_drafted" || got.Source != "handler.activity" ||
+	if got.NodeID != identitytest.RootNode(t, "support").Key() || got.HandlerEvent != "support.reply_drafted" || got.Source != "handler.activity" ||
 		got.ActivityID != "send_support_reply" || got.Tool != "telegram_send" || got.Decision != "support_reply" ||
 		got.EffectClass != string(runtimecontracts.ActivityEffectClassNonIdempotentWrite) {
 		t.Fatalf("approval point = %#v", got)
@@ -495,7 +495,7 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	if len(got.From) != 1 || got.From[0] != "waiting" {
 		t.Fatalf("fan-out from = %#v, want initial stage", got.From)
 	}
-	if got.Source != "handler.fan_out" || got.NodeID != "dispatcher" || got.EventType != "order.accepted" {
+	if got.Source != "handler.fan_out" || got.NodeID != identitytest.RootNode(t, "dispatcher").Key() || got.EventType != "order.accepted" {
 		t.Fatalf("fan-out source = %#v, want handler fan_out dispatcher/order.accepted", got)
 	}
 }
@@ -816,7 +816,7 @@ func TestBuildShowsIntrinsicJoinCoordinatorFailureWithExactProvenance(t *testing
 		t.Fatalf("stateless join readback = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
 	}
 	for _, diagnostic := range view.Diagnostics {
-		if diagnostic.CheckID == "singleton_coordinator_validation" && diagnostic.Location == "coordinator-node" && strings.Contains(diagnostic.Message, "handler job.received workflow_join") {
+		if diagnostic.CheckID == "singleton_coordinator_validation" && diagnostic.Location == identitytest.FlowNode(t, "coordinator", "coordinator-node").Key() && strings.Contains(diagnostic.Message, "handler job.received workflow_join") {
 			return
 		}
 	}
@@ -902,7 +902,7 @@ func TestBuildScansFlowLocalDuplicateNodeIDsForContainedOperations(t *testing.T)
 	for _, flowID := range []string{"alpha", "beta"} {
 		flow := flowByID(t, view, flowID)
 		op := containedOperationByTargetAndOp(t, flow, "entity.items", "set")
-		if op.NodeID != "indexer" {
+		if op.NodeID != identitytest.FlowNode(t, flowID, "indexer").Key() {
 			t.Fatalf("%s contained operation node = %q, want indexer", flowID, op.NodeID)
 		}
 		if op.MapKeyType != "text" || op.MapValueType != "Item" {

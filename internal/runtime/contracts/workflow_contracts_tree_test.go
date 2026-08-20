@@ -83,6 +83,25 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	if got := child.EventURIs["child.completed"]; got != "root-platform://parent/child/child.completed" {
 		t.Fatalf("expected child event uri, got %q", got)
 	}
+	records := bundle.ScopedNodeRecords()
+	wantNodes := map[string]bool{
+		identitytest.ExecutableNode(t, "flows/parent", "parent", "parent-node").Key(): false,
+		identitytest.ExecutableNode(t, "flows/parent", "child", "child-node").Key():   false,
+	}
+	for _, record := range records {
+		node, identityErr := record.Identity()
+		if identityErr != nil {
+			t.Fatalf("scoped node identity: %v", identityErr)
+		}
+		if _, exists := wantNodes[node.Key()]; exists {
+			wantNodes[node.Key()] = true
+		}
+	}
+	for node, found := range wantNodes {
+		if !found {
+			t.Fatalf("scoped node records %#v missing exact imported package node %q", records, node)
+		}
+	}
 	if ref, ok := bundle.URIRegistry.ByURI["root-platform://parent/child/child.completed"]; !ok {
 		t.Fatal("expected full URI in registry")
 	} else if ref.Kind != "event" || ref.FlowID != "child" {

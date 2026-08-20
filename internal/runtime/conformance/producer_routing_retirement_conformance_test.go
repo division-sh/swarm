@@ -124,6 +124,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 	cases := []struct {
 		id           string
 		fixture      string
+		packageKey   string
 		flowID       string
 		flowInstance string
 		nodeID       string
@@ -135,7 +136,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 	}{
 		{id: "B001", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "delivery", flowInstance: "delivery/fixture-instance", nodeID: "delivery-node", trigger: "timer.item.timeout", emitted: "item.completed", runtimeEvent: "delivery/item.completed", disposition: "same_flow"},
 		{id: "B002", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "intake", flowInstance: "intake", nodeID: "intake-router", trigger: "item.created", emitted: "item.processed", runtimeEvent: "intake/item.processed", disposition: "same_flow", payload: map[string]any{"item_id": "item-1", "items": []any{map[string]any{"id": "line-1"}}}},
-		{id: "B103", fixture: "tests/tier5-flow-lifecycle/test-auto-emit-on-create", flowID: "worker", flowInstance: "worker/worker-001", nodeID: "worker", trigger: "auto.started", emitted: "auto.processed", runtimeEvent: "worker/auto.processed", disposition: "same_flow"},
+		{id: "B103", fixture: "tests/tier5-flow-lifecycle/test-auto-emit-on-create", packageKey: "flows/worker", flowID: "worker", flowInstance: "worker/worker-001", nodeID: "worker", trigger: "auto.started", emitted: "auto.processed", runtimeEvent: "worker/auto.processed", disposition: "same_flow"},
 		{id: "B151", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.ping", emitted: "cycle.pong", disposition: "same_flow"},
 		{id: "B152", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.pong", emitted: "cycle.ping", disposition: "same_flow"},
 		{id: "B164", fixture: "tests/tier8-boot-verification/test-boot-permission-tool-mismatch", nodeID: "test-node", trigger: "task.requested", emitted: "task.completed", disposition: "same_flow"},
@@ -161,6 +162,9 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			}
 			previewCtx := context.Background()
 			node := conformanceNode(t, tc.flowID, tc.nodeID)
+			if tc.packageKey != "" {
+				node = conformancePackageNode(t, tc.packageKey, tc.flowID, tc.nodeID)
+			}
 			if tc.flowID != "" {
 				previewCtx = runtimedelivery.WithRoute(previewCtx, events.DeliveryRoute{
 					Recipient: events.MustNodeDeliveryRecipient(node),

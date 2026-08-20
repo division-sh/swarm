@@ -77,7 +77,7 @@ func TestJoinActivationPersistsTypedDeclarationHandle(t *testing.T) {
 	if err := Store(buckets, activation); err != nil {
 		t.Fatal(err)
 	}
-	raw := buckets["join-node"][bucketKey].(map[string]any)[activation.Key()].(map[string]any)
+	raw := buckets[joinNodeBucketKey(identitytest.RootNode(t, "join-node"))][bucketKey].(map[string]any)[activation.Key()].(map[string]any)
 	for _, retired := range []string{"flow_id", "node_id", "handler_event", "stage", "join_id", "window", "loop_generation", "timer_task_id", "timer_event_type"} {
 		if _, exists := raw[retired]; exists {
 			t.Fatalf("activation persisted retired authority %q: %#v", retired, raw)
@@ -113,7 +113,7 @@ func TestJoinActivationRejectsRetiredFlatIdentityRows(t *testing.T) {
 				t.Fatal(err)
 			}
 			row[retired] = "retired-authority"
-			buckets := map[string]map[string]any{"join-node": {bucketKey: map[string]any{activation.Key(): row}}}
+			buckets := map[string]map[string]any{joinNodeBucketKey(identitytest.RootNode(t, "join-node")): {bucketKey: map[string]any{activation.Key(): row}}}
 			if loaded, found, err := Load(buckets, identitytest.RootNode(t, "join-node"), activation.Key()); err == nil || found {
 				t.Fatalf("retired row loaded as %#v found=%v err=%v", loaded, found, err)
 			}

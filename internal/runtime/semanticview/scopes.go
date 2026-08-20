@@ -66,6 +66,14 @@ func ExecutableNodeFlowScope(source Source, node runtimeidentity.ExecutableNode)
 	if source == nil || !node.Valid() || node.FlowID() == "" {
 		return FlowScope{}, false
 	}
+	if bundle, ok := Bundle(source); ok {
+		if view, found := bundle.ExecutableNodeFlowView(node); found {
+			scope := flowScopeFromView(*view)
+			scope.PackageKey = node.PackageKey()
+			return scope, true
+		}
+		return FlowScope{}, false
+	}
 	for _, scope := range source.FlowScopes() {
 		packageKey := strings.Trim(strings.TrimSpace(scope.PackageKey), "/")
 		if packageKey == "" {

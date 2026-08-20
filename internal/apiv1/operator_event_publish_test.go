@@ -1218,7 +1218,7 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 		t.Fatalf("targeted result = %#v, want selected existing run", result)
 	}
 	assertEventPublishTargetRouteRow(t, db, runID, eventID, "operating/opco.product_initialization_requested", targetFlowInstance, targetEntityID)
-	assertEventPublishDeliveryTargetRoute(t, db, eventID, "node", "lifecycle-orchestrator", targetFlowInstance, targetEntityID)
+	assertEventPublishDeliveryTargetRoute(t, db, eventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), targetFlowInstance, targetEntityID)
 	if got := countEventRowsByRunID(t, db, runID); got != 2 {
 		t.Fatalf("events for selected run after targeted publish = %d, want 2", got)
 	}
@@ -1283,7 +1283,7 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	if gotEventName != "review.requested" || gotEntityID != "" || gotFlowInstance != "" {
 		t.Fatalf("event row = name:%q entity:%q flow:%q, want mixed root-receiver projection despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
 	}
-	assertStoredEventTargetProjectionEmpty(t, gotTargetRoute, gotTargetSet)
+	assertStoredEventEntitylessReceiverTarget(t, gotTargetRoute, gotTargetSet, "review")
 	var decoded map[string]any
 	if err := json.Unmarshal(gotPayload, &decoded); err != nil {
 		t.Fatalf("decode root/template collision payload: %v", err)
@@ -2918,21 +2918,21 @@ func containsStoredRoute(routes []events.RouteIdentity, want events.RouteIdentit
 	return false
 }
 
-func assertStoredEventTargetProjectionEmpty(t *testing.T, targetRouteRaw, targetSetRaw string) {
+func assertStoredEventEntitylessReceiverTarget(t *testing.T, targetRouteRaw, targetSetRaw, flowID string) {
 	t.Helper()
 	var target events.RouteIdentity
 	if err := json.Unmarshal([]byte(targetRouteRaw), &target); err != nil {
 		t.Fatalf("decode event target_route: %v", err)
 	}
 	if !target.Empty() {
-		t.Fatalf("event target_route = %#v, want empty entityless projection", target)
+		t.Fatalf("event target_route = %#v, want target_set ownership", target)
 	}
 	var targetSet []events.RouteIdentity
 	if err := json.Unmarshal([]byte(targetSetRaw), &targetSet); err != nil {
 		t.Fatalf("decode event target_set: %v", err)
 	}
-	if len(targetSet) != 0 {
-		t.Fatalf("event target_set = %#v, want empty entityless projection", targetSet)
+	if len(targetSet) != 1 || targetSet[0].FlowID != flowID || targetSet[0].FlowInstance == "" || targetSet[0].EntityID != "" {
+		t.Fatalf("event target_set = %#v, want one entityless %s receiver", targetSet, flowID)
 	}
 }
 

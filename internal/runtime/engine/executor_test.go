@@ -775,8 +775,44 @@ func TestExecutor_ValidateRequestAllowsDeepInboundChainDepth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	if err := exec.ValidateRequest(ExecutionRequest{ChainDepth: 3}); err != nil {
+	if err := exec.ValidateRequest(ExecutionRequest{Node: testRootExecutableNode(t, "validation-node"), ChainDepth: 3}); err != nil {
 		t.Fatalf("ValidateRequest error = %v, want nil", err)
+	}
+}
+
+func TestExecutionRequestStateAddressUsesExplicitExecutionFlowForRootDeclaration(t *testing.T) {
+	req := ExecutionRequest{
+		EntityID:        identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		Node:            testRootExecutableNode(t, "root-node"),
+		ExecutionFlowID: identity.NormalizeFlowID("root-workflow"),
+		Route:           runtimeflowidentity.StoredRoute("root-workflow", "instance", "root-workflow/instance"),
+	}
+	address := req.StateAddress()
+	if got := address.FlowID.String(); got != "root-workflow" {
+		t.Fatalf("state address flow_id = %q, want explicit root execution flow", got)
+	}
+	if req.Node.FlowID() != "" {
+		t.Fatalf("root declaration flow_id = %q, want empty declaration coordinate", req.Node.FlowID())
+	}
+}
+
+func TestExecutorValidateRequestRejectsDurableRouteWithoutExecutionFlow(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Node:  testRootExecutableNode(t, "root-node"),
+		Route: runtimeflowidentity.StoredRoute("root-workflow", "instance", "root-workflow/instance"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "exact execution flow identity is required") {
+		t.Fatalf("ValidateRequest error = %v, want missing execution-flow authority", err)
 	}
 }
 
@@ -832,7 +868,7 @@ func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T)
 	}
 	for name, handler := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := exec.ValidateRequest(ExecutionRequest{Handler: handler})
+			err := exec.ValidateRequest(ExecutionRequest{Node: testRootExecutableNode(t, "validation-node"), Handler: handler})
 			if err == nil || !strings.Contains(err.Error(), "_entity is read-only platform entity metadata") {
 				t.Fatalf("ValidateRequest error = %v, want _entity read-only write-target rejection", err)
 			}
@@ -3041,7 +3077,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	if _, ok := repo.mutation.Fields["dedup_key"]; ok {
 		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", repo.mutation.Fields)
 	}
-	if nodeBucket, ok := repo.mutation.StateBuckets["node-1"]; ok {
+	if nodeBucket, ok := repo.mutation.StateBuckets[node.Key()]; ok {
 		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
 			t.Fatalf("expected accumulator state to be cleared, state_buckets=%#v", repo.mutation.StateBuckets)
 		}
@@ -4776,8 +4812,8 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 			if got := emitted.SourceRoute().FlowInstance; got != "component-scaffold/component-1" {
 				t.Fatalf("source flow_instance = %q, want component-scaffold/component-1", got)
 			}
-			if got := emitted.SourceAgent(); got != "component-node" {
-				t.Fatalf("source agent = %q, want component-node", got)
+			if got, want := emitted.SourceAgent(), testFlowExecutableNode(t, "component-scaffold", "component-node").Key(); got != want {
+				t.Fatalf("source agent = %q, want %s", got, want)
 			}
 			if got := emitted.ProducerType(); got != events.EventProducerNode {
 				t.Fatalf("producer type = %q, want node", got)
@@ -4802,9 +4838,10 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "component-entity",
-		Node:     testFlowExecutableNode(t, "component-scaffold", "component-node"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		EntityID:        "component-entity",
+		Node:            testFlowExecutableNode(t, "component-scaffold", "component-node"),
+		HandlerEventKey: "repo_scaffold.repo_scaffolded",
+		Event:           eventtest.RunCreatingRootIngress("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5540,18 +5577,19 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
+	node := testFlowExecutableNode(t, "root", "node-1")
 	initial := testStateSnapshot("pending", map[string]any{
 		"dedup_key":         "dup-1",
 		"accumulated_total": 5,
 		"received_items":    []any{"a"},
 	}, nil, map[string]map[string]any{
-		"node-1": {
+		node.Key(): {
 			handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}},
 		},
 	})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "root", "node-1"),
+		Node:     node,
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
@@ -5567,7 +5605,7 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 	if _, ok := result.StateMutation.Fields["received_items"]; ok {
 		t.Fatalf("expected received_items to be cleared, metadata=%#v", result.StateMutation.Fields)
 	}
-	if nodeBucket, ok := result.StateMutation.StateBuckets["node-1"]; ok {
+	if nodeBucket, ok := result.StateMutation.StateBuckets[node.Key()]; ok {
 		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
 			t.Fatalf("expected accumulator bucket to be cleared, state_buckets=%#v", result.StateMutation.StateBuckets)
 		}

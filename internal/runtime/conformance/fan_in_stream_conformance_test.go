@@ -382,10 +382,39 @@ func fanInStreamPublishAndExecute(
 	if got := store.scopes[evt.ID()]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope for %s = %q, want subscribed", evt.ID(), got)
 	}
+	subscription, err := eb.SubscribeInternal(
+		ctx,
+		conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID).Key(),
+		evt.Type(),
+	)
+	if err != nil {
+		t.Fatalf("SubscribeInternal(%s): %v", evt.ID(), err)
+	}
+	subscription.MarkReady()
 	if _, err := eb.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
 		t.Fatalf("RecoverPersistedPipeline(%s): %v", evt.ID(), err)
+	}
+	select {
+	case delivery := <-subscription.Deliveries():
+		if delivery == nil {
+			t.Fatalf("RecoverPersistedPipeline(%s) delivered nil work", evt.ID())
+		}
+		if got := delivery.Event().ID(); got != evt.ID() {
+			t.Fatalf("RecoverPersistedPipeline(%s) delivered event %s", evt.ID(), got)
+		}
+		if got := delivery.HandoffRoute().Target.Route().Normalized(); got != deliveryTarget.Normalized() {
+			t.Fatalf("RecoverPersistedPipeline(%s) target = %#v, want %#v", evt.ID(), got, deliveryTarget.Normalized())
+		}
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete recovered delivery %s: %v", evt.ID(), err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for recovered delivery %s", evt.ID())
+	}
+	if err := subscription.Complete(false); err != nil {
+		t.Fatalf("retire recovered delivery subscription %s: %v", evt.ID(), err)
 	}
 	delivered := eventtest.TargetRouted(evt, deliveryTarget)
 	if got := delivered.EntityID(); got != deliveryTarget.EntityID {
@@ -395,6 +424,7 @@ func fanInStreamPublishAndExecute(
 	executionState.EntityID = ""
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		Node:            conformanceNode(t, templatefanin.ReceiverFlowID, templatefanin.ReceiverNodeID),
+		ExecutionFlowID: runtimeidentity.NormalizeFlowID(templatefanin.ReceiverFlowID),
 		Event:           delivered,
 		HandlerEventKey: templatefanin.ReceiverEvent,
 		Handler:         handler,

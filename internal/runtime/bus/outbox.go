@@ -354,23 +354,25 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
+	nodePassthrough := true
 	if intent.Recipients == nil {
-		passthrough, deferred, outcome, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
+		interception, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
 		if err != nil {
 			return false, runtimepipelineobligation.Continue(), err
 		}
-		if !outcome.ContinueDispatch() {
-			return false, outcome, nil
+		if !interception.Outcome.ContinueDispatch() {
+			return false, interception.Outcome, nil
 		}
-		for _, next := range deferred {
+		for _, next := range interception.Deferred {
 			if err := d.bus.publishDeferred(ctx, next); err != nil {
 				return false, runtimepipelineobligation.Continue(), err
 			}
 		}
-		if !passthrough {
+		if !interception.EventPassthrough {
 			d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
 			return false, runtimepipelineobligation.Continue(), nil
 		}
+		nodePassthrough = interception.NodePassthrough
 	}
 	recipients, err := d.bus.authoritativeRecipientsForEvent(ctx, intent.Event.ID())
 	if err != nil {
@@ -379,12 +381,21 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		recipients = uniqueStrings(intent.Recipients)
 	}
+	if !nodePassthrough {
+		d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
+		deliveryRoutes = targetOwnedAgentDeliveryRoutes(deliveryRoutes)
+		if len(recipients) == 0 {
+			return false, runtimepipelineobligation.Continue(), nil
+		}
+	}
 	pendingInternal := d.bus.pendingInternalDeliveryForEvent(intent.Event.ID())
 	if len(recipients) > 0 && !deliveryRoutesCoverAgentRecipients(deliveryRoutes, recipients) {
 		return false, runtimepipelineobligation.Continue(), fmt.Errorf("event %s has persisted agent recipients without exact identity-bearing delivery routes", intent.Event.ID())
 	}
 	internalRecipients := append([]string(nil), pendingInternal.recipients...)
-	if len(internalRecipients) == 0 {
+	if !nodePassthrough {
+		internalRecipients = nil
+	} else if len(internalRecipients) == 0 {
 		internalRecipients = deliveryRouteNodeRecipientIDs(deliveryRoutes)
 	}
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))

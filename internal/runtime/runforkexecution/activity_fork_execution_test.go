@@ -121,7 +121,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
-				NodeID: activityNode.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
+				NodeID: activityidentity.MustNodeOwner(activityNode).Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
 			})
@@ -364,12 +364,12 @@ func seedSelectedContractActivityAttempt(t *testing.T, db *sql.DB, fact activity
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow_a', 'test-node', 'review.requested',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow_a', $13, 'review.requested',
 			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'flow_a/connector.succeeded', 'flow_a/connector.failed',
 			$6::uuid, $7, $8::jsonb, $9::jsonb, $10, $11::jsonb, 'review', $12, $12, $12
 		)
 	`, requestEventID, fact.RunID, fact.SourceEventID, fact.EntityID, status, resultEventID, resultEventType,
-		selectedContractActivityJSON(t, resultPayload), failureJSON, fmt.Sprintf("sha256:%x", inputHash[:]), selectedContractActivityJSON(t, generation), at); err != nil {
+		selectedContractActivityJSON(t, resultPayload), failureJSON, fmt.Sprintf("sha256:%x", inputHash[:]), selectedContractActivityJSON(t, generation), at, fact.Owner.Key()); err != nil {
 		t.Fatalf("seed source activity attempt: %v", err)
 	}
 }

@@ -211,7 +211,10 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if !req.Node.Valid() {
 		return fmt.Errorf("%w: exact executable node identity is required", ErrInvalidConfig)
 	}
-	if err := validateHandlerEntityWriteTargets(e.deps.Source, req.Node.FlowID(), req.Handler); err != nil {
+	if req.Route.Valid() && strings.TrimSpace(req.ExecutionFlowID.String()) == "" {
+		return fmt.Errorf("%w: exact execution flow identity is required", ErrInvalidConfig)
+	}
+	if err := validateHandlerEntityWriteTargets(e.deps.Source, req.ExecutionFlowID.String(), req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	return nil
@@ -616,7 +619,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	base, err := BuildBaseContext(ContextBuilderInput{
 		Source:  e.deps.Source,
-		FlowID:  req.Node.FlowID(),
+		FlowID:  req.ExecutionFlowID.String(),
 		State:   state,
 		Event:   req.Event,
 		Payload: payload,
@@ -1230,7 +1233,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if !ok || bundle == nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("semantic source is not a workflow contract bundle")}
 	}
-	policy := bundle.ResolvedPolicyForFlow(frame.req.Node.FlowID())
+	policy := bundle.ResolvedPolicyForFlow(frame.req.ExecutionFlowID.String())
 	module, ok := policy.Modules[moduleID]
 	if !ok {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unknown module %q", moduleID)}
@@ -1489,7 +1492,7 @@ func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimeco
 	if rowID == "" {
 		rowID = strings.TrimSpace(spec.StoreAs)
 	}
-	policy := e.deps.Source.ResolvedPolicyForFlow(frame.req.Node.FlowID())
+	policy := e.deps.Source.ResolvedPolicyForFlow(frame.req.ExecutionFlowID.String())
 	setName := strings.TrimSpace(plan.Set)
 	set, ok := policy.Validation[setName]
 	if !ok {
@@ -2304,7 +2307,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	sourceRoute := emitSourceRoute(frame)
-	intentFlowID := identity.NormalizeFlowID(frame.req.Node.FlowID())
+	intentFlowID := identity.NormalizeFlowID(frame.req.ExecutionFlowID.String())
 	if sourceRoute.FlowID != "" {
 		intentFlowID = identity.NormalizeFlowID(sourceRoute.FlowID)
 	}
@@ -2525,7 +2528,7 @@ func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersis
 	}
 	appendWrite := func(write runtimecontracts.WorkflowDataWrite) {
 		if write.IsContainedOperation() {
-			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.Node.FlowID())
+			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.ExecutionFlowID.String())
 			if !ok {
 				return
 			}
@@ -2656,8 +2659,8 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Fields))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
-	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.Node.FlowID())))
-	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.Node.FlowID())
+	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.ExecutionFlowID.String())))
+	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.ExecutionFlowID.String())
 	ctx.Computed = values.Wrap(cloneStringAnyMap(frame.state.Computed))
 	return ctx
 }
@@ -2686,14 +2689,14 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 		frame.state.State.StateCarrier.Fields = map[string]any{}
 	}
 	storagePath := parsed
-	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.Node.FlowID(), target); err != nil {
+	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
 		return err
 	} else if entityTarget {
 		storagePath = paths.Parse(resolved.Path)
 		if value != nil && len(resolved.Field.Path) != 0 {
-			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.Node.FlowID())
+			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.ExecutionFlowID.String())
 			if !ok {
-				return fmt.Errorf("flow %s has no declared entity contract", frame.req.Node.FlowID())
+				return fmt.Errorf("flow %s has no declared entity contract", frame.req.ExecutionFlowID.String())
 			}
 			normalized, normalizeErr := entityruntime.NormalizeFieldValue(contract, resolved.Path, value)
 			if normalizeErr != nil {
@@ -2716,7 +2719,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 	}
 	parsed := paths.Parse(target)
 	if !parsed.HasExplicitRoot() {
-		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.Node.FlowID(), target); err != nil {
+		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
 			return err
 		} else if entityTarget {
 			executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
@@ -2737,7 +2740,7 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		return fmt.Errorf("join context is read-only")
 	case paths.RootEntity, paths.RootMetadata:
 		if parsed.Root == paths.RootEntity {
-			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.Node.FlowID(), target); err != nil {
+			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
 				return err
 			} else {
 				executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
@@ -3064,7 +3067,7 @@ func (e *Executor) resolveDeclarativeEmitEventType(frame *executionFrame, eventT
 	if eventType == "" || e == nil || e.deps.Source == nil || frame == nil {
 		return eventType
 	}
-	flowID := frame.req.Node.FlowID()
+	flowID := frame.req.ExecutionFlowID.String()
 	if flowID == "" {
 		return eventType
 	}
@@ -3205,7 +3208,7 @@ func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, env
 	delivery, deliveryPresent := runtimedelivery.RouteFromContext(frame.ctx)
 	input := runtimepinrouting.ResolutionInput{
 		Source:               e.deps.Source,
-		FlowID:               frame.req.Node.FlowID(),
+		FlowID:               frame.req.ExecutionFlowID.String(),
 		EventType:            strings.TrimSpace(eventType),
 		RoutingSource:        frame.req.ProducerSource,
 		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Fields),
@@ -3304,7 +3307,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 	case GuardFailureKill:
 		frame.result.Status = OutcomeKilled
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "kill")
-		if killedState := e.killStateTarget(frame.req.Node.FlowID()); killedState != "" {
+		if killedState := e.killStateTarget(frame.req.ExecutionFlowID.String()); killedState != "" {
 			frame.result.NextState = killedState
 			frame.state.State.CurrentState = killedState
 			frame.result.StateMutation.NextState = killedState

@@ -399,6 +399,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID(entityID),
 		Node:            e.nodeRef,
+		ExecutionFlowID: identity.NormalizeFlowID(flowID),
 		Route:           stateRoute,
 		Event:           evt,
 		ProducerSource:  producerSource,

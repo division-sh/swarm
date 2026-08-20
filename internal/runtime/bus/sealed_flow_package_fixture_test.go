@@ -115,7 +115,7 @@ func assertSealedFlowPackageDependencies(t *testing.T, source semanticview.Sourc
 
 func assertSealedFlowPackageWildcardScope(t *testing.T, source semanticview.Source) {
 	t.Helper()
-	consumerNode := testFlowNode(t, "consumer", "consumer-node")
+	consumerNode := testPackageNode(t, "flows/consumer", "consumer", "consumer-node")
 
 	if owners := source.RuntimeEventOwners("producer/audit.seen"); len(owners) != 0 {
 		t.Fatalf("RuntimeEventOwners(producer/audit.seen) = %#v, want no consumer wildcard sibling leakage", owners)
@@ -171,7 +171,7 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testPackageNode(t, "flows/consumer", "consumer", "consumer-node")), Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 		FlowID:       "consumer",
 		FlowInstance: "consumer",
 	}),

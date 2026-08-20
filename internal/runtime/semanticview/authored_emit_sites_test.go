@@ -149,8 +149,8 @@ func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinc
 	}
 	keys := []string{matches[0].SourceScopeKey, matches[1].SourceScopeKey}
 	sort.Strings(keys)
-	if strings.Join(keys, ",") != ".,extras" {
-		t.Fatalf("source scope keys = %v, want root package and extras; sites=%#v", keys, authoredEmitSiteSummaries(matches))
+	if strings.Join(keys, ",") != "extras,flows/support" {
+		t.Fatalf("source scope keys = %v, want sealed flow package and extras; sites=%#v", keys, authoredEmitSiteSummaries(matches))
 	}
 }
 

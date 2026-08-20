@@ -1065,7 +1065,8 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		"idempotency_key": "join-failure-arrival-" + uuid.NewString(),
 	})
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "dead_letter", 1)
-	waitServedDeliveryOutcomeCount(t, db, "postgres", arrival.EventID, "node", "join-node", "dead_letter", 1)
+	joinNode := identitytest.RootNode(t, "join-node").Key()
+	waitServedDeliveryOutcomeCount(t, db, "postgres", arrival.EventID, "node", joinNode, "dead_letter", 1)
 
 	type failureReadback struct {
 		EntityID   string `json:"entity_id"`
@@ -1086,7 +1087,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	}
 	found := false
 	for _, delivery := range event.Deliveries {
-		if delivery.SubscriberType == "node" && delivery.SubscriberID == "join-node" && delivery.Status == "dead_letter" &&
+		if delivery.SubscriberType == "node" && delivery.SubscriberID == joinNode && delivery.Status == "dead_letter" &&
 			delivery.Failure != nil && delivery.Failure.Class == runtimefailures.ClassEarlyArrival && delivery.Failure.Detail.Code == "join_not_armed" {
 			found = true
 		}
@@ -1098,7 +1099,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	if code != 0 || strings.TrimSpace(stderr) != "" {
 		t.Fatalf("join event view code=%d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	for _, want := range []string{"subscriber=node/join-node", "status=dead letter", "failure=platform.early_arrival/join_not_armed"} {
+	for _, want := range []string{"subscriber=node/" + joinNode, "status=dead letter", "failure=platform.early_arrival/join_not_armed"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("join event view missing %q:\n%s", want, stdout)
 		}
@@ -3711,7 +3712,7 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 	if _, exists := requestedPayload["validation_case_id"]; exists {
 		t.Fatalf("%s persisted source payload mutated with receiver-owned validation_case_id: %#v", backend, requestedPayload)
 	}
-	projection, targetFlow, targetInstance := servedEventDeliveryProjection(t, db, backend, requestedEventID, "validator-node")
+	projection, targetFlow, targetInstance := servedEventDeliveryProjection(t, db, backend, requestedEventID, identitytest.FlowNode(t, "validator", "validator-node").Key())
 	validationCaseID := strings.TrimSpace(projection["validation_case_id"])
 	if _, err := uuid.Parse(validationCaseID); err != nil {
 		t.Fatalf("%s projected validation_case_id = %q, want UUID: %v", backend, validationCaseID, err)
@@ -3814,7 +3815,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestWorkflowNodeHandlerStartHook: func(ctx context.Context, nodeID string, evt events.Event) error {
-			if !servedEventPublishMatchesNodeEvent(nodeID, evt, "portfolio-node", "opco.spinup_requested") {
+			if !servedEventPublishMatchesNodeEvent(nodeID, evt, identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested") {
 				return nil
 			}
 			hookMu.Lock()
@@ -3901,9 +3902,10 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	if spinup.RunID != runID || spinup.OperatorReferenceEventID != bootstrap.EventID || spinup.NewRunCreated || spinup.EventID == "" {
 		t.Fatalf("spinup event.publish result = %#v, want existing run with source lineage", spinup)
 	}
-	requireServedEventPublishPreHandlerProof(t, db, backend, blocked, runID, spinup.EventID, "portfolio-node")
-	assertServedEventPublishDeliveriesContainStatus(t, spinup.Deliveries, "node", "portfolio-node", "pending", "in_progress")
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "in_progress"); got != 1 {
+	portfolioNode := identitytest.RootNode(t, "portfolio-node").Key()
+	requireServedEventPublishPreHandlerProof(t, db, backend, blocked, runID, spinup.EventID, portfolioNode)
+	assertServedEventPublishDeliveriesContainStatus(t, spinup.Deliveries, "node", portfolioNode, "pending", "in_progress")
+	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", portfolioNode, "in_progress"); got != 1 {
 		t.Fatalf("%s parent delivery in_progress count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, spinup.EventID, "subscribed")
@@ -3914,17 +3916,18 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
-	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", "portfolio-node")
-	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", "portfolio-node")
+	waitServedDeliveryOutcomeCount(t, db, backend, spinup.EventID, "node", portfolioNode, "delivered", 1)
+	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", portfolioNode)
+	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", portfolioNode)
 
 	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
 	autoEntityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
 	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, autoEventID)
-	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, "lifecycle-orchestrator")
-	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, "lifecycle-orchestrator")
-	waitServedDeliveryOutcomeCount(t, db, backend, autoEventID, "node", "lifecycle-orchestrator", "delivered", 1)
+	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
+	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, lifecycleNode)
+	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, lifecycleNode)
+	waitServedDeliveryOutcomeCount(t, db, backend, autoEventID, "node", lifecycleNode, "delivered", 1)
 	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, autoEventID, "subscribed")
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
@@ -3936,8 +3939,9 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	componentEventID := waitServedEventPublishEventID(t, db, backend, runID, "operating/component_scaffold.spawn_requested")
 	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, componentEventID)
 	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
-	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, "operating/component_scaffold.spawn_requested", "component-scaffold")
-	requireServedTraceReadback(t, endpoint, runID, componentEventID, "operating/component_scaffold.spawn_requested", "component-scaffold")
+	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
+	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, "operating/component_scaffold.spawn_requested", componentNode)
+	requireServedTraceReadback(t, endpoint, runID, componentEventID, "operating/component_scaffold.spawn_requested", componentNode)
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
@@ -5418,7 +5422,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", "item-handler")
+	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", identitytest.RootNode(t, "item-handler").Key())
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
 	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
@@ -5448,8 +5452,9 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", "item-observer")
-	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", "item-observer")
+	itemObserver := identitytest.RootNode(t, "item-observer").Key()
+	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", itemObserver)
+	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", itemObserver)
 
 	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
 		"run", "trace", runID,
@@ -5460,7 +5465,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if traceCode != 0 {
 		t.Fatalf("trace readback code=%d stderr=%s stdout=%s", traceCode, traceStderr, traceStdout)
 	}
-	for _, want := range []string{"item.processed", followUpEventID, "delivered", "node/item-observer"} {
+	for _, want := range []string{"item.processed", followUpEventID, "delivered", "node/" + itemObserver} {
 		if !strings.Contains(traceStdout, want) {
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
@@ -5577,8 +5582,9 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "ready")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "ready")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	requireServedEventReadback(t, endpoint, targetEventID, runID, entityID, "operating/opco.product_review_requested", "lifecycle-orchestrator")
-	requireServedTraceReadback(t, endpoint, runID, targetEventID, "operating/opco.product_review_requested", "lifecycle-orchestrator")
+	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
+	requireServedEventReadback(t, endpoint, targetEventID, runID, entityID, "operating/opco.product_review_requested", lifecycleNode)
+	requireServedTraceReadback(t, endpoint, runID, targetEventID, "operating/opco.product_review_requested", lifecycleNode)
 
 	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 1 {
 		t.Fatalf("%s target-route idempotency rows = %d, want 1", backend, got)
@@ -5702,19 +5708,20 @@ func runServedEventPublishActiveLoadProof(
 		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, followUp.EventID, "subscribed")
-	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", "item-observer", "pending", "in_progress", "delivered")
+	itemObserver := identitytest.RootNode(t, "item-observer").Key()
+	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", itemObserver, "pending", "in_progress", "delivered")
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 	requireServedEventPublishDeliveryTargetRoute(t, db, backend, followUp.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), runID, entityID)
-	requireServedEventReadback(t, endpoint, followUp.EventID, runID, "", "item.processed", "item-observer")
+	requireServedEventReadback(t, endpoint, followUp.EventID, runID, "", "item.processed", itemObserver)
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", "item-observer")
+	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
 }
 
 func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, string, int) {

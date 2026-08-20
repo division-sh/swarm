@@ -1,6 +1,7 @@
 package semanticviewtest
 
 import (
+	"fmt"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -9,11 +10,11 @@ import (
 
 type rootAgentsSource struct {
 	semanticview.Source
-	scope semanticview.ProjectScope
+	scopes []semanticview.ProjectScope
 }
 
 func (s rootAgentsSource) ProjectScopes() []semanticview.ProjectScope {
-	return []semanticview.ProjectScope{s.scope}
+	return append([]semanticview.ProjectScope(nil), s.scopes...)
 }
 
 // WrapRootAgents gives direct in-memory root declarations the owner facts that
@@ -42,11 +43,44 @@ func WrapRootAgents(bundle *runtimecontracts.WorkflowContractBundle) semanticvie
 		agentURIs[localID] = uri
 	}
 	base := semanticview.Wrap(bundle)
-	return rootAgentsSource{Source: base, scope: semanticview.ProjectScope{
+	scopes := base.ProjectScopes()
+	rootScope := -1
+	for index := range scopes {
+		key := strings.Trim(strings.TrimSpace(scopes[index].Key), "/")
+		if key == "" {
+			key = "."
+		}
+		if key == "." && strings.TrimSpace(scopes[index].OwningFlowID) == "" {
+			rootScope = index
+			break
+		}
+	}
+	if rootScope >= 0 {
+		scopes[rootScope].Agents = runtimecontracts.EffectiveAgentRegistryEntries(bundle.Agents)
+		scopes[rootScope].AgentURIs = agentURIs
+		return rootAgentsSource{Source: base, scopes: scopes}
+	}
+
+	nodes := make(map[string]runtimecontracts.SystemNodeContract)
+	for _, record := range base.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			panic(fmt.Sprintf("semanticview test root node %q has invalid identity: %v", record.LogicalID, err))
+		}
+		if node.PackageKey() != "." || node.FlowID() != "" {
+			continue
+		}
+		if _, duplicate := nodes[node.NodeID()]; duplicate {
+			panic(fmt.Sprintf("semanticview test root node %q has duplicate exact identity", record.LogicalID))
+		}
+		nodes[node.NodeID()] = record.Entry
+	}
+	scopes = append(scopes, semanticview.ProjectScope{
 		Key: ".", Manifest: runtimecontracts.ProjectPackageDocument{
 			Name: "semanticview-test-root", Version: "1.0.0", PlatformVersion: ">=0.7.0 <0.8.0",
-		}, Nodes: bundle.NodeEntries(), Events: bundle.EventEntries(),
+		}, Nodes: nodes, Events: bundle.EventEntries(),
 		Agents: runtimecontracts.EffectiveAgentRegistryEntries(bundle.Agents), AgentURIs: agentURIs,
 		Tools: bundle.ToolEntries(), Policy: bundle.Policy,
-	}}
+	})
+	return rootAgentsSource{Source: base, scopes: scopes}
 }

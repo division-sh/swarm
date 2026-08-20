@@ -980,8 +980,8 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	alpha := identitytest.FlowNode(t, "flow-a", "alpha-intake")
-	beta := identitytest.FlowNode(t, "flow-b", "beta-intake")
+	alpha := identitytest.ExecutableNode(t, "flows/flow-a", "flow-a", "alpha-intake")
+	beta := identitytest.ExecutableNode(t, "flows/flow-b", "flow-b", "beta-intake")
 	if got := bundle.ResolveExecutableNodeEventPattern(alpha, "work.begin"); got != "flow-a/work.begin" {
 		t.Fatalf("alpha exact event projection = %q", got)
 	}
@@ -1064,8 +1064,8 @@ flow-b-wildcard:
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
-	flowA := identitytest.FlowNode(t, "flow-a", "flow-a-wildcard")
-	flowB := identitytest.FlowNode(t, "flow-b", "flow-b-wildcard")
+	flowA := identitytest.ExecutableNode(t, "flows/flow-a", "flow-a", "flow-a-wildcard")
+	flowB := identitytest.ExecutableNode(t, "flows/flow-b", "flow-b", "flow-b-wildcard")
 	if got := bundle.ResolveExecutableNodeEventPattern(flowA, "task.*"); got != "flow-a/task.*" {
 		t.Fatalf("flow-a exact wildcard projection = %q", got)
 	}

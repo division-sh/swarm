@@ -260,9 +260,9 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	triggerRoute := seedPipelineNodeDeliveryAuthority(t, db, trigger, pipelineNode(t, "child", "child-worker"))
+	childWorker := pipelineSourceNode(t, pc.SemanticSource(), "child", "child-worker")
+	triggerRoute := seedPipelineNodeDeliveryAuthority(t, db, trigger, childWorker)
 
-	childWorker := pipelineNode(t, "child", "child-worker")
 	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), childWorker, trigger); err != nil || !handled {
 		t.Fatalf("child-worker should handle work.requested through the input-pin alias: handled=%v err=%v", handled, err)
 	}

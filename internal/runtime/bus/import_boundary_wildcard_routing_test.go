@@ -23,7 +23,7 @@ import (
 
 func TestImportBoundaryWildcardScopesImportedPackageToOwnSubtreeByDefault(t *testing.T) {
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{})
-	workerNode := testFlowNode(t, "worker", "worker-listener")
+	workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -120,7 +120,7 @@ func TestImportBoundaryWildcardObserveGrantAddsNarrowSiblingCandidate(t *testing
 	source := loadBusImportBoundaryWildcardSource(t, importBoundaryWildcardFixtureOptions{
 		ObserveGrant: "      observe:\n        - source: producer\n          events: [task.done]\n",
 	})
-	workerNode := testFlowNode(t, "worker", "worker-listener")
+	workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -368,7 +368,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
-			if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != testFlowNode(t, "worker", "worker-listener").Key() || len(plan.DeliveryRoutes) != 1 {
+			if len(plan.RoutedRecipients) != 1 || plan.RoutedRecipients[0].ID != testPackageNode(t, "flows/worker", "worker", "worker-listener").Key() || len(plan.DeliveryRoutes) != 1 {
 				t.Fatalf("publish recipient plan = %#v, want one grant-backed worker delivery", plan)
 			}
 			if err := eb.Publish(context.Background(), evt); err != nil {
@@ -470,7 +470,7 @@ func TestImportBoundaryWildcardTemplateSourceAndConsumerLifecycleOrdersRemainExa
 
 func assertImportBoundaryWildcardAuthorizationDeliversAcrossSurfaces(t *testing.T, source semanticview.Source, eventPattern, matchPattern string) {
 	t.Helper()
-	workerNode := testFlowNode(t, "worker", "worker-listener")
+	workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
 	if issues := semanticview.ImportBoundaryWildcardGrantIssues(source); len(issues) != 0 {
 		t.Fatalf("observe grant issues = %#v, want grant accepted", issues)
 	}

@@ -35,6 +35,13 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeide
 		}
 		return events.NewStaticFlowRoutingSource(route)
 	}
+	if owner.Layer == "flow" {
+		scope, ok := semanticview.ExecutableNodeFlowScope(source, node)
+		if !ok {
+			return events.RoutingSource{}, fmt.Errorf("flow node %q routing source references missing flow %q", node.Key(), node.FlowID())
+		}
+		return admitFlowExecutionRoutingSource(source, "node", node.Key(), owner, route, scope)
+	}
 	return admitDeclaredExecutionRoutingSource(source, "node", node.Key(), owner, route)
 }
 
@@ -80,48 +87,53 @@ func admitDeclaredExecutionRoutingSource(source semanticview.Source, ownerType, 
 		}
 		return events.NewRootRoutingSource(route.EntityID)
 	case "flow":
-		if owner.FlowID == "" {
-			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source requires declared flow_id", ownerType, ownerID)
-		}
-		if route.FlowID != "" && route.FlowID != owner.FlowID {
-			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source flow_id %q conflicts with declared flow %q", ownerType, ownerID, route.FlowID, owner.FlowID)
-		}
-		route.FlowID = owner.FlowID
 		scope, ok := exactRoutingFlowScope(source, owner.PackageKey, owner.FlowID)
 		if !ok {
 			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source references missing flow %q", ownerType, ownerID, owner.FlowID)
 		}
-		flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if flowPath == "" {
-			flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(owner.FlowID)), "/")
-		}
-		switch strings.TrimSpace(scope.Mode) {
-		case runtimecontracts.FlowModeTemplate:
-			if route.FlowInstance == "" || (flowPath != "" && route.FlowInstance != flowPath && !strings.HasPrefix(route.FlowInstance, flowPath+"/")) {
-				return events.RoutingSource{}, fmt.Errorf("template %s %q routing source requires a concrete instance of %q", ownerType, ownerID, flowPath)
-			}
-			return events.NewConcreteTemplateInstanceRoutingSource(route)
-		case runtimecontracts.FlowModeStatic:
-			if flowPath == "" {
-				return events.RoutingSource{}, fmt.Errorf("static %s %q routing source requires declared flow path", ownerType, ownerID)
-			}
-			// A static declaration is the complete producer identity. Inbound
-			// wildcard descendants must not become a second instance dialect.
-			route.FlowInstance = flowPath
-			return events.NewStaticFlowRoutingSource(route)
-		case runtimecontracts.FlowModeSingleton:
-			if flowPath == "" || (route.FlowInstance != "" && route.FlowInstance != flowPath && !strings.HasPrefix(route.FlowInstance, flowPath+"/")) {
-				return events.RoutingSource{}, fmt.Errorf("singleton %s %q routing source requires an instance owned by flow path %q", ownerType, ownerID, flowPath)
-			}
-			// Singleton runtime instances are concrete lifecycle rows, but their
-			// authored routing identity is the one static flow endpoint.
-			route.FlowInstance = flowPath
-			return events.NewStaticFlowRoutingSource(route)
-		default:
-			return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source has unsupported mode %q", ownerType, ownerID, scope.Mode)
-		}
+		return admitFlowExecutionRoutingSource(source, ownerType, ownerID, owner, route, scope)
 	default:
 		return events.RoutingSource{}, fmt.Errorf("%s %q routing source has unsupported declaration layer %q", ownerType, ownerID, owner.Layer)
+	}
+}
+
+func admitFlowExecutionRoutingSource(source semanticview.Source, ownerType, ownerID string, owner runtimecontracts.ContractItemSource, route events.RouteIdentity, scope semanticview.FlowScope) (events.RoutingSource, error) {
+	owner.FlowID = strings.TrimSpace(owner.FlowID)
+	if owner.FlowID == "" {
+		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source requires declared flow_id", ownerType, ownerID)
+	}
+	if route.FlowID != "" && route.FlowID != owner.FlowID {
+		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source flow_id %q conflicts with declared flow %q", ownerType, ownerID, route.FlowID, owner.FlowID)
+	}
+	route.FlowID = owner.FlowID
+	flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(owner.FlowID)), "/")
+	}
+	switch strings.TrimSpace(scope.Mode) {
+	case runtimecontracts.FlowModeTemplate:
+		if route.FlowInstance == "" || (flowPath != "" && route.FlowInstance != flowPath && !strings.HasPrefix(route.FlowInstance, flowPath+"/")) {
+			return events.RoutingSource{}, fmt.Errorf("template %s %q routing source requires a concrete instance of %q", ownerType, ownerID, flowPath)
+		}
+		return events.NewConcreteTemplateInstanceRoutingSource(route)
+	case runtimecontracts.FlowModeStatic:
+		if flowPath == "" {
+			return events.RoutingSource{}, fmt.Errorf("static %s %q routing source requires declared flow path", ownerType, ownerID)
+		}
+		// A static declaration is the complete producer identity. Inbound
+		// wildcard descendants must not become a second instance dialect.
+		route.FlowInstance = flowPath
+		return events.NewStaticFlowRoutingSource(route)
+	case runtimecontracts.FlowModeSingleton:
+		if flowPath == "" || (route.FlowInstance != "" && route.FlowInstance != flowPath && !strings.HasPrefix(route.FlowInstance, flowPath+"/")) {
+			return events.RoutingSource{}, fmt.Errorf("singleton %s %q routing source requires an instance owned by flow path %q", ownerType, ownerID, flowPath)
+		}
+		// Singleton runtime instances are concrete lifecycle rows, but their
+		// authored routing identity is the one static flow endpoint.
+		route.FlowInstance = flowPath
+		return events.NewStaticFlowRoutingSource(route)
+	default:
+		return events.RoutingSource{}, fmt.Errorf("flow %s %q routing source has unsupported mode %q", ownerType, ownerID, scope.Mode)
 	}
 }
 

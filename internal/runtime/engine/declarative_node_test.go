@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -132,7 +133,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 
 func TestResolvedExecutionHandler_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
 	source := loadEngineImportBoundaryWildcardSource(t, "")
-	resolved := resolvedExecutionHandler(source, testFlowExecutableNode(t, "worker", "worker-listener"), "producer/task.done")
+	resolved := resolvedExecutionHandler(source, identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener"), "producer/task.done")
 	if resolved.matched {
 		t.Fatalf("resolvedExecutionHandler matched ungranted sibling event through raw fallback: %#v", resolved)
 	}
@@ -140,7 +141,7 @@ func TestResolvedExecutionHandler_DeniesImportBoundaryWildcardRawFallback(t *tes
 
 func TestResolvedExecutionHandler_AllowsGrantedImportBoundaryWildcard(t *testing.T) {
 	source := loadEngineImportBoundaryWildcardSource(t, "      observe:\n        - source: producer\n          events: [task.done]\n")
-	resolved := resolvedExecutionHandler(source, testFlowExecutableNode(t, "worker", "worker-listener"), "producer/task.done")
+	resolved := resolvedExecutionHandler(source, identitytest.ExecutableNode(t, "flows/worker", "worker", "worker-listener"), "producer/task.done")
 	if !resolved.matched {
 		t.Fatal("resolvedExecutionHandler did not match granted sibling event")
 	}

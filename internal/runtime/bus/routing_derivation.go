@@ -239,7 +239,11 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents, agentNamePlans); err != nil {
 			return nil, err
 		}
-		if err := rt.addNodePatternsLocked(source, scope.Key, owningFlowID, agentFlowID, handlerFlowID, inputEvents, basePath, localEvents, scope.Nodes); err != nil {
+		nodes, err := routeExecutableNodeDeclarations(source, scope.Key, handlerFlowID, true, scope.Nodes)
+		if err != nil {
+			return nil, err
+		}
+		if err := rt.addNodePatternsLocked(source, owningFlowID, agentFlowID, inputEvents, basePath, localEvents, nodes); err != nil {
 			return nil, err
 		}
 	}
@@ -272,7 +276,11 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents, agentNamePlans); err != nil {
 			return nil, err
 		}
-		if err := rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes); err != nil {
+		nodes, err := routeExecutableNodeDeclarations(source, "", scope.ID, false, scope.Nodes)
+		if err != nil {
+			return nil, err
+		}
+		if err := rt.addNodePatternsLocked(source, scope.ID, scope.ID, scope.InputEvents, flowPath, localEvents, nodes); err != nil {
 			return nil, err
 		}
 	}
@@ -779,12 +787,13 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 	}
 	for _, eventType := range sortedStringKeys(rootInputs) {
 		for _, project := range rootProjects {
-			for _, key := range sortedStringKeys(project.Nodes) {
-				semanticNodeID := strings.TrimSpace(key)
-				handlerNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(project.Paths.Key, "", semanticNodeID)
-				if err != nil {
-					return fmt.Errorf("admit root node %s identity: %w", semanticNodeID, err)
-				}
+			nodes, err := routeExecutableNodeDeclarations(source, project.Paths.Key, "", true, project.Nodes)
+			if err != nil {
+				return err
+			}
+			for _, declaration := range nodes {
+				handlerNode := declaration.Node
+				semanticNodeID := handlerNode.NodeID()
 				if !routeNodeSubscribesToLocalExact(source, handlerNode, eventType) {
 					continue
 				}
@@ -819,9 +828,8 @@ func rootInputFlowOwnsNodeRoute(source semanticview.Source, node runtimeidentity
 		if strings.EqualFold(scope.Mode, "template") || !normalizedStringListContains(scope.InputEvents, eventType) {
 			continue
 		}
-		for _, key := range sortedStringKeys(scope.Nodes) {
-			scopedNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.PackageKey, scope.ID, key)
-			if err == nil && scopedNode.Equal(node) {
+		if strings.TrimSpace(scope.ID) == node.FlowID() {
+			if _, declared := scope.Nodes[node.NodeID()]; declared {
 				return true
 			}
 		}
@@ -853,12 +861,13 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 			if localEvent == "" || !normalizedStringListContains(scope.InputEvents, localEvent) {
 				continue
 			}
-			for _, key := range sortedStringKeys(scope.Nodes) {
-				semanticNodeID := strings.TrimSpace(key)
-				handlerNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.PackageKey, flowID, semanticNodeID)
-				if err != nil {
-					return fmt.Errorf("admit root-input flow node %s identity: %w", semanticNodeID, err)
-				}
+			nodes, err := routeExecutableNodeDeclarations(source, "", flowID, false, scope.Nodes)
+			if err != nil {
+				return err
+			}
+			for _, declaration := range nodes {
+				handlerNode := declaration.Node
+				semanticNodeID := handlerNode.NodeID()
 				if !routeNodeSubscribesToLocalExact(source, handlerNode, localEvent) {
 					continue
 				}
@@ -1118,14 +1127,11 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	return nil
 }
 
-func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, routingFlowID, connectFlowID, handlerFlowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) error {
-	for _, key := range sortedStringKeys(nodes) {
-		entry := nodes[key]
-		semanticNodeID := strings.TrimSpace(key)
-		handlerNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(packageKey, handlerFlowID, semanticNodeID)
-		if err != nil {
-			return fmt.Errorf("admit route subscriber node %s identity: %w", key, err)
-		}
+func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, routingFlowID, connectFlowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes []routeExecutableNodeDeclaration) error {
+	for _, declaration := range nodes {
+		entry := declaration.Entry
+		handlerNode := declaration.Node
+		semanticNodeID := handlerNode.NodeID()
 		subscriber := Subscriber{
 			Recipient:   events.MustNodeDeliveryRecipient(handlerNode),
 			Path:        strings.Trim(strings.TrimSpace(basePath), "/"),
@@ -1147,7 +1153,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			if err := rt.addConnectRecipientLocked(connectFlowID, inputEvents, rawPattern, admittedSubscriber, ""); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, packageKey, routingFlowID, inputEvents, basePath, basePath, localEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, handlerNode.PackageKey(), routingFlowID, inputEvents, basePath, basePath, localEvents, rawPattern)
 			if err != nil {
 				return err
 			}
@@ -1453,13 +1459,14 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 			AgentNamePlan: namePlan,
 		})
 	}
-	for _, key := range sortedStringKeys(scope.Nodes) {
-		entry := scope.Nodes[key]
-		semanticNodeID := strings.TrimSpace(key)
-		handlerNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.PackageKey, scope.ID, semanticNodeID)
-		if err != nil {
-			return nil, fmt.Errorf("admit route subscriber node %s identity: %w", key, err)
-		}
+	nodes, err := routeExecutableNodeDeclarations(source, "", scope.ID, false, scope.Nodes)
+	if err != nil {
+		return nil, err
+	}
+	for _, declaration := range nodes {
+		entry := declaration.Entry
+		handlerNode := declaration.Node
+		semanticNodeID := handlerNode.NodeID()
 		patterns := runtimecontracts.EffectiveSystemNodeSubscriptions(entry)
 		if source != nil {
 			patterns = source.ExecutableNodeRuntimeSubscriptions(handlerNode)
@@ -1468,9 +1475,9 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 			continue
 		}
 		for _, pattern := range patterns {
-			admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.PackageKey, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
+			admission := routeClassifyAuthoredSubscription(source, subscriberNode, handlerNode.PackageKey(), scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
 			if !admission.Admitted() {
-				return nil, fmt.Errorf("route subscriber node %s: %s", key, admission.Message())
+				return nil, fmt.Errorf("route subscriber node %s: %s", semanticNodeID, admission.Message())
 			}
 		}
 		out = append(out, routeSubscriberTemplate{
@@ -1479,6 +1486,48 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 			HandlerNode: handlerNode,
 		})
 	}
+	return out, nil
+}
+
+type routeExecutableNodeDeclaration struct {
+	Node  runtimeidentity.ExecutableNode
+	Entry runtimecontracts.SystemNodeContract
+}
+
+func routeExecutableNodeDeclarations(source semanticview.Source, packageKey, flowID string, matchPackage bool, expected map[string]runtimecontracts.SystemNodeContract) ([]routeExecutableNodeDeclaration, error) {
+	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
+	if packageKey == "" {
+		packageKey = runtimeidentity.RootPackageKey
+	}
+	flowID = strings.TrimSpace(flowID)
+	found := make(map[string]struct{}, len(expected))
+	out := make([]routeExecutableNodeDeclaration, 0, len(expected))
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			return nil, fmt.Errorf("admit route subscriber node %s identity: %w", record.LogicalID, err)
+		}
+		if node.FlowID() != flowID {
+			continue
+		}
+		if matchPackage && node.PackageKey() != packageKey {
+			continue
+		}
+		if _, ok := expected[record.LogicalID]; !ok {
+			continue
+		}
+		if _, duplicate := found[record.LogicalID]; duplicate {
+			return nil, fmt.Errorf("route subscriber node %q has multiple exact declaration owners in flow %q", record.LogicalID, flowID)
+		}
+		found[record.LogicalID] = struct{}{}
+		out = append(out, routeExecutableNodeDeclaration{Node: node, Entry: record.Entry})
+	}
+	for nodeID := range expected {
+		if _, ok := found[nodeID]; !ok {
+			return nil, fmt.Errorf("route subscriber node %q has no exact declaration owner in flow %q", nodeID, flowID)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
 	return out, nil
 }
 

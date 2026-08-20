@@ -236,6 +236,10 @@ type ExecutionRequest struct {
 	ExecutionID string
 	EntityID    identity.EntityID
 	Node        identity.ExecutableNode
+	// ExecutionFlowID is the runtime flow scope selected for this exact node.
+	// It is distinct from Node.FlowID(): root declarations intentionally carry
+	// an empty owning flow while executing in the bundle's root flow.
+	ExecutionFlowID identity.FlowID
 	// Route is the exact workflow-instance persistence identity selected by
 	// the runtime boundary. ProducerSource remains event-source authority.
 	Route runtimeflowidentity.Route
@@ -272,7 +276,7 @@ type ExecutionRequest struct {
 
 func (r ExecutionRequest) StateAddress() StateAddress {
 	return StateAddress{
-		FlowID:   identity.NormalizeFlowID(r.Node.FlowID()),
+		FlowID:   identity.NormalizeFlowID(r.ExecutionFlowID.String()),
 		Route:    r.Route,
 		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
 	}

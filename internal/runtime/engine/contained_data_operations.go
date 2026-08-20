@@ -10,9 +10,10 @@ import (
 )
 
 func (e *Executor) applyContainedDataOperation(frame *executionFrame, current BaseContext, write runtimecontracts.WorkflowDataWrite) error {
-	contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.Node.FlowID())
+	flowID := frame.req.ExecutionFlowID.String()
+	contract, ok := entityruntime.ResolveForFlow(e.deps.Source, flowID)
 	if !ok {
-		return fmt.Errorf("flow %s has no declared entity contract", frame.req.Node.FlowID())
+		return fmt.Errorf("flow %s has no declared entity contract", flowID)
 	}
 	op := strings.TrimSpace(string(write.Operation))
 	target, err := entityruntime.ResolveContainedOperationTarget(contract, write.Target(), op, !write.Key.IsZero(), !write.Index.IsZero())

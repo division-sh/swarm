@@ -91,7 +91,7 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 	}{
 		{
 			id: eventtest.UUID("evt-input-connect"), eventType: "parent.lead_captured", recipient: "worker-node",
-			diagnosticRecipient: testFlowNode(t, "worker", "worker-node").Key(),
+			diagnosticRecipient: testPackageNode(t, "flows/worker", "worker", "worker-node").Key(),
 			source:              mustRootRoutingSource(t, eventtest.UUID("root-input-source")),
 		},
 		{

@@ -1424,7 +1424,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	materialized := eb.RouteTable().MaterializedRoutes(runtimeflowidentity.DeriveRoute("worker", "w-001"))
-	taskHandler := testFlowNode(t, "worker", "task-handler")
+	taskHandler := testPackageNode(t, "flows/worker", "worker", "task-handler")
 	hasRoute := func(eventPattern string) bool {
 		for _, route := range materialized {
 			if route.EventPattern == eventPattern && route.SubscriberID == taskHandler.Key() {
@@ -1474,7 +1474,7 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if !foundConcreteSubscriber {
 		t.Fatalf("routed recipients = %#v, want targeted task-handler concrete worker route", plan.RoutedRecipients)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Target: events.MustExistingEntityTarget(target)}
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(taskHandler), Target: events.MustExistingEntityTarget(target)}
 	if len(plan.DeliveryRoutes) != 1 || !deliveryRoutesContain(plan.DeliveryRoutes, wantRoute) {
 		t.Fatalf("plan delivery routes = %#v, want semantic node route %#v", plan.DeliveryRoutes, wantRoute)
 	}

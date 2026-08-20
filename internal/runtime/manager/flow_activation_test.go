@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -2330,8 +2331,9 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	}
 	oldEvent := "review/inst-1/task.started"
 	newEvent := "review/inst-1/task.revised"
-	if !hasRecord(durableRoutes[reqA.Instance.InstancePath], oldEvent, "route-observer") ||
-		!hasSubscriber(processA.Resolve(oldEvent), "route-observer") {
+	routeObserver := identitytest.FlowNode(t, "review", "route-observer").Key()
+	if !hasRecord(durableRoutes[reqA.Instance.InstancePath], oldEvent, routeObserver) ||
+		!hasSubscriber(processA.Resolve(oldEvent), routeObserver) {
 		t.Fatalf(
 			"source A route-only facts missing: durable=%#v process=%#v",
 			durableRoutes[reqA.Instance.InstancePath],
@@ -2384,16 +2386,16 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 		t.Fatalf("route-only revision changed wrong plan facts: before=%#v after=%#v", initial.Plan, revised.Plan)
 	}
 	revisedRecords := durableRoutes[reqB.Instance.InstancePath]
-	if hasRecord(revisedRecords, oldEvent, "route-observer") ||
-		hasSubscriber(processB.Resolve(oldEvent), "route-observer") {
+	if hasRecord(revisedRecords, oldEvent, routeObserver) ||
+		hasSubscriber(processB.Resolve(oldEvent), routeObserver) {
 		t.Fatalf(
 			"source B retained stale route-only facts: durable=%#v process=%#v",
 			revisedRecords,
 			processB.Resolve(oldEvent),
 		)
 	}
-	if !hasRecord(revisedRecords, newEvent, "route-observer") ||
-		!hasSubscriber(processB.Resolve(newEvent), "route-observer") {
+	if !hasRecord(revisedRecords, newEvent, routeObserver) ||
+		!hasSubscriber(processB.Resolve(newEvent), routeObserver) {
 		t.Fatalf(
 			"source B route-only facts missing: durable=%#v process=%#v",
 			revisedRecords,

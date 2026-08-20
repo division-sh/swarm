@@ -200,7 +200,13 @@ func (b *WorkflowContractBundle) ScopedNodeRecords() []ScopedNodeRecord {
 		return nil
 	}
 	if b.FlowTree.Root != nil {
-		return scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
+		records := scopedNodeRecordsFromExportedTree(b.FlowTree.Root)
+		for index := range records {
+			if strings.TrimSpace(records[index].Source.FlowID) != "" && strings.TrimSpace(records[index].Source.Layer) == "flow" {
+				records[index].Source.PackageKey = b.executableFlowPackageKey(records[index].Source.FlowID)
+			}
+		}
+		return records
 	}
 	if len(b.projectContracts) > 0 {
 		return scopedNodeRecordsFromProjectViews(b.ProjectViews())
@@ -262,21 +268,61 @@ func (b *WorkflowContractBundle) ExecutableNode(ref runtimeidentity.ExecutableNo
 	return ScopedNodeRecord{}, false
 }
 
-func (b *WorkflowContractBundle) executableNodeFlowView(ref runtimeidentity.ExecutableNode) (*FlowContractView, bool) {
+func (b *WorkflowContractBundle) ExecutableNodeFlowView(ref runtimeidentity.ExecutableNode) (*FlowContractView, bool) {
 	if b == nil || !ref.Valid() || ref.FlowID() == "" {
 		return nil, false
 	}
 	for _, view := range b.FlowViews() {
-		packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
+		packageKey := b.executableFlowViewPackageKey(&view)
 		if packageKey == ref.PackageKey() && strings.TrimSpace(view.Paths.ID) == ref.FlowID() {
 			candidate := view
 			return &candidate, true
 		}
 	}
 	return nil, false
+}
+
+func (b *WorkflowContractBundle) executableFlowPackageKey(flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if b == nil || flowID == "" {
+		return runtimeidentity.RootPackageKey
+	}
+	view, ok := b.FlowViewByID(flowID)
+	if !ok {
+		for _, candidate := range b.FlowViews() {
+			if strings.TrimSpace(candidate.Paths.ID) == flowID {
+				view = &candidate
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return runtimeidentity.RootPackageKey
+		}
+	}
+	return b.executableFlowViewPackageKey(view)
+}
+
+func (b *WorkflowContractBundle) executableFlowViewPackageKey(view *FlowContractView) string {
+	if b == nil || view == nil {
+		return runtimeidentity.RootPackageKey
+	}
+	flowDir := filepath.Clean(strings.TrimSpace(view.Paths.Dir))
+	if flowDir != "" && flowDir != "." {
+		for _, pkg := range b.PackageTree {
+			if filepath.Clean(strings.TrimSpace(pkg.Paths.Dir)) != flowDir {
+				continue
+			}
+			if packageKey := strings.Trim(strings.TrimSpace(pkg.Key), "/"); packageKey != "" {
+				return packageKey
+			}
+		}
+	}
+	packageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
+	if packageKey == "" {
+		return runtimeidentity.RootPackageKey
+	}
+	return packageKey
 }
 
 func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode) eventidentity.Scope {
@@ -290,7 +336,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 			OutputEvents: b.FlowOutputEvents(""),
 		}
 	}
-	view, ok := b.executableNodeFlowView(ref)
+	view, ok := b.ExecutableNodeFlowView(ref)
 	if !ok {
 		return eventidentity.Scope{}
 	}
@@ -312,7 +358,7 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 }
 
 func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeidentity.ExecutableNode) []eventidentity.DescendantScope {
-	view, ok := b.executableNodeFlowView(ref)
+	view, ok := b.ExecutableNodeFlowView(ref)
 	if !ok {
 		return nil
 	}
@@ -326,10 +372,7 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeident
 		if candidatePath == "" || candidatePath == parentPath || !strings.HasPrefix(candidatePath, parentPath+"/") {
 			continue
 		}
-		packageKey := strings.Trim(strings.TrimSpace(candidate.Paths.PackageKey), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
+		packageKey := b.executableFlowViewPackageKey(&candidate)
 		if packageKey != ref.PackageKey() && !strings.HasPrefix(packageKey, ref.PackageKey()+"/") {
 			continue
 		}
@@ -372,12 +415,9 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runt
 		}
 		return EventCatalogEntry{}, "", false
 	}
-	if view, ok := b.executableNodeFlowView(ref); ok {
+	if view, ok := b.ExecutableNodeFlowView(ref); ok {
 		for current := view; current != nil; current = current.Parent {
-			packageKey := strings.Trim(strings.TrimSpace(current.Paths.PackageKey), "/")
-			if packageKey == "" {
-				packageKey = runtimeidentity.RootPackageKey
-			}
+			packageKey := b.executableFlowViewPackageKey(current)
 			if packageKey != ref.PackageKey() {
 				continue
 			}
@@ -678,7 +718,7 @@ func (b *WorkflowContractBundle) ResolvedPolicyForExecutableNode(node runtimeide
 			break
 		}
 	}
-	if view, ok := b.executableNodeFlowView(node); ok {
+	if view, ok := b.ExecutableNodeFlowView(node); ok {
 		chain := make([]*FlowContractView, 0)
 		for current := view; current != nil; current = current.Parent {
 			chain = append(chain, current)
