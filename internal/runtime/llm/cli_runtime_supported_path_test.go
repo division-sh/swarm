@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -88,6 +89,7 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	cfg.Workspace.DockerBin = scriptPath
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
+	cfg.LLM.Models = llmselection.ModelAliases{"hostile-alias": {llmselection.BackendClaudeCLI: "hostile-config-model"}}
 
 	var allowedTools []string
 	var listedSurface managedcapabilities.Surface
@@ -170,6 +172,11 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := testManagedConversationContext(t, effects, "market-research-agent", "market/inst-1", "market_research")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
+	actor.Model = "hostile-alias"
+	actor.ResolvedModel = "hostile-actor-model"
+	actor.ResolvedLLMBackend = "hostile-backend"
+	actor.ResolvedLLMProvider = "hostile-provider"
+	actor.ResolvedLLMTransport = "hostile-transport"
 	actor.NativeTools = runtimeactors.NativeToolConfig{FileIO: true}
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
@@ -256,6 +263,9 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 		t.Fatalf("second args = %#v, want resume %q with fork", secondArgs, firstChild)
 	}
 	for index, args := range [][]string{firstArgs, secondArgs} {
+		if got := argValue(args, "--model"); got != "test-model" {
+			t.Fatalf("invocation %d --model = %q, want sealed frame model", index+1, got)
+		}
 		if got := argValue(args, "--tools"); got != "Edit,ExitPlanMode,Read,Write" {
 			t.Fatalf("invocation %d --tools = %q", index+1, got)
 		}
@@ -264,6 +274,11 @@ func TestClaudeCLIManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 		}
 		if slices.Contains(args, "--disallowedTools") {
 			t.Fatalf("invocation %d retained negative builtin catalog: %#v", index+1, args)
+		}
+	}
+	for index, settlement := range settlements {
+		if settlement.Usage.ResolvedModel != "test-model" || settlement.Spend.ResolvedModel != "test-model" {
+			t.Fatalf("settlement %d = %#v, want sealed frame model", index+1, settlement)
 		}
 	}
 }

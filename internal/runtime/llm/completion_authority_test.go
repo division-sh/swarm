@@ -3,18 +3,101 @@ package llm
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/google/uuid"
 )
+
+func TestManagedSessionAdoptionFailsClosedBeforeProviderDispatch(t *testing.T) {
+	harness := effecttest.New()
+	setEffectHarnessAgent(t, harness, "agent-1", "support/inst-1")
+	ctx := testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support")
+	registry := sessions.NewInMemoryRegistry(time.Second)
+	identity := testMemoryIdentity("agent-1", "support/inst-1")
+	current, err := registry.Acquire(ctx, identity, "worker-1")
+	if err != nil {
+		t.Fatalf("seed durable session: %v", err)
+	}
+	if err := registry.Release(ctx, current); err != nil {
+		t.Fatalf("release durable session: %v", err)
+	}
+
+	var providerRequests atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		providerRequests.Add(1)
+	}))
+	defer provider.Close()
+
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, nil)
+	runtime.apiURL = provider.URL
+	runtime.apiKey = "test-key"
+	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
+	conversation := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", nil, testMemory(), 1, runtime)
+	conversation.SetToolExecutor(openAIToolExecutor{})
+	conversation.Session = &Session{
+		ID:             uuid.NewString(),
+		AgentID:        "agent-1",
+		Memory:         testMemory(),
+		MemoryIdentity: identity,
+		SystemPrompt:   conversation.SystemPrompt,
+	}
+
+	_, err = conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("agent-1")})
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Detail.Code != "managed_capability_turn_identity_mismatch" {
+		t.Fatalf("managed adoption failure = %#v, want managed_capability_turn_identity_mismatch", failure)
+	}
+	if conversation.Session.ID != current.SessionID {
+		t.Fatalf("adopted session id = %q, want durable %q", conversation.Session.ID, current.SessionID)
+	}
+	if got := providerRequests.Load(); got != 0 {
+		t.Fatalf("provider requests = %d, want fail closed before dispatch", got)
+	}
+}
+
+func TestAllManagedAdaptersGateAdoptedSessionIdentityBeforeProviderLaunch(t *testing.T) {
+	tests := []struct {
+		file       string
+		adoption   string
+		launchCall string
+	}{
+		{file: "api_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.sendAdmittedRequest("},
+		{file: "openai_compatible_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.sendAdmittedRequest("},
+		{file: "openai_responses_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.sendAdmittedRequest("},
+		{file: "cli_runtime.go", adoption: "if lease.SessionID != s.ID", launchCall: "r.runWithPreparedPrompt("},
+		{file: "mock_runtime.go", adoption: "if lease.SessionID != session.ID", launchCall: "executeMockCompletion("},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			raw, err := os.ReadFile(tt.file)
+			if err != nil {
+				t.Fatalf("read adapter: %v", err)
+			}
+			source := string(raw)
+			acquire := strings.Index(source, "acquireContinuedMemory(")
+			adopt := strings.Index(source, tt.adoption)
+			gate := strings.Index(source, "prepareCompletionContext(")
+			launch := strings.Index(source, tt.launchCall)
+			if acquire < 0 || adopt <= acquire || gate <= adopt || launch <= gate {
+				t.Fatalf("adapter chronology acquire=%d adopt=%d gate=%d launch=%d", acquire, adopt, gate, launch)
+			}
+		})
+	}
+}
 
 func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *testing.T) {
 	harness := effecttest.New()

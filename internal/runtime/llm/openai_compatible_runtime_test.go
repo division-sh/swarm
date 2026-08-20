@@ -16,6 +16,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -38,8 +39,8 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 		w.Header().Set("content-type", "application/json")
 		switch len(requests) {
 		case 1:
-			if req.Model != "gpt-compatible-mini" {
-				t.Fatalf("first request model = %q, want low-cost model", req.Model)
+			if req.Model != "test-model" {
+				t.Fatalf("first request model = %q, want sealed frame model", req.Model)
 			}
 			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Function.Name != "lookup" {
 				t.Fatalf("tools = %#v, want lookup function tool", req.Tools)
@@ -53,6 +54,9 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 				"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}
 			}`))
 		case 2:
+			if req.Model != "test-model" {
+				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
+			}
 			if !openAICompatibleRequestHasFrame(req.Messages, `"kind":"tool_continuation"`) {
 				t.Fatalf("second request does not contain canonical continuation frame: %#v", req.Messages)
 			}
@@ -77,6 +81,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	harness := effecttest.New()
 	setEffectHarnessAgent(t, harness, "agent-1", "support/inst-1")
 	cfg := openAICompatibleTestConfig(server.URL)
+	cfg.LLM.Models = llmselection.ModelAliases{"cheap": {llmselection.BackendOpenAICompatible: "hostile-config-model"}}
 	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)}
 	runtime, err := RuntimeFactory{
 		Cfg:                  cfg,
@@ -97,6 +102,10 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	ctx := testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	actor.Model = "cheap"
+	actor.ResolvedModel = "hostile-actor-model"
+	actor.ResolvedLLMBackend = "hostile-backend"
+	actor.ResolvedLLMProvider = "hostile-provider"
+	actor.ResolvedLLMTransport = "hostile-transport"
 	actor.EntityID = "entity-1"
 	ctx = runtimeactors.WithActor(ctx, actor)
 	tools := []ToolDefinition{{
@@ -133,7 +142,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	if conversations.record.SessionID == "" || conversations.record.Identity != testMemoryIdentity("agent-1", "support/inst-1") {
 		t.Fatalf("conversation record = %#v, want exact reusable-memory snapshot", conversations.record)
 	}
-	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "gpt-compatible-mini" {
+	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "test-model" {
 		t.Fatalf("final completion usage = %#v", settlements[1].Usage)
 	}
 }
@@ -149,11 +158,17 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 		w.Header().Set("content-type", "application/json")
 		switch len(requests) {
 		case 1:
+			if req.Model != "test-model" {
+				t.Fatalf("first request model = %q, want sealed frame model", req.Model)
+			}
 			if !anthropicRequestHasFrame(req.Messages, `"kind":"initial"`) {
 				t.Fatalf("first request does not contain canonical initial frame: %#v", req.Messages)
 			}
 			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":7,"output_tokens":3},"content":[{"type":"tool_use","id":"call_1","name":"lookup","input":{"query":"status"}}]}`))
 		case 2:
+			if req.Model != "test-model" {
+				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
+			}
 			if !anthropicRequestHasFrame(req.Messages, `"kind":"tool_continuation"`) {
 				t.Fatalf("second request does not contain canonical continuation frame: %#v", req.Messages)
 			}
@@ -167,14 +182,20 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	harness := effecttest.New()
 	setEffectHarnessAgent(t, harness, "agent-1", "support/inst-1")
 	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)}
-	runtime := NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, nil)
+	runtime := NewAnthropicAPIRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
+		"hostile-alias": {llmselection.BackendAnthropic: "hostile-config-model"},
+	}}}, registry, "worker-1", nil, nil)
 	runtime.liveSessions = registry
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
 	ctx := testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
-	actor.Model = "regular"
+	actor.Model = "hostile-alias"
+	actor.ResolvedModel = "hostile-actor-model"
+	actor.ResolvedLLMBackend = "hostile-backend"
+	actor.ResolvedLLMProvider = "hostile-provider"
+	actor.ResolvedLLMTransport = "hostile-transport"
 	ctx = runtimeactors.WithActor(ctx, actor)
 	tools := []ToolDefinition{{
 		Name: "lookup", Description: "Lookup status",
@@ -188,6 +209,10 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	}
 	if response.Message.Content != "done" || len(requests) != 2 {
 		t.Fatalf("response=%#v requests=%d, want done after initial and continuation", response, len(requests))
+	}
+	settlements := harness.CompletionSettlementsForAdapter("anthropic_api")
+	if len(settlements) != 2 || settlements[0].Usage.ResolvedModel != "test-model" || settlements[1].Usage.ResolvedModel != "test-model" {
+		t.Fatalf("completion settlements = %#v, want sealed frame model on both turns", settlements)
 	}
 }
 
@@ -230,7 +255,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
@@ -263,7 +288,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
@@ -305,11 +330,12 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenCredentialMissing(t *testing.T) {
 
 	runtime := NewOpenAICompatibleRuntime(openAICompatibleTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	ctx := withTestStatelessMemory(t, unmanagedLLMTestContext(), "agent-1", "")
+	ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular"})
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("ContinueSession failure = %#v, want authentication required", failure)

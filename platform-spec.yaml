@@ -10374,6 +10374,18 @@ agent_execution_frame:
     managed_call: >
       ManagedSessionRuntime accepts only the sealed ManagedCall carrying a validated AgentExecutionFrame and exact managed
       provider-turn/capability authorities. The old raw managed ContinueSession/Step boundary is unsupported.
+    managed_provider_projection: >
+      Managed-call validation projects the frame's runtime mode, provider, transport, and concrete model into one typed
+      adapter-local value. Managed request construction, provider admission and rate-limit bucket selection, CLI launch
+      arguments, mock execution, completion usage, and spend settlement consume that same value unchanged. They may not
+      re-resolve or overwrite it from mutable actor/config state or provider response metadata. A non-empty frame model is
+      sent exactly; an adapter that cannot honor it fails before provider launch. Fork chat resolves its own current
+      selection through its distinct authority and does not satisfy this managed projection.
+    adopted_session_identity: >
+      Durable session acquisition may replace the caller's stale process-local session id. Every managed adapter validates
+      the resulting session against the exact provider-turn capability authority after acquisition and before provider
+      launch. A changed session id fails closed with managed_capability_turn_identity_mismatch and performs no provider
+      request; adapters may not repair, remint, or weaken the sealed frame/surface identity.
     fork_chat_call: >
       ForkChatSessionRuntime accepts only the sealed ForkChatCall and exact fork-chat authority. Fork chat may not carry or
       satisfy managed frame/capability authority. Startup probe remains a distinct boundary. Noop implements interface shape

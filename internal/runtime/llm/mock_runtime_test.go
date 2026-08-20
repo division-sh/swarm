@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -71,7 +72,7 @@ def handle(input):
 	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"echo","schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
 	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{{
 		Name: "echo", Schema: map[string]any{"type": "object", "required": []any{"text"}, "properties": map[string]any{"text": map[string]any{"type": "string"}}, "additionalProperties": false},
-	}}, request)
+	}}, request, "mock-frame-model")
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}
@@ -96,10 +97,17 @@ def handle(input):
 `)
 	harness := effecttest.New()
 	registry := sessions.NewInMemoryRegistry(time.Second)
-	runtime := NewMockRuntime(&config.Config{}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness))
+	runtime := NewMockRuntime(&config.Config{LLM: config.LLMConfig{Models: llmselection.ModelAliases{
+		"hostile-alias": {llmselection.BackendMock: "hostile-config-model"},
+	}}}, registry, "worker-1", nil, nil, liveTestCompletionController(harness, harness, harness, harness))
 	ctx := testManagedConversationContext(t, harness, "mock-agent", "mock/inst-1", "worker")
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	actor.ExecutionMode = runtimeeffects.ExecutionModeMock
+	actor.Model = "hostile-alias"
+	actor.ResolvedModel = "hostile-actor-model"
+	actor.ResolvedLLMBackend = "hostile-backend"
+	actor.ResolvedLLMProvider = "hostile-provider"
+	actor.ResolvedLLMTransport = "hostile-transport"
 	actor.Mock = mockperformance.Performance{Kind: "python", SourcePath: "mocks/agent.py", Source: source, Digest: pythonSourceDigest(source)}
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
@@ -119,6 +127,9 @@ def handle(input):
 	}
 	if len(settlements) != 1 || settlements[0].AgentTurn == nil || len(input.Messages) != 1 || !strings.Contains(input.Messages[0].Content, `"kind":"initial"`) {
 		t.Fatalf("mock settlements = %#v, want one canonical frame request", settlements)
+	}
+	if settlements[0].Usage.ResolvedModel != "test-model" || settlements[0].Spend.ResolvedModel != "test-model" {
+		t.Fatalf("mock settlement = %#v, want sealed frame model", settlements[0])
 	}
 }
 

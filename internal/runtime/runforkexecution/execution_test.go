@@ -1435,6 +1435,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			}
 			processCapability := selectedContractTestProcessCapability(t, ctx, pg, loaded)
 
+			var cfg *config.Config
 			var providerCalls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ordinal := providerCalls.Add(1)
@@ -1443,6 +1444,9 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 					t.Errorf("decode %s provider request: %v", tc.name, err)
 				}
 				requestJSON, _ := json.Marshal(request)
+				if request["model"] != tc.model {
+					t.Errorf("%s provider request model = %#v, want sealed frame model %q", tc.name, request["model"], tc.model)
+				}
 				if !jsonValueContains(request, "emit_task_completed") || !jsonValueContains(request, "lookup_data") {
 					t.Errorf("%s provider request omits exact delivered tools: %s", tc.name, requestJSON)
 				}
@@ -1454,6 +1458,11 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				}
 				if ordinal > 2 || !jsonValueContains(request, wantKind) {
 					t.Errorf("%s provider request %d omits %s frame: %s", tc.name, ordinal, wantKind, requestJSON)
+				}
+				if ordinal == 1 {
+					cfg.LLM.Models = llmselection.ModelAliases{
+						llmselection.ModelAliasRegular: {tc.backend: "hostile-config-model-after-frame"},
+					}
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(response))
@@ -1477,7 +1486,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			if err := providerCredentials.Set(ctx, tc.credentialEnv, "test-key"); err != nil {
 				t.Fatalf("store provider credential: %v", err)
 			}
-			cfg := selectedForkAPIProviderConfig(tc.backend, tc.model, provider.URL)
+			cfg = selectedForkAPIProviderConfig(tc.backend, tc.model, provider.URL)
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -1902,6 +1911,9 @@ fi
 		}
 		if !strings.Contains(string(args), "CLAUDE_CODE_OAUTH_TOKEN=selected-fork-oauth-token") || strings.Contains(string(args), "stale-host-token") {
 			t.Fatalf("Claude invocation %s credential projection = %q", invocation, args)
+		}
+		if invocation == "2" && capturedSelectedForkArgValue(t, args, "--model") != "claude-selected-fork" {
+			t.Fatalf("Claude live invocation model = %q, want sealed selected-fork frame model", capturedSelectedForkArgValue(t, args, "--model"))
 		}
 		allowed := strings.Split(capturedSelectedForkArgValue(t, args, "--allowedTools"), ",")
 		slices.Sort(allowed)

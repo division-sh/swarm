@@ -170,11 +170,11 @@ func (r *OpenAIResponsesRuntime) StartSession(ctx context.Context, agentID, syst
 }
 
 func (r *OpenAIResponsesRuntime) ContinueManagedSession(ctx context.Context, s *Session, call ManagedCall) (*Response, error) {
-	message, err := validateManagedCall(ctx, s, call)
+	managed, err := validateManagedProviderCall(ctx, s, call, r.ProviderContract())
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, s, message)
+	return r.continueSession(ctx, s, managed.message, &managed)
 }
 
 func (r *OpenAIResponsesRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -182,10 +182,10 @@ func (r *OpenAIResponsesRuntime) ContinueForkChatSession(ctx context.Context, s 
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, s, message)
+	return r.continueSession(ctx, s, message, nil)
 }
 
-func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session, message Message, managed *managedProviderCall) (*Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -217,6 +217,10 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	}
 
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAIResponses)
+	resolvedModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(r.apiKey) == "" {
 		credential, err := r.credentials.Resolve(ctx, profile)
 		if err != nil {
@@ -232,7 +236,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		r.baseURL = baseURL
 	}
 
-	reqBody, err := r.buildRequest(ctx, s, message)
+	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
 	}
@@ -247,10 +251,6 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	reqJSON, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-responses request: %w", err)
-	}
-	resolvedModel, err := resolveProviderAdmissionModel(ctx, r.cfg, r.providerAdmission, profile)
-	if err != nil {
-		return nil, err
 	}
 	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
 	if err != nil {
@@ -323,7 +323,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 			Latency:        latency,
 			Failure:        agentTurnFailure(err, "openai_responses_decode"),
 		}, nil)
-		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+		usage.Model = reqBody.Model
 		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "response_conversion"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
@@ -346,7 +346,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		ParseOK:        true,
 		Latency:        latency,
 	}, &resp)
-	usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+	usage.Model = reqBody.Model
 	if err := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"}); err != nil {
 		return nil, err
 	}
@@ -402,8 +402,7 @@ func (r *OpenAIResponsesRuntime) persistConversation(ctx context.Context, s *Ses
 	}
 }
 
-func (r *OpenAIResponsesRuntime) buildRequest(ctx context.Context, s *Session, input Message) (openAIResponsesRequest, error) {
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAIResponses)
+func (r *OpenAIResponsesRuntime) buildRequest(s *Session, input Message, model string) (openAIResponsesRequest, error) {
 	items := make([]any, 0, len(s.Messages)+2)
 	for _, m := range s.Messages {
 		items = append(items, toOpenAIResponsesInputItems(m)...)
@@ -430,18 +429,12 @@ func (r *OpenAIResponsesRuntime) buildRequest(ctx context.Context, s *Session, i
 		})
 	}
 
-	modelReq := llmselection.ModelResolution{
-		Models: r.cfg.LLM.Models,
-	}
-	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
-		modelReq.Model = actor.Model
-	}
-	resolvedModel, err := llmselection.ResolveModel(profile, modelReq)
-	if err != nil {
-		return openAIResponsesRequest{}, err
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return openAIResponsesRequest{}, fmt.Errorf("openai-responses managed provider model is required")
 	}
 	return openAIResponsesRequest{
-		Model:        resolvedModel.ConcreteModel,
+		Model:        model,
 		Instructions: s.SystemPrompt,
 		Input:        items,
 		Tools:        tools,

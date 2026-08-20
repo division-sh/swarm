@@ -167,11 +167,11 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 }
 
 func (r *AnthropicAPIRuntime) ContinueManagedSession(ctx context.Context, s *Session, call ManagedCall) (*Response, error) {
-	message, err := validateManagedCall(ctx, s, call)
+	managed, err := validateManagedProviderCall(ctx, s, call, r.ProviderContract())
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, s, message)
+	return r.continueSession(ctx, s, managed.message, &managed)
 }
 
 func (r *AnthropicAPIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
@@ -179,10 +179,10 @@ func (r *AnthropicAPIRuntime) ContinueForkChatSession(ctx context.Context, s *Se
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, s, message)
+	return r.continueSession(ctx, s, message, nil)
 }
 
-func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, message Message, managed *managedProviderCall) (*Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -214,6 +214,10 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	}
 
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	resolvedModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(r.apiKey) == "" {
 		credential, err := r.credentials.Resolve(ctx, profile)
 		if err != nil {
@@ -222,7 +226,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		r.apiKey = credential.Value
 	}
 
-	reqBody, err := r.buildRequest(ctx, s, message)
+	reqBody, err := r.buildRequest(s, message, resolvedModel.ConcreteModel)
 	if err != nil {
 		return nil, err
 	}
@@ -237,10 +241,6 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	reqJSON, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
-	}
-	resolvedModel, err := resolveProviderAdmissionModel(ctx, r.cfg, r.providerAdmission, profile)
-	if err != nil {
-		return nil, err
 	}
 	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
 	if err != nil {
@@ -304,7 +304,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		s.ParseFailures++
 		return nil, usageErr
 	}
-	usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
+	usage.Model = reqBody.Model
 
 	turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
@@ -370,8 +370,7 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 	}
 }
 
-func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, input Message) (anthropicRequest, error) {
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+func (r *AnthropicAPIRuntime) buildRequest(s *Session, input Message, model string) (anthropicRequest, error) {
 	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
 	for _, m := range s.Messages {
 		am, ok := toAnthropicMessage(m)
@@ -400,18 +399,12 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 		tools = append(tools, tool)
 	}
 
-	modelReq := llmselection.ModelResolution{
-		Models: r.cfg.LLM.Models,
-	}
-	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
-		modelReq.Model = actor.Model
-	}
-	resolvedModel, err := llmselection.ResolveModel(profile, modelReq)
-	if err != nil {
-		return anthropicRequest{}, err
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return anthropicRequest{}, fmt.Errorf("anthropic managed provider model is required")
 	}
 	return anthropicRequest{
-		Model:     resolvedModel.ConcreteModel,
+		Model:     model,
 		MaxTokens: 1024,
 		System:    s.SystemPrompt,
 		Messages:  msgs,

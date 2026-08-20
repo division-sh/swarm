@@ -7503,7 +7503,7 @@ func TestRunServeRuntimeBundleDeleteRefreshesSurvivingGenerationPostgres(t *test
 		PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres",
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
-		TestLLMRuntime: runtimellm.NoopRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestLLMRuntime: servedNoopLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
 			contextsReady <- contexts
 		},
@@ -7690,7 +7690,7 @@ func TestRunServeRuntimeBundleDeleteRefreshesSurvivingGenerationPostgres(t *test
 		PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres",
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
-		TestLLMRuntime: runtimellm.NoopRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestLLMRuntime: servedNoopLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 	restarted.waitForReadyLine()
 	if code := restarted.stop(); code != 0 {

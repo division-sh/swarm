@@ -11,6 +11,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 type ToolDefinition struct {
@@ -214,6 +215,42 @@ func validateManagedCall(ctx context.Context, session *Session, call ManagedCall
 		return Message{}, fmt.Errorf("managed call provider prompt does not match session contract")
 	}
 	return call.providerMessage()
+}
+
+type managedProviderCall struct {
+	message  Message
+	provider agentframe.Provider
+}
+
+func validateManagedProviderCall(ctx context.Context, session *Session, call ManagedCall, contract ProviderContract) (managedProviderCall, error) {
+	message, err := validateManagedCall(ctx, session, call)
+	if err != nil {
+		return managedProviderCall{}, err
+	}
+	if err := contract.Validate(); err != nil {
+		return managedProviderCall{}, err
+	}
+	provider := call.Frame().Session.Provider
+	if provider.RuntimeMode != contract.RuntimeMode || provider.Provider != contract.Provider || provider.Transport != string(contract.Transport) {
+		return managedProviderCall{}, fmt.Errorf("managed call frame provider contract does not match adapter")
+	}
+	return managedProviderCall{message: message, provider: provider}, nil
+}
+
+func (c managedProviderCall) resolvedModel(profile llmselection.Profile) (llmselection.ResolvedModel, error) {
+	if !profile.Active {
+		return llmselection.ResolvedModel{}, fmt.Errorf("managed call requires active provider profile")
+	}
+	if c.provider.RuntimeMode != profile.RuntimeMode || c.provider.Provider != profile.Provider || c.provider.Transport != profile.Transport {
+		return llmselection.ResolvedModel{}, fmt.Errorf("managed call frame provider contract does not match profile %q", profile.ID)
+	}
+	return llmselection.ResolvedModel{
+		ConcreteModel: c.provider.Model,
+		Backend:       profile.ID,
+		Provider:      c.provider.Provider,
+		Transport:     c.provider.Transport,
+		RuntimeMode:   c.provider.RuntimeMode,
+	}, nil
 }
 
 func validateForkChatCall(ctx context.Context, session *Session, call ForkChatCall) (Message, error) {

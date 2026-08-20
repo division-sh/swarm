@@ -112,11 +112,11 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 }
 
 func (r *MockRuntime) ContinueManagedSession(ctx context.Context, session *Session, call ManagedCall) (*Response, error) {
-	message, err := validateManagedCall(ctx, session, call)
+	managed, err := validateManagedProviderCall(ctx, session, call, r.ProviderContract())
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, session, message)
+	return r.continueSession(ctx, session, managed.message, &managed)
 }
 
 func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Session, call ForkChatCall) (*Response, error) {
@@ -124,10 +124,10 @@ func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Sess
 	if err != nil {
 		return nil, err
 	}
-	return r.continueSession(ctx, session, message)
+	return r.continueSession(ctx, session, message, nil)
 }
 
-func (r *MockRuntime) continueSession(ctx context.Context, session *Session, message Message) (*Response, error) {
+func (r *MockRuntime) continueSession(ctx context.Context, session *Session, message Message, managed *managedProviderCall) (*Response, error) {
 	if session == nil {
 		return nil, errors.New("nil session")
 	}
@@ -154,6 +154,15 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, session, "error", "Marking the reused mock agent delivery in progress failed", map[string]any{"memory_enabled": resolved.Enabled()}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused mock session: %w", err)
 	}
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendMock)
+	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
+	if err != nil {
+		return nil, err
+	}
+	completionModel := strings.TrimSpace(providerModel.ConcreteModel)
+	if completionModel == "" {
+		completionModel = "mock-regular"
+	}
 
 	request, err := buildMockRequest(ctx, session, message)
 	if err != nil {
@@ -171,9 +180,8 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err != nil {
 		return nil, err
 	}
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendMock)
 	start := time.Now()
-	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON)
+	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, completionModel)
 	latency := time.Since(start)
 	if response != nil {
 		if surface, ok := managedcapabilities.FromContext(ctx); ok {
@@ -277,11 +285,7 @@ type mockUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
-	model := strings.TrimSpace(actor.ResolvedModel)
-	if model == "" {
-		model = "mock-regular"
-	}
+func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, model string) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
 	attempt, err := runtimeeffects.BeginCompletion(ctx, "mock_python", request, nil)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), nil, err

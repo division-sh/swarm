@@ -13,10 +13,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepreservationcleanup "github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -96,7 +96,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		source := semanticview.Wrap(bundle)
 		rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(stores, cfg, runtimepkg.RuntimeOptions{
 			SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
-			LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true,
+			LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 			ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,
 			BundleSourceFact:  mustServeTestPersistedBundleSourceFact(bundleHash),
 			RuntimeInstanceID: runtimeInstanceID,
@@ -188,8 +188,9 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	if err != nil {
 		t.Fatalf("plan active fixture runs before replay proof: %v", err)
 	}
+	stopCtx := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 	for _, run := range deletePlan.ActiveRuns {
-		if _, err := selected.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+		if _, err := selected.StopRunControl(stopCtx, runtimeruncontrol.TransitionRequest{
 			RunID: run.RunID, Reason: "bundle delete replay proof", ControlledBy: "test", Now: req.RequestedAt,
 		}); err != nil && !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {
 			t.Fatalf("stop active fixture run %s: %v", run.RunID, err)
