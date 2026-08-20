@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -242,21 +243,23 @@ type AuthorizeRequest struct {
 	Transport          string
 	RequestFingerprint string
 	CapabilitySurface  *managedcapabilities.Surface
+	OriginDelivery     runtimedelivery.Claim
 	Lineage            map[string]string
 	Now                time.Time
 }
 
 type Attempt struct {
-	OperationID  string
-	AttemptID    string
-	Token        LifecycleToken
-	Authority    Authority
-	Kind         Kind
-	Class        EffectClass
-	Adapter      string
-	Transport    string
-	Ordinal      int
-	AuthorizedAt time.Time
+	OperationID    string
+	AttemptID      string
+	Token          LifecycleToken
+	Authority      Authority
+	Kind           Kind
+	Class          EffectClass
+	Adapter        string
+	Transport      string
+	Ordinal        int
+	AuthorizedAt   time.Time
+	OriginDelivery runtimedelivery.Claim
 }
 
 type Settlement struct {
@@ -585,12 +588,24 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 	}
 	ctx = WithAuthority(ctx, authority)
 	var capabilitySurface *managedcapabilities.Surface
+	var originDelivery runtimedelivery.Claim
 	if authority.Target.Kind == UsageTargetAgentTurn {
 		surface, err := managedEffectCapabilitySurface(ctx, authority)
 		if err != nil {
 			return nil, err
 		}
 		capabilitySurface = &surface
+		if authority.Kind == AuthorityNormalAgent {
+			claim, ok := runtimedelivery.ClaimFromContext(ctx)
+			if !ok {
+				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+			}
+			if claim.SubscriberClass() != runtimedelivery.SubscriberAgent ||
+				claim.SubscriberID() != authority.Normal.AgentID || claim.RunID() != authority.Target.RunID {
+				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "delivery_id": claim.DeliveryID()})
+			}
+			originDelivery = claim
+		}
 	}
 	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
 	if err != nil {
@@ -598,7 +613,7 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
-		CapabilitySurface: capabilitySurface, Lineage: lineage,
+		CapabilitySurface: capabilitySurface, OriginDelivery: originDelivery, Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
@@ -786,6 +801,12 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
 	}
 	result, err := store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
+	if result.Committed {
+		recordCompletionSettlementObservation(ctx, CompletionSettlementObservation{
+			AttemptID: result.AttemptID, OriginDelivery: result.OriginDelivery,
+			OriginDeliverySettled: result.OriginDeliverySettled, Finalization: result.Finalization,
+		})
+	}
 	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {
 		h.controller.completionSpendProjector.ProjectCommittedCompletionSpend(context.WithoutCancel(ctx), CompletionSpendProjection{
 			AttemptID: result.AttemptID,
@@ -869,6 +890,17 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 				return Attempt{}, err
 			}
 			req.CapabilitySurface = &validated
+			if authority.Kind == AuthorityNormalAgent {
+				if err := req.OriginDelivery.Validate(); err != nil {
+					return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
+				}
+				if req.OriginDelivery.SubscriberClass() != runtimedelivery.SubscriberAgent ||
+					req.OriginDelivery.SubscriberID() != authority.Normal.AgentID || req.OriginDelivery.RunID() != authority.Target.RunID {
+					return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "delivery_id": req.OriginDelivery.DeliveryID()})
+				}
+			} else if req.OriginDelivery.Validate() == nil {
+				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "authority_kind": authority.Kind})
+			}
 		} else if req.CapabilitySurface != nil {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "target_kind": authority.Target.Kind})
 		}

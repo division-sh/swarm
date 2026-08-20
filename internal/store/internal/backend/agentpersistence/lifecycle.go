@@ -12,6 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -247,7 +248,7 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, req)
+	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, req, s.providerDrains)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -275,7 +276,7 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, req)
+	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, req, s.providerDrains)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -285,7 +286,7 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	return result, nil
 }
 
-func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	fingerprint, err := req.Identity.Fingerprint()
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -307,6 +308,9 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
+	if err := captureLifecycleProviderDrainsPostgres(ctx, tx, story, drains, req, previous, exists, &result); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	result.Subordinate, err = applyPostgresLifecycleSubordinate(ctx, tx, req)
 	if err == nil {
 		err = applyPostgresLifecycleCell(ctx, tx, req, result)
@@ -320,7 +324,7 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 	return result, err
 }
 
-func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	previous, exists, err := loadSQLiteLifecycleCell(ctx, tx, req.Identity)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -335,6 +339,9 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, sto
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
+	if err := captureLifecycleProviderDrainsSQLite(ctx, tx, story, drains, req, previous, exists, &result); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	result.Subordinate, err = applySQLiteLifecycleSubordinate(ctx, tx, req)
 	if err == nil {
 		err = applySQLiteLifecycleCellTx(ctx, tx, req, result)
@@ -493,6 +500,111 @@ func lifecycleResult(req runtimemanager.AgentLifecycleTransition, previous lifec
 		PreviousPhase: previousPhase, Phase: req.TargetPhase, ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
 		Topology:    req.Topology,
 		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
+	}
+}
+
+const providerAttemptDrainLifetime = 5 * time.Minute
+
+func captureLifecycleProviderDrainsPostgres(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	drains ProviderAttemptDrainPostgresCapturer,
+	req runtimemanager.AgentLifecycleTransition,
+	previous lifecycleCell,
+	exists bool,
+	result *runtimemanager.AgentLifecycleTransitionResult,
+) error {
+	capture, ok, err := lifecycleProviderDrainCapture(req, previous, exists, result)
+	if err != nil || !ok {
+		return err
+	}
+	if drains == nil {
+		return fmt.Errorf("agent lifecycle PostgreSQL provider-drain owner is not bound")
+	}
+	captured, err := drains.CaptureProviderAttemptDrainsPostgresTx(ctx, tx, story, capture)
+	if err != nil {
+		return err
+	}
+	applyLifecycleProviderDrainResult(req, captured, result)
+	return nil
+}
+
+func captureLifecycleProviderDrainsSQLite(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	drains ProviderAttemptDrainSQLiteCapturer,
+	req runtimemanager.AgentLifecycleTransition,
+	previous lifecycleCell,
+	exists bool,
+	result *runtimemanager.AgentLifecycleTransitionResult,
+) error {
+	capture, ok, err := lifecycleProviderDrainCapture(req, previous, exists, result)
+	if err != nil || !ok {
+		return err
+	}
+	if drains == nil {
+		return fmt.Errorf("agent lifecycle SQLite provider-drain owner is not bound")
+	}
+	captured, err := drains.CaptureProviderAttemptDrainsSQLiteTx(ctx, tx, story, capture)
+	if err != nil {
+		return err
+	}
+	applyLifecycleProviderDrainResult(req, captured, result)
+	return nil
+}
+
+func lifecycleProviderDrainCapture(
+	req runtimemanager.AgentLifecycleTransition,
+	previous lifecycleCell,
+	exists bool,
+	result *runtimemanager.AgentLifecycleTransitionResult,
+) (runtimeeffects.ProviderAttemptDrainCapture, bool, error) {
+	if !exists || previous.Phase != runtimemanager.AgentLifecycleRunning || req.TargetGeneration <= previous.Generation {
+		return runtimeeffects.ProviderAttemptDrainCapture{}, false, nil
+	}
+	var target runtimeeffects.ProviderDrainTarget
+	switch req.TargetPhase {
+	case runtimemanager.AgentLifecycleRunning:
+		target = runtimeeffects.ProviderDrainTargetRunning
+	case runtimemanager.AgentLifecycleTerminated:
+		target = runtimeeffects.ProviderDrainTargetTerminated
+	case runtimemanager.AgentLifecycleFailed:
+		target = runtimeeffects.ProviderDrainTargetFailed
+	default:
+		return runtimeeffects.ProviderAttemptDrainCapture{}, false, fmt.Errorf("lifecycle supersession target %q cannot own provider drains", req.TargetPhase)
+	}
+	capture := runtimeeffects.ProviderAttemptDrainCapture{
+		Predecessor: runtimeeffects.LifecycleToken{
+			RuntimeEpoch: previous.Epoch,
+			Identity:     req.Identity,
+			AgentID:      req.AgentID,
+			Generation:   previous.Generation,
+		},
+		SuccessorRuntimeEpoch: req.TargetEpoch,
+		SuccessorGeneration:   req.TargetGeneration,
+		Target:                target,
+		LifecycleOperationID:  req.OperationID,
+		LifecycleTransitionID: result.TransitionID,
+		CapturedAt:            req.Now.UTC(),
+		ExpiresAt:             req.Now.UTC().Add(providerAttemptDrainLifetime),
+	}
+	return capture, true, capture.Validate()
+}
+
+func applyLifecycleProviderDrainResult(
+	req runtimemanager.AgentLifecycleTransition,
+	captured runtimeeffects.ProviderAttemptDrainCaptureResult,
+	result *runtimemanager.AgentLifecycleTransitionResult,
+) {
+	result.ProviderDrainCount = captured.Captured
+	if captured.Captured == 0 {
+		return
+	}
+	result.ProviderDrainTarget = req.TargetPhase
+	if req.TargetPhase == runtimemanager.AgentLifecycleTerminated || req.TargetPhase == runtimemanager.AgentLifecycleFailed {
+		result.Phase = runtimemanager.AgentLifecycleDraining
 	}
 }
 
@@ -840,7 +952,7 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
 			projection.ParentAgentID, projection.EntityID, string(projection.ConfigJSON), string(projection.SubscriptionsJSON), string(projection.EmitEventsJSON),
 			string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req), req.Now.UTC(), startedAt.UTC(),
-			string(req.TargetPhase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+			string(result.Phase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
 			string(req.Topology.Authority.Kind), string(topologyRaw), string(req.Topology.Lifetime))
 		return err
 	}
@@ -855,7 +967,7 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 		  AND flow_instance_id=$6 AND flow_instance=$7
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		lifecycleAgentStatus(req), string(req.TargetPhase), req.TargetGeneration,
+		lifecycleAgentStatus(req), string(result.Phase), req.TargetGeneration,
 		req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
 		req.Now.UTC(), string(req.Topology.Authority.Kind), mustTopologyJSON(req.Topology), string(req.Topology.Lifetime))
 	return err
@@ -906,7 +1018,7 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
 			nullString(projection.ParentAgentID), nullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
 			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req),
-			req.Now.UTC(), startedAt.UTC(), string(req.TargetPhase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+			req.Now.UTC(), startedAt.UTC(), string(result.Phase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
 			string(req.Topology.Authority.Kind), string(topologyRaw), string(req.Topology.Lifetime))
 		return err
 	}
@@ -919,7 +1031,7 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 		  AND agent_route_presence=? AND flow_scope_key=?
 		  AND flow_instance_id=? AND flow_instance=?
-	`, lifecycleAgentStatus(req), string(req.TargetPhase), req.TargetGeneration,
+	`, lifecycleAgentStatus(req), string(result.Phase), req.TargetGeneration,
 		req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
 		req.Now.UTC(), string(req.Topology.Authority.Kind), mustTopologyJSON(req.Topology), string(req.Topology.Lifetime),
 		fields.AgentID, fields.NameOwner, fields.NameSource,

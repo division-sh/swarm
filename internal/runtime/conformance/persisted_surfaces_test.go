@@ -125,7 +125,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	sessionID := uuid.NewString()
-	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
+	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
 		Memory:    agentmemory.PlatformDefault(),
 		SessionID: sessionID,
@@ -141,8 +141,8 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		ResponseRaw:    []byte(`{"result":"stale fallback text"}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	reader := pg
@@ -324,6 +324,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "reused-live-session")
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, Agent: lifecycleToken.Identity})
@@ -525,6 +526,7 @@ printf '{"result":"ok"}'
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
 		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
 		base = agentmemory.WithExecution(base, agentmemory.Authored(true), agentmemory.Identity{RunID: runID, Agent: lifecycleToken.Identity})
@@ -632,7 +634,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	}
 
 	auditSessionID := uuid.NewString()
-	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
+	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		SessionID: auditSessionID,
 		AgentID:   "agent-1",
 		RunID:     runID,
@@ -642,8 +644,8 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 			{Kind: "outcome", Text: "done"},
 		},
 		ParseOK: true,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(stateless): %v", err)
 	}
 
 	reader := pg
@@ -1622,7 +1624,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	sessionID := uuid.NewString()
-	if err := pg.AppendAgentTurn(ctx, managedConformanceTurnRecord(t, runtimellm.AgentTurnRecord{
+	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
 		Memory:    agentmemory.PlatformDefault(),
 		RunID:     runID,
@@ -1644,8 +1646,8 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 		},
 		ParseOK: true,
 		Latency: 5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(task runtime_log block): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(task runtime_log block): %v", err)
 	}
 
 	reader := pg

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
@@ -100,6 +101,14 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	if err != nil {
 		panic(err)
 	}
+	claim, err := runtimedelivery.AdmitPersistedClaim(
+		"44444444-4444-4444-8444-444444444444", target.RunID, "effect-test-agent-route",
+		"55555555-5555-4555-8555-555555555555", 1, runtimedelivery.SubscriberAgent, h.Token.AgentID,
+	)
+	if err != nil {
+		panic(err)
+	}
+	ctx = runtimedelivery.WithClaim(ctx, claim)
 	return managedcapabilities.WithContext(ctx, surface)
 }
 
@@ -146,7 +155,7 @@ func (h *Harness) AuthorizeExternalAttempt(_ context.Context, authority runtimee
 	attempt := runtimeeffects.Attempt{
 		OperationID: req.OperationID, AttemptID: req.AttemptID, Token: authority.Normal, Authority: authority,
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
-		Ordinal: 1, AuthorizedAt: req.Now,
+		Ordinal: 1, AuthorizedAt: req.Now, OriginDelivery: req.OriginDelivery,
 	}
 	h.Attempts[attempt.AttemptID] = attempt
 	h.States[attempt.AttemptID] = runtimeeffects.StateAuthorized

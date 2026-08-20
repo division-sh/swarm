@@ -116,6 +116,7 @@ type AgentLifecyclePhase string
 const (
 	AgentLifecycleRegistered AgentLifecyclePhase = "registered"
 	AgentLifecycleRunning    AgentLifecyclePhase = "running"
+	AgentLifecycleDraining   AgentLifecyclePhase = "draining"
 	AgentLifecycleTerminated AgentLifecyclePhase = "terminated"
 	AgentLifecycleFailed     AgentLifecyclePhase = "failed"
 )
@@ -161,21 +162,23 @@ type AgentLifecycleState struct {
 }
 
 type AgentLifecycleTransitionResult struct {
-	OperationID        string                            `json:"operation_id"`
-	TransitionID       string                            `json:"transition_id"`
-	Identity           runtimeagentidentity.Identity     `json:"identity"`
-	AgentID            string                            `json:"agent_id"`
-	PreviousEpoch      int64                             `json:"previous_epoch"`
-	RuntimeEpoch       int64                             `json:"runtime_epoch"`
-	PreviousGeneration uint64                            `json:"previous_generation"`
-	Generation         uint64                            `json:"generation"`
-	PreviousPhase      AgentLifecyclePhase               `json:"previous_phase"`
-	Phase              AgentLifecyclePhase               `json:"phase"`
-	ConfigRevision     string                            `json:"config_revision"`
-	RunMode            AgentRunMode                      `json:"run_mode"`
-	Topology           runtimeagenttopology.Admission    `json:"topology"`
-	Subordinate        sessions.LifecycleMutationOutcome `json:"subordinate"`
-	Replayed           bool                              `json:"-"`
+	OperationID         string                            `json:"operation_id"`
+	TransitionID        string                            `json:"transition_id"`
+	Identity            runtimeagentidentity.Identity     `json:"identity"`
+	AgentID             string                            `json:"agent_id"`
+	PreviousEpoch       int64                             `json:"previous_epoch"`
+	RuntimeEpoch        int64                             `json:"runtime_epoch"`
+	PreviousGeneration  uint64                            `json:"previous_generation"`
+	Generation          uint64                            `json:"generation"`
+	PreviousPhase       AgentLifecyclePhase               `json:"previous_phase"`
+	Phase               AgentLifecyclePhase               `json:"phase"`
+	ConfigRevision      string                            `json:"config_revision"`
+	RunMode             AgentRunMode                      `json:"run_mode"`
+	Topology            runtimeagenttopology.Admission    `json:"topology"`
+	Subordinate         sessions.LifecycleMutationOutcome `json:"subordinate"`
+	ProviderDrainCount  int                               `json:"provider_drain_count"`
+	ProviderDrainTarget AgentLifecyclePhase               `json:"provider_drain_target,omitempty"`
+	Replayed            bool                              `json:"-"`
 }
 
 type AgentLifecyclePersistence interface {

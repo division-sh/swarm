@@ -42,6 +42,7 @@ func TestAgentTopologyMutationProductionConsumersStatic(t *testing.T) {
 	wantWrites := map[string]int{
 		"lifecycle.go":                       4,
 		"external_effect_authority_store.go": 2,
+		"provider_drain.go":                  2,
 	}
 	if len(agentWrites) != len(wantWrites) {
 		t.Fatalf("production agents-table writers = %#v, want %#v", agentWrites, wantWrites)

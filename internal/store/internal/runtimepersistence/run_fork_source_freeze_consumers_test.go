@@ -213,11 +213,6 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
 				TurnCount: 1, Status: "active",
 			}
-			turn := runtimellm.AgentTurnRecord{
-				SessionID: uuid.NewString(), AgentID: identity.AgentID(), Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
-				Memory: agentmemory.PlatformDefault(), RequestPayload: []byte(`{"request":true}`), ResponseRaw: []byte(`{"ok":true}`), ParseOK: true,
-			}
-			turn = managedAgentTurnRecordForTest(t, turn)
 			watchdog := runtimellm.ConversationWatchdogUpdate{
 				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity,
 				Watchdog: &runtimellm.ConversationWatchdog{State: "healthy_long_running", BlockingLayer: "session_execution", Action: "turn_long_running", Outcome: "observed", LastOutputAt: "2026-07-15T12:00:00Z", RecordedAt: "2026-07-15T12:00:30Z"},
@@ -228,7 +223,6 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 				Rotate(context.Context, agentmemory.Identity, string, runtimesessions.RotationMetadata) (*runtimesessions.Lease, error)
 				IncrementTurn(context.Context, agentmemory.Identity, string) error
 				AdoptSessionID(context.Context, agentmemory.Identity, string, string) error
-				AppendAgentTurn(context.Context, runtimellm.AgentTurnRecord) error
 				UpsertConversation(context.Context, runtimellm.ConversationRecord) error
 				UpdateLiveSessionWatchdog(context.Context, runtimellm.ConversationWatchdogUpdate) error
 				LoadActiveConversation(context.Context, agentmemory.Identity) (runtimellm.ConversationRecord, bool, error)
@@ -247,7 +241,6 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			}
 			requireForkedSourceRefusal(t, "session turn", store.IncrementTurn(ctx, identity, lease.SessionID))
 			requireForkedSourceRefusal(t, "session adopt", store.AdoptSessionID(ctx, identity, "worker", uuid.NewString()))
-			requireForkedSourceRefusal(t, "append agent turn", store.AppendAgentTurn(ctx, turn))
 			requireForkedSourceRefusal(t, "conversation upsert", store.UpsertConversation(ctx, conversation))
 			requireForkedSourceRefusal(t, "watchdog update", store.UpdateLiveSessionWatchdog(ctx, watchdog))
 			if _, found, err := store.LoadActiveConversation(ctx, identity); err != nil || found {

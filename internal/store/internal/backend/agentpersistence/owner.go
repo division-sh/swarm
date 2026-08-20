@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -24,16 +25,25 @@ type DirectivePipelineOwner interface {
 	TerminalizePipelineObligationTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Disposition, time.Time) error
 }
 
+type ProviderAttemptDrainPostgresCapturer interface {
+	CaptureProviderAttemptDrainsPostgresTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+}
+
+type ProviderAttemptDrainSQLiteCapturer interface {
+	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+}
+
 type AgentSource interface {
 	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
 }
 
 type AgentPostgresOwner struct {
-	backend     *postgresbackend.Backend
-	schemaGuard func() error
-	agents      AgentSource
-	events      DirectiveEventCommitter
-	pipeline    DirectivePipelineOwner
+	backend        *postgresbackend.Backend
+	schemaGuard    func() error
+	agents         AgentSource
+	events         DirectiveEventCommitter
+	pipeline       DirectivePipelineOwner
+	providerDrains ProviderAttemptDrainPostgresCapturer
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, agents AgentSource) (*AgentPostgresOwner, error) {
@@ -57,11 +67,34 @@ func (s *AgentPostgresOwner) requireCurrentSchema() error {
 }
 
 type AgentSQLiteOwner struct {
-	backend     *sqlitebackend.Backend
-	schemaGuard func() error
-	agents      AgentSource
-	events      DirectiveEventCommitter
-	pipeline    DirectivePipelineOwner
+	backend        *sqlitebackend.Backend
+	schemaGuard    func() error
+	agents         AgentSource
+	events         DirectiveEventCommitter
+	pipeline       DirectivePipelineOwner
+	providerDrains ProviderAttemptDrainSQLiteCapturer
+}
+
+func (s *AgentPostgresOwner) BindProviderAttemptDrains(owner ProviderAttemptDrainPostgresCapturer) error {
+	if s == nil || owner == nil {
+		return fmt.Errorf("agent lifecycle PostgreSQL provider-drain owner is required")
+	}
+	if s.providerDrains != nil {
+		return fmt.Errorf("agent lifecycle PostgreSQL provider-drain owner is already bound")
+	}
+	s.providerDrains = owner
+	return nil
+}
+
+func (s *AgentSQLiteOwner) BindProviderAttemptDrains(owner ProviderAttemptDrainSQLiteCapturer) error {
+	if s == nil || owner == nil {
+		return fmt.Errorf("agent lifecycle SQLite provider-drain owner is required")
+	}
+	if s.providerDrains != nil {
+		return fmt.Errorf("agent lifecycle SQLite provider-drain owner is already bound")
+	}
+	s.providerDrains = owner
+	return nil
 }
 
 func (s *AgentPostgresOwner) BindDirectiveDependencies(events DirectiveEventCommitter, pipeline DirectivePipelineOwner) error {

@@ -41,7 +41,7 @@ func llmTestWorkContext(t testing.TB, ctx context.Context) context.Context {
 			t.Errorf("join LLM test process owner: %v", err)
 		}
 	})
-	return worklifetime.WithOccurrence(ctx, owner)
+	return worklifetime.WithOccurrence(worklifetime.WithProcess(ctx, process), owner)
 }
 
 func managedProviderTestContext(t *testing.T, ctx context.Context, runtime Runtime, session *Session, tools []ToolDefinition) context.Context {

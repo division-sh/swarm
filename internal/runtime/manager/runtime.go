@@ -975,6 +975,9 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
 			return summary, fmt.Errorf("reconcile external effect attempts: %w", err)
 		}
+		if err := am.lifecycle.refreshRecoveredProviderDrainFinalizations(ctx); err != nil {
+			return summary, err
+		}
 	}
 	if am.budget != nil {
 		if err := am.budget.ProjectRecoveryBudgetState(ctx); err != nil {
@@ -1440,7 +1443,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 
 	am.lifecycle.mu.Lock()
 	execution := cell.execution
-	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if execution == nil || execution.agent == nil || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		am.lifecycle.mu.Unlock()
 		return replaceExecutionResult{}, fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(agentID))
 	}
@@ -2004,6 +2007,9 @@ func agentDeliveryExecutionContext(
 		}
 		if admission, found := managedexecution.FromContext(loopCtx); found {
 			ctx = managedexecution.WithAdmission(ctx, admission)
+		}
+		if process, found := worklifetime.ProcessFromContext(loopCtx); found {
+			ctx = worklifetime.WithProcess(ctx, process)
 		}
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)

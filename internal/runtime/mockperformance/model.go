@@ -15,13 +15,14 @@ const (
 // Source is captured during contract compilation; runtime code never rereads
 // Module from the ambient filesystem.
 type Performance struct {
-	Kind       string `yaml:"kind" json:"kind"`
-	Module     string `yaml:"module" json:"module"`
-	Source     []byte `yaml:"-" json:"source,omitempty"`
-	Digest     string `yaml:"-" json:"digest,omitempty"`
-	SourcePath string `yaml:"-" json:"source_path,omitempty"`
+	Kind                  string `yaml:"kind" json:"kind"`
+	Module                string `yaml:"module" json:"module"`
+	PostToolTailLatencyMS int    `yaml:"post_tool_tail_latency_ms,omitempty" json:"post_tool_tail_latency_ms,omitempty"`
+	Source                []byte `yaml:"-" json:"source,omitempty"`
+	Digest                string `yaml:"-" json:"digest,omitempty"`
+	SourcePath            string `yaml:"-" json:"source_path,omitempty"`
 }
 
 func (p Performance) Configured() bool {
-	return p.Kind != "" || p.Module != "" || len(p.Source) > 0 || p.Digest != ""
+	return p.Kind != "" || p.Module != "" || p.PostToolTailLatencyMS != 0 || len(p.Source) > 0 || p.Digest != ""
 }

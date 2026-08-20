@@ -896,6 +896,7 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, rt.Options.RuntimeInstanceID)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, rt.authorActivityScope)
@@ -924,6 +925,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	if opts.ProcessWorkOwner == nil {
 		return nil, fmt.Errorf("runtime process work owner is required")
 	}
+	ctx = worklifetime.WithProcess(ctx, opts.ProcessWorkOwner)
 	workOccurrence, err := opts.ProcessWorkOwner.NewRuntime(ctx, worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: opts.RuntimeInstanceID,
 		BundleHash:        boot.BundleSourceFact.BundleHash(),

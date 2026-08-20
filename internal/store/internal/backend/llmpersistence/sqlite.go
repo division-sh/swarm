@@ -3,115 +3,16 @@ package llmpersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
-	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
 )
-
-func (s *LLMSQLiteOwner) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
-	executionMode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("agent turn execution mode is required")
-	}
-	plan, identity, err := validateTurnMemory(rec)
-	if err != nil {
-		return err
-	}
-	if rec.CapabilitySurface == nil {
-		return fmt.Errorf("sqlite agent turn requires exact managed capability surface")
-	}
-	capabilitySurfacePayload, err := json.Marshal(rec.CapabilitySurface)
-	if err != nil {
-		return fmt.Errorf("encode sqlite agent turn managed capability surface: %w", err)
-	}
-	rec = runtimellm.CanonicalizeTurnForPersistence(rec)
-	if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
-		return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
-	}
-	failurePayload := ""
-	if encoded, err := storefailurecodec.Encode(rec.Failure); err != nil {
-		return fmt.Errorf("encode agent turn failure: %w", err)
-	} else if encoded != nil {
-		failurePayload = encoded.(string)
-	}
-	latencyMS := int(rec.Latency / time.Millisecond)
-	if latencyMS < 0 {
-		latencyMS = 0
-	}
-	now := s.now()
-	fields, err := storeagent.IdentityFields(identity.Agent)
-	if err != nil {
-		return err
-	}
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
-			return err
-		}
-		if plan.Enabled {
-			res, err := tx.ExecContext(txctx, `
-				UPDATE agent_sessions SET updated_at=?
-				WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
-				  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
-				  AND flow_instance_id=? AND flow_instance=?
-				  AND memory_enabled=1 AND status='active'
-			`, now, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner,
-				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
-			if err != nil {
-				return fmt.Errorf("touch exact sqlite live memory row: %w", err)
-			}
-			if rows, _ := res.RowsAffected(); rows != 1 {
-				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
-			}
-		} else if err := ensureSQLiteStatelessAuditTx(txctx, tx, rec, plan, identity, now); err != nil {
-			return err
-		}
-		surface, err := storemanagedcapability.InsertSQLite(txctx, tx, capabilitySurfacePayload)
-		if err != nil {
-			return err
-		}
-		if err := storemanagedcapability.ValidateAgentTurn(surface, identity.Agent, rec.SessionID, identity.RunID); err != nil {
-			return err
-		}
-		turnID := surface.Authority.ID
-		_, err = tx.ExecContext(txctx, `
-			INSERT INTO agent_turns (
-				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-				trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-				emitted_events,
-				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		`, turnID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, strings.TrimSpace(rec.SessionID), fields.FlowInstancePath,
-			plan.Enabled, string(plan.Source), sqliteNullUUID(rec.EntityID), sqliteNullUUID(rec.TriggerEventID), sqliteNullString(rec.TriggerEventType),
-			sqliteNullString(rec.TaskID), surface.ID, normalizeJSONArray(rec.ToolCalls), normalizeJSONArray(rec.EmittedEvents),
-			sqliteNullString(storeagent.NormalizeJSONPayload(rec.RequestPayload)), sqliteNullString(storeagent.NormalizeJSONPayload(rec.ResponseRaw)), normalizeJSONArray(rec.TurnBlocks),
-			rec.ParseOK, latencyMS, rec.RetryCount, executionMode, sqliteNullString(failurePayload), now)
-		if err != nil {
-			return fmt.Errorf("insert sqlite agent turn: %w", err)
-		}
-		if err := recordAuthorActivityTurnWithStory(txctx, story, authorActivityTurn{
-			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
-			FlowID: identity.FlowInstance(), TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
-			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
-			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: now,
-		}); err != nil {
-			return err
-		}
-		return nil
-	})
-}
 
 func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity, now time.Time) error {
 	fields, err := storeagent.IdentityFields(identity.Agent)

@@ -19,6 +19,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -148,6 +149,26 @@ type recoveryTestStore struct {
 	agents []PersistedAgent
 }
 
+type startupRecoveryOrderStore struct {
+	recoveryTestStore
+	order *[]string
+}
+
+func (s *startupRecoveryOrderStore) ReconcileExternalEffectAttempts(context.Context, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error) {
+	*s.order = append(*s.order, "effects")
+	return runtimeeffects.RecoverySummary{}, nil
+}
+
+type startupRecoveryOrderBus struct {
+	*recoveryTestBus
+	order *[]string
+}
+
+func (b *startupRecoveryOrderBus) SweepPipelineObligations(context.Context, int) (runtimepipelineobligation.SweepResult, error) {
+	*b.order = append(*b.order, "delivery")
+	return runtimepipelineobligation.SweepResult{Exhausted: true}, nil
+}
+
 func (s *recoveryTestStore) UpsertAgent(context.Context, PersistedAgent) error { return nil }
 func (s *recoveryTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return append([]PersistedAgent(nil), s.agents...), nil
@@ -200,6 +221,30 @@ func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *re
 	am.mu.Lock()
 	am.startupAgentsHydrated = false
 	am.mu.Unlock()
+}
+
+func TestStartupRecoversProviderDrainsBeforeDeliveryReplay(t *testing.T) {
+	order := make([]string, 0, 2)
+	store := &startupRecoveryOrderStore{order: &order}
+	bus := &startupRecoveryOrderBus{recoveryTestBus: &recoveryTestBus{}, order: &order}
+	am := newTestAgentManager(t, bus, nil, store)
+	am.mu.Lock()
+	am.startupAgentsHydrated = true
+	am.mu.Unlock()
+
+	ctx := testAuthorActivityContext(context.Background())
+	if _, err := am.HydrateForStartup(ctx); err != nil {
+		t.Fatalf("hydrate startup effects: %v", err)
+	}
+	if len(order) != 1 || order[0] != "effects" {
+		t.Fatalf("startup order after hydration=%v, want effects only", order)
+	}
+	if _, err := am.RecoverAfterStartupAdmission(managedExecutionTestContext(t, ctx)); err != nil {
+		t.Fatalf("recover startup deliveries: %v", err)
+	}
+	if len(order) != 2 || order[0] != "effects" || order[1] != "delivery" {
+		t.Fatalf("startup recovery order=%v, want effects before delivery", order)
+	}
 }
 
 func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(t *testing.T) {

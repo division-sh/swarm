@@ -181,7 +181,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		return nil, err
 	}
 	start := time.Now()
-	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, providerModel)
+	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, providerModel, len(request.ToolResults) != 0)
 	latency := time.Since(start)
 	if response != nil {
 		if surface, ok := managedcapabilities.FromContext(ctx); ok {
@@ -285,7 +285,7 @@ type mockUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
+func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
 	model := strings.TrimSpace(providerModel.ConcreteModel)
 	attempt, err := runtimeeffects.BeginCompletion(ctx, "mock_python", request, nil)
 	if err != nil {
@@ -309,6 +309,9 @@ func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig,
 	}
 	raw := append([]byte(nil), result.Output...)
 	dispatch.evidence = map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw), "fuel_consumed": result.FuelConsumed, "module_digest": actor.Mock.Digest}
+	if err := waitMockPostToolTail(heartbeatCtx, actor.Mock, postToolRound); err != nil {
+		return nil, raw, estimatedMockUsage(request, raw, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
 	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); err != nil {
 		return nil, raw, estimatedMockUsage(request, raw, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
@@ -318,6 +321,23 @@ func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig,
 	}
 	dispatch.state = runtimeeffects.StateSettled
 	return response, raw, usage, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil)
+}
+
+func waitMockPostToolTail(ctx context.Context, performance mockperformance.Performance, postToolRound bool) error {
+	if !postToolRound || performance.PostToolTailLatencyMS == 0 {
+		return nil
+	}
+	if performance.PostToolTailLatencyMS < 0 {
+		return fmt.Errorf("mock post-tool tail latency must be non-negative")
+	}
+	timer := time.NewTimer(time.Duration(performance.PostToolTailLatencyMS) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-timer.C:
+		return nil
+	}
 }
 
 func parseMockCompletionOutput(raw, request []byte, tools []ToolDefinition, model string) (*Response, runtimeeffects.CompletionUsage, error) {

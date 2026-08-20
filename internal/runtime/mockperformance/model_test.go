@@ -18,7 +18,7 @@ func TestPerformanceAuthoredGrammarIsPythonOnly(t *testing.T) {
 		}
 	}
 	sort.Strings(authored)
-	want := []string{"kind", "module"}
+	want := []string{"kind", "module", "post_tool_tail_latency_ms"}
 	if !reflect.DeepEqual(authored, want) {
 		t.Fatalf("authored mock grammar = %#v, want Python-only fields %#v", authored, want)
 	}

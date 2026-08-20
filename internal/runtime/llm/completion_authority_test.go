@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -142,7 +143,8 @@ func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime occurrence: %v", err)
 	}
-	ctx := worklifetime.WithOccurrence(harness.CompletionContext("retirement"), owner)
+	ctx := worklifetime.WithOccurrence(worklifetime.WithProcess(harness.CompletionContext("retirement"), process), owner)
+	processBaseline := process.ActiveCount()
 	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
@@ -151,19 +153,25 @@ func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start completion heartbeat: %v", err)
 	}
-	if got := owner.ActiveCount(); got != 1 {
-		t.Fatalf("active completion heartbeat work = %d, want 1", got)
+	if got := owner.ActiveCount(); got != 0 {
+		t.Fatalf("runtime occurrence owns %d completion heartbeat leases, want none", got)
+	}
+	if got := process.ActiveCount(); got != processBaseline+1 {
+		t.Fatalf("process active work=%d, want baseline %d plus one completion tail", got, processBaseline)
 	}
 	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if _, err := owner.RetireAndWait(waitCtx); err != nil {
 		t.Fatalf("retire runtime occurrence: %v", err)
 	}
+	if got := process.ActiveCount(); got != 1 {
+		t.Fatalf("process active work after occurrence retirement=%d, want completion tail only", got)
+	}
 	if err := heartbeat.Stop(); err != nil {
 		t.Fatalf("stop retired completion heartbeat: %v", err)
 	}
-	if got := owner.ActiveCount(); got != 0 {
-		t.Fatalf("active completion heartbeat work after retirement = %d, want 0", got)
+	if got := process.ActiveCount(); got != 0 {
+		t.Fatalf("active process completion heartbeat work after stop = %d, want 0", got)
 	}
 	if _, err := process.Join(waitCtx); err != nil {
 		t.Fatalf("join process: %v", err)
@@ -225,6 +233,29 @@ func TestCompletionAdaptersDoNotRetainLegacyTurnOrBudgetOwners(t *testing.T) {
 				t.Errorf("%s retains retired completion owner %q", file, token)
 			}
 		}
+	}
+}
+
+func TestCompletionTurnEvidenceHasNoLegacyProductionWriter(t *testing.T) {
+	internalRoot := filepath.Clean(filepath.Join("..", ".."))
+	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), "AppendAgentTurn(") {
+			t.Errorf("%s retains forbidden direct provider-turn writer", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan production completion writers: %v", err)
 	}
 }
 

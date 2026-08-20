@@ -188,6 +188,12 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
+	if err := effectOwner.BindProviderDrainDelivery(deliveryOwner); err != nil {
+		return nil, err
+	}
+	if err := agentOwner.BindProviderAttemptDrains(effectOwner); err != nil {
+		return nil, err
+	}
 	decisionOwner, err := storedecision.NewPostgres(backend, store.requireCurrentSchema, runLifecycle)
 	if err != nil {
 		return nil, err
@@ -410,6 +416,12 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	store.effectSQLiteOwner = effectOwner
 	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, store.now)
 	if err != nil {
+		return nil, err
+	}
+	if err := effectOwner.BindProviderDrainDelivery(deliveryOwner); err != nil {
+		return nil, err
+	}
+	if err := agentOwner.BindProviderAttemptDrains(effectOwner); err != nil {
 		return nil, err
 	}
 	decisionOwner, err := storedecision.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, store.now)

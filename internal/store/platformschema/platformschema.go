@@ -41,6 +41,7 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 
 const deliveryCurrentAttemptForeignKey = "FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker) DEFERRABLE INITIALLY DEFERRED"
 const deadLetterDeliveryOutcomeForeignKey = "FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version)"
+const providerAttemptOriginForeignKey = "FOREIGN KEY (origin_delivery_id, origin_claim_version, origin_claim_token) REFERENCES event_delivery_attempts(delivery_id, claim_version, claim_token)"
 
 // PostgreSQL requires the referenced table to exist when a foreign key is
 // declared. SQLite permits the same authoritative inline DDL to reference the
@@ -57,6 +58,16 @@ func deferPostgresForwardReferences(statement string, deferred []string) (string
 		if strings.Contains(statement, deadLetterDeliveryOutcomeForeignKey) {
 			statement = strings.Replace(statement, ",\n    "+deadLetterDeliveryOutcomeForeignKey, "", 1)
 			deferred = append(deferred, "ALTER TABLE dead_letters ADD CONSTRAINT dead_letters_delivery_outcome_fk "+deadLetterDeliveryOutcomeForeignKey)
+		}
+	case "runtime_external_effect_attempts":
+		if strings.Contains(statement, providerAttemptOriginForeignKey) {
+			statement = strings.Replace(statement, ",\n    "+providerAttemptOriginForeignKey, "", 1)
+			deferred = append(deferred, "ALTER TABLE runtime_external_effect_attempts ADD CONSTRAINT runtime_external_effect_attempts_origin_fk "+providerAttemptOriginForeignKey)
+		}
+	case "runtime_provider_attempt_drains":
+		if strings.Contains(statement, providerAttemptOriginForeignKey) {
+			statement = strings.Replace(statement, ",\n    "+providerAttemptOriginForeignKey, "", 1)
+			deferred = append(deferred, "ALTER TABLE runtime_provider_attempt_drains ADD CONSTRAINT runtime_provider_attempt_drains_origin_fk "+providerAttemptOriginForeignKey)
 		}
 	}
 	return statement, deferred
@@ -247,6 +258,8 @@ func platformTableOrder(name string) int {
 		return 63
 	case "runtime_external_effect_attempts":
 		return 64
+	case "runtime_provider_attempt_drains":
+		return 65
 	case "agent_turns":
 		return 65
 	case "conversation_fork_turn_completions":

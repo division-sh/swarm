@@ -1401,13 +1401,13 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		t.Fatalf("expected redacted email, got %#v", rec.Messages)
 	}
 
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
 		Memory: agentmemory.Authored(true), SessionID: uuid.NewString(),
 	}); err == nil {
 		t.Fatal("expected missing session row error")
 	}
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
@@ -1419,8 +1419,8 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		ResponseRaw:    []byte(`{"y":2}`),
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	var toolCallsJSON, emittedEventsJSON string
@@ -1489,7 +1489,7 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 	}
 }
 
-func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
+func TestManagerStore_ManagedTurnReadbackFixture_PersistsObservedToolCalls(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
@@ -1498,7 +1498,7 @@ func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", Identity: identity, RunID: identity.RunID, FlowInstance: identity.FlowInstance(),
 		Memory: agentmemory.Authored(true), SessionID: sessionID,
 		ToolCalls: []runtimellm.ToolCall{
@@ -1510,7 +1510,7 @@ func TestManagerStore_AppendAgentTurn_PersistsObservedToolCalls(t *testing.T) {
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	var raw string
@@ -1864,7 +1864,7 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
 
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
 		TurnBlocks: []runtimellm.TurnBlock{
@@ -1877,7 +1877,7 @@ func TestManagerStore_AppendStatelessAgentTurnPersistsTurnBlocks(t *testing.T) {
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	var got string
@@ -1900,7 +1900,7 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
 
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory:           agentmemory.PlatformDefault(),
 		SessionID:        sessionID,
@@ -1909,7 +1909,7 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 		ParseOK:          true,
 		Latency:          5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	var got string
@@ -1924,7 +1924,7 @@ func TestManagerStore_AppendStatelessAgentTurnCanonicalizesTurnBlocksThroughSing
 	}
 }
 
-func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwnershipAndPersistsTurnRow(t *testing.T) {
+func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateForLiveOwnershipAndPersistsTurnRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
@@ -1945,7 +1945,7 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 		t.Fatalf("UpsertConversation(session): %v", err)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
@@ -1956,8 +1956,8 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 		ResponseRaw:    []byte(`{"result":"done"}`),
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	var parseOK bool
@@ -1985,7 +1985,7 @@ func TestManagerStore_AppendAgentTurn_LeavesLiveSessionRuntimeStateForLiveOwners
 	}
 }
 
-func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeState(t *testing.T) {
+func TestManagerStore_ManagedTurnReadbackFixture_PreservesLiveSessionRetryLineageRuntimeState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
@@ -2006,7 +2006,7 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 		t.Fatalf("seed live runtime_state: %v", err)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
@@ -2017,8 +2017,8 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 		ResponseRaw:    []byte(`{"result":"done"}`),
 		ParseOK:        true,
 		Latency:        10 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	var providerID, retryReason, retriesFrom string
@@ -2037,7 +2037,7 @@ func TestManagerStore_AppendAgentTurn_PreservesLiveSessionRetryLineageRuntimeSta
 	}
 }
 
-func TestManagerStore_AppendAgentTurnRollsBackStatelessAuditAndTurnWhenTurnInsertFails(t *testing.T) {
+func TestManagerStore_ManagedTurnReadbackFixtureRollsBackStatelessAuditAndTurnWhenTurnInsertFails(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -2048,7 +2048,7 @@ func TestManagerStore_AppendAgentTurnRollsBackStatelessAuditAndTurnWhenTurnInser
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
@@ -2060,7 +2060,7 @@ func TestManagerStore_AppendAgentTurnRollsBackStatelessAuditAndTurnWhenTurnInser
 		Latency:        5 * time.Millisecond,
 	})
 	if err == nil {
-		t.Fatal("expected AppendAgentTurn to fail when agent_turns insert fails")
+		t.Fatal("expected ManagedTurnReadbackFixture to fail when agent_turns insert fails")
 	}
 
 	var auditCount, turnCount int
@@ -2089,7 +2089,7 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          runID,
 		FlowInstance:   "global",
@@ -2100,7 +2100,7 @@ func TestManagerStore_StatelessTurnPersistsAuditEvidenceWithoutLiveMemory(t *tes
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless): %v", err)
+		t.Fatalf("ManagedTurnReadbackFixture(stateless): %v", err)
 	}
 
 	var memoryEnabled bool
@@ -2152,7 +2152,7 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 		t.Fatalf("UpsertConversation(memory): %v", err)
 	}
 
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RunID:          identity.RunID,
 		FlowInstance:   identity.FlowInstance(),
@@ -2163,8 +2163,8 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(memory): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(memory): %v", err)
 	}
 
 	var auditCount, turnCount int
@@ -2193,13 +2193,13 @@ func TestManagerStore_AppendStatelessTurnCreatesCanonicalAuditRow(t *testing.T) 
 	sessionID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID: "a1", RunID: runID, FlowInstance: "global",
 		Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
 		RequestPayload: []byte(`{"kind":"stateless"}`), ResponseRaw: []byte(`{"ok":true}`),
 		ParseOK: true, Latency: 5 * time.Millisecond,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless missing audit): %v", err)
+		t.Fatalf("ManagedTurnReadbackFixture(stateless missing audit): %v", err)
 	}
 
 	var gotRunID, flowInstance, source, conversation string
@@ -2230,7 +2230,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	entityID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -2240,8 +2240,8 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless entity metadata): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(stateless entity metadata): %v", err)
 	}
 
 	var count, turns int
@@ -2301,7 +2301,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	flowInstance := "review/inst-1"
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
-	if err := pg.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		SessionID:      sessionID,
 		RunID:          runID,
@@ -2311,8 +2311,8 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless flow): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(stateless flow): %v", err)
 	}
 
 	var count, turns int
@@ -2361,7 +2361,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	}
 }
 
-func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlock(t *testing.T) {
+func TestManagerStore_ManagedTurnReadbackFixture_FailsOnMalformedCanonicalRuntimeLogTurnBlock(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -2370,7 +2370,7 @@ func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlo
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := uuid.NewString()
-	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:      "a1",
 		Memory:       agentmemory.PlatformDefault(),
 		SessionID:    sessionID,
@@ -2387,11 +2387,11 @@ func TestManagerStore_AppendAgentTurn_FailsOnMalformedCanonicalRuntimeLogTurnBlo
 		Latency: 5 * time.Millisecond,
 	})
 	if err == nil || !strings.Contains(err.Error(), "canonical runtime_log block details.component is required") {
-		t.Fatalf("AppendAgentTurn error = %v, want canonical runtime_log turn-block failure", err)
+		t.Fatalf("ManagedTurnReadbackFixture error = %v, want canonical runtime_log turn-block failure", err)
 	}
 }
 
-func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlockField(t *testing.T) {
+func TestManagerStore_ManagedTurnReadbackFixture_FailsOnNonStringCanonicalRuntimeLogTurnBlockField(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -2400,7 +2400,7 @@ func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlo
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	sessionID := uuid.NewString()
-	err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:      "a1",
 		Memory:       agentmemory.PlatformDefault(),
 		SessionID:    sessionID,
@@ -2417,7 +2417,7 @@ func TestManagerStore_AppendAgentTurn_FailsOnNonStringCanonicalRuntimeLogTurnBlo
 		Latency: 5 * time.Millisecond,
 	})
 	if err == nil || !strings.Contains(err.Error(), "canonical runtime_log block details.component must be a string") {
-		t.Fatalf("AppendAgentTurn error = %v, want canonical runtime_log string-type failure", err)
+		t.Fatalf("ManagedTurnReadbackFixture error = %v, want canonical runtime_log string-type failure", err)
 	}
 }
 
@@ -2845,7 +2845,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	identity := specMemoryIdentity(ceoID, "operating/global")
 	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance())
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        identity.AgentID(),
 		Identity:       identity,
 		Memory:         agentmemory.Authored(true),
@@ -2859,7 +2859,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		Latency:        123 * time.Millisecond,
 		RetryCount:     0,
 	}); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
@@ -2965,7 +2965,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	}); err != nil {
 		t.Fatalf("seed conversation: %v", err)
 	}
-	if err := appendManagedAgentTurnForTest(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		SessionID:      uuid.NewString(),
 		AgentID:        identity.AgentID(),
 		Identity:       identity,

@@ -464,6 +464,7 @@ func (i RuntimeIdentity) validate() error {
 type RuntimeOccurrence struct {
 	occurrence *ownedOccurrence
 	identity   RuntimeIdentity
+	process    *Process
 }
 
 type ManagerRunIdentity struct {
@@ -484,6 +485,7 @@ func (i ManagerRunIdentity) validate() error {
 type ManagerRunOccurrence struct {
 	occurrence *ownedOccurrence
 	identity   ManagerRunIdentity
+	process    *Process
 }
 
 // ManagerWorkOccurrence is the fixed projection carried by one Manager work
@@ -505,9 +507,11 @@ func NewManagerRunOccurrence(ctx context.Context, parent Occurrence, identity Ma
 	if err != nil {
 		return nil, fmt.Errorf("admit manager run occurrence: %w", err)
 	}
+	process, _ := ProcessFromContext(parentLease.Context())
 	return &ManagerRunOccurrence{
 		occurrence: newOwnedOccurrence(parentLease.Context(), parentLease),
 		identity:   identity,
+		process:    process,
 	}, nil
 }
 
@@ -528,6 +532,7 @@ func (m *ManagerRunOccurrence) beginClass(ctx context.Context, companion Occurre
 	if m == nil {
 		return nil, errors.New("manager run occurrence is required")
 	}
+	ctx = WithProcess(ctx, m.process)
 	companion = normalizeManagerCompanion(m, companion)
 	projection := &ManagerWorkOccurrence{manager: m, companion: companion}
 	if companion == nil {
@@ -729,6 +734,7 @@ func (p *Process) NewRuntime(ctx context.Context, identity RuntimeIdentity) (*Ru
 			RuntimeInstanceID: strings.TrimSpace(identity.RuntimeInstanceID),
 			BundleHash:        strings.TrimSpace(identity.BundleHash),
 		},
+		process: p,
 	}, nil
 }
 
@@ -736,14 +742,14 @@ func (r *RuntimeOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
 	}
-	return r.occurrence.begin(WithOccurrence(ctx, r))
+	return r.occurrence.begin(WithOccurrence(WithProcess(ctx, r.process), r))
 }
 
 func (r *RuntimeOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {
 	if r == nil {
 		return nil, errors.New("runtime occurrence is required")
 	}
-	return r.occurrence.gate.beginStanding(WithOccurrence(ctx, r))
+	return r.occurrence.gate.beginStanding(WithOccurrence(WithProcess(ctx, r.process), r))
 }
 
 func (r *RuntimeOccurrence) Fence() error {

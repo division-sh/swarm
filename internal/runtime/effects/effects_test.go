@@ -2,6 +2,7 @@ package effects
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -13,6 +14,31 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
+
+func TestDrainedCompletionInputHasNoMutableProjectionSurface(t *testing.T) {
+	typeOf := reflect.TypeOf(DrainedCompletionSettlement{})
+	want := map[string]reflect.Type{
+		"Settlement": reflect.TypeOf(Settlement{}),
+		"Usage":      reflect.TypeOf(CompletionUsage{}),
+		"AgentTurn":  reflect.TypeOf(CompletionAgentTurn{}),
+		"Spend":      reflect.TypeOf(CompletionSpend{}),
+		"Now":        reflect.TypeOf(time.Time{}),
+	}
+	if typeOf.NumField() != len(want) {
+		t.Fatalf("drained completion fields=%d, want exactly %d immutable evidence fields", typeOf.NumField(), len(want))
+	}
+	for name, fieldType := range want {
+		field, ok := typeOf.FieldByName(name)
+		if !ok || field.Type != fieldType {
+			t.Fatalf("drained completion field %s=%v present=%v, want %v", name, field.Type, ok, fieldType)
+		}
+	}
+	for _, forbidden := range []string{"ProviderHead", "Conversation", "Session", "Watchdog", "Output"} {
+		if _, ok := typeOf.FieldByName(forbidden); ok {
+			t.Fatalf("drained completion exposes forbidden mutable field %s", forbidden)
+		}
+	}
+}
 
 func effectLifecycleToken(t testing.TB, runtimeEpoch int64, agentID string, generation uint64) LifecycleToken {
 	t.Helper()

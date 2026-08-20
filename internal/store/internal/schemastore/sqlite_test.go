@@ -20,8 +20,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 69 {
-		t.Fatalf("platform table plan count = %d, want 69", len(platformPlans))
+	if len(platformPlans) != 70 {
+		t.Fatalf("platform table plan count = %d, want 70", len(platformPlans))
 	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",

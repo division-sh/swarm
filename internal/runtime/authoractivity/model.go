@@ -294,12 +294,12 @@ var kindContracts = map[Kind]kindContract{
 		Actions: map[string]string{"created": "created", "decided": "decided", "deferred": "deferred", "expired": "expired", "superseded": "superseded"},
 	},
 	KindAgentLifecycle: {
-		Transitions: set("registered", "running", "terminated", "failed"), SourceOwner: "agent_lifecycle_transition_facts", SourceIdentityRequired: true,
+		Transitions: set("registered", "running", "draining", "terminated", "failed"), SourceOwner: "agent_lifecycle_transition_facts", SourceIdentityRequired: true,
 		AllowedProjectionFields:  set("subject_type", "subject_id", "previous_phase", "next_phase", "previous_generation", "next_generation", "run_mode"),
 		RequiredProjectionFields: set("subject_type", "subject_id"),
 		SubjectStrategy:          subjectTypedIdentity, SubjectTypes: set("agent"),
-		ScopeByTransition: scopeAll(ScopeBundle, "registered", "running", "terminated", "failed"), HumanVisibleTransitions: set("failed"),
-		Actions: map[string]string{"registered": "registered", "running": "running", "terminated": "terminated", "failed": "failed"},
+		ScopeByTransition: scopeAll(ScopeBundle, "registered", "running", "draining", "terminated", "failed"), HumanVisibleTransitions: set("failed"),
+		Actions: map[string]string{"registered": "registered", "running": "running", "draining": "draining", "terminated": "terminated", "failed": "failed"},
 	},
 	KindDirectiveLifecycle: {
 		Transitions: set("received", "in_flight", "completed", "failed", "outcome_uncertain"), SourceOwner: "agent_directive_operations", SourceIdentityRequired: true,

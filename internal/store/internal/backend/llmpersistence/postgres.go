@@ -7,17 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sessionstore "github.com/division-sh/swarm/internal/store/internal/backend/sessions"
-	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
 	"github.com/google/uuid"
 )
 
@@ -26,108 +21,6 @@ type ConversationRuntimeStateDescriptor = sessionstore.ConversationRuntimeStateD
 
 var ValidateConversationRuntimeWatchdogDescriptor = sessionstore.ValidateConversationRuntimeWatchdogDescriptor
 var DecodeConversationRuntimeStateDescriptor = sessionstore.DecodeConversationRuntimeStateDescriptor
-
-func (s *LLMPostgresOwner) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
-	executionMode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("agent turn execution mode is required")
-	}
-	plan, identity, err := validateTurnMemory(rec)
-	if err != nil {
-		return err
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
-	if err != nil {
-		return err
-	}
-
-	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		ctx = txctx
-		if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
-			return err
-		}
-		if plan.Enabled {
-			res, err := tx.ExecContext(ctx, `
-			UPDATE agent_sessions SET updated_at=now()
-				WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3
-				  AND agent_name_owner=$4 AND agent_name_source=$5 AND agent_route_presence=$6
-				  AND flow_scope_key=$7 AND flow_instance_id=$8 AND flow_instance=$9
-				  AND memory_enabled=TRUE AND status='active'
-			`, strings.TrimSpace(rec.SessionID), identity.RunID, fields.AgentID, fields.NameOwner,
-				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
-			if err != nil {
-				return fmt.Errorf("touch exact live memory row: %w", err)
-			}
-			if rows, _ := res.RowsAffected(); rows != 1 {
-				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
-			}
-		} else if err := ensurePostgresStatelessAuditTx(ctx, tx, rec, plan, identity); err != nil {
-			return err
-		}
-
-		if rec.CapabilitySurface == nil {
-			return fmt.Errorf("agent turn requires exact managed capability surface")
-		}
-		capabilitySurfacePayload, err := json.Marshal(rec.CapabilitySurface)
-		if err != nil {
-			return fmt.Errorf("encode agent turn managed capability surface: %w", err)
-		}
-		rec = runtimellm.CanonicalizeTurnForPersistence(rec)
-		if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
-			return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
-		}
-		failurePayload := ""
-		if encoded, err := storefailurecodec.Encode(rec.Failure); err != nil {
-			return fmt.Errorf("encode agent turn failure: %w", err)
-		} else if encoded != nil {
-			failurePayload = encoded.(string)
-		}
-		latencyMS := int(rec.Latency / time.Millisecond)
-		if latencyMS < 0 {
-			latencyMS = 0
-		}
-		surface, err := storemanagedcapability.InsertPostgres(ctx, tx, capabilitySurfacePayload)
-		if err != nil {
-			return err
-		}
-		if err := storemanagedcapability.ValidateAgentTurn(surface, identity.Agent, rec.SessionID, identity.RunID); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO agent_turns (
-				turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-				trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-				emitted_events, request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-			) VALUES (
-				$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12,NULLIF($13,'')::uuid,
-				NULLIF($14,'')::uuid,NULLIF($15,''),NULLIF($16,''),$17::uuid,$18::jsonb,$19::jsonb,
-				CASE WHEN $20='' THEN NULL ELSE $20::jsonb END,CASE WHEN $21='' THEN NULL ELSE $21::jsonb END,
-				$22::jsonb,$23,$24,$25,$26,CASE WHEN $27='' THEN NULL ELSE $27::jsonb END,now()
-			)
-		`, surface.Authority.ID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, strings.TrimSpace(rec.SessionID), fields.FlowInstancePath,
-			plan.Enabled, string(plan.Source), strings.TrimSpace(rec.EntityID), strings.TrimSpace(rec.TriggerEventID),
-			strings.TrimSpace(rec.TriggerEventType), strings.TrimSpace(rec.TaskID), surface.ID, normalizeJSONArray(rec.ToolCalls),
-			normalizeJSONArray(rec.EmittedEvents), storeagent.NormalizeJSONPayload(rec.RequestPayload), storeagent.NormalizeJSONPayload(rec.ResponseRaw),
-			normalizeJSONArray(rec.TurnBlocks), rec.ParseOK, latencyMS, rec.RetryCount, executionMode, failurePayload)
-		if err != nil {
-			return fmt.Errorf("insert agent turn: %w", err)
-		}
-		if err := recordAuthorActivityTurnWithStory(ctx, story, authorActivityTurn{
-			TurnID: surface.Authority.ID, RunID: identity.RunID, AgentID: identity.AgentID(), SessionID: rec.SessionID, EntityID: rec.EntityID,
-			FlowID: identity.FlowInstance(), TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
-			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
-			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: time.Now().UTC(),
-		}); err != nil {
-			return err
-		}
-		return nil
-	})
-}
 
 func validateTurnMemory(rec runtimellm.AgentTurnRecord) (agentmemory.Plan, agentmemory.Identity, error) {
 	plan, err := rec.Memory.Normalize()

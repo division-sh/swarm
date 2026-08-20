@@ -147,6 +147,9 @@ func materializeAgentMockPerformance(source resolvedAgentMockMaterializationSour
 	if strings.TrimSpace(performance.Kind) != mockperformance.KindPython {
 		return mockperformance.Performance{}, fmt.Errorf("agent %s mock.kind %q is unsupported; use %q", agentID, performance.Kind, mockperformance.KindPython)
 	}
+	if performance.PostToolTailLatencyMS < 0 {
+		return mockperformance.Performance{}, fmt.Errorf("agent %s mock.post_tool_tail_latency_ms must be non-negative", agentID)
+	}
 	module, err := validateAgentMockModulePath(performance.Module)
 	if err != nil {
 		return mockperformance.Performance{}, fmt.Errorf("agent %s mock.module %q: %w", agentID, performance.Module, err)
@@ -189,11 +192,12 @@ func materializeAgentMockPerformance(source resolvedAgentMockMaterializationSour
 		return mockperformance.Performance{}, fmt.Errorf("agent %s mock.module %q is invalid: %w", agentID, performance.Module, err)
 	}
 	return mockperformance.Performance{
-		Kind:       mockperformance.KindPython,
-		Module:     module,
-		Source:     append([]byte(nil), moduleSource...),
-		Digest:     digest,
-		SourcePath: filepath.ToSlash(sourcePath),
+		Kind:                  mockperformance.KindPython,
+		Module:                module,
+		PostToolTailLatencyMS: performance.PostToolTailLatencyMS,
+		Source:                append([]byte(nil), moduleSource...),
+		Digest:                digest,
+		SourcePath:            filepath.ToSlash(sourcePath),
 	}, nil
 }
 

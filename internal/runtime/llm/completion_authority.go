@@ -55,10 +55,17 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 	if interval <= 0 || lease <= 0 {
 		return ctx, nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_timing_invalid", "llm-completion-authority", "heartbeat_attempt", nil)
 	}
-	owner, occurrenceOwned := worklifetime.OccurrenceFromContext(ctx)
 	var workLease *worklifetime.Lease
 	var err error
-	if occurrenceOwned {
+	normalProviderAttempt := handle.Attempt().Kind == runtimeeffects.KindProviderTurn && handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent
+	owner, occurrenceOwned := worklifetime.OccurrenceFromContext(ctx)
+	if normalProviderAttempt {
+		process, processOwned := worklifetime.ProcessFromContext(ctx)
+		if !processOwned {
+			return ctx, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_process_work_owner_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+		}
+		workLease, err = process.Begin(context.WithoutCancel(ctx))
+	} else if occurrenceOwned {
 		workLease, err = owner.Begin(ctx)
 	} else if process, processOwned := worklifetime.ProcessFromContext(ctx); processOwned {
 		workLease, err = process.Begin(ctx)
@@ -69,7 +76,7 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_admission_failed", "llm-completion-authority", "heartbeat_attempt", nil, err)
 	}
 	heartbeatParent := workLease.Context()
-	if occurrenceOwned {
+	if occurrenceOwned && !normalProviderAttempt {
 		heartbeatParent = worklifetime.WithOccurrence(heartbeatParent, owner)
 	}
 	if err := handle.Heartbeat(heartbeatParent, lease); err != nil {

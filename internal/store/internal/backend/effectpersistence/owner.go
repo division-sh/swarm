@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -28,11 +30,18 @@ type schemaQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+type providerDrainDeliveryOwner interface {
+	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
+	SettleProviderOriginSuccessTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedelivery.Claim, []string, time.Duration) error
+	SettleProviderOriginFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedelivery.Claim, runtimedelivery.Settlement) error
+}
+
 type EffectPostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent func() error
 	lifecycle      completionCandidateOwner
 	llm            *storellm.LLMPostgresOwner
+	delivery       providerDrainDeliveryOwner
 }
 
 type EffectSQLiteOwner struct {
@@ -40,6 +49,29 @@ type EffectSQLiteOwner struct {
 	requireCurrent func() error
 	lifecycle      completionCandidateOwner
 	llm            *storellm.LLMSQLiteOwner
+	delivery       providerDrainDeliveryOwner
+}
+
+func (s *EffectPostgresOwner) BindProviderDrainDelivery(owner providerDrainDeliveryOwner) error {
+	if s == nil || owner == nil {
+		return errors.New("provider-drain PostgreSQL delivery owner is required")
+	}
+	if s.delivery != nil {
+		return errors.New("provider-drain PostgreSQL delivery owner is already bound")
+	}
+	s.delivery = owner
+	return nil
+}
+
+func (s *EffectSQLiteOwner) BindProviderDrainDelivery(owner providerDrainDeliveryOwner) error {
+	if s == nil || owner == nil {
+		return errors.New("provider-drain SQLite delivery owner is required")
+	}
+	if s.delivery != nil {
+		return errors.New("provider-drain SQLite delivery owner is already bound")
+	}
+	s.delivery = owner
+	return nil
 }
 
 func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle completionCandidateOwner, llm *storellm.LLMPostgresOwner) (*EffectPostgresOwner, error) {
