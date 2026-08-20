@@ -10346,7 +10346,11 @@ agent_execution_frame:
     - resolved business-intent artifact and identity
     - canonical criteria references plus criteria identity bound to the bundle
     - canonical provider-visible prompt assembled from intent, criteria, and generated environment context
-    - resolved runtime mode, provider, transport, and optional model
+    - resolved runtime mode, provider, transport, and the paired authored model alias plus concrete model when selected
+    provider_model_selection: >
+      `model_alias` is the exact canonical authored alias and `model` is its resolved concrete provider model. They are
+      either both absent or both present; managed execution supplies both. Surrounding-whitespace aliases/models and
+      one-sided selections fail closed before frame completion.
     criteria_identity: >
       `agent-criteria:v1:sha256:<64 lowercase hex>` over deterministic compact JSON containing the admitted bundle hash and
       canonical criteria references. Runtime-only, reordered, duplicated, or mismatched criteria fail closed.
@@ -10375,10 +10379,11 @@ agent_execution_frame:
       ManagedSessionRuntime accepts only the sealed ManagedCall carrying a validated AgentExecutionFrame and exact managed
       provider-turn/capability authorities. The old raw managed ContinueSession/Step boundary is unsupported.
     managed_provider_projection: >
-      Managed-call validation projects the frame's runtime mode, provider, transport, and concrete model into one typed
+      Managed-call validation projects the frame's runtime mode, provider, transport, authored model alias, and concrete model into one typed
       adapter-local value. Managed request construction, provider admission and rate-limit bucket selection, CLI launch
       arguments, mock execution, completion usage, and spend settlement consume that same value unchanged. They may not
-      re-resolve or overwrite it from mutable actor/config state or provider response metadata. A non-empty frame model is
+      re-resolve or overwrite either model coordinate from mutable actor/config state or provider response metadata. Alias-keyed
+      provider limits and persisted spend model_alias consume the frame alias directly. A non-empty frame model is
       sent exactly; an adapter that cannot honor it fails before provider launch. Fork chat resolves its own current
       selection through its distinct authority and does not satisfy this managed projection.
     adopted_session_identity: >

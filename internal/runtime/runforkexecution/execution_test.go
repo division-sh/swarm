@@ -1742,6 +1742,7 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 	if turnCount != wantTurns {
 		t.Fatalf("selected completion evidence rows = %d, want %d", turnCount, wantTurns)
 	}
+	assertSelectedForkCompletionModelAlias(t, ctx, db, proof.RuntimeExecutionID, adapter, wantTurns)
 }
 
 func TestExecuteSelectedContractRunForkClaudeOAuthPersistsStartupAndTurnCapabilityAuthority(t *testing.T) {
@@ -1835,7 +1836,7 @@ PY
 fi
 printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"WebFetch\",\"WebSearch\",\"mcp__runtime-tools__emit_task_completed\"]}"
 if [ "$count" -gt 1 ]; then
-  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$session_id\",\"result\":\"selected-fork-flow-complete\"}"
+  printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$session_id\",\"model\":\"claude-selected-fork\",\"result\":\"selected-fork-flow-complete\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}"
 fi
 `
 	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
@@ -2074,6 +2075,25 @@ func assertSelectedForkClaudeCapabilityEvidence(t testing.TB, ctx context.Contex
 		t.Fatalf("decode selected Claude turn surface: %v", err)
 	}
 	assertSelectedForkClaudeManagedSurface(t, surface, proof.RuntimeExecutionID, result.Materialization.ForkRunID, managedcapabilities.AuthorityProviderTurn)
+	assertSelectedForkCompletionModelAlias(t, ctx, db, proof.RuntimeExecutionID, "claude_cli", 1)
+}
+
+func assertSelectedForkCompletionModelAlias(t testing.TB, ctx context.Context, db *sql.DB, executionID, adapter string, wantTurns int) {
+	t.Helper()
+	var total, canonical int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE l.model_alias = $3)
+		FROM spend_ledger l
+		JOIN runtime_external_effect_attempts a ON a.attempt_id = l.external_effect_attempt_id
+		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+		WHERE o.selected_execution_id = $1::uuid
+		  AND a.adapter = $2
+	`, executionID, adapter, llmselection.ModelAliasRegular).Scan(&total, &canonical); err != nil {
+		t.Fatalf("load selected completion model aliases: %v", err)
+	}
+	if total != wantTurns || canonical != wantTurns {
+		t.Fatalf("selected completion model aliases total=%d canonical=%d, want %d exact regular aliases", total, canonical, wantTurns)
+	}
 }
 
 func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabilities.Surface, executionID, runID string, authorityKind managedcapabilities.AuthorityKind) {

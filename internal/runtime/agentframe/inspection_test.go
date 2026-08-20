@@ -16,7 +16,7 @@ func TestAgentFrameEffectiveInspectionRequiresExactConcreteIdentity(t *testing.T
 	seed := PreviewSeed{
 		BundleHash: testBundleHash, BundleSource: "persisted", AgentID: session.AgentIdentity.AgentID(), AuthoredFlow: "root",
 		AgentIdentity: &session.AgentIdentity, Role: session.Role, FlowID: session.FlowID, Intent: session.Intent,
-		Criteria: session.Criteria, Provider: &Provider{RuntimeMode: session.RuntimeMode, Provider: session.Provider, Transport: session.Transport, Model: session.Model},
+		Criteria: session.Criteria, Provider: &Provider{RuntimeMode: session.RuntimeMode, Provider: session.Provider, Transport: session.Transport, ModelAlias: session.ModelAlias, Model: session.Model},
 		ProviderPrompt: prompt,
 	}
 	_, err = InspectEffective(InspectionSelector{AgentID: "different-root-agent", Root: true}, seed)

@@ -86,6 +86,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		RuntimeMode:    providerContract.RuntimeMode,
 		Provider:       providerContract.Provider,
 		Transport:      string(providerContract.Transport),
+		ModelAlias:     cfg.Model,
 		Model:          cfg.ResolvedModel,
 	}, "", tools, cfg.Memory, maxTurns, modelRuntime)
 	if err != nil {

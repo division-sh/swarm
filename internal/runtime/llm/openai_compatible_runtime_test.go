@@ -136,6 +136,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	if len(settlements) != 2 {
 		t.Fatalf("completion settlements = %d, want 2", len(settlements))
 	}
+	requireManagedSettlementProviderSelection(t, settlements)
 	if settlements[0].AgentTurn == nil || !settlements[0].AgentTurn.Memory.Enabled || !settlements[0].AgentTurn.ParseOK || !strings.Contains(string(settlements[0].AgentTurn.ToolCalls), `"call_1"`) {
 		t.Fatalf("first completion turn = %#v, want memory-enabled call_1", settlements[0].AgentTurn)
 	}
@@ -211,6 +212,7 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 		t.Fatalf("response=%#v requests=%d, want done after initial and continuation", response, len(requests))
 	}
 	settlements := harness.CompletionSettlementsForAdapter("anthropic_api")
+	requireManagedSettlementProviderSelection(t, settlements)
 	if len(settlements) != 2 || settlements[0].Usage.ResolvedModel != "test-model" || settlements[1].Usage.ResolvedModel != "test-model" {
 		t.Fatalf("completion settlements = %#v, want sealed frame model on both turns", settlements)
 	}

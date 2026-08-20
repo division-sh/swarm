@@ -1913,6 +1913,7 @@ func newConformanceManagedConversation(t *testing.T, agentID string, identity ag
 		RuntimeMode:    contract.RuntimeMode,
 		Provider:       contract.Provider,
 		Transport:      string(contract.Transport),
+		ModelAlias:     "regular",
 		Model:          "regular",
 	}, "", nil, agentmemory.Authored(true), 10, runtime)
 	if err != nil {
