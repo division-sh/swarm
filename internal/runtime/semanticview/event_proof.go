@@ -29,9 +29,11 @@ func ResolveExecutableNodeEventProof(source Source, node runtimeidentity.Executa
 	if canonical := runtimeeventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, authored)); canonical != "" {
 		proof.Canonical = canonical
 	}
-	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
-		if local := localizeExecutableNodeEventForProof(source, scope, proof.Canonical); local != "" {
-			proof.Local = local
+	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
+		if scope, ok := semanticScope.OwningFlow(); ok {
+			if local := localizeExecutableNodeEventForProof(source, scope, proof.Canonical); local != "" {
+				proof.Local = local
+			}
 		}
 	}
 	for _, candidate := range uniqueNormalizedProofCandidates(proof.Local, proof.Authored, proof.Canonical) {

@@ -134,10 +134,12 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 
 func TestRetiredFlattenedExecutableNodeReadersStayAbsent(t *testing.T) {
 	forbidden := map[string]struct{}{
-		"NodeEntries":        {},
-		"NodeEventHandlers":  {},
-		"NodeContractSource": {},
-		"NodeEntry":          {},
+		"NodeEntries":             {},
+		"NodeEventHandlers":       {},
+		"NodeContractSource":      {},
+		"NodeEntry":               {},
+		"ExecutableNodeFlowView":  {},
+		"ExecutableNodeFlowScope": {},
 	}
 	inspectProductionGo(t, func(path string, file *ast.File) {
 		ast.Inspect(file, func(node ast.Node) bool {

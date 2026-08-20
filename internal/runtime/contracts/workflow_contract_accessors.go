@@ -268,20 +268,6 @@ func (b *WorkflowContractBundle) ExecutableNode(ref runtimeidentity.ExecutableNo
 	return ScopedNodeRecord{}, false
 }
 
-func (b *WorkflowContractBundle) ExecutableNodeFlowView(ref runtimeidentity.ExecutableNode) (*FlowContractView, bool) {
-	if b == nil || !ref.Valid() || ref.FlowID() == "" {
-		return nil, false
-	}
-	for _, view := range b.FlowViews() {
-		packageKey := b.executableFlowViewPackageKey(&view)
-		if packageKey == ref.PackageKey() && strings.TrimSpace(view.Paths.ID) == ref.FlowID() {
-			candidate := view
-			return &candidate, true
-		}
-	}
-	return nil, false
-}
-
 func (b *WorkflowContractBundle) executableFlowPackageKey(flowID string) string {
 	flowID = strings.TrimSpace(flowID)
 	if b == nil || flowID == "" {
@@ -325,24 +311,43 @@ func (b *WorkflowContractBundle) executableFlowViewPackageKey(view *FlowContract
 	return packageKey
 }
 
+func (b *WorkflowContractBundle) ExecutableFlowViewPackageKey(view *FlowContractView) string {
+	return b.executableFlowViewPackageKey(view)
+}
+
 func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.ExecutableNode) eventidentity.Scope {
 	if b == nil || !ref.Valid() {
 		return eventidentity.Scope{}
 	}
+	scope, err := b.ExecutableNodeSemanticScope(ref)
+	if err != nil {
+		return eventidentity.Scope{}
+	}
 	if ref.FlowID() == "" {
+		localEvents := b.rootLocalEvents()
+		if declaration, ok := scope.DeclarationView(); ok {
+			for eventType := range declaration.Events {
+				localEvents = append(localEvents, strings.TrimSpace(eventType))
+			}
+		}
 		return eventidentity.Scope{
-			LocalEvents:  b.rootLocalEvents(),
+			LocalEvents:  normalizedStrings(localEvents),
 			InputEvents:  b.FlowInputEvents(""),
 			OutputEvents: b.FlowOutputEvents(""),
 		}
 	}
-	view, ok := b.ExecutableNodeFlowView(ref)
+	view, ok := scope.OwningFlow()
 	if !ok {
 		return eventidentity.Scope{}
 	}
 	localEvents := make([]string, 0, len(view.Events)+len(view.Schema.Pins.Inputs.Events)+len(view.Schema.Pins.Outputs.Events)+1)
 	for eventType := range view.Events {
 		localEvents = append(localEvents, strings.TrimSpace(eventType))
+	}
+	if declaration, ok := scope.DeclarationView(); ok && declaration != view {
+		for eventType := range declaration.Events {
+			localEvents = append(localEvents, strings.TrimSpace(eventType))
+		}
 	}
 	localEvents = append(localEvents, view.Schema.Pins.Inputs.Events...)
 	localEvents = append(localEvents, view.Schema.Pins.Outputs.Events...)
@@ -358,7 +363,11 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 }
 
 func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeidentity.ExecutableNode) []eventidentity.DescendantScope {
-	view, ok := b.ExecutableNodeFlowView(ref)
+	scope, err := b.ExecutableNodeSemanticScope(ref)
+	if err != nil {
+		return nil
+	}
+	view, ok := scope.OwningFlow()
 	if !ok {
 		return nil
 	}
@@ -367,25 +376,26 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(ref runtimeident
 		return nil
 	}
 	out := make([]eventidentity.DescendantScope, 0)
-	for _, candidate := range b.FlowViews() {
-		candidatePath := eventidentity.Normalize(candidate.Path)
-		if candidatePath == "" || candidatePath == parentPath || !strings.HasPrefix(candidatePath, parentPath+"/") {
-			continue
-		}
-		packageKey := b.executableFlowViewPackageKey(&candidate)
-		if packageKey != ref.PackageKey() && !strings.HasPrefix(packageKey, ref.PackageKey()+"/") {
-			continue
-		}
-		localEvents := make([]string, 0, len(candidate.Events)+len(candidate.Schema.Pins.Inputs.Events)+len(candidate.Schema.Pins.Outputs.Events))
-		for eventType := range candidate.Events {
-			localEvents = append(localEvents, strings.TrimSpace(eventType))
-		}
-		localEvents = append(localEvents, candidate.Schema.Pins.Inputs.Events...)
-		localEvents = append(localEvents, candidate.Schema.Pins.Outputs.Events...)
-		if len(localEvents) != 0 {
-			out = append(out, eventidentity.DescendantScope{Path: candidatePath, LocalEvents: normalizedStrings(localEvents)})
+	var walk func([]FlowContractView)
+	walk = func(children []FlowContractView) {
+		for index := range children {
+			candidate := children[index]
+			candidatePath := eventidentity.Normalize(candidate.Path)
+			if candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
+				localEvents := make([]string, 0, len(candidate.Events)+len(candidate.Schema.Pins.Inputs.Events)+len(candidate.Schema.Pins.Outputs.Events))
+				for eventType := range candidate.Events {
+					localEvents = append(localEvents, strings.TrimSpace(eventType))
+				}
+				localEvents = append(localEvents, candidate.Schema.Pins.Inputs.Events...)
+				localEvents = append(localEvents, candidate.Schema.Pins.Outputs.Events...)
+				if len(localEvents) != 0 {
+					out = append(out, eventidentity.DescendantScope{Path: candidatePath, LocalEvents: normalizedStrings(localEvents)})
+				}
+			}
+			walk(candidate.Children)
 		}
 	}
+	walk(view.Children)
 	return out
 }
 
@@ -415,27 +425,24 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runt
 		}
 		return EventCatalogEntry{}, "", false
 	}
-	if view, ok := b.ExecutableNodeFlowView(ref); ok {
-		for current := view; current != nil; current = current.Parent {
-			packageKey := b.executableFlowViewPackageKey(current)
-			if packageKey != ref.PackageKey() {
-				continue
+	if scope, err := b.ExecutableNodeSemanticScope(ref); err == nil {
+		view, ok := scope.OwningFlow()
+		if ok {
+			owningPackageKey := b.executableFlowViewPackageKey(view)
+			for current := view; current != nil; current = current.Parent {
+				packageKey := b.executableFlowViewPackageKey(current)
+				if packageKey != owningPackageKey {
+					continue
+				}
+				if entry, key, found := lookup(current.Events); found {
+					return entry, key, true
+				}
 			}
-			if entry, key, found := lookup(current.Events); found {
+		}
+		if project, ok := scope.PackageView(); ok {
+			if entry, key, found := lookup(project.Events); found {
 				return entry, key, true
 			}
-		}
-	}
-	for _, project := range b.ProjectViews() {
-		packageKey := strings.Trim(strings.TrimSpace(project.Paths.Key), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
-		if packageKey != ref.PackageKey() {
-			continue
-		}
-		if entry, key, found := lookup(project.Events); found {
-			return entry, key, true
 		}
 	}
 	if ref.PackageKey() == runtimeidentity.RootPackageKey {
@@ -708,20 +715,21 @@ func (b *WorkflowContractBundle) ResolvedPolicyForExecutableNode(node runtimeide
 		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
 	doc := clonePolicyDocument(b.Policy)
-	for _, project := range b.ProjectViews() {
-		packageKey := strings.Trim(strings.TrimSpace(project.Paths.Key), "/")
-		if packageKey == "" {
-			packageKey = runtimeidentity.RootPackageKey
-		}
-		if packageKey == node.PackageKey() {
-			mergeContractPolicyDocument(&doc, project.Policy)
-			break
-		}
+	scope, err := b.ExecutableNodeSemanticScope(node)
+	if err != nil {
+		return PolicyDocument{Values: map[string]PolicyValue{}}
 	}
-	if view, ok := b.ExecutableNodeFlowView(node); ok {
+	if project, ok := scope.PackageView(); ok {
+		mergeContractPolicyDocument(&doc, project.Policy)
+	} else if declaration, ok := scope.DeclarationView(); ok && strings.TrimSpace(scope.Declaration.Source.Layer) == "project" {
+		mergeContractPolicyDocument(&doc, declaration.Policy)
+	}
+	if view, ok := scope.OwningFlow(); ok {
 		chain := make([]*FlowContractView, 0)
 		for current := view; current != nil; current = current.Parent {
-			chain = append(chain, current)
+			if strings.TrimSpace(current.Paths.ID) != "" {
+				chain = append(chain, current)
+			}
 		}
 		for index := len(chain) - 1; index >= 0; index-- {
 			mergeContractPolicyDocument(&doc, chain[index].Policy)

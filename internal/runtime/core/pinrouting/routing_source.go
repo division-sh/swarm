@@ -24,13 +24,14 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeide
 	if _, ok := source.ExecutableNode(node); !ok {
 		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared node %q", node.Key())
 	}
-	owner, ok := source.ExecutableNodeSource(node)
-	if !ok {
-		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires declared source for %q", node.Key())
+	semanticScope, err := semanticview.ResolveExecutableNodeSemanticScope(source, node)
+	if err != nil {
+		return events.RoutingSource{}, fmt.Errorf("node execution routing source requires semantic scope for %q: %w", node.Key(), err)
 	}
+	owner := semanticScope.Declaration.Source
 	route = route.Normalized()
 	if strings.TrimSpace(owner.Layer) == "project" && strings.TrimSpace(owner.FlowID) != "" {
-		scope, ok := semanticview.FlowScopeByID(source, owner.FlowID)
+		scope, ok := semanticScope.OwningFlow()
 		if !ok {
 			return events.RoutingSource{}, fmt.Errorf("project node %q routing source references missing owning flow %q", node.Key(), owner.FlowID)
 		}
@@ -43,7 +44,7 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeide
 		return events.NewStaticFlowRoutingSource(route)
 	}
 	if owner.Layer == "flow" {
-		scope, ok := semanticview.ExecutableNodeFlowScope(source, node)
+		scope, ok := semanticScope.OwningFlow()
 		if !ok {
 			return events.RoutingSource{}, fmt.Errorf("flow node %q routing source references missing flow %q", node.Key(), node.FlowID())
 		}

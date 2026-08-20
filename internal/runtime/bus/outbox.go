@@ -383,7 +383,8 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	}
 	if !nodePassthrough {
 		d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
-		deliveryRoutes = targetOwnedAgentDeliveryRoutes(deliveryRoutes)
+		deliveryRoutes = nonCollidingAgentDeliveryRoutesAfterNodeConsume(deliveryRoutes)
+		recipients = deliveryRouteAgentRecipientIDs(deliveryRoutes)
 		if len(recipients) == 0 {
 			return false, runtimepipelineobligation.Continue(), nil
 		}

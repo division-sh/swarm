@@ -113,12 +113,16 @@ func TestWorkflowNodeHarnessInputKeepsOnlyAuthoredLocalSubscription(t *testing.T
 	harness := loadHarnessInjectionPipelineSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
 	withoutSource := loadHarnessInjectionPipelineSource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
 
-	workerNode := pipelinePackageNode(t, "flows/worker", "worker", "worker-node")
-	got, err := workflowNodeSubscriptionAliases(harness, workerNode, "work.requested")
+	harnessWorkerNode := pipelineSourceNode(t, harness, "worker", "worker-node")
+	plainWorkerNode := pipelineSourceNode(t, withoutSource, "worker", "worker-node")
+	if !harnessWorkerNode.Equal(plainWorkerNode) {
+		t.Fatalf("fixture node identities differ: harness=%q plain=%q", harnessWorkerNode.Key(), plainWorkerNode.Key())
+	}
+	got, err := workflowNodeSubscriptionAliases(harness, harnessWorkerNode, "work.requested")
 	if err != nil {
 		t.Fatalf("harness subscription aliases: %v", err)
 	}
-	want, err := workflowNodeSubscriptionAliases(withoutSource, workerNode, "work.requested")
+	want, err := workflowNodeSubscriptionAliases(withoutSource, plainWorkerNode, "work.requested")
 	if err != nil {
 		t.Fatalf("plain subscription aliases: %v", err)
 	}
@@ -330,6 +334,59 @@ func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T
 	}
 	if !workflowNodeHasProducesForTest(*worker, "task.done") {
 		t.Fatalf("produces = %#v, want task.done", worker.Produces)
+	}
+}
+
+func TestLoadWorkflowNodes_NestedProjectPackageUsesOwningFlowForSubscriptionAndEmission(t *testing.T) {
+	nodeContract := runtimecontracts.SystemNodeContract{
+		ID: "shared",
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
+		},
+	}
+	childPackage := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"shared": nodeContract},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Path:  "orders",
+		Paths: runtimecontracts.FlowContractPaths{ID: "orders", PackageKey: "flows/orders"},
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+			Inputs:  runtimecontracts.FlowInputPins{Events: []string{"task.start"}},
+			Outputs: runtimecontracts.FlowOutputPins{Events: []string{"task.done"}},
+		}},
+		Events:   map[string]runtimecontracts.EventCatalogEntry{"task.start": {}, "task.done": {}},
+		Children: []runtimecontracts.FlowContractView{childPackage},
+	}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{flow}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]},
+	}})
+	ref := pipelinePackageNode(t, "packages/a", "orders", "shared")
+
+	nodes, err := LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	var got *WorkflowNode
+	for index := range nodes {
+		if nodes[index].Node.Equal(ref) {
+			got = &nodes[index]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("nested package node missing from %#v", nodes)
+	}
+	if !workflowNodeHasSubscriptionForTest(*got, "orders/task.start") || !workflowNodeHasSubscriptionForTest(*got, "task.start") {
+		t.Fatalf("subscriptions = %#v, want owning-flow canonical and local forms", got.Subscriptions)
+	}
+	if !workflowNodeHasProducesForTest(*got, "orders/task.done") {
+		t.Fatalf("produces = %#v, want orders/task.done", got.Produces)
+	}
+	resolved := workflowNodeEventHandlerResolutionForEventType(source, ref, "orders/task.start")
+	if !resolved.Matched || resolved.HandlerEventKey != "task.start" {
+		t.Fatalf("handler resolution = %#v, want exact nested declaration", resolved)
 	}
 }
 

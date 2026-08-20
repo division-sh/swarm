@@ -551,6 +551,22 @@ func (i *targetRouteConsumingInterceptor) Intercept(_ context.Context, evt event
 	return false, nil, runtimepipelineobligation.Continue(), nil
 }
 
+type nodeRouteConsumingInterceptor struct {
+	nodeCalls int
+}
+
+func (*nodeRouteConsumingInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func (i *nodeRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, _ events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	if !route.Recipient.IsNode() {
+		return true, nil, runtimepipelineobligation.Continue(), nil
+	}
+	i.nodeCalls++
+	return false, nil, runtimepipelineobligation.Continue(), nil
+}
+
 func (i *targetRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	evt := delivery.Event()
 	if route.Target.Route().Normalized().Empty() {
@@ -781,6 +797,71 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	case got := <-live:
 		t.Fatalf("target-consuming node event leaked to live recipient: %#v", got)
 	default:
+	}
+}
+
+func TestPersistedNodeConsumePreservesTargetlessAgentRoutes(t *testing.T) {
+	const eventType = events.EventType("custom.mixed_node_agent")
+	for _, surface := range []string{"recovery", "post_commit"} {
+		t.Run(surface, func(t *testing.T) {
+			store := newTargetRouteMemoryStore()
+			interceptor := &nodeRouteConsumingInterceptor{}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+
+			identity := testAgentRouteIdentity(t, "observer", "")
+			deliveries := subscribeTestAgentAdmissionWithIdentity(
+				t, eb, testAgentSubscriptionAdmission(t, "observer", eventType), identity, "",
+			)
+			collidingIdentity := testAgentRouteIdentity(t, "handler", "")
+			collidingDeliveries := subscribeTestAgentAdmissionWithIdentity(
+				t, eb, testAgentSubscriptionAdmission(t, "handler", eventType), collidingIdentity, "",
+			)
+			target := events.RouteIdentity{
+				FlowID: "worker", FlowInstance: "worker/inst-1", EntityID: eventtest.UUID("persisted-node-consume"),
+			}
+			evt := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), eventType, "", "", []byte(`{}`), 0, uuid.NewString(), "",
+				events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{target}), time.Now().UTC(),
+			)
+			store.events[evt.ID()] = evt
+			store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
+			store.routes[evt.ID()] = []events.DeliveryRoute{
+				{
+					Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "handler")),
+					Target:    events.MustExistingEntityTarget(target),
+				},
+				exactAgentDeliveryRoute(identity),
+				exactAgentDeliveryRoute(collidingIdentity),
+			}
+			store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
+
+			switch surface {
+			case "recovery":
+				if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
+					Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
+				}, nil); err != nil {
+					t.Fatalf("RecoverPersistedPipeline: %v", err)
+				}
+			case "post_commit":
+				if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
+					t.Fatalf("DispatchPostCommit: %v", err)
+				}
+			default:
+				t.Fatalf("unknown surface %q", surface)
+			}
+
+			if interceptor.nodeCalls != 1 {
+				t.Fatalf("node interceptor calls = %d, want 1", interceptor.nodeCalls)
+			}
+			got := requireBusEvent(t, deliveries, surface+" targetless agent delivery")
+			if got.HasTargetRoute() {
+				t.Fatalf("targetless agent delivery target = %#v, want absent", got.TargetRoute())
+			}
+			requireNoBusEvent(t, collidingDeliveries, surface+" same-ID agent collision")
+		})
 	}
 }
 

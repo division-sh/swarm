@@ -289,14 +289,16 @@ name: extras
 version: "1.0.0"
 flows: []
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.extrasNodeID, "support.start", opts.extrasEmit, ""))
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "events.yaml"), "extras.start: {}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.extrasNodeID, "extras.start", opts.extrasEmit, ""))
 	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "package.yaml"), `
 name: support-addon
 version: "1.0.0"
 flows: []
 `)
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "support.start", opts.nestedPackageEmit, ""))
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "events.yaml"), "addon.start: {}\n")
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "addon.start", opts.nestedPackageEmit, ""))
 	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

@@ -14,6 +14,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -600,8 +601,8 @@ func TestSameFlowPackageJoinDeclarationsStayIndependentAcrossRestartOnBothStores
 				entityID := FlowInstanceEntityID(path)
 				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: route.InstanceID, StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
-					CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
-						"entity_id": entityID, "flow_path": path, "instance_id": route.InstanceID, "expected": []any{"a", "b"},
+					EntityID: entityID, CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{
+						"flow_path": path, "instance_id": route.InstanceID, "expected": []any{"a", "b"},
 					},
 				})); err != nil {
 					t.Fatal(err)
@@ -620,7 +621,7 @@ func TestSameFlowPackageJoinDeclarationsStayIndependentAcrossRestartOnBothStores
 					if err != nil || !found {
 						t.Fatalf("load package join instance: found=%v err=%v", found, err)
 					}
-					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 					if err != nil {
 						t.Fatal(err)
 					}

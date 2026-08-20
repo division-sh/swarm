@@ -315,6 +315,9 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 				}},
 			},
 		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"component-node": {ID: "component-node"},
+		},
 	}
 	repo := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold"},

@@ -441,7 +441,7 @@ func waitStageLifecycleJoin(t *testing.T, ctx context.Context, pipeline *runtime
 			if instance.StorageRef != route.InstancePath || instance.EntityID != entityID {
 				t.Fatalf("persisted join identity = route:%q entity:%v, want %q/%q", instance.StorageRef, instance.EntityID, route.InstancePath, entityID)
 			}
-			activation, found := findStageLifecycleJoin(instance, batchID)
+			activation, found := findStageLifecycleJoin(t, instance, batchID)
 			if found && activation.Completed() == completed && instance.CurrentState == state && instance.Status == status {
 				return instance, activation
 			}
@@ -511,7 +511,8 @@ func loadStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInsta
 	return activation
 }
 
-func findStageLifecycleJoin(instance runtimepipeline.WorkflowInstance, batchID string) (joinruntime.Activation, bool) {
+func findStageLifecycleJoin(t *testing.T, instance runtimepipeline.WorkflowInstance, batchID string) (joinruntime.Activation, bool) {
+	t.Helper()
 	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
 	if err != nil {
 		return joinruntime.Activation{}, false
