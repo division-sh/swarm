@@ -252,6 +252,88 @@ func (s *DeliveryPostgresOwner) BindAgentSession(ctx context.Context, claim runt
 	})
 }
 
+func (s *DeliveryPostgresOwner) ValidateProviderOriginTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) error {
+	return postgresDeliveryAdapter.ValidateCurrentClaim(ctx, tx, claim)
+}
+
+func (s *DeliverySQLiteOwner) ValidateProviderOriginTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) error {
+	return sqliteDeliveryAdapter.ValidateCurrentClaim(ctx, tx, claim)
+}
+
+func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	sideEffects []string,
+	duration time.Duration,
+) error {
+	_, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+	return err
+}
+
+func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	sideEffects []string,
+	duration time.Duration,
+) error {
+	_, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+	return err
+}
+
+func (s *DeliveryPostgresOwner) SettleProviderOriginFailureTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	settlement runtimedelivery.Settlement,
+) error {
+	snapshot, err := postgresDeliveryAdapter.SettleFailure(ctx, tx, story, claim, settlement)
+	if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+		return err
+	}
+	record, found, err := eventrecordpostgres.Load(ctx, tx, snapshot.EventID)
+	if err != nil || !found {
+		if err == nil {
+			err = eventrecord.Missing(snapshot.EventID)
+		}
+		return err
+	}
+	diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+	if err != nil {
+		return err
+	}
+	return s.RecordDeadLetterTx(ctx, tx, story, diagnostic, true)
+}
+
+func (s *DeliverySQLiteOwner) SettleProviderOriginFailureTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	settlement runtimedelivery.Settlement,
+) error {
+	snapshot, err := sqliteDeliveryAdapter.SettleFailure(ctx, tx, story, claim, settlement)
+	if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+		return err
+	}
+	record, found, err := eventrecordsqlite.Load(ctx, tx, snapshot.EventID)
+	if err != nil || !found {
+		if err == nil {
+			err = eventrecord.Missing(snapshot.EventID)
+		}
+		return err
+	}
+	diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+	if err != nil {
+		return err
+	}
+	return s.RecordDeadLetterTx(ctx, tx, story, diagnostic, true)
+}
+
 func (s *DeliverySQLiteOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
 	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {

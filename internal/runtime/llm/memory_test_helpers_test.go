@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 )
 
@@ -70,7 +71,8 @@ func withTestActorConcreteIdentity(ctx context.Context, identity agentidentity.I
 func withTestMemory(ctx context.Context, agentID, flowInstance string) context.Context {
 	identity := testMemoryIdentity(agentID, flowInstance)
 	ctx = withTestActorConcreteIdentity(ctx, identity.Agent)
-	return agentmemory.WithExecution(ctx, testMemory(), identity)
+	ctx = agentmemory.WithExecution(ctx, testMemory(), identity)
+	return withTestOriginDeliveryClaim(ctx, identity.RunID, identity.AgentID())
 }
 
 func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowInstance string) context.Context {
@@ -81,10 +83,27 @@ func withTestStatelessMemory(t testing.TB, ctx context.Context, agentID, flowIns
 		identity = testMemoryIdentity(agentID, flowInstance).Agent
 	}
 	ctx = withTestActorConcreteIdentity(ctx, identity)
-	return agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{
+	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{
 		RunID: testMemoryRunID,
 		Agent: identity,
 	})
+	return withTestOriginDeliveryClaim(ctx, testMemoryRunID, identity.AgentID())
+}
+
+func withTestOriginDeliveryClaim(ctx context.Context, runID, agentID string) context.Context {
+	claim, err := runtimedelivery.AdmitPersistedClaim(
+		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		runID,
+		"llm-test-origin:"+agentID,
+		"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+		1,
+		runtimedelivery.SubscriberAgent,
+		agentID,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return runtimedelivery.WithClaim(ctx, claim)
 }
 
 func setEffectHarnessAgent(t testing.TB, harness *effecttest.Harness, agentID, flowInstance string) {

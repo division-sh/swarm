@@ -247,7 +247,7 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 		if flowInstance != "" && identity.FlowInstance() != flowInstance {
 			continue
 		}
-		if !includeTerminated && (cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed) {
+		if !includeTerminated && (cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed) {
 			continue
 		}
 		candidates = append(candidates, identity.Normalize())
@@ -1111,7 +1111,7 @@ func (c *agentLifecycleCoordinator) prepareLoopTokenLocked(identity runtimeagent
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cell := c.cells[identity]
-	if cell == nil || cell != lockedCell || cell.identity != identity || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if cell == nil || cell != lockedCell || cell.identity != identity || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		return runtimeeffects.LifecycleToken{}, fmt.Errorf("%w: %s", ErrAgentNotFound, identity.Description())
 	}
 	return lifecycleToken(identity, runtimebus.CurrentRuntimeEpoch(), cell.generation+1), nil
@@ -1143,7 +1143,7 @@ func (c *agentLifecycleCoordinator) lockIdentityOperationWithFailed(identity run
 	cell.opMu.Lock()
 	c.mu.Lock()
 	current := c.cells[identity]
-	valid := current == cell && current.phase != AgentLifecycleTerminated && (includeFailed || current.phase != AgentLifecycleFailed)
+	valid := current == cell && current.phase != AgentLifecycleDraining && current.phase != AgentLifecycleTerminated && (includeFailed || current.phase != AgentLifecycleFailed)
 	c.mu.Unlock()
 	if !valid {
 		cell.opMu.Unlock()
@@ -1160,7 +1160,7 @@ func (c *agentLifecycleCoordinator) executionSnapshotByIdentity(identity runtime
 	defer c.mu.Unlock()
 	cell := c.cells[identity.Normalize()]
 	if cell == nil || cell.execution == nil || cell.execution.agent == nil ||
-		cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+		cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		return agentExecutionSnapshot{}, false
 	}
 	return snapshotExecution(cell.execution), true
@@ -1174,7 +1174,7 @@ func (c *agentLifecycleCoordinator) executionIdentities() []runtimeagentidentity
 	defer c.mu.Unlock()
 	identities := make([]runtimeagentidentity.Identity, 0, len(c.cells))
 	for identity, cell := range c.cells {
-		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
+		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleDraining && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
 			identities = append(identities, identity)
 		}
 	}
@@ -1192,7 +1192,7 @@ func (c *agentLifecycleCoordinator) executionConfigs() []models.AgentConfig {
 	defer c.mu.Unlock()
 	configs := make([]models.AgentConfig, 0, len(c.cells))
 	for _, cell := range c.cells {
-		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
+		if cell != nil && cell.execution != nil && cell.execution.agent != nil && cell.phase != AgentLifecycleDraining && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleFailed {
 			configs = append(configs, cell.execution.config)
 		}
 	}
@@ -1282,7 +1282,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	identity := lockedCell.identity
 	c.mu.Lock()
 	cell := c.cells[identity]
-	if cell == nil || cell != lockedCell || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if cell == nil || cell != lockedCell || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		c.mu.Unlock()
 		return nil, runtimeeffects.LifecycleToken{}, nil, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
@@ -1641,7 +1641,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 	agentID := identity.AgentID()
 	c.mu.Lock()
 	cell := c.cells[identity]
-	if cell == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
+	if cell == nil || cell.phase == AgentLifecycleDraining || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		c.mu.Unlock()
 		return models.AgentConfig{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
@@ -1709,6 +1709,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 		}
 	}
 	store := c.persistence()
+	effectivePhase := target
 	if store != nil {
 		result, err := store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
 			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash, Identity: identity,
@@ -1722,6 +1723,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 			return models.AgentConfig{}, err
 		}
 		nextEpoch, nextGeneration = result.RuntimeEpoch, result.Generation
+		effectivePhase = result.Phase
 	} else if c.sessions != nil {
 		if _, _, err := c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
 			OperationID: operationID, RequestHash: requestHash,
@@ -1733,7 +1735,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 			return models.AgentConfig{}, err
 		}
 	}
-	cell.epoch, cell.generation, cell.phase, cell.runMode, cell.topology = nextEpoch, nextGeneration, target, AgentRunModeStopped, transitionTopology
+	cell.epoch, cell.generation, cell.phase, cell.runMode, cell.topology = nextEpoch, nextGeneration, effectivePhase, AgentRunModeStopped, transitionTopology
 	if execution != nil {
 		execution.fenced = true
 		if execution.leases > 0 {
@@ -1760,11 +1762,66 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 		<-leasesDone
 	}
 	c.mu.Lock()
-	if current := c.cells[identity]; current == cell && current.execution == execution && current.phase == target {
+	if current := c.cells[identity]; current == cell && current.execution == execution && (current.phase == target || current.phase == AgentLifecycleDraining) {
 		current.execution = nil
 	}
 	c.mu.Unlock()
 	return previousConfig, nil
+}
+
+func (c *agentLifecycleCoordinator) observeProviderDrainFinalization(finalization runtimeeffects.ProviderDrainFinalization) {
+	if c == nil || !finalization.Token.Valid() || !finalization.Target.Valid() {
+		return
+	}
+	identity := finalization.Token.Identity.Normalize()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cell := c.cells[identity]
+	if cell == nil || cell.epoch != finalization.Token.RuntimeEpoch || cell.generation != finalization.Token.Generation || cell.phase != AgentLifecycleDraining {
+		return
+	}
+	cell.phase = AgentLifecyclePhase(finalization.Target)
+}
+
+func (c *agentLifecycleCoordinator) refreshRecoveredProviderDrainFinalizations(ctx context.Context) error {
+	if c == nil || c.stateReader == nil {
+		return nil
+	}
+	c.mu.Lock()
+	identities := make([]runtimeagentidentity.Identity, 0)
+	for identity, cell := range c.cells {
+		if cell != nil && cell.phase == AgentLifecycleDraining {
+			identities = append(identities, identity)
+		}
+	}
+	c.mu.Unlock()
+	for _, identity := range identities {
+		state, found, err := c.stateReader.LoadAgentLifecycleState(ctx, identity)
+		if err != nil {
+			return fmt.Errorf("refresh recovered provider-drain lifecycle %s: %w", identity.Description(), err)
+		}
+		if !found {
+			return fmt.Errorf("refresh recovered provider-drain lifecycle %s: durable cell is absent", identity.Description())
+		}
+		c.mu.Lock()
+		cell := c.cells[identity.Normalize()]
+		if cell != nil && cell.phase == AgentLifecycleDraining {
+			if cell.epoch != state.RuntimeEpoch || cell.generation != state.Generation {
+				c.mu.Unlock()
+				return fmt.Errorf("refresh recovered provider-drain lifecycle %s: durable generation changed", identity.Description())
+			}
+			switch state.Phase {
+			case AgentLifecycleDraining:
+			case AgentLifecycleTerminated, AgentLifecycleFailed:
+				cell.phase = state.Phase
+			default:
+				c.mu.Unlock()
+				return fmt.Errorf("refresh recovered provider-drain lifecycle %s: invalid durable phase %q", identity.Description(), state.Phase)
+			}
+		}
+		c.mu.Unlock()
+	}
+	return nil
 }
 
 func lifecycleTerminationOperationKind(target AgentLifecyclePhase) (string, error) {

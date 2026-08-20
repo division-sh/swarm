@@ -169,7 +169,41 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		record.ReasonCode = startupManagerReplayReasonDirectiveIntercepted
 		return eventProcessResult{record: record}
 	}
+	attemptCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(attemptCtx)
 	out, err := agent.OnEvent(attemptCtx, evt)
+	if observation := completionSettlement(); observation.OriginDeliverySettled {
+		if !claim.Same(observation.OriginDelivery) {
+			claimErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_settled_foreign_origin_delivery", "agent-manager", "process_event", map[string]any{
+				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID,
+			})
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonProcessFailed
+			record.Failure = failureEnvelope(claimErr, "agent-manager", "observe_completion_settlement")
+			return eventProcessResult{record: record, err: claimErr}
+		}
+		if len(out) != 0 {
+			outputErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "drained_completion_output_forbidden", "agent-manager", "process_event", map[string]any{
+				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID,
+			})
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonProcessFailed
+			record.Failure = failureEnvelope(outputErr, "agent-manager", "observe_completion_settlement")
+			return eventProcessResult{record: record, err: outputErr}
+		}
+		if observation.Finalization != nil {
+			am.lifecycle.observeProviderDrainFinalization(*observation.Finalization)
+		}
+		if err != nil {
+			agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonProcessFailed
+			record.Failure = runtimefailures.CloneEnvelope(&agentFailure.Failure)
+			return eventProcessResult{record: record, err: agentFailure}
+		}
+		record.Outcome = startupManagerReplayOutcomeReplayed
+		record.ReasonCode = startupManagerReplayReasonReplayed
+		return eventProcessResult{record: record}
+	}
 	if reason, ok := am.activeRunDeliveryQuiesced(ctx, evt.ID(), route); ok {
 		record.Outcome = startupManagerReplayOutcomeSkipped
 		record.ReasonCode = reason

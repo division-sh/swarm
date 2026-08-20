@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -72,7 +73,7 @@ def handle(input):
 	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"echo","schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
 	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{{
 		Name: "echo", Schema: map[string]any{"type": "object", "required": []any{"text"}, "properties": map[string]any{"text": map[string]any{"type": "string"}}, "additionalProperties": false},
-	}}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"})
+	}}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false)
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}
@@ -132,6 +133,36 @@ def handle(input):
 	if settlements[0].Usage.ResolvedModel != "test-model" || settlements[0].Spend.ResolvedModel != "test-model" {
 		t.Fatalf("mock settlement = %#v, want sealed frame model", settlements[0])
 	}
+}
+
+func TestMockProviderTailLatencyShapesSelfTerminalization(t *testing.T) {
+	t.Run("zero", func(t *testing.T) {
+		if err := waitMockPostToolTail(context.Background(), mockperformance.Performance{}, true); err != nil {
+			t.Fatalf("zero tail: %v", err)
+		}
+	})
+	t.Run("non_tool_round", func(t *testing.T) {
+		if err := waitMockPostToolTail(context.Background(), mockperformance.Performance{PostToolTailLatencyMS: 60_000}, false); err != nil {
+			t.Fatalf("non-tool round: %v", err)
+		}
+	})
+	t.Run("nonzero", func(t *testing.T) {
+		started := time.Now()
+		if err := waitMockPostToolTail(context.Background(), mockperformance.Performance{PostToolTailLatencyMS: 15}, true); err != nil {
+			t.Fatalf("nonzero tail: %v", err)
+		}
+		if elapsed := time.Since(started); elapsed < 15*time.Millisecond {
+			t.Fatalf("nonzero tail elapsed=%s, want at least 15ms", elapsed)
+		}
+	})
+	t.Run("long_cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cause := errors.New("retire mock tail")
+		cancel(cause)
+		if err := waitMockPostToolTail(ctx, mockperformance.Performance{PostToolTailLatencyMS: 60_000}, true); !errors.Is(err, cause) {
+			t.Fatalf("cancelled long tail error=%v, want %v", err, cause)
+		}
+	})
 }
 
 func TestParseMockCompletionOutputFailsClosed(t *testing.T) {

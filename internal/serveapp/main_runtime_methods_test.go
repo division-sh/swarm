@@ -92,20 +92,6 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueManagedSession(ctx context.
 	if !ok {
 		return nil, errors.New("served session cleanup proof requires managed capability surface")
 	}
-	runID := session.MemoryIdentity.RunID
-	err = r.store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
-		AgentID: session.AgentID, Identity: session.MemoryIdentity, Memory: session.Memory, SessionID: lease.SessionID,
-		FlowInstance: session.MemoryIdentity.FlowInstance(), RunID: runID, CapabilitySurface: &surface,
-		ResponseRaw: []byte(`{"proof":"in-flight"}`), ParseOK: true,
-	})
-	if err != nil {
-		return nil, r.reportFailure(fmt.Errorf(
-			"append turn identity %#v record_run_id %q: %w",
-			session.MemoryIdentity,
-			runID,
-			err,
-		))
-	}
 	select {
 	case r.started <- lease.SessionID:
 	default:

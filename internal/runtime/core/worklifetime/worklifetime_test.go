@@ -71,6 +71,52 @@ func TestRuntimeOccurrenceFenceRetireAndProcessJoin(t *testing.T) {
 	}
 }
 
+func TestRuntimeAndManagerLeasesRetainExactProcessOwner(t *testing.T) {
+	process := NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{
+		RuntimeInstanceID: "runtime-process-owner",
+		BundleHash:        "bundle-process-owner",
+	})
+	if err != nil {
+		t.Fatalf("new runtime occurrence: %v", err)
+	}
+	runtimeLease, err := runtimeOwner.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin runtime work: %v", err)
+	}
+	if got, ok := ProcessFromContext(runtimeLease.Context()); !ok || got != process {
+		t.Fatalf("runtime process owner = %p/%t, want exact owner %p", got, ok, process)
+	}
+	if err := runtimeLease.Done(); err != nil {
+		t.Fatalf("settle runtime work: %v", err)
+	}
+
+	manager, err := NewManagerRunOccurrence(context.Background(), runtimeOwner, ManagerRunIdentity{Generation: 1})
+	if err != nil {
+		t.Fatalf("new manager run occurrence: %v", err)
+	}
+	managerLease, err := manager.Begin(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin manager work: %v", err)
+	}
+	if got, ok := ProcessFromContext(managerLease.Context()); !ok || got != process {
+		t.Fatalf("manager process owner = %p/%t, want exact owner %p", got, ok, process)
+	}
+	if err := managerLease.Done(); err != nil {
+		t.Fatalf("settle manager work: %v", err)
+	}
+	if err := manager.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire manager run: %v", err)
+	}
+	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime: %v", err)
+	}
+	process.Retire()
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
 func TestLeaseSettlesExactlyOnce(t *testing.T) {
 	process := NewProcess()
 	lease, err := process.Begin(context.Background())

@@ -6515,7 +6515,7 @@ engine:
         authoring:
           runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
           agent_performance:
-            shape: '{mock: {kind: python, module: <declaring-package-relative .py file>}}'
+            shape: '{mock: {kind: python, module: <declaring-package-relative .py file>, post_tool_tail_latency_ms: <optional non-negative integer>}}'
             kind: python
             entrypoint: handle
             rule: >
@@ -6524,7 +6524,10 @@ engine:
               outer contracts root. The authored module path is package-relative authoring truth. Contract compilation reads
               it once and captures the package-relative Module, canonical outer-contract-relative SourcePath, exact bytes, and
               sha256 digest into the generation-owned agent descriptor; runtime execution never rereads the ambient file and
-              no composition-root fallback or second path dialect exists.
+              no composition-root fallback or second path dialect exists. post_tool_tail_latency_ms deterministically delays
+              response observation after a tool-result round
+              and before completion settlement. It is generation-owned authored timing evidence, not a test sleep or runtime
+              heuristic, and negative values fail contract compilation.
         python_abi:
           runtime: cpython-wasi-3.13.14-wasi_sdk-24 through Wasmtime
           input: >
@@ -13344,7 +13347,7 @@ platform_tables:
             tools                       JSONB NOT NULL DEFAULT '[]',
             permissions                 JSONB NOT NULL DEFAULT '[]',
             runtime_descriptor          JSONB NOT NULL DEFAULT '{}',
-            lifecycle_phase             TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'terminated', 'failed')),
+            lifecycle_phase             TEXT NOT NULL DEFAULT 'registered' CHECK (lifecycle_phase IN ('registered', 'running', 'draining', 'terminated', 'failed')),
             lifecycle_generation        BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_generation >= 0),
             lifecycle_runtime_epoch     BIGINT NOT NULL DEFAULT 0 CHECK (lifecycle_runtime_epoch >= 0),
             lifecycle_config_revision   TEXT NOT NULL DEFAULT '',
@@ -13445,7 +13448,7 @@ platform_tables:
             expected_epoch     BIGINT NOT NULL,
             expected_generation BIGINT NOT NULL,
             target_generation BIGINT NOT NULL,
-            target_phase      TEXT NOT NULL CHECK (target_phase IN ('registered', 'running', 'terminated', 'failed')),
+            target_phase      TEXT NOT NULL CHECK (target_phase IN ('registered', 'running', 'draining', 'terminated', 'failed')),
             config_revision   TEXT NOT NULL,
             run_mode          TEXT NOT NULL CHECK (run_mode IN ('stopped', 'standard', 'authoritative_delivery_only')),
             state             TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'succeeded', 'failed', 'indeterminate')),
@@ -13568,6 +13571,13 @@ platform_tables:
             usage_target_id    UUID,
             target_ordinal     INTEGER CHECK (target_ordinal IS NULL OR target_ordinal > 0),
             capability_surface_id UUID REFERENCES managed_agent_capability_surfaces(surface_id),
+            origin_delivery_id UUID,
+            origin_run_id      UUID,
+            origin_route_identity TEXT,
+            origin_claim_token UUID,
+            origin_claim_version BIGINT,
+            origin_subscriber_type TEXT CHECK (origin_subscriber_type IS NULL OR origin_subscriber_type = 'agent'),
+            origin_subscriber_id TEXT,
             state              TEXT NOT NULL CHECK (state IN ('authorized', 'launched', 'response_observed', 'settled', 'terminal_failure', 'outcome_uncertain')),
             evidence           JSONB NOT NULL DEFAULT '{}',
             failure            JSONB,
@@ -13579,8 +13589,55 @@ platform_tables:
             UNIQUE (operation_id, attempt_ordinal),
             CHECK ((usage_target_kind IS NULL AND usage_target_id IS NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'agent_turn' AND usage_target_id IS NOT NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'conversation_fork_turn_completion' AND usage_target_id IS NOT NULL AND target_ordinal > 0)),
             CHECK ((usage_target_kind = 'conversation_fork_turn_completion' AND capability_surface_id IS NULL) OR (COALESCE(usage_target_kind, '') <> 'conversation_fork_turn_completion' AND capability_surface_id IS NOT NULL)),
+            CHECK ((origin_delivery_id IS NULL AND origin_run_id IS NULL AND origin_route_identity IS NULL AND origin_claim_token IS NULL AND origin_claim_version IS NULL AND origin_subscriber_type IS NULL AND origin_subscriber_id IS NULL) OR (origin_delivery_id IS NOT NULL AND origin_run_id IS NOT NULL AND NULLIF(TRIM(origin_route_identity), '') IS NOT NULL AND origin_claim_token IS NOT NULL AND origin_claim_version > 0 AND origin_subscriber_type = 'agent' AND NULLIF(TRIM(origin_subscriber_id), '') IS NOT NULL)),
+            FOREIGN KEY (origin_delivery_id, origin_claim_version, origin_claim_token) REFERENCES event_delivery_attempts(delivery_id, claim_version, claim_token),
             INDEX idx_runtime_external_effect_attempts_recovery (state, lease_expires_at, updated_at),
             INDEX idx_runtime_external_effect_attempts_target (usage_target_kind, usage_target_id) WHERE usage_target_id IS NOT NULL
+        );
+    runtime_provider_attempt_drains:
+      description: >-
+        Exact normal-agent predecessor provider attempts captured atomically by lifecycle supersession after launch.
+        A pending row authorizes only immutable completion evidence, budget settlement, and the exact originating delivery
+        outcome. Running successors remain running; terminal targets expose draining until their last row settles or expires.
+        The row never authorizes provider dispatch, mutable session/provider-head projection, output publication, or successor work.
+      ddl: |
+        CREATE TABLE runtime_provider_attempt_drains (
+            drain_id                 UUID PRIMARY KEY,
+            attempt_id               UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            operation_id             UUID NOT NULL REFERENCES runtime_external_effect_operations(operation_id),
+            lifecycle_operation_id   UUID NOT NULL,
+            lifecycle_transition_id  UUID NOT NULL,
+            agent_id                 TEXT NOT NULL,
+            agent_name_owner         TEXT NOT NULL,
+            agent_name_source        TEXT NOT NULL,
+            agent_route_presence     TEXT NOT NULL,
+            flow_scope_key           TEXT NOT NULL,
+            flow_instance_id         TEXT NOT NULL,
+            flow_instance            TEXT NOT NULL,
+            predecessor_runtime_epoch BIGINT NOT NULL CHECK (predecessor_runtime_epoch > 0),
+            predecessor_generation   BIGINT NOT NULL CHECK (predecessor_generation > 0),
+            successor_runtime_epoch  BIGINT NOT NULL CHECK (successor_runtime_epoch > 0),
+            successor_generation     BIGINT NOT NULL CHECK (successor_generation > 0),
+            target_phase             TEXT NOT NULL CHECK (target_phase IN ('running', 'terminated', 'failed')),
+            origin_delivery_id       UUID NOT NULL,
+            origin_run_id            UUID NOT NULL,
+            origin_route_identity    TEXT NOT NULL CHECK (NULLIF(TRIM(origin_route_identity), '') IS NOT NULL),
+            origin_claim_token       UUID NOT NULL,
+            origin_claim_version     BIGINT NOT NULL CHECK (origin_claim_version > 0),
+            origin_subscriber_type   TEXT NOT NULL CHECK (origin_subscriber_type = 'agent'),
+            origin_subscriber_id     TEXT NOT NULL CHECK (NULLIF(TRIM(origin_subscriber_id), '') IS NOT NULL),
+            state                    TEXT NOT NULL CHECK (state IN ('pending', 'settled', 'expired')),
+            failure                  JSONB,
+            captured_at              TIMESTAMPTZ NOT NULL,
+            expires_at               TIMESTAMPTZ NOT NULL,
+            settled_at               TIMESTAMPTZ,
+            CHECK (successor_generation > predecessor_generation),
+            CHECK (expires_at > captured_at),
+            CHECK ((state = 'pending' AND failure IS NULL AND settled_at IS NULL) OR (state = 'settled' AND settled_at IS NOT NULL) OR (state = 'expired' AND failure IS NOT NULL AND settled_at IS NOT NULL)),
+            FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
+            FOREIGN KEY (origin_delivery_id, origin_claim_version, origin_claim_token) REFERENCES event_delivery_attempts(delivery_id, claim_version, claim_token),
+            INDEX idx_runtime_provider_attempt_drains_pending (state, expires_at, captured_at),
+            INDEX idx_runtime_provider_attempt_drains_agent (agent_id, flow_instance, predecessor_generation)
         );
     reply_contexts:
       description: >-
@@ -13878,6 +13935,7 @@ platform_tables:
             completed_at     TIMESTAMPTZ,
             PRIMARY KEY (delivery_id, claim_version),
             UNIQUE (delivery_id, claim_version, open_marker),
+            UNIQUE (delivery_id, claim_version, claim_token),
             FOREIGN KEY (active_session_id, session_run_id, session_agent_id, session_agent_name_owner, session_agent_name_source, session_agent_route_presence, session_agent_flow_scope_key, session_agent_flow_instance_id, session_agent_flow_instance_path) REFERENCES agent_sessions(session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             FOREIGN KEY (session_delivery_id, session_run_id, session_subscriber_type, session_agent_id, session_agent_name_owner, session_agent_name_source, session_agent_route_presence, session_agent_flow_scope_key, session_agent_flow_instance_id, session_agent_flow_instance_path) REFERENCES event_deliveries(delivery_id, run_id, subscriber_type, subscriber_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path),
             FOREIGN KEY (current_delivery_id, claim_version, open_marker) REFERENCES event_deliveries(delivery_id, current_attempt_version, current_attempt_open) DEFERRABLE INITIALLY DEFERRED,
@@ -14040,7 +14098,7 @@ platform_tables:
       lookup_pattern: Runtime acquires memory via exact `(run_id, agent_id, flow_instance)` equality with explicit status filtering.
       lifecycle_authority: 'The agents lifecycle cell/token is the sole admission and mutable-projection authority for live sessions. Lifecycle replace/destroy transitions own the complete active+suspended exact-agent set in the same selected-store transaction as the lifecycle cell and durable outcome. Standalone registry termination is non-authoritative.'
       exact_acquire_hydrate: 'Persistent provider startup must lease and hydrate one exact session_id atomically under the current lifecycle token. A separate latest-active conversation read, hydration fallback to empty history, or provider start after hydration failure is forbidden.'
-      mutable_projection: 'Every live-session mutation revalidates the current lifecycle token in the same transaction. Superseded AppendAgentTurn stores append-only agent_turns evidence but returns stale_projection_refused and does not change this table.'
+      mutable_projection: 'Every live-session mutation revalidates the current lifecycle token in the same transaction. Current completion settlement may update the exact current session projection. Drained predecessor settlement stores immutable agent_turns evidence through its restricted permit and cannot mutate this table.'
       live_owner_query: 'Live session ownership MUST query status = ''active'' only.'
       resumable_owner_query: 'Resume/supersession ownership MUST query status IN (''active'', ''suspended'').'
       status_lifecycle: 'status remains active, suspended, terminated. orphaned and contaminated are
@@ -34113,7 +34171,8 @@ agent_lifecycle_authority:
   durable_cell:
     table: agents
     fields: [lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id, topology_authority_kind, topology_admission, execution_lifetime]
-    rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority.
+    phases: [registered, running, draining, terminated, failed]
+    rule: The agents row is the sole durable lifecycle cell. Process memory is a fenced projection and never an independent authority. Draining is terminal-target truth only while one or more exact predecessor provider-attempt drains remain pending; a running successor remains running and represents predecessor drains only in runtime_provider_attempt_drains.
   lifecycle_token:
     fields: [runtime_epoch, agent_id, generation]
     rule: Every managed agent execution context carries exactly one token. Missing or superseded authority fails before external launch.
@@ -34131,7 +34190,7 @@ agent_lifecycle_authority:
       variants: [normal, selected_contract_fork]
       rule: AgentManager receives one explicit closed variant at construction. Normal turns install the acting lifecycle token and receiver-owned normal admission/controller state. Selected-contract turns install the exact selected authority, admission, controller, and lineage supplied by the selected runtime owner. No variant is inferred from delivery-context values.
     replace:
-      rule: Start, restart, reconfigure, recovery, flow activation, and spawn-during-run enumerate agent IDs only and select the current projection after acquiring the per-agent operation lock. Replacement fences new leases, cancels the predecessor generation, removes its exact route, awaits loop and direct-execution release, installs one successor projection, then starts that successor.
+      rule: Start, restart, reconfigure, recovery, flow activation, and spawn-during-run enumerate agent IDs only and select the current projection after acquiring the per-agent operation lock. Replacement fences new leases and serializes against provider-attempt launch in the selected-store lifecycle transaction. Every authorized attempt for which transition wins is terminally abandoned with its reservation and exact origin delivery settled before return. Every already-launched or response-observed predecessor attempt for which launch wins is captured into one exact durable drain in that transaction. Only after commit may the runtime cancel the predecessor generation, remove its exact route, await generation-owned work, install one successor projection, and start that successor.
       same_current: Reconfigure compares the validated candidate revision with the authoritative locked current revision before invoking the Agent factory. Same-current preserves Agent/config identity, loop, route channel/token, generation, sessions, and factory count.
     route:
       owner: EventBus ReplaceAgentRoute and RemoveAgentRoute keyed by the complete lifecycle token
@@ -34156,7 +34215,7 @@ agent_lifecycle_authority:
     ordering:
       - Under the per-agent operation lock, read the authoritative current projection, merge and validate any patch, and return same-current before Agent factory invocation.
       - Materialize any changed candidate only inside that locked replacement decision.
-      - Commit the lifecycle cell, immutable transition fact, durable operation outcome, and diagnostic outbox atomically.
+      - Commit the lifecycle cell, immutable transition fact, durable operation outcome, diagnostic outbox, transition-wins terminal attempt/origin outcomes, and launch-wins exact provider drains atomically.
       - Fence the predecessor generation before cancellation and await its generation-aware release before starting a successor loop.
       - Persistence failure leaves the prior process-local owner unchanged and cannot be acknowledged as success.
     replay: Repeating one operation_id first revalidates any current declaration-owned topology authority under the same selected-store serialization used by first execution, then returns its stored outcome without cancelling, restarting, rotating, or advancing generation again. A stale or authority-free replay cannot publish durable or process state.
@@ -34187,7 +34246,7 @@ agent_lifecycle_authority:
   live_session_mutable_projection:
     rule: Acquire/hydrate, rotate, turn-count increment, provider-head adoption, conversation upsert, watchdog update, and the mutable half of turn persistence lock and revalidate the agents lifecycle cell in the same selected-store transaction as their mutation. An earlier current-generation check is not authority for a later write.
     release: Exact stale lease release is monotonic cleanup only. It may clear only the named predecessor lease and cannot mutate current conversation, provider head, lifecycle state, or successor ownership.
-    turn_evidence_split: AppendAgentTurn returns a typed result separating evidence_stored from current_projection_applied or stale_projection_refused. A same-agent superseded completion stores immutable agent_turns evidence but cannot update agent_sessions run_id, timestamps, conversation, provider state, watchdog, or other mutable projection. Evidence failure rolls back both evidence and any current projection; current-generation evidence and projection commit together.
+    turn_evidence_split: SettleCompletion is the only provider-turn evidence writer. Current settlement may atomically apply the exact current mutable projection. Drained settlement accepts a distinct restricted value containing immutable turn/effect/spend evidence only and cannot update agent_sessions run_id, timestamps, conversation, provider state, watchdog, output, or successor state. The stale_projection_refused rule is structural at admission to the drained value, before any evidence mutation. Evidence failure rolls back the complete current or drained named operation. Direct AppendAgentTurn and any alternate turn insert owner are forbidden.
   public_restart:
     idempotency: A supplied API idempotency key derives a stable lifecycle operation_id. API completion failure is repaired by replaying the stored lifecycle outcome without repeating restart.
     diagnostic: Success requires durable transition outcome and durable outbox enqueue; immediate projection is non-authoritative.
@@ -34283,7 +34342,7 @@ managed_external_effect_authority:
     required_fields: [effect_kind, effect_class, adapter, transport, launch_site, primitive_keys, launch_observed, prelaunch_failure, postlaunch_failure, outcome_mapping, canonical_evidence, settlement_recovery, proof]
     rule: Registration is incomplete unless every field is concrete and the source-derived primitive contract binds every actual launch/write boundary to its adapter, Begin admission, pre-primitive launched marker, outcome table, and named execution proof.
   context_authority:
-    managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token and usage target; selected-contract-fork agents require the exact selected execution authority and actor usage target. Same-slug sibling identity is a mismatch. Missing or mismatched context fails closed before authorization.
+    managed_agent: Every adapter invocation requires the exact managed-execution admission, provider-turn capability surface carrying the typed concrete actor identity, selected-store controller, and typed logical-operation identity. Normal agents additionally require an exactly matching lifecycle token, usage target, and live typed originating delivery claim with exact delivery ID, run, route identity, claim token/version, agent subscriber class, and subscriber identity. Selected-contract-fork agents require the exact selected execution authority and actor usage target and cannot carry a normal origin claim. Same-slug sibling identity is a mismatch. Missing or mismatched context fails closed before authorization.
     eventbus_handoff: Managed-effect context authority installed after EventBus transfer is receiver-owned. Normal authority derives from the acting lifecycle token; selected-contract authority is the exact typed selected owner. Publisher context ancestry cannot establish, replace, or shadow either authority.
     startup_probe: Provider/MCP startup probing requires the exact startup-probe capability surface, startup authority, and selected-store controller. Startup authority cannot authorize a provider turn or be reused after execution admission.
     serve_registration: >
@@ -34302,7 +34361,7 @@ managed_external_effect_authority:
     read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
     write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
   launch:
-    rule: Authorization atomically compares the lifecycle token with the durable agents cell and creates the attempt. At launch, the selected-store transaction locks and revalidates the same lifecycle cell against the attempt token before atomically marking the operation and attempt launched. The durable launched marker must commit before HTTP dispatch, process start, MCP stdio write, or any filesystem mutation, including parent-directory creation, temporary-file creation/cleanup, file write/sync/chmod, and replacement.
+    rule: Authorization atomically compares the lifecycle token with the durable agents cell, validates and stamps the exact normal-agent originating delivery claim, and creates the attempt and budget reservation. At launch, the selected-store transaction locks and revalidates the same lifecycle cell against the attempt token before atomically marking the operation and attempt launched. Lifecycle supersession locks that same cell before classifying every exact predecessor attempt. Transition-wins occurs before external dispatch and terminally abandons authorized work, releases reservations, and settles the exact origin. Launch-wins atomically captures the launched or response-observed attempt into one predecessor drain. No third result exists. The durable launched marker must commit before HTTP dispatch, process start, MCP stdio write, or any filesystem mutation, including parent-directory creation, temporary-file creation/cleanup, file write/sync/chmod, and replacement.
     rejection: If the primitive subsequently rejects launch with exact zero-effect proof, the already-marked attempt settles terminal_failure with launch_rejected evidence. Marker failure performs zero launch or mutation.
     stale: platform.superseded_generation with zero launch or mutation.
   settlement:
@@ -34316,19 +34375,40 @@ managed_external_effect_authority:
     postlaunch_write_or_unknown_failure: Every error after cmd.Start succeeds, including provider exit, response validation,
       mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
       adapter-specific evidence while preserving the original failure as the returned classification; automatic redispatch is forbidden.
-    mutable_projection: |
-      Successor-facing session, conversation, watchdog, provider-head,
-      turn-count, and rotation projection is lifecycle-token validated at the
-      same selected-store mutation boundary. AppendAgentTurn reports immutable
-      evidence storage separately from mutable projection: a superseded
-      same-agent completion stores its turn evidence and returns
-      stale_projection_refused without changing the live session; current
-      projection and evidence commit together. Old-generation turn,
-      task-audit, spend, and effect evidence remains immutable.
+    current_completion: Successor-facing session, conversation, watchdog, provider-head, turn-count, and rotation projection is lifecycle-token validated at the same selected-store mutation boundary as immutable completion evidence. Current projection and evidence commit together.
+    predecessor_drain:
+      owner: runtime_provider_attempt_drains plus one named selected-store drained completion operation
+      capture: A lifecycle transition captures every exact normal-agent provider attempt in launched or response_observed under the lifecycle-cell lock. The row binds the complete predecessor token, successor generation, lifecycle transition, target phase, operation/attempt, expiry, and originating delivery claim.
+      permit: Current and drained completion permits are distinct closed variants. The drained input structurally permits only immutable agent_turns evidence, exact effect terminal evidence, exact spend and reservation release, the exact originating delivery terminal outcome/receipt, drain settlement, and last-drain terminal lifecycle finalization.
+      atomicity: The drained operation commits or rolls back every permitted fact together. Exact origin mismatch, mutable provider-head/session/conversation/watchdog/output intent, stale drain identity, duplicate non-exact evidence, or any subordinate writer failure changes nothing.
+      lifecycle_truth: Terminated or failed targets remain draining until their last pending drain settles or expires with a typed loud failure, then atomically finalize to their target. A running successor stays running while predecessor drains remain exact sidecar facts. A drained predecessor cannot mutate or block the successor.
+      process_lifetime: Provider heartbeat and post-tool tail execution are process-owned after launch. Generation retirement rejects new work and may cancel generation-local consumers, but it cannot discard the accepted process-local tail before exact terminal settlement.
+      forbidden: [provider redispatch, provider-head mutation, session or conversation mutation, watchdog mutation, output publication, successor projection, inferred event-to-delivery lookup, latest-claim lookup, stale-error fallback, compatibility settlement]
   recovery:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
-    launched_or_response_observed: Startup settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch.
+    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact originating delivery and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
+  invariant_ids:
+    runtime.provider_attempt.origin_claim_exact:
+      owner: BeginCompletion plus selected-store external-effect authorization
+      rule: Every normal-agent provider attempt stores one validated exact live delivery claim; no event, route, latest-row, or context inference can replace it.
+      negative_proof: TestProviderAttemptDrainRejectsMissingOrForeignOriginClaimParity
+    runtime.provider_attempt.supersession_linearized:
+      owner: selected-store lifecycle transition and launch operations
+      rule: Transition-wins terminally settles prelaunch work and launch-wins captures one exact predecessor drain under the same lifecycle cell lock.
+      negative_proof: TestProviderAttemptLaunchVersusLifecycleSupersessionParity
+    runtime.provider_attempt.drained_settlement_restricted:
+      owner: DrainedCompletionSettlement and the named selected-store drained completion operation
+      rule: Drained settlement can commit immutable evidence and its exact origin/finalization only; every mutable or cross-attempt projection is unrepresentable or rejected atomically.
+      negative_proof: TestDrainedCompletionInputHasNoMutableProjectionSurface
+    runtime.provider_attempt.recovery_no_redispatch:
+      owner: selected-store external-effect recovery before delivery recovery
+      rule: Every captured or crash-stranded provider attempt converges to exact terminal evidence and origin outcome without provider dispatch, and repeated recovery is idempotent.
+      negative_proof: TestProviderAttemptDrainStartupRecoveryParity
+    runtime.provider_attempt.mock_tail_timing:
+      owner: generation-owned mockperformance Performance and mock runtime
+      rule: Authored deterministic post-tool tail latency delays response observation on tool-result rounds and remains cancellation-aware.
+      negative_proof: TestMockProviderTailLatencyShapesSelfTerminalization
   automatic_redispatch_allowlist:
     - adapter: claude_cli
       condition: preceding operation and attempt are terminal_failure, retain the same persisted authority epoch/generation as the current typed authority, and have no launched_at or carry exact launch_rejected=true evidence after cmd.Start rejection
@@ -34406,6 +34486,9 @@ llm_completion_execution_authority:
     - DifferentOwner for provider completion execution
     - adapter-owned turn or spend append after provider completion
     - settling a successful provider attempt before usage/target/spend/head settlement
+    - direct AppendAgentTurn or any provider-turn evidence writer outside SettleCompletion
+    - normal-agent provider-attempt authorization without one exact current originating delivery claim
+    - lifecycle supersession that cancels or fences an already-launched provider attempt without exact drain capture
     - process-local locking as budget admission authority
     - fake ordinary-agent lifecycle rows for selected-fork or forkchat execution
     - provider redispatch during recovery or replay

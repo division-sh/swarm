@@ -109,10 +109,6 @@ func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts oper
 	return s.operatorEntityPostgres.AggregateOperatorEntities(ctx, opts)
 }
 
-func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec llm.AgentTurnRecord) error {
-	return s.lLMPostgresOwner.AppendAgentTurn(ctx, rec)
-}
-
 func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runquiescence.Request) (runquiescence.Result, error) {
 	return s.runLifecyclePostgresOwner.ApplyActiveRunQuiescence(ctx, req)
 }
@@ -1191,10 +1187,6 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentm
 
 func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	return s.operatorEntitySQLite.AggregateOperatorEntities(ctx, opts)
-}
-
-func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec llm.AgentTurnRecord) error {
-	return s.lLMSQLiteOwner.AppendAgentTurn(ctx, rec)
 }
 
 func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req runquiescence.Request) (runquiescence.Result, error) {

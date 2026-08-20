@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -200,14 +201,58 @@ type CompletionSettlement struct {
 	Now          time.Time
 }
 
+// DrainedCompletionSettlement is the immutable-only completion surface for an
+// exact predecessor drain. It deliberately has no provider-head or output
+// projection fields.
+type DrainedCompletionSettlement struct {
+	Settlement Settlement
+	Usage      CompletionUsage
+	AgentTurn  CompletionAgentTurn
+	Spend      CompletionSpend
+	Now        time.Time
+}
+
+func AdmitDrainedCompletionSettlement(attempt Attempt, settlement CompletionSettlement) (DrainedCompletionSettlement, error) {
+	if settlement.ProviderHead != nil {
+		return DrainedCompletionSettlement{}, fmt.Errorf("drained completion cannot mutate provider head")
+	}
+	if settlement.AgentTurn == nil {
+		return DrainedCompletionSettlement{}, fmt.Errorf("drained completion requires immutable agent-turn evidence")
+	}
+	if err := settlement.Validate(attempt); err != nil {
+		return DrainedCompletionSettlement{}, err
+	}
+	return DrainedCompletionSettlement{
+		Settlement: settlement.Settlement,
+		Usage:      settlement.Usage,
+		AgentTurn:  *settlement.AgentTurn,
+		Spend:      settlement.Spend,
+		Now:        settlement.Now,
+	}, nil
+}
+
+func (s DrainedCompletionSettlement) CompletionSettlement() CompletionSettlement {
+	turn := s.AgentTurn
+	return CompletionSettlement{
+		Settlement: s.Settlement,
+		Usage:      s.Usage,
+		AgentTurn:  &turn,
+		Spend:      s.Spend,
+		Now:        s.Now,
+	}
+}
+
 // CompletionSettlementResult is selected-store truth about a terminal
 // settlement. Committed may be true with a non-nil error when the transaction
 // deliberately committed an outcome-uncertain provider-head conflict.
 type CompletionSettlementResult struct {
-	Committed     bool
-	SpendRecorded bool
-	AttemptID     string
-	EntityID      string
+	Committed             bool
+	SpendRecorded         bool
+	AttemptID             string
+	EntityID              string
+	OriginDelivery        runtimedelivery.Claim
+	OriginDeliverySettled bool
+	Finalization          *ProviderDrainFinalization
 }
 
 type CompletionSpendProjection struct {

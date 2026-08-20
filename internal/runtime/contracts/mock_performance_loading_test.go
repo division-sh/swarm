@@ -18,13 +18,13 @@ func TestMaterializeAgentMockPerformancesCapturesExactGenerationBytes(t *testing
 	original := []byte("def handle(input):\n    return {'text': 'first'}\n")
 	writeAgentMockTestFile(t, module, string(original))
 	entries, err := materializeAgentMockPerformances(agentMockTestSource(root, root, ".", filepath.Join(root, "agents.yaml")), map[string]AgentRegistryEntry{
-		"assistant": {Mock: mockperformance.Performance{Kind: "python", Module: "mocks/assistant.py"}},
+		"assistant": {Mock: mockperformance.Performance{Kind: "python", Module: "mocks/assistant.py", PostToolTailLatencyMS: 25}},
 	})
 	if err != nil {
 		t.Fatalf("materialize mock performance: %v", err)
 	}
 	performance := entries["assistant"].Mock
-	if performance.Module != "mocks/assistant.py" || string(performance.Source) != string(original) || !strings.HasPrefix(performance.Digest, "sha256:") || performance.SourcePath != "mocks/assistant.py" {
+	if performance.Module != "mocks/assistant.py" || string(performance.Source) != string(original) || !strings.HasPrefix(performance.Digest, "sha256:") || performance.SourcePath != "mocks/assistant.py" || performance.PostToolTailLatencyMS != 25 {
 		t.Fatalf("materialized performance = %#v", performance)
 	}
 	if err := os.WriteFile(module, []byte("def handle(input):\n    return {'text': 'second'}\n"), 0o600); err != nil {
@@ -32,6 +32,19 @@ func TestMaterializeAgentMockPerformancesCapturesExactGenerationBytes(t *testing
 	}
 	if string(performance.Source) != string(original) {
 		t.Fatalf("compiled generation reread ambient module: %q", performance.Source)
+	}
+}
+
+func TestMaterializeAgentMockPerformancesRejectsNegativeTailLatency(t *testing.T) {
+	root := t.TempDir()
+	declaration := filepath.Join(root, "agents.yaml")
+	writeAgentMockTestFile(t, declaration, "assistant: {}\n")
+	writeAgentMockTestFile(t, filepath.Join(root, "assistant.py"), validAgentMockSource("assistant"))
+	_, err := materializeAgentMockPerformances(agentMockTestSource(root, root, ".", declaration), map[string]AgentRegistryEntry{
+		"assistant": {Mock: mockperformance.Performance{Kind: "python", Module: "assistant.py", PostToolTailLatencyMS: -1}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be non-negative") {
+		t.Fatalf("negative tail latency error=%v", err)
 	}
 }
 

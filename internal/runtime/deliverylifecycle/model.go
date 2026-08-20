@@ -523,6 +523,16 @@ func (c Claim) Validate() error {
 	return nil
 }
 
+// Same reports exact fenced claim identity without exposing its persistence
+// token to runtime consumers.
+func (c Claim) Same(other Claim) bool {
+	return c.valid() && other.valid() &&
+		c.deliveryID == other.deliveryID && c.runID == other.runID &&
+		c.routeIdentity == other.routeIdentity && c.token == other.token &&
+		c.version == other.version && c.class == other.class &&
+		c.subscriberID == other.subscriberID
+}
+
 func (c Claim) valid() bool {
 	return strings.TrimSpace(c.deliveryID) != "" && strings.TrimSpace(c.runID) != "" && strings.TrimSpace(c.routeIdentity) != "" &&
 		strings.TrimSpace(c.token) != "" && c.version > 0 && c.class.MaxRetries() >= 0 && strings.TrimSpace(c.subscriberID) != ""

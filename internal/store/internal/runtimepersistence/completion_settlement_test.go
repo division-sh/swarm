@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -33,6 +36,7 @@ type completionSettlementFixture struct {
 	db          *sql.DB
 	sqlite      bool
 	authority   runtimeeffects.Authority
+	origin      runtimedelivery.Claim
 	context     context.Context
 	sessionID   string
 	agentID     string
@@ -249,16 +253,28 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 
 	setCompletionFixtureGeneration(t, fixture, 2)
 	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
-	if err != nil {
-		t.Fatalf("reconcile fenced prelaunch completion: %v", err)
+	if err == nil {
+		t.Fatal("reconcile stale prelaunch completion without a lifecycle drain succeeded")
 	}
-	if summary.PrelaunchTerminal != 1 || summary.OutcomeUncertain != 0 {
-		t.Fatalf("fenced prelaunch recovery summary=%+v, want 1/0", summary)
+	if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Detail.Code != "provider_attempt_drain_missing" {
+		t.Fatalf("stale prelaunch recovery error=%v, want provider_attempt_drain_missing", err)
 	}
-	requireExternalAttemptState(t, fixture.db, fixture.sqlite, authorized.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
-	requireCompletionRecoveryRows(t, fixture, authorized.Attempt().AttemptID, 1, 0, 0)
+	if summary != (runtimeeffects.RecoverySummary{}) {
+		t.Fatalf("failed prelaunch recovery summary=%+v, want empty", summary)
+	}
+	requireExternalAttemptState(t, fixture.db, fixture.sqlite, authorized.Attempt().AttemptID, runtimeeffects.StateAuthorized)
+	requireCompletionRecoveryRows(t, fixture, authorized.Attempt().AttemptID, 0, 0, 1)
 
 	setCompletionFixtureGeneration(t, fixture, 1)
+	failure := runtimefailures.FromError(context.Canceled, "completion-test", "cleanup")
+	cleanup := completionSettlementForTest(t, authorized.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
+	cleanup.ProviderHead = nil
+	cleanup.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure.Failure}
+	cleanup.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
+	cleanup.AgentTurn.Failure = &failure.Failure
+	if err := authorized.SettleCompletion(ctx, cleanup); err != nil {
+		t.Fatalf("settle restored prelaunch completion: %v", err)
+	}
 	secondAuthority := fixture.authority
 	secondAuthority.Target.ID = uuid.NewString()
 	ctx = runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithAuthority(fixture.context, secondAuthority), "ordinary-recovery:launched")
@@ -272,14 +288,17 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	}
 	setCompletionFixtureGeneration(t, fixture, 2)
 	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
-	if err != nil {
-		t.Fatalf("reconcile fenced launched completion: %v", err)
+	if err == nil {
+		t.Fatal("reconcile stale launched completion without a lifecycle drain succeeded")
 	}
-	if summary.PrelaunchTerminal != 0 || summary.OutcomeUncertain != 1 {
-		t.Fatalf("fenced launched recovery summary=%+v, want 0/1", summary)
+	if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Detail.Code != "provider_attempt_drain_missing" {
+		t.Fatalf("stale launched recovery error=%v, want provider_attempt_drain_missing", err)
 	}
-	requireExternalAttemptState(t, fixture.db, fixture.sqlite, launched.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
-	requireCompletionRecoveryRows(t, fixture, launched.Attempt().AttemptID, 1, 1, 0)
+	if summary != (runtimeeffects.RecoverySummary{}) {
+		t.Fatalf("failed launched recovery summary=%+v, want empty", summary)
+	}
+	requireExternalAttemptState(t, fixture.db, fixture.sqlite, launched.Attempt().AttemptID, runtimeeffects.StateLaunched)
+	requireCompletionRecoveryRows(t, fixture, launched.Attempt().AttemptID, 0, 0, 1)
 }
 
 func proveCompletionProviderHeadStaleAuthorityCannotSettle(t *testing.T, fixture completionSettlementFixture) {
@@ -346,11 +365,37 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 		RunID: runID, SessionID: sessionID, Memory: agentmemory.Authored(true), FlowInstance: flowInstance,
 	}
 	authority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
-	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store))
+	origin := claimCompletionOriginForTest(t, ctx, store, authority, now)
+	completionCtx := runtimedelivery.WithClaim(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)), origin)
 	return completionSettlementFixture{
-		store: store, db: db, sqlite: sqlite, authority: authority, context: completionCtx,
+		store: store, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder,
 	}
+}
+
+func claimCompletionOriginForTest(t testing.TB, ctx context.Context, store completionSettlementTestStore, authority runtimeeffects.Authority, now time.Time) runtimedelivery.Claim {
+	t.Helper()
+	originEvent := eventtest.ExistingRunRootIngress(
+		uuid.NewString(), "completion.origin", "gateway", "", []byte(`{}`), 0,
+		authority.Target.RunID, events.EventEnvelope{}, now,
+	)
+	route := events.DeliveryRoute{
+		Recipient:     events.MustAgentDeliveryRecipient(authority.Normal.Identity.AgentID()),
+		AgentIdentity: authority.Normal.Identity,
+	}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, store, originEvent, []events.DeliveryRoute{route}); err != nil {
+		t.Fatalf("commit completion origin delivery: %v", err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, store.(deliveryFixtureStore), originEvent, route)
+	if err != nil {
+		t.Fatalf("claim completion origin delivery: %v", err)
+	}
+	return claimed.Claim
+}
+
+func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authority) context.Context {
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(f.store))
+	return runtimedelivery.WithClaim(ctx, f.origin)
 }
 
 func beginObservedCompletionForSettlementTest(t *testing.T, ctx context.Context, adapter, request string) *runtimeeffects.Handle {
@@ -385,10 +430,10 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, AgentID: target.AgentID, SessionID: target.SessionID,
 			RunID: target.RunID, Identity: testAgentMemoryIdentity(t, target.RunID, target.AgentID, target.FlowInstance),
-			Memory: target.Memory, FlowInstance: target.FlowInstance, ParseOK: true,
+			Memory: target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID, ParseOK: true,
 		},
 		Spend: runtimeeffects.CompletionSpend{
-			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			EntityID: target.EntityID, FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
 			Model: "regular", ModelAlias: "regular",
 			BackendProfile: "test", Provider: "anthropic", Transport: "process", ResolvedModel: "claude-test",
 			CostUSD: 0.25, InvocationType: "agent_turn",

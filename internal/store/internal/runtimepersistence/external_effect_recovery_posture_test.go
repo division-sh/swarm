@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -209,11 +210,13 @@ func beginProviderRecoveryPostureMatrix(t *testing.T, fixture completionSettleme
 		authority.ExecutionMode = mode
 		authority.Target.ID = uuid.NewString()
 		authority.BudgetScopes = nil
+		origin := claimCompletionOriginForTest(t, testAuthorActivityContext(), fixture.store, authority, time.Now().UTC())
 		adapter := "anthropic_api"
 		if mode == executionmode.Mock {
 			adapter = "mock_python"
 		}
-		ctx := runtimeeffects.WithAuthority(fixture.context, authority)
+		ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
+		ctx = runtimedelivery.WithClaim(ctx, origin)
 		ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "posture-provider:"+string(mode)+":"+tc.name+":"+uuid.NewString())
 		ctx = withManagedCompletionTestSurface(t, ctx, authority, adapter)

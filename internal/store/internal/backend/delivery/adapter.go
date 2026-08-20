@@ -833,6 +833,14 @@ func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, story runtimeau
 	return a.settle(ctx, tx, story, claim, Settlement{Disposition: "success", SideEffects: sideEffects, Duration: duration})
 }
 
+func (a *Adapter) ValidateCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) error {
+	if tx == nil {
+		return fmt.Errorf("delivery claim validation transaction is required")
+	}
+	_, _, err := a.requireCurrentClaim(ctx, tx, claim)
+	return err
+}
+
 func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {
 	if settlement.Disposition != FailureRetry && settlement.Disposition != FailureDeadLetter {
 		return Snapshot{}, fmt.Errorf("delivery failure disposition %q is invalid", settlement.Disposition)

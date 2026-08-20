@@ -1393,7 +1393,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
 		t.Fatalf("BindAgentSession trace event: %v", err)
 	}
-	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",
 		Memory:           agentmemory.Authored(true),
 		SessionID:        lease.SessionID,
@@ -1404,8 +1404,8 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		RequestPayload:   []byte(`{"prompt":"hello"}`),
 		ResponseRaw:      []byte(`{"content":"ok"}`),
 		ParseOK:          true,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn: %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 	trace, _, err := store.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
@@ -1448,7 +1448,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	sessionID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
-	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
 		Memory:         agentmemory.PlatformDefault(),
 		SessionID:      sessionID,
@@ -1457,8 +1457,8 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(stateless): %v", err)
 	}
 
 	var count int
@@ -1507,7 +1507,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
-	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
 		Memory:         agentmemory.Authored(false),
 		SessionID:      sessionID,
@@ -1517,8 +1517,8 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless entity): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(stateless entity): %v", err)
 	}
 
 	var count int
@@ -1563,7 +1563,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	flowInstance := "review/inst-1"
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
-	if err := store.AppendAgentTurn(runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), managedAgentTurnRecordForTest(t, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
 		Memory:         agentmemory.PlatformDefault(),
 		SessionID:      sessionID,
@@ -1573,8 +1573,8 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 		ResponseRaw:    []byte(`{"ok":true}`),
 		ParseOK:        true,
 		Latency:        5 * time.Millisecond,
-	})); err != nil {
-		t.Fatalf("AppendAgentTurn(stateless flow): %v", err)
+	}); err != nil {
+		t.Fatalf("ManagedTurnReadbackFixture(stateless flow): %v", err)
 	}
 
 	var count int
@@ -1654,7 +1654,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	}); err != nil {
 		t.Fatalf("UpsertConversation(memory): %v", err)
 	}
-	if err := appendManagedAgentTurnForTest(t, runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), store, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive), store, runtimellm.AgentTurnRecord{
 		SessionID:      uuid.NewString(),
 		AgentID:        identity.AgentID(),
 		Identity:       identity,

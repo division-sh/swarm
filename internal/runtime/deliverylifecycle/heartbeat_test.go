@@ -152,3 +152,15 @@ func heartbeatTestClaim() Claim {
 		subscriberID:  "agent-a",
 	}
 }
+
+func TestClaimSameIncludesOpaqueFencingToken(t *testing.T) {
+	claim := heartbeatTestClaim()
+	if !claim.Same(claim) {
+		t.Fatal("exact claim did not match itself")
+	}
+	foreign := claim
+	foreign.token = uuid.NewString()
+	if claim.Same(foreign) {
+		t.Fatal("claim matched a foreign fencing token")
+	}
+}

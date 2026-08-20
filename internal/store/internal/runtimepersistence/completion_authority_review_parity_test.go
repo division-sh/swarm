@@ -176,7 +176,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	nextAuthority.FenceGeneration = 2
 	nextAuthority.Target.ID = uuid.NewString()
 	nextCtx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), nextAuthority), newCompletionControllerForTest(fixture.store)),
+		fixture.contextFor(nextAuthority),
 		logicalID,
 	)
 	nextCtx = withManagedCompletionTestSurface(t, nextCtx, nextAuthority, "claude_cli")
@@ -212,7 +212,7 @@ func proveCommittedCompletionBudgetProjection(t *testing.T, sqlite bool) {
 	fixture := newCompletionReviewFixture(t, sqlite)
 	projection := &completionProjectionCapture{}
 	ctx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), fixture.authority), liveTestCompletionController(fixture.store, fixture.store, fixture.store, projection)),
+		runtimeeffects.WithController(fixture.contextFor(fixture.authority), liveTestCompletionController(fixture.store, fixture.store, fixture.store, projection)),
 		"review:budget-projection",
 	)
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "budget-projection")
