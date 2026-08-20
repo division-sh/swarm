@@ -416,7 +416,7 @@ func TestEventBusStageFlowInstanceRoutePersistsCompleteCrossInstanceObserverTopo
 		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
 	}
 	var observerRouteFound bool
-	workerNode := testFlowNode(t, "worker", "worker-listener")
+	workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
 	for _, route := range store.stagedRoutes {
 		if route.Identity == consumerIdentity &&
 			route.EventPattern == "producer/source-1/task.done" &&
@@ -481,7 +481,7 @@ func TestEventBusExactFlowInstanceRouteTopologyRemovesObsoleteObserverRows(t *te
 			if got := eb.RouteTable().Resolve("producer/source-1/task.done"); len(got) != 0 {
 				t.Fatalf("observer route after %s removal = %#v, want none", removed.ScopeKey, got)
 			}
-			workerNode := testFlowNode(t, "worker", "worker-listener")
+			workerNode := testPackageNode(t, "flows/worker", "worker", "worker-listener")
 			for _, route := range store.routes {
 				if route.EventPattern == "producer/source-1/task.done" &&
 					route.SubscriberID == workerNode.Key() {

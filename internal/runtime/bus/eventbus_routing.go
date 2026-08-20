@@ -766,17 +766,17 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
 	if route.Recipient.IsNode() {
-		passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
+		interception, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
 		if err != nil {
 			return err
 		}
-		if len(deferred) > 0 {
+		if len(interception.Deferred) > 0 {
 			return errors.New("delivery continuation cannot create uncommitted deferred publications")
 		}
-		if _, retry := outcome.RetryRelease(); retry {
+		if _, retry := interception.Outcome.RetryRelease(); retry {
 			return errors.New("delivery continuation route requested event-level retry release")
 		}
-		if _, settled := outcome.Disposition(); settled || !passthrough {
+		if _, settled := interception.Outcome.Disposition(); settled || !interception.EventPassthrough || !interception.NodePassthrough {
 			return nil
 		}
 	}

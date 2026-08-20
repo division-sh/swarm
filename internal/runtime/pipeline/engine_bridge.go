@@ -271,6 +271,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:               identity.NormalizeEntityID(entityID),
 		Node:                   node,
+		ExecutionFlowID:        identity.NormalizeFlowID(flowID),
 		Route:                  stateRoute,
 		Event:                  triggerCtx.Event,
 		ProducerSource:         producerSource,

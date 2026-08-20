@@ -3804,7 +3804,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
 		eventBusTestRunID, previewEnvelope, rootSource, time.Now().UTC())
 	childPreviewCtx := runtimedelivery.WithRoute(ctx, rootConnectPlan.DeliveryRoutes[0])
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testFlowNode(t, "child", "child-relay"), previewEvent, runtimepipeline.WorkflowState{
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, testPackageNode(t, "flows/child", "child", "child-relay"), previewEvent, runtimepipeline.WorkflowState{
 		EntityID: childTarget.EntityID,
 		Stage:    "waiting",
 	}, nil); err != nil {

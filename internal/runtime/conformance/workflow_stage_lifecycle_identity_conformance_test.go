@@ -342,9 +342,17 @@ func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *
 
 func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, db *sql.DB, eventID string, activation runtimepkg.StandingActivation) {
 	t.Helper()
-	routes, err := selected.ListEventDeliveryRoutes(ctx, eventID)
-	if err != nil {
-		t.Fatalf("list authored singleton delivery routes: %v", err)
+	deadline := time.Now().Add(10 * time.Second)
+	var (
+		routes []events.DeliveryRoute
+		err    error
+	)
+	for time.Now().Before(deadline) {
+		routes, err = selected.ListEventDeliveryRoutes(ctx, eventID)
+		if err == nil && len(routes) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	targetRoute := events.RouteIdentity{}
 	if len(routes) == 1 {
@@ -357,7 +365,7 @@ func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, select
 	if err != nil {
 		t.Fatalf("derive authored singleton delivery id: %v", err)
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline = time.Now().Add(10 * time.Second)
 	var snapshot runtimedelivery.Snapshot
 	for time.Now().Before(deadline) {
 		snapshot, err = selected.Snapshot(ctx, deliveryID)
@@ -509,7 +517,7 @@ func findStageLifecycleJoin(instance runtimepipeline.WorkflowInstance, batchID s
 		return joinruntime.Activation{}, false
 	}
 	key := joinruntime.ActivationKey("awaiting", "awaiting", batchID)
-	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformanceNode(t, "scout", "scout-coordinator"), key)
+	activation, ok, err := joinruntime.Load(carrier.StateBuckets, conformancePackageNode(t, "flows/scout", "scout", "scout-coordinator"), key)
 	if err != nil || !ok {
 		return joinruntime.Activation{}, false
 	}

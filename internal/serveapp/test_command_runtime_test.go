@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -1068,16 +1069,22 @@ func servedBackendLabel(backend servedparity.Backend) string {
 }
 
 func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *testing.T) {
+	rootNode := func(localID string) string {
+		return identitytest.RootNode(t, localID).Key()
+	}
+	flowNode := func(flowID, localID string) string {
+		return identitytest.FlowNode(t, flowID, localID).Key()
+	}
 	tests := []struct {
 		example        canonicalrouting.ArtifactID
 		deliveredNodes map[string]int
 	}{
-		{canonicalrouting.RootIngress, map[string]int{"item-handler": 1, "item-observer": 1}},
-		{canonicalrouting.ParentConnect, map[string]int{"producer-node": 1, "consumer-node": 1}},
-		{canonicalrouting.TemplateSelectExisting, map[string]int{"producer-node": 2, "account-node": 2}},
-		{canonicalrouting.TemplateSelectOrCreate, map[string]int{"producer-node": 1, "account-node": 1}},
-		{canonicalrouting.TemplateReply, map[string]int{"initiator-node": 2, "requester-node": 3, "provider-node": 1}},
-		{canonicalrouting.TemplateCreateMintedKey, map[string]int{"producer-node": 1, "validator-node": 1}},
+		{canonicalrouting.RootIngress, map[string]int{rootNode("item-handler"): 1, rootNode("item-observer"): 1}},
+		{canonicalrouting.ParentConnect, map[string]int{flowNode("producer", "producer-node"): 1, flowNode("consumer", "consumer-node"): 1}},
+		{canonicalrouting.TemplateSelectExisting, map[string]int{flowNode("producer", "producer-node"): 2, flowNode("account", "account-node"): 2}},
+		{canonicalrouting.TemplateSelectOrCreate, map[string]int{flowNode("producer", "producer-node"): 1, flowNode("account", "account-node"): 1}},
+		{canonicalrouting.TemplateReply, map[string]int{flowNode("initiator", "initiator-node"): 2, flowNode("requester", "requester-node"): 3, flowNode("provider", "provider-node"): 1}},
+		{canonicalrouting.TemplateCreateMintedKey, map[string]int{flowNode("producer", "producer-node"): 1, flowNode("validator", "validator-node"): 1}},
 	}
 	for _, test := range tests {
 		t.Run(string(test.example), func(t *testing.T) {
@@ -1111,7 +1118,7 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 			}
 			if test.example == canonicalrouting.TemplateReply {
 				options.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, nodeID string, _ events.Event) error {
-					if nodeID != "provider-node" {
+					if nodeID != flowNode("provider", "provider-node") {
 						return nil
 					}
 					select {

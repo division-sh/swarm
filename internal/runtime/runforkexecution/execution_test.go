@@ -4226,7 +4226,7 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 		routes[0].Recipient.ID() != mustRunForkRootNode("test-node").Key() ||
 		!routes[0].Target.Empty() ||
 		routes[0].Handler.Empty() ||
-		routes[0].Handler.FlowID() != "selected-workflow" {
+		!routes[0].Handler.Node().Equal(mustRunForkRootNode("test-node")) {
 		t.Fatalf("materialized routes = %#v, want target node route only", routes)
 	}
 }

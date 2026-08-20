@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const semanticExecutionFixtureRunID = "00000000-0000-0000-0000-000000000001"
@@ -14,6 +15,13 @@ const semanticExecutionFixtureRunID = "00000000-0000-0000-0000-000000000001"
 // ExecuteSemanticFixture completes the durable facts that engine unit tests
 // intentionally omit while keeping the production executor fail-closed.
 func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
+	if strings.TrimSpace(req.ExecutionFlowID.String()) == "" {
+		flowID := strings.TrimSpace(req.Node.FlowID())
+		if flowID == "" && e != nil && e.deps.Source != nil {
+			flowID = strings.TrimSpace(e.deps.Source.WorkflowName())
+		}
+		req.ExecutionFlowID = identity.NormalizeFlowID(flowID)
+	}
 	if req.Event.AdmissionClass() == events.EventAdmissionRootIngress && strings.TrimSpace(req.Event.RunID()) == "" {
 		if req.Event.ProducerType() == "" {
 			return ExecutionResult{}, fmt.Errorf("complete engine root fixture: producer type is required")

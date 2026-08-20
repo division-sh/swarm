@@ -42,7 +42,7 @@ func TestFlowInstanceIdentity_DistinguishesScopeKeyInstancePathAndEntityID(t *te
 func TestFlowInstanceIdentity_CreateEntityUsesTypedPathAndLogicalInstance(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
 
-	handler, ok := source.ExecutableNodeEventHandler(pipelineNode(t, "child", "validator"), "validate.start")
+	handler, ok := source.ExecutableNodeEventHandler(pipelineSourceNode(t, source, "child", "validator"), "validate.start")
 	if !ok {
 		t.Fatal("expected validator handler for validate.start")
 	}

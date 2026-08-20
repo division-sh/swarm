@@ -1224,22 +1224,28 @@ func (eb *EventBus) completeCommittedPublishDispatch(evt events.Event, inboundPl
 
 	inboundPlan = inboundPlan.Normalized()
 
-	passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
+	interception, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
 		return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_dispatch_failed", eventBusFailure(err, "dispatch_committed_publish"))))
 	}
-	if _, retry := outcome.RetryRelease(); retry {
+	if _, retry := interception.Outcome.RetryRelease(); retry {
 		return nil
 	}
-	if disposition, ok := outcome.Disposition(); ok {
+	if disposition, ok := interception.Outcome.Disposition(); ok {
 		return eb.settleCommittedPublish(ctx, publicationClaim, disposition)
 	}
 
-	if passthrough {
-		recipients := inboundPlan.RecipientIDs()
+	if interception.EventPassthrough {
+		liveRecipients := inboundPlan.LiveRecipients
+		deliveryRoutes := inboundPlan.liveDispatchDeliveryRoutes()
+		if !interception.NodePassthrough {
+			liveRecipients = nonCollidingAgentRecipientsAfterNodeConsume(liveRecipients, deliveryRoutes)
+			deliveryRoutes = agentDeliveryRoutesForLiveRecipients(deliveryRoutes, liveRecipients)
+		}
+		recipients := routePlanLiveRecipientIDs(liveRecipients)
 		if len(recipients) > 0 {
 			eb.logQueuedDeliveries(ctx, evt, inboundPlan.PersistedRecipientIDs(), "matched_agent_subscription", inboundPlan.ExtraDetail)
-			if err := eb.deliverRoutePlanWithRoutes(workCtx, evt, inboundPlan); err != nil {
+			if err := eb.deliverLiveRecipientsWithRoutes(workCtx, evt, liveRecipients, deliveryRoutes); err != nil {
 				if errors.Is(err, errAuthoritativeDeliveryIncomplete) {
 					return err
 				}
@@ -1258,7 +1264,7 @@ func (eb *EventBus) completeCommittedPublishDispatch(evt events.Event, inboundPl
 	}
 	eb.logPublished(ctx, evt, 0)
 
-	for _, d := range deferred {
+	for _, d := range interception.Deferred {
 		if err := eb.publishDeferred(workCtx, d); err != nil {
 			return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(err, "publish_deferred"))))
 		}
@@ -1302,28 +1308,51 @@ func pipelineDispositionFailureReason(fallback string, failure *runtimefailures.
 	return strings.TrimSpace(fallback)
 }
 
-func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+type deliveryRouteInterception struct {
+	EventPassthrough bool
+	NodePassthrough  bool
+	Deferred         []events.Event
+	Outcome          runtimepipelineobligation.ExecutionOutcome
+}
+
+func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (deliveryRouteInterception, error) {
 	interceptors := eb.interceptorsSnapshot()
 	nodeRoutes := nodeDeliveryRoutes(deliveryRoutes)
 	if len(nodeRoutes) == 0 {
-		return eb.runInterceptorSet(ctx, evt, interceptors)
+		passthrough, deferred, outcome, err := eb.runInterceptorSet(ctx, evt, interceptors)
+		return deliveryRouteInterception{
+			EventPassthrough: passthrough,
+			NodePassthrough:  passthrough,
+			Deferred:         deferred,
+			Outcome:          outcome,
+		}, err
 	}
 	eventInterceptors, routeInterceptors := splitDeliveryRouteInterceptors(interceptors)
 	passthrough, deferred, outcome, err := eb.runInterceptorSet(ctx, evt, eventInterceptors)
 	if err != nil {
-		return passthrough, nil, runtimepipelineobligation.Continue(), err
+		return deliveryRouteInterception{}, err
 	}
 	if !outcome.ContinueDispatch() {
-		return passthrough, deferred, outcome, nil
+		return deliveryRouteInterception{
+			EventPassthrough: passthrough,
+			NodePassthrough:  passthrough,
+			Deferred:         deferred,
+			Outcome:          outcome,
+		}, nil
 	}
 	routePassthrough, routeDeferred, routeOutcome, err := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
 	if err != nil {
-		return passthrough, nil, runtimepipelineobligation.Continue(), err
+		return deliveryRouteInterception{}, err
 	}
 	if len(routeDeferred) > 0 {
 		deferred = append(deferred, routeDeferred...)
 	}
-	return passthrough && routePassthrough, deferred, routeOutcome, nil
+	return deliveryRouteInterception{
+		EventPassthrough: passthrough,
+		NodePassthrough:  routePassthrough,
+		Deferred:         deferred,
+		Outcome:          routeOutcome,
+	}, nil
 }
 
 func nodeDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
@@ -1335,6 +1364,72 @@ func nodeDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.Delivery
 		routes = append(routes, route)
 	}
 	return routes
+}
+
+func agentDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
+	routes := make([]events.DeliveryRoute, 0)
+	for _, route := range events.NormalizeDeliveryRoutes(deliveryRoutes) {
+		if route.Recipient.IsAgent() {
+			routes = append(routes, route)
+		}
+	}
+	return routes
+}
+
+func targetOwnedAgentDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
+	routes := make([]events.DeliveryRoute, 0)
+	for _, route := range agentDeliveryRoutes(deliveryRoutes) {
+		if !route.Target.Empty() {
+			routes = append(routes, route)
+		}
+	}
+	return routes
+}
+
+func nonCollidingAgentRecipientsAfterNodeConsume(recipients []RoutePlanLiveRecipient, routes []events.DeliveryRoute) []RoutePlanLiveRecipient {
+	consumedNodeIDs := make(map[string]struct{})
+	exact := make(map[agentidentity.Identity]struct{})
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.Recipient.IsNode() {
+			consumedNodeIDs[route.Recipient.LocalID()] = struct{}{}
+		} else if route.Recipient.IsAgent() {
+			exact[route.AgentIdentity] = struct{}{}
+		}
+	}
+	out := make([]RoutePlanLiveRecipient, 0, len(recipients))
+	for _, recipient := range normalizeRoutePlanLiveRecipients(recipients) {
+		if _, collision := consumedNodeIDs[recipient.Recipient.LocalID()]; collision {
+			continue
+		}
+		if _, ok := exact[recipient.AgentIdentity]; recipient.Recipient.IsAgent() && ok {
+			out = append(out, recipient)
+		}
+	}
+	return normalizeRoutePlanLiveRecipients(out)
+}
+
+func agentDeliveryRoutesForLiveRecipients(routes []events.DeliveryRoute, recipients []RoutePlanLiveRecipient) []events.DeliveryRoute {
+	exact := make(map[agentidentity.Identity]struct{})
+	for _, recipient := range normalizeRoutePlanLiveRecipients(recipients) {
+		if recipient.Recipient.IsAgent() {
+			exact[recipient.AgentIdentity] = struct{}{}
+		}
+	}
+	out := make([]events.DeliveryRoute, 0, len(routes))
+	for _, route := range agentDeliveryRoutes(routes) {
+		if _, ok := exact[route.AgentIdentity]; ok {
+			out = append(out, route)
+		}
+	}
+	return events.NormalizeDeliveryRoutes(out)
+}
+
+func routePlanLiveRecipientIDs(recipients []RoutePlanLiveRecipient) []string {
+	out := make([]string, 0, len(recipients))
+	for _, recipient := range normalizeRoutePlanLiveRecipients(recipients) {
+		out = append(out, recipient.subscriberID())
+	}
+	return uniqueStrings(out)
 }
 
 func splitDeliveryRouteInterceptors(interceptors []EventInterceptor) ([]EventInterceptor, []DeliveryRouteInterceptor) {
@@ -2145,15 +2240,22 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
-	passthrough := true
+	eventPassthrough := true
+	nodePassthrough := true
 	deferred := []events.Event(nil)
 	if replayInterceptors && scope == runtimepipelineobligation.ScopeSubscribed {
 		var outcome runtimepipelineobligation.ExecutionOutcome
 		if dispatchRecipients {
-			passthrough, deferred, outcome, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
+			var interception deliveryRouteInterception
+			interception, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
+			eventPassthrough = interception.EventPassthrough
+			nodePassthrough = interception.NodePassthrough
+			deferred = interception.Deferred
+			outcome = interception.Outcome
 		} else {
 			eventInterceptors, _ := splitDeliveryRouteInterceptors(eb.interceptorsSnapshot())
-			passthrough, deferred, outcome, err = eb.runInterceptorSet(ctx, evt, eventInterceptors)
+			eventPassthrough, deferred, outcome, err = eb.runInterceptorSet(ctx, evt, eventInterceptors)
+			nodePassthrough = eventPassthrough
 		}
 		if err != nil {
 			return runtimepipelineobligation.Continue(), err
@@ -2162,7 +2264,12 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 			return outcome, nil
 		}
 	}
-	if dispatchRecipients && passthrough && len(liveRecipients) > 0 {
+	if !nodePassthrough {
+		deliveryRoutes = targetOwnedAgentDeliveryRoutes(deliveryRoutes)
+		liveRecipients = deliveryRouteAgentRecipientIDs(deliveryRoutes)
+		internalRecipients = nil
+	}
+	if dispatchRecipients && eventPassthrough && len(liveRecipients) > 0 {
 		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes); err != nil {
 			return runtimepipelineobligation.Continue(), err
 		}
@@ -2175,7 +2282,7 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	if !dispatchRecipients {
 		return runtimepipelineobligation.Continue(), nil
 	}
-	if !passthrough || len(liveRecipients) == 0 {
+	if !eventPassthrough || len(liveRecipients) == 0 {
 		return runtimepipelineobligation.Continue(), nil
 	}
 	owner := "event_deliveries"
