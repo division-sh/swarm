@@ -1376,14 +1376,21 @@ func agentDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.Deliver
 	return routes
 }
 
-func targetOwnedAgentDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
-	routes := make([]events.DeliveryRoute, 0)
-	for _, route := range agentDeliveryRoutes(deliveryRoutes) {
-		if !route.Target.Empty() {
-			routes = append(routes, route)
+func nonCollidingAgentDeliveryRoutesAfterNodeConsume(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
+	consumedNodeIDs := make(map[string]struct{})
+	for _, route := range events.NormalizeDeliveryRoutes(deliveryRoutes) {
+		if route.Recipient.IsNode() {
+			consumedNodeIDs[route.Recipient.LocalID()] = struct{}{}
 		}
 	}
-	return routes
+	routes := make([]events.DeliveryRoute, 0)
+	for _, route := range agentDeliveryRoutes(deliveryRoutes) {
+		if _, collision := consumedNodeIDs[route.Recipient.LocalID()]; collision {
+			continue
+		}
+		routes = append(routes, route)
+	}
+	return events.NormalizeDeliveryRoutes(routes)
 }
 
 func nonCollidingAgentRecipientsAfterNodeConsume(recipients []RoutePlanLiveRecipient, routes []events.DeliveryRoute) []RoutePlanLiveRecipient {
@@ -2265,7 +2272,7 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		}
 	}
 	if !nodePassthrough {
-		deliveryRoutes = targetOwnedAgentDeliveryRoutes(deliveryRoutes)
+		deliveryRoutes = nonCollidingAgentDeliveryRoutesAfterNodeConsume(deliveryRoutes)
 		liveRecipients = deliveryRouteAgentRecipientIDs(deliveryRoutes)
 		internalRecipients = nil
 	}

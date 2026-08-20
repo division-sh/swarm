@@ -33,6 +33,7 @@ const (
 	AuthoredSubscriptionFailureQualifiedExact        AuthoredSubscriptionFailure = "qualified_exact_forbidden"
 	AuthoredSubscriptionFailurePatternUnauthorized   AuthoredSubscriptionFailure = "pattern_unauthorized"
 	AuthoredSubscriptionFailureTimerPatternForbidden AuthoredSubscriptionFailure = "timer_pattern_forbidden"
+	AuthoredSubscriptionFailureSemanticScopeInvalid  AuthoredSubscriptionFailure = "semantic_scope_invalid"
 )
 
 // AuthoredSubscriptionRequest carries the complete scope needed to classify
@@ -275,10 +276,15 @@ func ClassifyExecutableNodeSubscription(source Source, node runtimeidentity.Exec
 	flowPath := ""
 	localEvents := map[string]struct{}{}
 	var inputEvents []string
-	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
+	semanticScope, scopeErr := ResolveExecutableNodeSemanticScope(source, node)
+	if scopeErr != nil {
+		return failedAuthoredSubscription(AuthoredSubscriptionAdmission{}, AuthoredSubscriptionFailureSemanticScopeInvalid,
+			fmt.Sprintf("node %q semantic scope is invalid: %v", node.Key(), scopeErr))
+	}
+	if scope, ok := semanticScope.OwningFlow(); ok {
 		flowPath = scope.Path
 		localEvents, inputEvents = authoredSubscriptionScopeEvents(scope)
-	} else if project, ok := executableNodeProjectScope(source, node); ok && node.FlowID() == "" {
+	} else if project, ok := semanticScope.DeclarationProject(); ok && node.FlowID() == "" {
 		for eventType := range project.Events {
 			if eventType = eventidentity.Normalize(eventType); eventType != "" {
 				localEvents[eventType] = struct{}{}
@@ -350,9 +356,11 @@ func ResolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 	}
 	flowPath := ""
 	var inputEvents []string
-	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
-		flowPath = scope.Path
-		inputEvents = append([]string(nil), scope.InputEvents...)
+	if semanticScope, err := ResolveExecutableNodeSemanticScope(source, node); err == nil {
+		if scope, ok := semanticScope.OwningFlow(); ok {
+			flowPath = scope.Path
+			inputEvents = append([]string(nil), scope.InputEvents...)
+		}
 	}
 	for _, candidate := range append(exact, patterns...) {
 		admission := candidate.admission

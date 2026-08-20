@@ -86,7 +86,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("last revenue after first = %#v, want 100", got)
 	}
-	assertFanInStreamReport(t, state.StateCarrier.Metadata, "operating/a", "report-1", 100)
+	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-1", 100)
 
 	duplicate := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-b", "operating/a", "report-2", "2026-Q1", 200)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, duplicate, target)
@@ -96,7 +96,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("last revenue after duplicate = %#v, want unchanged first arrival value", got)
 	}
-	assertFanInStreamReport(t, state.StateCarrier.Metadata, "operating/a", "report-1", 100)
+	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-1", 100)
 
 	nextWindow := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-c", "operating/a", "report-3", "2026-Q2", 300)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, nextWindow, target)
@@ -109,7 +109,7 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if got := state.StateCarrier.Fields["last_revenue"]; got != float64(300) {
 		t.Fatalf("last revenue after next window = %#v, want 300", got)
 	}
-	assertFanInStreamReport(t, state.StateCarrier.Metadata, "operating/a", "report-3", 300)
+	assertFanInStreamReport(t, state.StateCarrier.Fields, "operating/a", "report-3", 300)
 }
 
 func TestCreateEventIDCarryProjectionReachesHandler(t *testing.T) {
@@ -184,14 +184,14 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	if got := carrier.Fields["last_revenue"]; got != float64(100) {
 		t.Fatalf("producer-driven stream last revenue = %#v, want 100", got)
 	}
-	assertFanInStreamReport(t, carrier.Metadata, requestEventID, "", 100)
+	assertFanInStreamReport(t, carrier.Fields, requestEventID, "", 100)
 }
 
-func assertFanInStreamReport(t *testing.T, metadata map[string]any, operatingID, reportID string, revenue float64) {
+func assertFanInStreamReport(t *testing.T, fields map[string]any, operatingID, reportID string, revenue float64) {
 	t.Helper()
-	reports, ok := metadata["reports"].(map[string]any)
+	reports, ok := fields["reports"].(map[string]any)
 	if !ok {
-		t.Fatalf("reports = %#v, want map", metadata["reports"])
+		t.Fatalf("reports = %#v, want map", fields["reports"])
 	}
 	report, ok := reports[operatingID].(map[string]any)
 	if !ok {

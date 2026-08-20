@@ -1407,7 +1407,15 @@ contract_formats:
           selected-contract fork, recovery, and readback preserve it without reconstruction. Node subscriber_id and other
           durable compact forms are strict canonical codecs of the complete tuple: missing coordinates, alternate spellings,
           unknown fields, malformed keys, or disagreement with the selected declaration fail before mutation. Existing
-          stores and local-ID encodings are unsupported; there is no fallback, migration, or dual string authority.
+          stores and local-ID encodings are unsupported; there is no fallback, migration, or dual string authority. Semantic
+          interpretation uses one node-scope projection that retains the exact declaration package/project context separately
+          from the inherited owning-flow context. A flow-layer declaration resolves both facts from its exact package and flow;
+          a project-layer declaration nested below a flow retains its project package while resolving that exact structural
+          flow ancestor. Event references, patterns, catalogs, subscriptions, authored emissions, policy overlays, and pin
+          routing consume this projection. Static, root-input, and standing/template route compilation separately require exact
+          package, flow, and local-node selection. Missing, duplicate, or contradictory declaration/flow ownership fails before
+          semantic publication or runtime mutation; package matching is never optional and a bare flow/local-node match cannot
+          repair it.
         decision_state:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1482'

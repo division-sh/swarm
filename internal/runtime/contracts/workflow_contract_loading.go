@@ -160,6 +160,10 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			continue
 		}
 		nodeID := node.Key()
+		if _, scopeErr := bundle.ExecutableNodeSemanticScope(node); scopeErr != nil {
+			errs = append(errs, fmt.Errorf("%w: node %s semantic scope: %v", ErrInvalidField, nodeID, scopeErr))
+			continue
+		}
 		if authoredID := strings.TrimSpace(record.Entry.ID); !SystemNodeIDMatchesKey(node.NodeID(), authoredID) {
 			errs = append(errs, fmt.Errorf("%w: node %s id %q must match map key", ErrInvalidField, nodeID, authoredID))
 		}

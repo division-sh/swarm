@@ -126,8 +126,11 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 }
 
 func executableNodeFlowPath(source Source, node runtimeidentity.ExecutableNode) string {
-	if scope, ok := ExecutableNodeFlowScope(source, node); ok {
-		return strings.Trim(strings.TrimSpace(scope.Path), "/")
+	semanticScope, err := ResolveExecutableNodeSemanticScope(source, node)
+	if err == nil {
+		if scope, ok := semanticScope.OwningFlow(); ok {
+			return strings.Trim(strings.TrimSpace(scope.Path), "/")
+		}
 	}
 	return ""
 }

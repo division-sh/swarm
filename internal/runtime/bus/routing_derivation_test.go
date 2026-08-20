@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,6 +109,137 @@ func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRo
 	if !seen["node:listener"] || !seen["agent:observer"] {
 		t.Fatalf("resolved subscribers = %#v, want listener and observer", got)
 	}
+}
+
+func TestDeriveRouteTableRequiresExactPackageOwnerAcrossRouteSurfaces(t *testing.T) {
+	for _, mode := range []string{"static", "template"} {
+		for _, reverse := range []bool{false, true} {
+			order := "a_then_b"
+			if reverse {
+				order = "b_then_a"
+			}
+			t.Run(mode+"/"+order, func(t *testing.T) {
+				source := loadPackageCollisionRouteSource(t, mode, reverse)
+				routes, err := runtimebus.DeriveRouteTable(source)
+				if err != nil {
+					t.Fatalf("DeriveRouteTable: %v", err)
+				}
+				if mode == "template" {
+					if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("orders", "one")}); err != nil {
+						t.Fatalf("AddFlowInstanceRoute: %v", err)
+					}
+					assertExactPackageRoute(t, routes.Resolve("orders/one/root.start"), "subscription", "flows/orders")
+					return
+				}
+				resolved := routes.Resolve("orders/root.start")
+				assertExactPackageRoute(t, resolved, "subscription", "flows/orders")
+				assertExactPackageRoute(t, routes.Resolve("root.start"), "root_input_flow", "flows/orders")
+			})
+		}
+	}
+}
+
+func assertExactPackageRoute(t *testing.T, subscribers []runtimebus.Subscriber, routeSource, packageKey string) {
+	t.Helper()
+	matches := 0
+	for _, subscriber := range subscribers {
+		if subscriber.RouteSourceCode() != routeSource {
+			continue
+		}
+		node, ok := subscriber.Recipient.Node()
+		if !ok {
+			t.Fatalf("subscriber = %#v, want node recipient", subscriber)
+		}
+		if node.PackageKey() != packageKey || node.FlowID() != "orders" || node.NodeID() != "shared" {
+			t.Fatalf("subscriber owner = %q/%q/%q, want %q/orders/shared", node.PackageKey(), node.FlowID(), node.NodeID(), packageKey)
+		}
+		matches++
+	}
+	if matches != 1 {
+		t.Fatalf("%s routes = %#v, want one exact package owner", routeSource, subscribers)
+	}
+}
+
+func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) semanticview.Source {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	root := t.TempDir()
+	packages := []string{"flows/orders/addon-a", "flows/orders/addon-b"}
+	if reverse {
+		packages[0], packages[1] = packages[1], packages[0]
+	}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", path, err)
+		}
+	}
+	write(filepath.Join(root, "package.yaml"), `
+name: exact-package-routes
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - path: `+packages[0]+`
+  - path: `+packages[1]+`
+flows:
+  - id: orders
+    flow: orders
+    mode: `+mode+`
+`)
+	write(filepath.Join(root, "schema.yaml"), `
+name: exact-package-routes
+pins:
+  inputs:
+    events: [root.start]
+`)
+	write(filepath.Join(root, "events.yaml"), "root.start: {}\n")
+	write(filepath.Join(root, "entities.yaml"), "{}\n")
+	write(filepath.Join(root, "nodes.yaml"), "{}\n")
+	write(filepath.Join(root, "agents.yaml"), "{}\n")
+	write(filepath.Join(root, "tools.yaml"), "{}\n")
+	write(filepath.Join(root, "policy.yaml"), "{}\n")
+	write(filepath.Join(root, "flows", "orders", "package.yaml"), "name: orders\nversion: \"1.0.0\"\nflows: []\n")
+	write(filepath.Join(root, "flows", "orders", "schema.yaml"), `
+name: orders
+mode: `+mode+`
+initial_state: active
+states: [active, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [root.start]
+`)
+	write(filepath.Join(root, "flows", "orders", "events.yaml"), "root.start: {}\naddon-a.start: {}\naddon-b.start: {}\n")
+	write(filepath.Join(root, "flows", "orders", "agents.yaml"), "{}\n")
+	write(filepath.Join(root, "flows", "orders", "policy.yaml"), "{}\n")
+	write(filepath.Join(root, "flows", "orders", "nodes.yaml"), `
+shared:
+  id: shared
+  execution_type: system_node
+  event_handlers:
+    root.start:
+      advances_to: done
+`)
+	for _, name := range []string{"addon-a", "addon-b"} {
+		dir := filepath.Join(root, "flows", "orders", name)
+		write(filepath.Join(dir, "package.yaml"), "name: "+name+"\nversion: \"1.0.0\"\nflows: []\n")
+		write(filepath.Join(dir, "nodes.yaml"), `
+shared:
+  id: shared
+  execution_type: system_node
+  event_handlers:
+    `+name+`.start:
+      advances_to: done
+`)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestEventBusLocalNodeWildcardAdmissionPreservesScope(t *testing.T) {

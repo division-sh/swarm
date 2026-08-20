@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -117,8 +116,7 @@ func deadEventDeclarations(source semanticview.Source) []deadEventDeclaration {
 	for _, scope := range semanticview.FlowScopes(source) {
 		flowID := strings.TrimSpace(scope.ID)
 		for eventName, entry := range scope.Events {
-			scopeNode, _ := runtimeidentity.AdmitExecutableNodeDeclaration(scope.PackageKey, flowID, "__event_schema__")
-			canonical := eventidentity.Normalize(source.ResolveExecutableNodeEventReference(scopeNode, eventName))
+			canonical := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventName))
 			if canonical == "" {
 				continue
 			}
@@ -205,8 +203,7 @@ func deadEventTypedConsumerMatches(source semanticview.Source, census semanticvi
 		FlowID:     strings.TrimSpace(decl.FlowID),
 		PackageKey: strings.TrimSpace(decl.PackageKey),
 	}
-	scopeNode, _ := runtimeidentity.AdmitExecutableNodeDeclaration(decl.PackageKey, decl.FlowID, "__event_schema__")
-	producer.Event = semanticview.ResolveExecutableNodeEventProof(source, scopeNode, decl.Canonical)
+	producer.Event = semanticview.ResolveFlowEventProof(source, decl.FlowID, decl.Canonical)
 	matches, _ := census.ResolveTypedPubSubConsumerMatches(producer)
 	return matches
 }
