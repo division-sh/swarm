@@ -10340,6 +10340,11 @@
         "additionalProperties": false,
         "properties": {
           "model": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_alias": {
+            "minLength": 1,
             "type": "string"
           },
           "provider": {
@@ -10358,7 +10363,9 @@
         "required": [
           "runtime_mode",
           "provider",
-          "transport"
+          "transport",
+          "model_alias",
+          "model"
         ],
         "type": "object"
       },
