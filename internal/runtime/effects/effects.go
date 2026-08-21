@@ -782,13 +782,13 @@ func (h *Handle) Succeed(ctx context.Context, evidence map[string]any) error {
 	return h.Settle(ctx, StateSettled, nil, evidence)
 }
 
-func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSettlement) error {
+func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSettlement) (CompletionSettlementResult, error) {
 	if h == nil || h.controller == nil || h.controller.store == nil {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
+		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
 	store := h.controller.completionStore
 	if store == nil {
-		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_settlement_store_missing", "llm-completion-authority", "settle_completion", nil)
+		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_settlement_store_missing", "llm-completion-authority", "settle_completion", nil)
 	}
 	settlement.Settlement.OperationID = h.attempt.OperationID
 	settlement.Settlement.AttemptID = h.attempt.AttemptID
@@ -798,12 +798,15 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	}
 	settlement.Settlement.Now = settlement.Now
 	if err := settlement.Validate(h.attempt); err != nil {
-		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
+		return CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
 	}
 	result, err := store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
+	if result.Committed && !result.Disposition.Valid() {
+		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_settlement_disposition_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID, "disposition": result.Disposition})
+	}
 	if result.Committed {
 		recordCompletionSettlementObservation(ctx, CompletionSettlementObservation{
-			AttemptID: result.AttemptID, OriginDelivery: result.OriginDelivery,
+			AttemptID: result.AttemptID, Disposition: result.Disposition, OriginDelivery: result.OriginDelivery,
 			OriginDeliverySettled: result.OriginDeliverySettled, Finalization: result.Finalization,
 		})
 	}
@@ -813,7 +816,7 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 			EntityID:  result.EntityID,
 		})
 	}
-	return err
+	return result, err
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {

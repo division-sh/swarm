@@ -18,18 +18,19 @@ import (
 )
 
 type Harness struct {
-	mu                 sync.Mutex
-	Token              runtimeeffects.LifecycleToken
-	AuthorizeErr       error
-	HeartbeatErr       error
-	HeartbeatFailAfter int
-	MarkErr            error
-	SettleErr          error
-	SettleOrigin       bool
-	Heartbeats         map[string]int
-	Attempts           map[string]runtimeeffects.Attempt
-	States             map[string]runtimeeffects.State
-	Completions        map[string]runtimeeffects.CompletionSettlement
+	mu                    sync.Mutex
+	Token                 runtimeeffects.LifecycleToken
+	AuthorizeErr          error
+	HeartbeatErr          error
+	HeartbeatFailAfter    int
+	MarkErr               error
+	SettleErr             error
+	SettleOrigin          bool
+	CompletionDisposition runtimeeffects.CompletionSettlementDisposition
+	Heartbeats            map[string]int
+	Attempts              map[string]runtimeeffects.Attempt
+	States                map[string]runtimeeffects.State
+	Completions           map[string]runtimeeffects.CompletionSettlement
 }
 
 func New() *Harness {
@@ -228,9 +229,16 @@ func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Att
 	h.Completions[attempt.AttemptID] = settlement
 	h.States[attempt.AttemptID] = settlement.Settlement.State
 	return runtimeeffects.CompletionSettlementResult{
-		Committed: true, SpendRecorded: true, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
+		Committed: true, Disposition: h.completionDisposition(), SpendRecorded: true, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
 		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: h.SettleOrigin,
 	}, nil
+}
+
+func (h *Harness) completionDisposition() runtimeeffects.CompletionSettlementDisposition {
+	if h.CompletionDisposition.Valid() {
+		return h.CompletionDisposition
+	}
+	return runtimeeffects.CompletionSettlementCurrent
 }
 
 func (h *Harness) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {

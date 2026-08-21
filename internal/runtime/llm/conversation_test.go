@@ -146,7 +146,7 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 	if err != nil {
 		return nil, err
 	}
-	if err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+	if _, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"turn": r.calls + 1}},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact, InputTokens: &input, OutputTokens: &output},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{

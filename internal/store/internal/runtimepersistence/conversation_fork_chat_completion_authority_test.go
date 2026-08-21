@@ -401,7 +401,7 @@ func settleForkChatCompletionAttempt(t *testing.T, ctx context.Context, handle *
 		failure := runtimefailures.FromError(cause, "forkchat-test", "settle")
 		settlement.Settlement.Failure = &failure.Failure
 	}
-	if err := handle.SettleCompletion(ctx, settlement); err != nil {
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle forkchat completion: %v", err)
 	}
 }
@@ -422,7 +422,7 @@ func settleForkChatPrelaunchFailure(t *testing.T, ctx context.Context, handle *r
 		},
 		Now: now,
 	}
-	if err := handle.SettleCompletion(ctx, settlement); err != nil {
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle prelaunch forkchat completion: %v", err)
 	}
 }

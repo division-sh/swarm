@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -213,16 +212,16 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 				requireAgentLifecycleState(t, fixture, target.wantDuring, result.Generation)
 
 				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "forbidden-head")
-				if err := handle.SettleCompletion(ctx, settlement); err == nil || !strings.Contains(err.Error(), "drained completion cannot mutate provider head") {
-					t.Fatalf("drained mutable projection error=%v", err)
-				}
-				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
-				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
-				requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateResponseObserved, 0, 1)
-
-				settlement.ProviderHead = nil
-				if err := handle.SettleCompletion(ctx, settlement); err != nil {
+				settled, err := handle.SettleCompletion(ctx, settlement)
+				if err != nil {
 					t.Fatalf("settle drained completion: %v", err)
+				}
+				if settled.Disposition != runtimeeffects.CompletionSettlementDrained {
+					t.Fatalf("completion disposition=%q, want drained", settled.Disposition)
+				}
+				wantFinalization := target.phase != runtimemanager.AgentLifecycleRunning
+				if !settled.Committed || !settled.SpendRecorded || !settled.OriginDeliverySettled || (settled.Finalization != nil) != wantFinalization {
+					t.Fatalf("drained settlement result=%+v, want complete immutable commit with finalization=%t", settled, wantFinalization)
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
@@ -337,7 +336,7 @@ func TestProviderAttemptCompletionAfterOriginalOriginExpiryParity(t *testing.T) 
 				if candidate.drained {
 					settlement.ProviderHead = nil
 				}
-				if err := handle.SettleCompletion(ctx, settlement); err != nil {
+				if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 					t.Fatalf("settle after original origin expiry: %v", err)
 				}
 				if !candidate.drained {
@@ -380,7 +379,7 @@ func TestProviderAttemptDrainAdapterParity(t *testing.T) {
 					settlement.Spend.Transport = registration.Transport
 				}
 				applyManagedCompletionTestSurface(t, settlement.AgentTurn, handle.Attempt().Authority, adapter)
-				if err := handle.SettleCompletion(ctx, settlement); err != nil {
+				if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 					t.Fatalf("settle drained %s completion: %v", adapter, err)
 				}
 				requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
@@ -446,7 +445,7 @@ func TestProviderAttemptDrainTenAttemptExactnessParity(t *testing.T) {
 			settlement.ProviderHead = nil
 			settlement.AgentTurn.ToolCalls = json.RawMessage(fmt.Sprintf(`[{"id":"tool-%02d","name":"lookup"}]`, index))
 			settlement.AgentTurn.EmittedEvents = json.RawMessage(fmt.Sprintf(`[{"type":"batch.completed","index":%d}]`, index))
-			if err := handle.SettleCompletion(contexts[index], settlement); err != nil {
+			if _, err := handle.SettleCompletion(contexts[index], settlement); err != nil {
 				t.Fatalf("settle batch attempt %d: %v", index, err)
 			}
 			requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
@@ -474,7 +473,7 @@ func TestProviderAttemptDrainTerminalFailureParity(t *testing.T) {
 		settlement.Settlement.State = runtimeeffects.StateTerminalFailure
 		settlement.Settlement.Failure = &failure
 		settlement.AgentTurn.Failure = &failure
-		if err := handle.SettleCompletion(ctx, settlement); err != nil {
+		if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 			t.Fatalf("settle drained terminal failure: %v", err)
 		}
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
@@ -503,7 +502,7 @@ func TestProviderAttemptDrainSettlementRollbackParity(t *testing.T) {
 
 				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "")
 				settlement.ProviderHead = nil
-				if err := handle.SettleCompletion(ctx, settlement); err == nil {
+				if _, err := handle.SettleCompletion(ctx, settlement); err == nil {
 					t.Fatalf("%s boundary did not fail", boundary.name)
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)

@@ -198,17 +198,21 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		if dispatch == nil {
 			return nil, executeErr
 		}
-		if settleErr := settleCompletionTurn(ctx, dispatch, targetID, turn, nil, profile, usage, runtimeeffects.StateTerminalFailure, turn.Failure, map[string]any{
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, targetID, turn, nil, profile, usage, runtimeeffects.StateTerminalFailure, turn.Failure, map[string]any{
 			"execution_mode": runtimeeffects.ExecutionModeMock, "module_digest": actor.Mock.Digest,
 		}); settleErr != nil {
 			return nil, errors.Join(executeErr, settleErr)
 		}
 		return nil, executeErr
 	}
-	if err := settleCompletionTurn(ctx, dispatch, targetID, turn, response, profile, usage, runtimeeffects.StateSettled, nil, map[string]any{
+	settled, err := settleCompletionTurn(ctx, dispatch, targetID, turn, response, profile, usage, runtimeeffects.StateSettled, nil, map[string]any{
 		"execution_mode": runtimeeffects.ExecutionModeMock, "module_digest": actor.Mock.Digest,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
+	}
+	if settled.Drained() {
+		return nil, nil
 	}
 	if err := requireCurrentProviderProjection(ctx, session.AgentID); err != nil {
 		return nil, err

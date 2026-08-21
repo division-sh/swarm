@@ -59,6 +59,7 @@ type ProviderDrainFinalization struct {
 
 type CompletionSettlementObservation struct {
 	AttemptID             string
+	Disposition           CompletionSettlementDisposition
 	OriginDelivery        runtimedelivery.Claim
 	OriginDeliverySettled bool
 	Finalization          *ProviderDrainFinalization

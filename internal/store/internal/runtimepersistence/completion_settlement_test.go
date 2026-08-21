@@ -58,8 +58,12 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:success")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "success")
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
-	if err := handle.SettleCompletion(ctx, settlement); err != nil {
+	settled, err := handle.SettleCompletion(ctx, settlement)
+	if err != nil {
 		t.Fatalf("settle completion with provider head: %v", err)
+	}
+	if !settled.Committed || settled.Disposition != runtimeeffects.CompletionSettlementCurrent || settled.Drained() {
+		t.Fatalf("current settlement result=%+v", settled)
 	}
 	requireProviderHead(t, fixture.db, fixture.sqlite, fixture.sessionID, "provider-head-next")
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
@@ -81,9 +85,12 @@ func proveCompletionProviderHeadConflictCommitsUncertainty(t *testing.T, fixture
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:conflict")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "conflict")
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "stale-provider-head", "provider-head-next")
-	err := handle.SettleCompletion(ctx, settlement)
+	settled, err := handle.SettleCompletion(ctx, settlement)
 	if err == nil {
 		t.Fatal("provider-head conflict returned nil")
+	}
+	if !settled.Committed || settled.Disposition != runtimeeffects.CompletionSettlementCurrent {
+		t.Fatalf("provider-head conflict result=%+v, want committed current uncertainty", settled)
 	}
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Detail.Code != "provider_head_cas_conflict" {
@@ -137,7 +144,7 @@ func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completio
 	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
 	settlement.AgentTurn.Failure = &failure.Failure
 	settlement.ProviderHead = nil
-	if err := handle.SettleCompletion(ctx, settlement); err != nil {
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle prelaunch completion: %v", err)
 	}
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
@@ -272,7 +279,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	cleanup.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure.Failure}
 	cleanup.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
 	cleanup.AgentTurn.Failure = &failure.Failure
-	if err := authorized.SettleCompletion(ctx, cleanup); err != nil {
+	if _, err := authorized.SettleCompletion(ctx, cleanup); err != nil {
 		t.Fatalf("settle restored prelaunch completion: %v", err)
 	}
 	secondAuthority := fixture.authority

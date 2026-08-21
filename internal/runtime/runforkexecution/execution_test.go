@@ -2808,7 +2808,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err != nil {
 		t.Fatalf("marshal winning %s capability surface: %v", winner.surface, err)
 	}
-	if err := handle.SettleCompletion(providerCtx, runtimeeffects.CompletionSettlement{
+	if _, err := handle.SettleCompletion(providerCtx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"surface": winner.surface}},
 		Usage: runtimeeffects.CompletionUsage{
 			ResolvedModel: "test-model",

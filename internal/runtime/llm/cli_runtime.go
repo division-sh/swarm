@@ -397,7 +397,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
 		state := claudeCompletionFailureState(err)
-		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
@@ -429,7 +429,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		ctx = managedcapabilities.WithContext(ctx, observed)
 		if validateErr := ValidateCLIProviderCapabilitySurface(observed, resp); validateErr != nil {
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
-			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
+			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
 				return nil, errors.Join(validateErr, settleErr)
 			}
 			return nil, validateErr
@@ -438,7 +438,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if _, ok := managedcapabilities.FromContext(ctx); !ok {
 		if validateErr := validateClaudeInvocationProviderBuiltins(toolProjection, resp); validateErr != nil {
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(validateErr, "claude_cli_capability_validation")), resp)
-			if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
+			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_capability_surface"}); settleErr != nil {
 				return nil, errors.Join(validateErr, settleErr)
 			}
 			return nil, validateErr
@@ -446,7 +446,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	if err := validateCLIResponseToolCallsForTurn(ctx, actor, s.Tools, resp); err != nil {
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_tool_validation")), resp)
-		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_tool_calls", "provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_tool_calls", "provider_session_id": strings.TrimSpace(resp.SessionID)}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		if projectionErr := requireCurrentProviderProjection(ctx, s.AgentID); projectionErr != nil {
@@ -457,7 +457,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if returnedSessionID := strings.TrimSpace(resp.SessionID); returnedSessionID != childSessionID {
 		err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_provider_child_identity_mismatch", "claude-cli-adapter", "validate_response", map[string]any{"expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID})
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, false, latency, agentTurnFailure(err, "claude_cli_identity_validation")), resp)
-		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_response", "expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "validate_response", "expected_provider_session_id": childSessionID, "returned_provider_session_id": returnedSessionID}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		return nil, err
@@ -465,7 +465,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
 		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, agentTurnFailure(err, "claude_cli_projection")), resp)
-		if settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "project_provider_turn", "provider_session_id": childSessionID}); settleErr != nil {
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateOutcomeUncertain, turn.Failure, map[string]any{"stage": "project_provider_turn", "provider_session_id": childSessionID}); settleErr != nil {
 			return nil, errors.Join(err, settleErr)
 		}
 		return nil, err
@@ -475,20 +475,23 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		settlementEvidence["usage_exactness"] = string(runtimeeffects.CompletionUsageUnavailable)
 	}
 	turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, nil), resp)
+	var settled runtimeeffects.CompletionSettlementResult
 	if !resolved.Enabled() {
-		if err := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence); err != nil {
-			return nil, err
-		}
+		settled, err = settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence)
 	} else {
 		if lease == nil {
 			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
 		}
-		if err := settleCompletionTurnWithProviderHead(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence, &runtimeeffects.CompletionProviderHead{
+		settled, err = settleCompletionTurnWithProviderHead(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence, &runtimeeffects.CompletionProviderHead{
 			Identity: resolved.Identity, SessionID: s.ID, LockOwner: lease.LockOwner,
 			ExpectedProviderHead: confirmedHead, NewProviderHead: childSessionID,
-		}); err != nil {
-			return nil, err
-		}
+		})
+	}
+	if err != nil {
+		return nil, err
+	}
+	if settled.Drained() {
+		return nil, nil
 	}
 	s.Messages = append(s.Messages, message, resp.Message)
 	s.ProviderSessionID = childSessionID
