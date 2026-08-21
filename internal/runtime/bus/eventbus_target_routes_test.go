@@ -1022,6 +1022,62 @@ func TestEventBusDeclaredKeyAcquisitionSettlesBeforePersistence(t *testing.T) {
 	}
 }
 
+func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
+	const eventType = "work.keyed"
+	binding := []runtimecontracts.SelectEntityKeyBinding{{
+		Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id"),
+	}}
+	tests := []struct {
+		name    string
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{name: "select", handler: runtimecontracts.SystemNodeEventHandler{SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
+		{name: "select or create", handler: runtimecontracts.SystemNodeEventHandler{SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			exact := events.RouteIdentity{
+				FlowID: "review", FlowInstance: "review/exact", EntityID: eventtest.UUID("targeted-declared-key-exact-" + test.name),
+			}.Normalized()
+			competing := events.RouteIdentity{
+				FlowID: "review", FlowInstance: "review/competing", EntityID: eventtest.UUID("targeted-declared-key-competing-" + test.name),
+			}.Normalized()
+			store := newTargetRouteMemoryStore()
+			store.setTargetOwnerRoutes(exact, competing)
+			store.workflowInstances = []runtimepipeline.WorkflowInstance{
+				{EntityID: exact.EntityID, WorkflowName: "review", InstanceID: "exact", StorageRef: exact.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "exact-owner-key"}},
+				{EntityID: competing.EntityID, WorkflowName: "review", InstanceID: "competing", StorageRef: competing.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "payload-key"}},
+			}
+			node := testFlowNode(t, "review", "target-node")
+			source := semanticview.Wrap(materializedTargetBundleWithHandler("review", "target-node", eventType, test.handler))
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source,
+				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+					return []DeliveryRouteBlueprint{{
+						Recipient: events.MustNodeDeliveryRecipient(node), Target: exact,
+						Handler: runtimepipeline.MustDeliveryTargetHandler(node).ForEvent(eventType),
+					}}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(
+				eventID, eventType, "", "", []byte(`{"account_id":"payload-key"}`), 0, uuid.NewString(), "",
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Now().UTC(),
+			)
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("publish targeted %s: %v", test.name, err)
+			}
+			want := events.MustExistingEntityTarget(exact)
+			if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Target != want {
+				t.Fatalf("targeted %s routes = %#v, want exact owner %#v and never competing owner %#v", test.name, routes, want, competing)
+			}
+		})
+	}
+}
+
 func TestEventBusSelectOrCreateTargetIsImmutableAfterPrepublicationLinearization(t *testing.T) {
 	const eventType = "work.keyed"
 	selector := &runtimecontracts.SelectOrCreateEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{

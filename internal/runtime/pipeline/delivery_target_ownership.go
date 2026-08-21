@@ -235,9 +235,10 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	if deliveryTargetHandlerUsesDeclaredKey(handler, policy.Acquisition) {
-		// Declared-key acquisition owns exact instance selection. A path carried by
-		// route discovery is semantic scope only and must never preselect a row.
+	if deliveryTargetHandlerUsesDeclaredKey(handler, policy.Acquisition) && !req.Event.HasTargetRoute() {
+		// Declared-key acquisition owns selection only for an explicitly untargeted
+		// event. A targeted event already carries admitted exact receiver evidence;
+		// re-resolving its payload key could redirect it to another entity.
 		blueprint = events.RouteIdentity{FlowID: flowID}
 		acquired, err := acquireDeliveryTargetByDeclaredKey(req.Context, req.WorkflowInstances, req.Source, flowID, req.Recipient.ID(), handler, req.Event, policy.Acquisition)
 		if err != nil {

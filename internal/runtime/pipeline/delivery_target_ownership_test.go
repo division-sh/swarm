@@ -425,6 +425,43 @@ func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.
 	}
 }
 
+func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDeclaredKeyAcquisition(t *testing.T) {
+	source := deliveryTargetOwnershipSource()
+	exact := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/exact", EntityID: eventtest.UUID("declared-key-explicit-target"),
+	}.Normalized()
+	competing := WorkflowInstance{
+		EntityID: eventtest.UUID("declared-key-competing-owner"), WorkflowName: "review", InstanceID: "competing",
+		StorageRef: "review/competing", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+	}
+	for _, nodeID := range []string{"key-selector", "key-upserter"} {
+		t.Run(nodeID, func(t *testing.T) {
+			node := pipelineNode(t, "review", nodeID)
+			handler, err := AdmitDeliveryTargetHandler(source, node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evt := eventtest.RunCreatingRootIngress(
+				eventtest.UUID("declared-key-explicit-target-"+nodeID), events.EventType("review/work.keyed"),
+				"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "",
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Time{},
+			)
+			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+				Context: context.Background(), Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
+				Blueprint: exact, Handler: handler.ForEvent("work.keyed"),
+				Candidates:        []DeliveryTargetOwnerCandidate{{Route: exact}},
+				WorkflowInstances: deliveryTargetWorkflowReader{selected: []WorkflowInstance{competing}},
+			})
+			if err != nil {
+				t.Fatalf("classify targeted %s: %v", nodeID, err)
+			}
+			if !owner.ExistingEntity() || owner.Route() != exact {
+				t.Fatalf("targeted owner = %s %#v, want exact existing owner %#v", owner.Code(), owner.Route(), exact)
+			}
+		})
+	}
+}
+
 func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppearanceAndRejectsConflict(t *testing.T) {
 	source := deliveryTargetOwnershipSource()
 	evt := eventtest.RunCreatingRootIngress(
