@@ -144,6 +144,26 @@ func TestBundleHashV1RejectsMockModuleMutationAfterCompilation(t *testing.T) {
 	}
 }
 
+func TestBundleHashV1RejectsMockModuleParentSymlinkAfterCompilation(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load mocked agent bundle: %v", err)
+	}
+	externalMocks := filepath.Join(t.TempDir(), "mocks")
+	writeBundleHashText(t, filepath.Join(externalMocks, "assistant.py"), mockAssistantSource)
+	if err := os.RemoveAll(filepath.Join(root, "mocks")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(externalMocks, filepath.Join(root, "mocks")); err != nil {
+		t.Skipf("symlink creation unsupported: %v", err)
+	}
+	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "symlinks are not allowed") {
+		t.Fatalf("BundleHash error = %v, want intermediate symlink rejection", err)
+	}
+}
+
 func TestBundleHashV1RejectsCompiledMockDigestContradiction(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writeMockedAgentContractsDir(t)
@@ -646,6 +666,35 @@ func TestBundleHashV1RejectsSymlinksWhenSupported(t *testing.T) {
 	}
 	if _, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("BundleHash symlink error = %v, want symlink rejection", err)
+	}
+}
+
+func TestBundleHashV1RejectsExplicitInputThroughIntermediateSymlink(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: explicit-symlink\nversion: \"1.0.0\"\nflows: []\n")
+	external := t.TempDir()
+	writeBundleHashText(t, filepath.Join(external, "events.yaml"), "events: {}\n")
+	link := filepath.Join(root, "linked")
+	if err := os.Symlink(external, link); err != nil {
+		t.Skipf("symlink creation unsupported: %v", err)
+	}
+	bundle := bundleHashTestBundle(root, platform)
+	bundle.Paths.ProjectEventsFile = filepath.Join(link, "events.yaml")
+	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "symlinks are not allowed") {
+		t.Fatalf("BundleHash error = %v, want contracts-root intermediate symlink rejection", err)
+	}
+}
+
+func TestBundleHashV1RejectsRecursiveRootThroughIntermediateSymlink(t *testing.T) {
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: recursive-symlink\nversion: \"1.0.0\"\nflows:\n  - id: alpha\n    flow: alpha\n")
+	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "schema.yaml"), "name: alpha\n")
+	externalData := filepath.Join(t.TempDir(), "data")
+	writeBundleHashBytes(t, filepath.Join(externalData, "payload.bin"), []byte("outside"))
+	dataLink := filepath.Join(root, "flows", "alpha", "data")
+	if err := os.Symlink(externalData, dataLink); err != nil {
+		t.Skipf("symlink creation unsupported: %v", err)
+	}
+	if _, err := BundleHash(bundleHashTestBundle(root, platform)); err == nil || !strings.Contains(err.Error(), "symlinks are not allowed") {
+		t.Fatalf("BundleHash error = %v, want recursive-root intermediate symlink rejection", err)
 	}
 }
 

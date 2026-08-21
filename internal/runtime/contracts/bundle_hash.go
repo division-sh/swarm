@@ -222,7 +222,7 @@ func (b *bundleHashEntryBuilder) addAgentIntentFiles(bundle *WorkflowContractBun
 }
 
 func (b *bundleHashEntryBuilder) addExactIntentFile(path string, expected []byte) error {
-	abs, err := canonicalRegularFile(path, "agent intent input")
+	abs, err := canonicalContractsRootInput(b.contractsRoot, path, "agent intent input", false)
 	if err != nil {
 		return err
 	}
@@ -334,7 +334,7 @@ func (b *bundleHashEntryBuilder) addAgentMockModuleFiles(bundle *WorkflowContrac
 }
 
 func (b *bundleHashEntryBuilder) addExactAgentMockModuleFile(path string, expected []byte) error {
-	abs, err := canonicalRegularFile(path, "agent mock module input")
+	abs, err := canonicalContractsRootInput(b.contractsRoot, path, "agent mock module input", false)
 	if err != nil {
 		return err
 	}
@@ -389,7 +389,7 @@ func (b *bundleHashEntryBuilder) addRequiredPlatformSpec(path string) error {
 }
 
 func (b *bundleHashEntryBuilder) addRequiredBundleYAML(path string) error {
-	abs, err := canonicalRegularFile(path, "root package manifest")
+	abs, err := canonicalContractsRootInput(b.contractsRoot, path, "root package manifest", false)
 	if err != nil {
 		return err
 	}
@@ -405,7 +405,7 @@ func (b *bundleHashEntryBuilder) addOptionalBundleFile(path string, policy bundl
 	if path == "" {
 		return nil
 	}
-	abs, err := canonicalRegularFile(path, "bundle input")
+	abs, err := canonicalContractsRootInput(b.contractsRoot, path, "bundle input", false)
 	if err != nil {
 		return err
 	}
@@ -421,7 +421,7 @@ func (b *bundleHashEntryBuilder) addRecursiveDir(dir string, policy bundleHashCo
 	if dir == "" {
 		return nil
 	}
-	absDir, err := canonicalAbsDir(dir, "bundle recursive input")
+	absDir, err := canonicalContractsRootInput(b.contractsRoot, dir, "bundle recursive input", true)
 	if err != nil {
 		return err
 	}
@@ -527,6 +527,36 @@ func canonicalAbsDir(path, label string) (string, error) {
 		return "", fmt.Errorf("%s %s is not a directory", label, abs)
 	}
 	return filepath.Clean(abs), nil
+}
+
+func canonicalContractsRootInput(root, path, label string, wantDir bool) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("%s is required", label)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("%s path %q: %w", label, path, err)
+	}
+	abs = filepath.Clean(abs)
+	rel, err := pathRelativeToRoot(root, abs)
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", label, abs, err)
+	}
+	info, err := lstatNoSymlinkPath(root, rel, abs)
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", label, abs, err)
+	}
+	if wantDir {
+		if !info.IsDir() {
+			return "", fmt.Errorf("%s %s is not a directory", label, abs)
+		}
+		return abs, nil
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s %s is not a regular file", label, abs)
+	}
+	return abs, nil
 }
 
 func bundleHashBundleLabel(root, path string) (string, error) {

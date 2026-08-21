@@ -637,7 +637,7 @@ func bundleBuildRecursiveInputDirs(bundle *WorkflowContractBundle) ([]string, er
 		if dir == "" {
 			continue
 		}
-		abs, err := canonicalAbsDir(dir, "bundle recursive input")
+		abs, err := canonicalContractsRootInput(bundle.Paths.ContractsRoot, dir, "bundle recursive input", true)
 		if err != nil {
 			return nil, err
 		}
