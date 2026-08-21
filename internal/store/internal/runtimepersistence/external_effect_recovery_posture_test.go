@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"database/sql"
 	"strconv"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -122,6 +125,73 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 			if after != before {
 				t.Fatalf("rejected provider recovery mutated selected store:\nbefore=%#v\nafter=%#v", before, after)
 			}
+		})
+	}
+}
+
+func TestExternalEffectRecoveryPostureAdmissionTerminalRunProviderSQLiteAndPostgres(t *testing.T) {
+	type runQuiescenceStore interface {
+		ApplyActiveRunQuiescence(context.Context, runtimerunquiescence.Request) (runtimerunquiescence.Result, error)
+	}
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) completionSettlementFixture
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) completionSettlementFixture {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				return newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true)
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) completionSettlementFixture {
+				_, db, _ := testutil.StartPostgres(t)
+				return newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false)
+			},
+		},
+	} {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := providerDrainContext(t, fixture, "posture-terminal-run")
+			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "posture-terminal-run")
+			transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleRunning)
+			selected, ok := fixture.store.(runQuiescenceStore)
+			if !ok {
+				t.Fatalf("completion store %T does not expose run quiescence", fixture.store)
+			}
+			quiesced, err := selected.ApplyActiveRunQuiescence(testAuthorActivityContext(), runtimerunquiescence.Request{
+				OperationName: "provider_attempt_terminal_run_posture", RequestedAt: time.Now().UTC(),
+				RunIDs: []string{fixture.authority.Target.RunID}, ReasonCode: runtimerunquiescence.ServeAbandonReasonCode,
+				ControlledBy: "external-effect-recovery-posture-test", DeliveryNote: "terminal provider posture admission proof",
+			})
+			if err != nil || len(quiesced.Runs) != 1 || !quiesced.Runs[0].Changed {
+				t.Fatalf("terminalize provider run: result=%+v err=%v", quiesced, err)
+			}
+
+			attempts := []recoveryPostureAttempt{{
+				AttemptID: handle.Attempt().AttemptID,
+				RunID:     fixture.authority.Target.RunID,
+				Initial:   runtimeeffects.StateResponseObserved,
+				Expected:  runtimeeffects.StateResponseObserved,
+			}}
+			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)
+			_, err = fixture.store.ReconcileExternalEffectAttempts(
+				testAuthorActivityContext(),
+				runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly),
+			)
+			if err == nil || !strings.Contains(err.Error(), "runtime.execution_posture=mock_only") {
+				t.Fatalf("recover live terminal-run provider attempt under mock_only = %v, want rejection", err)
+			}
+			after := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)
+			if after != before {
+				t.Fatalf("rejected terminal-run provider recovery mutated selected store:\nbefore=%#v\nafter=%#v", before, after)
+			}
+			requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
+			requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, transition.Generation)
+			requireTerminalizedOriginDelivery(t, fixture, runtimerunquiescence.ServeAbandonReasonCode)
 		})
 	}
 }
