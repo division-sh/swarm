@@ -512,7 +512,7 @@ func acquireDeliveryTargetByDeclaredKey(
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_invalid: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
-	candidates, err := reader.SelectActiveWorkflowInstances(
+	stateRecords, err := reader.SelectActiveWorkflowEntityStates(
 		ctx,
 		runtimeflowidentity.ScopeKey(source, flowID),
 		selectEntityFieldSelectors(expected),
@@ -521,8 +521,12 @@ func acquireDeliveryTargetByDeclaredKey(
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
-	matches := make([]WorkflowInstance, 0, len(candidates))
-	for _, candidate := range candidates {
+	matches := make([]WorkflowInstance, 0, len(stateRecords))
+	for _, record := range stateRecords {
+		candidate, err := decodeDeliveryTargetWorkflowEntityState(source, flowID, record)
+		if err != nil {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
+		}
 		if !workflowInstanceOwnedByFlow(source, candidate, flowID) || deliveryTargetWorkflowInstanceTerminal(source, flowID, candidate) || !selectEntityCandidateMatches(candidate, expected) {
 			continue
 		}
@@ -552,9 +556,24 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 	}
 	identity := deriveFlowInstanceIdentity(source, flowID, instanceID)
 	route := events.RouteIdentity{FlowID: strings.TrimSpace(flowID), FlowInstance: identity.InstancePath, EntityID: identity.EntityID}.Normalized()
-	if existing, ok, err := reader.LoadWorkflowInstance(ctx, identity.Route()); err != nil {
+	existing, ok, err := reader.LoadWorkflowInstance(ctx, identity.Route())
+	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
-	} else if ok {
+	}
+	if !ok {
+		record, stateExists, stateErr := reader.LoadWorkflowEntityState(ctx, identity.Route(), runtimeidentity.NormalizeEntityID(identity.EntityID))
+		if stateErr != nil {
+			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), stateErr)
+		}
+		if stateExists {
+			existing, err = decodeDeliveryTargetWorkflowEntityState(source, flowID, record)
+			if err != nil {
+				return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
+			}
+			ok = true
+		}
+	}
+	if ok {
 		if !workflowInstanceOwnedByFlow(source, existing, flowID) || deliveryTargetWorkflowInstanceTerminal(source, flowID, existing) || !selectEntityCandidateMatches(existing, expected) {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_conflict: node %s flow %s deterministic entity %s exists but does not match declared active key", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), route.EntityID)
 		}
@@ -568,6 +587,18 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 		return events.NewExistingEntityTarget(existingRoute)
 	}
 	return events.NewMaterializingEntityTarget(route)
+}
+
+func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {
+	route, err := workflowInstanceRouteForExecution(source, flowID, record.FlowInstance)
+	if err != nil {
+		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state route: %w", err)
+	}
+	workflowVersion := ""
+	if source != nil {
+		workflowVersion = source.WorkflowVersion()
+	}
+	return DecodeWorkflowEntityStatePersistenceRecord(record, route, strings.TrimSpace(flowID), workflowVersion)
 }
 
 func deliveryTargetRouteForWorkflowInstance(source semanticview.Source, flowID string, instance WorkflowInstance) (events.RouteIdentity, error) {

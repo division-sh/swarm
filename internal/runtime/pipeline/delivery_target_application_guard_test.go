@@ -95,6 +95,25 @@ func TestDeliveryTargetOwnershipRetiredFallbacksStayAbsent(t *testing.T) {
 	}
 }
 
+func TestDeclaredKeyAcquisitionConsumesEntityStateAuthority(t *testing.T) {
+	acquisition := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "acquireDeliveryTargetByDeclaredKey")
+	for _, required := range []string{"SelectActiveWorkflowEntityStates", "decodeDeliveryTargetWorkflowEntityState"} {
+		if !strings.Contains(acquisition, required) {
+			t.Errorf("declared-key acquisition stopped consuming state authority %q", required)
+		}
+	}
+	if strings.Contains(acquisition, "SelectActiveWorkflowInstances") {
+		t.Error("declared-key acquisition reintroduced lifecycle-required selection")
+	}
+
+	selectOrCreate := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "acquireSelectOrCreateMaterializingTarget")
+	for _, required := range []string{"LoadWorkflowInstance", "LoadWorkflowEntityState", "decodeDeliveryTargetWorkflowEntityState"} {
+		if !strings.Contains(selectOrCreate, required) {
+			t.Errorf("select-or-create exact-target validation stopped consuming %q", required)
+		}
+	}
+}
+
 func TestStampedTargetReaderCallsitesRemainFinite(t *testing.T) {
 	allowed := map[string]struct{}{
 		"engine_adapter.go":   {},

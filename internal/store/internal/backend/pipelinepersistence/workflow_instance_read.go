@@ -69,6 +69,42 @@ func (s *PipelinePostgresOwner) LoadWorkflowEntityState(ctx context.Context, rou
 	return record, true, nil
 }
 
+func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres workflow entity state reader is required")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
+	if scopeKey == "" || len(selectors) == 0 {
+		return nil, nil
+	}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	rows, err := s.backend.QueryContext(ctx, postgresWorkflowEntityStateSelect+`
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = $1::uuid
+		  AND EXISTS (
+			SELECT 1 FROM runs run
+			WHERE run.run_id = es.run_id AND run.status IN ($4, $5)
+		  )
+		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
+		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+		ORDER BY es.created_at ASC, es.entity_id ASC
+	`, runID, scopeKey, scopeKey+"/%", string(activeStates[0]), string(activeStates[1]))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records, err := scanPostgresWorkflowEntityStates(rows)
+	if err != nil {
+		return nil, err
+	}
+	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, selectors, excludedStates)
+}
+
 func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres workflow instance reader is required")
@@ -249,6 +285,21 @@ func scanPostgresWorkflowEntityState(row workflowInstanceScanner) (runtimepipeli
 	return record, nil
 }
 
+func scanPostgresWorkflowEntityStates(rows *sql.Rows) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	records := make([]runtimepipeline.WorkflowEntityStatePersistenceRecord, 0, 32)
+	for rows.Next() {
+		record, err := scanPostgresWorkflowEntityState(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
 func scanPostgresWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInstance, error) {
 	items := make([]runtimepipeline.WorkflowInstance, 0, 32)
 	for rows.Next() {
@@ -319,6 +370,42 @@ func (s *PipelineSQLiteOwner) LoadWorkflowEntityState(ctx context.Context, route
 		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
 	}
 	return record, true, nil
+}
+
+func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite workflow entity state reader is required")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
+	if scopeKey == "" || len(selectors) == 0 {
+		return nil, nil
+	}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	rows, err := s.backend.QueryContext(ctx, sqliteWorkflowEntityStateSelect+`
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = ?
+		  AND EXISTS (
+			SELECT 1 FROM runs run
+			WHERE run.run_id = es.run_id AND run.status IN (?, ?)
+		  )
+		  AND (es.flow_instance = ? OR es.flow_instance LIKE ?)
+		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+		ORDER BY es.created_at ASC, es.entity_id ASC
+	`, runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey+"/%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records, err := scanSQLiteWorkflowEntityStates(rows)
+	if err != nil {
+		return nil, err
+	}
+	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, selectors, excludedStates)
 }
 
 func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {
@@ -485,6 +572,21 @@ func scanSQLiteWorkflowEntityState(row workflowInstanceScanner) (runtimepipeline
 		*item.target = value
 	}
 	return record, nil
+}
+
+func scanSQLiteWorkflowEntityStates(rows *sql.Rows) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	records := make([]runtimepipeline.WorkflowEntityStatePersistenceRecord, 0, 32)
+	for rows.Next() {
+		record, err := scanSQLiteWorkflowEntityState(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
 func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInstance, error) {

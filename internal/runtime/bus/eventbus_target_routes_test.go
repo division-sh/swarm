@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -52,6 +53,7 @@ type targetRouteMemoryStore struct {
 	flowRoutes        []FlowInstanceRouteRecord
 	targetOwners      []ActiveTargetDescriptor
 	workflowInstances []runtimepipeline.WorkflowInstance
+	workflowStates    []runtimepipeline.WorkflowEntityStatePersistenceRecord
 }
 
 func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
@@ -94,6 +96,64 @@ func (s *targetRouteMemoryStore) ListWorkflowInstances(context.Context) ([]runti
 	return append([]runtimepipeline.WorkflowInstance(nil), s.workflowInstances...), nil
 }
 
+func (s *targetRouteMemoryStore) LoadWorkflowEntityState(_ context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, record := range s.workflowStates {
+		if strings.Trim(strings.TrimSpace(record.FlowInstance), "/") == route.InstancePath && runtimeidentity.NormalizeEntityID(record.EntityID) == entityID {
+			return record, true, nil
+		}
+	}
+	for _, instance := range s.workflowInstances {
+		if strings.Trim(strings.TrimSpace(instance.StorageRef), "/") == route.InstancePath && runtimeidentity.NormalizeEntityID(instance.EntityID) == entityID {
+			return targetRouteWorkflowStateRecord(instance), true, nil
+		}
+	}
+	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
+}
+
+func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records := append([]runtimepipeline.WorkflowEntityStatePersistenceRecord(nil), s.workflowStates...)
+	for _, instance := range s.workflowInstances {
+		if instance.Status == "terminated" || instance.Status == "inactive" || !instance.TerminatedAt.IsZero() {
+			continue
+		}
+		records = append(records, targetRouteWorkflowStateRecord(instance))
+	}
+	excluded := map[string]struct{}{}
+	for _, state := range excludedStates {
+		excluded[strings.ToLower(strings.TrimSpace(state))] = struct{}{}
+	}
+	out := make([]runtimepipeline.WorkflowEntityStatePersistenceRecord, 0, len(records))
+	for _, record := range records {
+		instancePath := strings.Trim(strings.TrimSpace(record.FlowInstance), "/")
+		if instancePath != scopeKey && !strings.HasPrefix(instancePath, strings.Trim(scopeKey, "/")+"/") {
+			continue
+		}
+		if _, skip := excluded[strings.ToLower(strings.TrimSpace(record.CurrentState))]; skip {
+			continue
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(record.Fields, &fields); err != nil {
+			return nil, err
+		}
+		matched := true
+		for _, selector := range selectors {
+			value, ok := runtimepipeline.WorkflowMetadataValue(fields, selector.Field)
+			if !ok || !runtimepipeline.WorkflowJSONValuesEqual(value, selector.Value) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			out = append(out, record)
+		}
+	}
+	return out, nil
+}
+
 func (s *targetRouteMemoryStore) SelectActiveWorkflowInstances(_ context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -125,6 +185,20 @@ func (s *targetRouteMemoryStore) SelectActiveWorkflowInstances(_ context.Context
 		}
 	}
 	return out, nil
+}
+
+func targetRouteWorkflowStateRecord(instance runtimepipeline.WorkflowInstance) runtimepipeline.WorkflowEntityStatePersistenceRecord {
+	marshal := func(value any) json.RawMessage {
+		raw, _ := json.Marshal(value)
+		return raw
+	}
+	return runtimepipeline.WorkflowEntityStatePersistenceRecord{
+		EntityID: instance.EntityID, FlowInstance: instance.StorageRef, EntityType: instance.EntityType,
+		Slug: instance.Slug, Name: instance.Name, CurrentState: instance.CurrentState, Revision: instance.Revision,
+		EnteredStageAt: instance.EnteredStageAt, Gates: marshal(instance.Gates), Fields: marshal(instance.Fields),
+		Bookkeeping: marshal(instance.Bookkeeping), Accumulator: marshal(instance.StateBuckets),
+		CreatedAt: instance.CreatedAt, UpdatedAt: instance.UpdatedAt,
+	}
 }
 
 func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTargetDescriptor {

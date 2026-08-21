@@ -1340,6 +1340,9 @@ contract_formats:
             produces the exact receiving route instead of consuming a source/path-derived preselection. Zero select matches and
             multiple matches fail closed. Zero select_or_create matches stamp the deterministic future route; if that exact row
             appears before execution it is accepted only when its identity and declared key agree, otherwise execution fails.
+            Declared-key cardinality reads the run-scoped entity_state registry directly. A matching active state row remains
+            selectable before its flow_instances lifecycle companion exists; when a companion exists, terminated or inactive
+            lifecycle excludes that row. Joining through lifecycle as a prerequisite for selected ownership is forbidden.
             Once committed, later matching rows cannot redirect the delivery. Pipeline computes one immutable
             DeliveryTargetApplication from the stamped target and passes it through state preload, both production engines,
             mutation ownership, and producer-source projection. Those consumers validate availability and agreement but do not
