@@ -243,23 +243,23 @@ type AuthorizeRequest struct {
 	Transport          string
 	RequestFingerprint string
 	CapabilitySurface  *managedcapabilities.Surface
-	OriginDelivery     runtimedelivery.Claim
+	Origin             CompletionOrigin
 	Lineage            map[string]string
 	Now                time.Time
 }
 
 type Attempt struct {
-	OperationID    string
-	AttemptID      string
-	Token          LifecycleToken
-	Authority      Authority
-	Kind           Kind
-	Class          EffectClass
-	Adapter        string
-	Transport      string
-	Ordinal        int
-	AuthorizedAt   time.Time
-	OriginDelivery runtimedelivery.Claim
+	OperationID  string
+	AttemptID    string
+	Token        LifecycleToken
+	Authority    Authority
+	Kind         Kind
+	Class        EffectClass
+	Adapter      string
+	Transport    string
+	Ordinal      int
+	AuthorizedAt time.Time
+	Origin       CompletionOrigin
 }
 
 type Settlement struct {
@@ -588,7 +588,7 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 	}
 	ctx = WithAuthority(ctx, authority)
 	var capabilitySurface *managedcapabilities.Surface
-	var originDelivery runtimedelivery.Claim
+	var origin CompletionOrigin
 	if authority.Target.Kind == UsageTargetAgentTurn {
 		surface, err := managedEffectCapabilitySurface(ctx, authority)
 		if err != nil {
@@ -596,15 +596,23 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 		}
 		capabilitySurface = &surface
 		if authority.Kind == AuthorityNormalAgent {
-			claim, ok := runtimedelivery.ClaimFromContext(ctx)
-			if !ok {
-				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
+			claim, hasDelivery := runtimedelivery.ClaimFromContext(ctx)
+			directive, hasDirective := directiveCompletionOriginFromContext(ctx)
+			if hasDelivery == hasDirective {
+				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
 			}
-			if claim.SubscriberClass() != runtimedelivery.SubscriberAgent ||
-				claim.SubscriberID() != authority.Normal.AgentID || claim.RunID() != authority.Target.RunID {
-				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "delivery_id": claim.DeliveryID()})
+			if hasDelivery {
+				if claim.SubscriberClass() != runtimedelivery.SubscriberAgent ||
+					claim.SubscriberID() != authority.Normal.AgentID || claim.RunID() != authority.Target.RunID {
+					return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter), "delivery_id": claim.DeliveryID()})
+				}
+				origin, err = DeliveryCompletionOrigin(claim)
+			} else {
+				origin, err = DirectiveCompletionOrigin(directive)
 			}
-			originDelivery = claim
+			if err != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)}, err)
+			}
 		}
 	}
 	operationID, err := canonicalOperationID(ctx, authority, strings.TrimSpace(adapter), lineage)
@@ -613,7 +621,7 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
-		CapabilitySurface: capabilitySurface, OriginDelivery: originDelivery, Lineage: lineage,
+		CapabilitySurface: capabilitySurface, Origin: origin, Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
@@ -806,8 +814,8 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	}
 	if result.Committed {
 		recordCompletionSettlementObservation(ctx, CompletionSettlementObservation{
-			AttemptID: result.AttemptID, Disposition: result.Disposition, OriginDelivery: result.OriginDelivery,
-			OriginDeliverySettled: result.OriginDeliverySettled, Finalization: result.Finalization,
+			AttemptID: result.AttemptID, Disposition: result.Disposition, Origin: result.Origin,
+			OriginSettled: result.OriginSettled, Finalization: result.Finalization,
 		})
 	}
 	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {
@@ -894,14 +902,14 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			}
 			req.CapabilitySurface = &validated
 			if authority.Kind == AuthorityNormalAgent {
-				if err := req.OriginDelivery.Validate(); err != nil {
-					return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
+				if err := req.Origin.Validate(); err != nil {
+					return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 				}
-				if req.OriginDelivery.SubscriberClass() != runtimedelivery.SubscriberAgent ||
-					req.OriginDelivery.SubscriberID() != authority.Normal.AgentID || req.OriginDelivery.RunID() != authority.Target.RunID {
-					return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "delivery_id": req.OriginDelivery.DeliveryID()})
+				if req.Origin.Kind == CompletionOriginDelivery && (req.Origin.Delivery.SubscriberClass() != runtimedelivery.SubscriberAgent ||
+					req.Origin.Delivery.SubscriberID() != authority.Normal.AgentID || req.Origin.Delivery.RunID() != authority.Target.RunID) {
+					return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "delivery_id": req.Origin.Delivery.DeliveryID()})
 				}
-			} else if req.OriginDelivery.Validate() == nil {
+			} else if req.Origin.Validate() == nil {
 				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "authority_kind": authority.Kind})
 			}
 		} else if req.CapabilitySurface != nil {

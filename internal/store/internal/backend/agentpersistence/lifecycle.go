@@ -304,6 +304,9 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 	if result, ok, err := loadPostgresLifecycleOperationResult(ctx, tx, req); err != nil || ok {
 		return result, err
 	}
+	if err := rejectPostgresPendingDrainTransition(ctx, tx, req, previous, exists); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if err := validateLifecycleExpectation(req, previous, exists); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -335,6 +338,9 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, sto
 	if result, ok, err := loadSQLiteLifecycleOperationResult(ctx, tx, req); err != nil || ok {
 		return result, err
 	}
+	if err := rejectSQLitePendingDrainTransition(ctx, tx, req, previous, exists); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if err := validateLifecycleExpectation(req, previous, exists); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -353,6 +359,38 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, sto
 		err = story.Record(ctx, agentLifecycleAuthorActivityDraft(req, result))
 	}
 	return result, err
+}
+
+func rejectPostgresPendingDrainTransition(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, previous lifecycleCell, exists bool) error {
+	if !exists || previous.Phase != runtimemanager.AgentLifecycleDraining || req.TargetPhase == runtimemanager.AgentLifecycleDraining {
+		return nil
+	}
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return err
+	}
+	var pending bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runtime_provider_attempt_drains WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3 AND agent_route_presence=$4 AND flow_scope_key=$5 AND flow_instance_id=$6 AND flow_instance=$7 AND successor_runtime_epoch=$8 AND successor_generation=$9 AND state='pending')`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, previous.Epoch, previous.Generation).Scan(&pending)
+	if err != nil || !pending {
+		return err
+	}
+	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_transition_blocked", "agent-lifecycle-store", req.OperationKind, map[string]any{"agent_id": req.AgentID, "runtime_epoch": previous.Epoch, "generation": previous.Generation, "target_phase": req.TargetPhase})
+}
+
+func rejectSQLitePendingDrainTransition(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, previous lifecycleCell, exists bool) error {
+	if !exists || previous.Phase != runtimemanager.AgentLifecycleDraining || req.TargetPhase == runtimemanager.AgentLifecycleDraining {
+		return nil
+	}
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return err
+	}
+	var pending int
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runtime_provider_attempt_drains WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=? AND successor_runtime_epoch=? AND successor_generation=? AND state='pending')`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, previous.Epoch, previous.Generation).Scan(&pending)
+	if err != nil || pending == 0 {
+		return err
+	}
+	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_transition_blocked", "agent-lifecycle-store", req.OperationKind, map[string]any{"agent_id": req.AgentID, "runtime_epoch": previous.Epoch, "generation": previous.Generation, "target_phase": req.TargetPhase})
 }
 
 func (s *AgentPostgresOwner) runPostgresLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {

@@ -16,6 +16,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -381,6 +382,33 @@ func (s *directiveEventStore) finalizeFailureCallCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.finalizeFailureCalls
+}
+
+func TestConsumeProviderSettledDirectiveUsesExactDurableTerminalState(t *testing.T) {
+	operationID := "00000000-0000-0000-0000-000000000801"
+	ownerID := "00000000-0000-0000-0000-000000000802"
+	failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+	store := &directiveEventStore{operations: map[string]runtimeagentcontrol.DirectiveOperation{
+		operationID: {
+			OperationID: operationID, ExecutionOwnerID: ownerID,
+			State: runtimeagentcontrol.DirectiveOperationIndeterminate, Failure: &failure,
+		},
+	}}
+	origin := runtimeagentcontrol.DirectiveExecutionOrigin{OperationID: operationID, ExecutionOwnerID: ownerID}
+	completionOrigin, err := runtimeeffects.DirectiveCompletionOrigin(origin)
+	if err != nil {
+		t.Fatalf("directive completion origin: %v", err)
+	}
+	terminal, err := consumeProviderSettledDirective(context.Background(), store, store.operations[operationID], origin, runtimeeffects.CompletionSettlementObservation{
+		AttemptID: "00000000-0000-0000-0000-000000000803", Disposition: runtimeeffects.CompletionSettlementDrained,
+		Origin: completionOrigin, OriginSettled: true,
+	})
+	if !terminal || !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+		t.Fatalf("consume provider-settled directive terminal=%v err=%v", terminal, err)
+	}
+	if got := store.finalizeFailureCallCount(); got != 0 {
+		t.Fatalf("provider-settled directive secondary failure calls=%d, want 0", got)
+	}
 }
 
 var _ runtimeagentcontrol.DirectiveOperationStore = (*directiveEventStore)(nil)

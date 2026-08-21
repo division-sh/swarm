@@ -877,27 +877,67 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 		}
 		return providerOriginRecoveryExpiredExact, nil
 	}
-	if !record.Status.Terminal() || record.ClaimVersion != claim.Version() {
+	if !record.Status.Terminal() {
 		return 0, fmt.Errorf("%w: provider origin recovery claim is stale", ErrConflict)
 	}
-	query := `
-		SELECT COUNT(*)
-		FROM event_delivery_attempts a
-		JOIN event_delivery_outcomes o
-		  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
-		WHERE a.delivery_id=$1::uuid AND a.claim_version=$2 AND a.claim_token=$3::uuid
-		  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
-	if a.dialect == DialectSQLite {
+	var query string
+	args := []any{claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
+	switch {
+	case record.ClaimVersion == claim.Version():
 		query = `
 			SELECT COUNT(*)
 			FROM event_delivery_attempts a
 			JOIN event_delivery_outcomes o
 			  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
-			WHERE a.delivery_id=? AND a.claim_version=? AND a.claim_token=?
+			WHERE a.delivery_id=$1::uuid AND a.claim_version=$2 AND a.claim_token=$3::uuid
 			  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
+		if a.dialect == DialectSQLite {
+			query = `
+				SELECT COUNT(*)
+				FROM event_delivery_attempts a
+				JOIN event_delivery_outcomes o
+				  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
+				WHERE a.delivery_id=? AND a.claim_version=? AND a.claim_token=?
+				  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
+		}
+	case record.Status == StatusDeadLetter && record.ClaimVersion == claim.Version()+1:
+		// Parent terminalization closes the interrupted attempt and records one
+		// authoritative synthetic terminal claim/outcome at the next version.
+		query = `
+			SELECT COUNT(*)
+			FROM event_delivery_attempts interrupted
+			JOIN event_delivery_attempts terminal
+			  ON terminal.delivery_id=interrupted.delivery_id AND terminal.claim_version=$4
+			JOIN event_delivery_outcomes o
+			  ON o.delivery_id=terminal.delivery_id AND o.claim_version=terminal.claim_version
+			WHERE interrupted.delivery_id=$1::uuid
+			  AND interrupted.claim_version=$2 AND interrupted.claim_token=$3::uuid
+			  AND interrupted.open_marker=FALSE AND interrupted.completed_at IS NOT NULL
+			  AND interrupted.outcome='terminalized'
+			  AND terminal.open_marker=FALSE AND terminal.completed_at IS NOT NULL
+			  AND terminal.outcome='terminalized' AND o.outcome='terminalized'`
+		args = append(args, record.ClaimVersion)
+		if a.dialect == DialectSQLite {
+			query = `
+				SELECT COUNT(*)
+				FROM event_delivery_attempts interrupted
+				JOIN event_delivery_attempts terminal
+				  ON terminal.delivery_id=interrupted.delivery_id AND terminal.claim_version=?
+				JOIN event_delivery_outcomes o
+				  ON o.delivery_id=terminal.delivery_id AND o.claim_version=terminal.claim_version
+				WHERE interrupted.delivery_id=?
+				  AND interrupted.claim_version=? AND interrupted.claim_token=?
+				  AND interrupted.open_marker=FALSE AND interrupted.completed_at IS NOT NULL
+				  AND interrupted.outcome='terminalized'
+				  AND terminal.open_marker=FALSE AND terminal.completed_at IS NOT NULL
+				  AND terminal.outcome='terminalized' AND o.outcome='terminalized'`
+			args = []any{record.ClaimVersion, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
+		}
+	default:
+		return 0, fmt.Errorf("%w: provider origin recovery claim is stale", ErrConflict)
 	}
 	var exactSettlements int
-	if err := tx.QueryRowContext(ctx, query, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()).Scan(&exactSettlements); err != nil {
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&exactSettlements); err != nil {
 		return 0, fmt.Errorf("load provider origin recovery settlement: %w", err)
 	}
 	if exactSettlements != 1 {

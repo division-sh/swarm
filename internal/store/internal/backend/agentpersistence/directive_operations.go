@@ -677,7 +677,7 @@ func (s *AgentSQLiteOwner) transitionSQLiteDirectiveOperation(ctx context.Contex
 	return out, err
 }
 
-func recordDirectiveAuthorActivity(ctx context.Context, story *privateauthoractivity.Mutation, op runtimeagentcontrol.DirectiveOperation, occurredAt time.Time, failure *runtimefailures.Envelope) error {
+func recordDirectiveAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, op runtimeagentcontrol.DirectiveOperation, occurredAt time.Time, failure *runtimefailures.Envelope) error {
 	if story == nil {
 		return fmt.Errorf("directive author activity mutation is required")
 	}

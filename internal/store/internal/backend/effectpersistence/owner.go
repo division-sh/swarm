@@ -8,8 +8,11 @@ import (
 	"strings"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -38,12 +41,19 @@ type providerDrainDeliveryOwner interface {
 	SettleProviderOriginRecoveryFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedelivery.Claim, runtimedelivery.Settlement) error
 }
 
+type providerDrainDirectiveOwner interface {
+	ValidateProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) error
+	RenewProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
+	SettleProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
+}
+
 type EffectPostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent func() error
 	lifecycle      completionCandidateOwner
 	llm            *storellm.LLMPostgresOwner
 	delivery       providerDrainDeliveryOwner
+	directives     providerDrainDirectiveOwner
 }
 
 type EffectSQLiteOwner struct {
@@ -52,6 +62,23 @@ type EffectSQLiteOwner struct {
 	lifecycle      completionCandidateOwner
 	llm            *storellm.LLMSQLiteOwner
 	delivery       providerDrainDeliveryOwner
+	directives     providerDrainDirectiveOwner
+}
+
+func (s *EffectPostgresOwner) BindProviderDrainDirectives(owner providerDrainDirectiveOwner) error {
+	if s == nil || owner == nil || s.directives != nil {
+		return errors.New("provider-drain PostgreSQL directive owner must be bound exactly once")
+	}
+	s.directives = owner
+	return nil
+}
+
+func (s *EffectSQLiteOwner) BindProviderDrainDirectives(owner providerDrainDirectiveOwner) error {
+	if s == nil || owner == nil || s.directives != nil {
+		return errors.New("provider-drain SQLite directive owner must be bound exactly once")
+	}
+	s.directives = owner
+	return nil
 }
 
 func (s *EffectPostgresOwner) BindProviderDrainDelivery(owner providerDrainDeliveryOwner) error {

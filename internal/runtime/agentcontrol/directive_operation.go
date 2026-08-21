@@ -13,6 +13,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/google/uuid"
 )
 
 const DirectiveOperationMethod = "agent.send_directive"
@@ -35,6 +36,7 @@ var (
 	ErrDirectiveOutcomeIndeterminate = errors.New("agent directive outcome indeterminate")
 	ErrDirectiveTransitionConflict   = errors.New("agent directive transition conflict")
 	ErrDirectiveIdempotencyConflict  = errors.New("agent directive idempotency conflict")
+	ErrDirectiveProviderDrained      = errors.New("agent directive provider attempt drained")
 )
 
 type DirectiveOperation struct {
@@ -144,6 +146,51 @@ type DirectiveExecutionAdmissionRequest struct {
 type DirectiveExecutionAdmission struct {
 	Operation DirectiveOperation
 	Event     events.AdmittedEvent
+}
+
+// DirectiveExecutionOrigin is the exact durable authority for provider work
+// launched while executing one admitted board directive.
+type DirectiveExecutionOrigin struct {
+	OperationID      string
+	ExecutionOwnerID string
+}
+
+func NewDirectiveExecutionOrigin(op DirectiveOperation) (DirectiveExecutionOrigin, error) {
+	op = op.Normalized()
+	origin := DirectiveExecutionOrigin{
+		OperationID:      op.OperationID,
+		ExecutionOwnerID: op.ExecutionOwnerID,
+	}
+	if err := origin.Validate(); err != nil {
+		return DirectiveExecutionOrigin{}, err
+	}
+	if op.State != DirectiveOperationExecuting {
+		return DirectiveExecutionOrigin{}, fmt.Errorf("directive provider origin requires an executing operation")
+	}
+	return origin, nil
+}
+
+func (o DirectiveExecutionOrigin) Normalize() DirectiveExecutionOrigin {
+	o.OperationID = strings.TrimSpace(o.OperationID)
+	o.ExecutionOwnerID = strings.TrimSpace(o.ExecutionOwnerID)
+	return o
+}
+
+func (o DirectiveExecutionOrigin) Validate() error {
+	o = o.Normalize()
+	for name, value := range map[string]string{
+		"operation_id": o.OperationID, "execution_owner_id": o.ExecutionOwnerID,
+	} {
+		if _, err := uuid.Parse(value); err != nil {
+			return fmt.Errorf("directive provider origin %s must be a UUID: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (o DirectiveExecutionOrigin) Same(other DirectiveExecutionOrigin) bool {
+	o, other = o.Normalize(), other.Normalize()
+	return o.OperationID == other.OperationID && o.ExecutionOwnerID == other.ExecutionOwnerID
 }
 
 type DirectiveOperationStore interface {

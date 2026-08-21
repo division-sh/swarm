@@ -234,6 +234,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
 		return nil, err
 	}
+	if err := effectOwner.BindProviderDrainDirectives(agentOwner); err != nil {
+		return nil, err
+	}
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
@@ -462,6 +465,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	store.operatorRunSQLite = operatorRun
 	if err := agentOwner.BindDirectiveDependencies(eventOwner, pipelineOwner); err != nil {
+		return nil, err
+	}
+	if err := effectOwner.BindProviderDrainDirectives(agentOwner); err != nil {
 		return nil, err
 	}
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {

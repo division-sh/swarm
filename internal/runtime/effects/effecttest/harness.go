@@ -157,7 +157,7 @@ func (h *Harness) AuthorizeExternalAttempt(_ context.Context, authority runtimee
 	attempt := runtimeeffects.Attempt{
 		OperationID: req.OperationID, AttemptID: req.AttemptID, Token: authority.Normal, Authority: authority,
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
-		Ordinal: 1, AuthorizedAt: req.Now, OriginDelivery: req.OriginDelivery,
+		Ordinal: 1, AuthorizedAt: req.Now, Origin: req.Origin,
 	}
 	h.Attempts[attempt.AttemptID] = attempt
 	h.States[attempt.AttemptID] = runtimeeffects.StateAuthorized
@@ -230,7 +230,7 @@ func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Att
 	h.States[attempt.AttemptID] = settlement.Settlement.State
 	return runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: h.completionDisposition(), SpendRecorded: true, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
-		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: h.SettleOrigin,
+		Origin: attempt.Origin, OriginSettled: h.SettleOrigin,
 	}, nil
 }
 
