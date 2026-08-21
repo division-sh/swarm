@@ -3,14 +3,18 @@ package bus
 import (
 	"context"
 	"errors"
+	"strings"
+	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -241,4 +245,29 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 		deps.RunOrigins = role
 	}
 	return deps
+}
+
+func TestDurableDependenciesRequireWorkflowInstanceStateReaderAtConstruction(t *testing.T) {
+	roles := unexpectedDurableTestRoles{}
+	store := newTargetRouteMemoryStore()
+	deps := DurableDependencies{
+		RunLifecycle: roles, DeliveryLifecycle: roles, FlowRoutes: roles, FlowRouteRecords: roles,
+		FlowRouteSets: roles, FlowRouteTopology: roles, FlowRouteRollback: roles,
+		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles,
+	}
+	opts := EventBusOptions{
+		BundleSourceFact:    authorActivityTestBundleSourceFact,
+		Durable:             deps,
+		ExecutionPosture:    executionposture.Live,
+		PipelineObligations: store.PipelineObligations(),
+		ReceiverExecution:   eventreceiver.NormalExecution(),
+	}
+	if _, err := NewEventBusWithOptions(store, opts); err == nil || !strings.Contains(err.Error(), "workflow instance/state reader") {
+		t.Fatalf("missing workflow reader validation error = %v", err)
+	}
+	opts.Durable.WorkflowInstances = roles
+	if _, err := NewEventBusWithOptions(store, opts); err != nil {
+		t.Fatalf("construct with complete durable dependencies: %v", err)
+	}
 }

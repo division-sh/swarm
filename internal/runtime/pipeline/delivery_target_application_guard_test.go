@@ -105,6 +105,10 @@ func TestDeclaredKeyAcquisitionConsumesEntityStateAuthority(t *testing.T) {
 	if strings.Contains(acquisition, "SelectActiveWorkflowInstances") {
 		t.Error("declared-key acquisition reintroduced lifecycle-required selection")
 	}
+	classification := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "ClassifyDeliveryTargetOwnership")
+	if !strings.Contains(classification, "!req.Event.HasTargetRoute()") {
+		t.Error("declared-key acquisition stopped requiring explicit target absence")
+	}
 
 	selectOrCreate := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "acquireSelectOrCreateMaterializingTarget")
 	for _, required := range []string{"LoadWorkflowInstance", "LoadWorkflowEntityState", "decodeDeliveryTargetWorkflowEntityState"} {

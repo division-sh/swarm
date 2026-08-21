@@ -63,6 +63,70 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				)
 			}
 
+			t.Run("targeted declared-key handlers preserve exact owner", func(t *testing.T) {
+				flowID := "targeted-" + uuid.NewString()
+				exact := events.RouteIdentity{FlowID: flowID, FlowInstance: flowID, EntityID: uuid.NewString()}.Normalized()
+				competing := events.RouteIdentity{FlowID: flowID, FlowInstance: flowID + "/competing", EntityID: uuid.NewString()}.Normalized()
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, exact.EntityID, exact.FlowInstance, "active", "exact-owner-key")
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, competing.EntityID, competing.FlowInstance, "active", "payload-key")
+
+				source := stateOnlyAcquisitionSource(flowID)
+				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, flowID, "selector")
+				if err != nil {
+					t.Fatal(err)
+				}
+				handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, node)
+				if err != nil {
+					t.Fatal(err)
+				}
+				bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
+					ContractBundle: source,
+					RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
+						return []runtimebus.DeliveryRouteBlueprint{{
+							Recipient: events.MustNodeDeliveryRecipient(node), Target: exact,
+							Handler: handler.ForEvent("test.node_emitted"),
+						}}, nil
+					},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				payload, err := json.Marshal(map[string]any{"account_id": "payload-key"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				evt := eventtest.ExistingRunRootIngress(
+					uuid.NewString(), "test.node_emitted", "", "", payload, 0, runID,
+					events.EnvelopeForTargetRoute(events.EventEnvelope{}, exact), time.Now().UTC(),
+				)
+				if err := bus.Publish(ctx, evt); err != nil {
+					t.Fatalf("publish targeted declared-key handlers: %v", err)
+				}
+				persisted, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
+				if err != nil || !found {
+					t.Fatalf("load targeted event: found=%t err=%v", found, err)
+				}
+				want := events.MustExistingEntityTarget(exact)
+				seenRecipients := map[string]bool{}
+				for _, route := range persisted.DeliveryRoutes {
+					if route.Target != want {
+						t.Fatalf("targeted route = %#v, want exact owner %#v and never competing owner %#v", route, want, competing)
+					}
+					seenRecipients[route.Recipient.LocalID()] = true
+				}
+				for _, nodeID := range []string{"selector", "upserter"} {
+					if !seenRecipients[nodeID] {
+						t.Fatalf("targeted routes = %#v, missing %s declared-key consumer", persisted.DeliveryRoutes, nodeID)
+					}
+				}
+
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID+"/later", "active", "payload-key")
+				if err := bus.Publish(ctx, evt); err != nil {
+					t.Fatalf("duplicate targeted publish replanned: %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 2)
+			})
+
 			t.Run("select chooses state-only owner", func(t *testing.T) {
 				flowID := "select-" + uuid.NewString()
 				accountID := "state-only-select-" + uuid.NewString()

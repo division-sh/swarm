@@ -1340,6 +1340,8 @@ contract_formats:
             produces the exact receiving route instead of consuming a source/path-derived preselection. Zero select matches and
             multiple matches fail closed. Zero select_or_create matches stamp the deterministic future route; if that exact row
             appears before execution it is accepted only when its identity and declared key agree, otherwise execution fails.
+            Declared-key acquisition is authorized only by explicit target absence. An event carrying an admitted exact target
+            consumes that target for select and select_or_create handlers; payload-key matches cannot redirect it to another owner.
             Declared-key cardinality reads the run-scoped entity_state registry directly. A matching active state row remains
             selectable before its flow_instances lifecycle companion exists; when a companion exists, terminated or inactive
             lifecycle excludes that row. Joining through lifecycle as a prerequisite for selected ownership is forbidden.
