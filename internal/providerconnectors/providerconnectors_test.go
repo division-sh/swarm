@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -186,6 +187,89 @@ func TestValidateSourceRejectsScopedDuplicateAgentExposureOfProviderConnector(t 
 			t.Fatalf("ValidateSource errors = %q, want scoped exposure rejection for %s", joined, agentID)
 		}
 	}
+}
+
+func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *testing.T) {
+	source := loadNestedProviderConnectorAgentSource(t)
+	declarations := semanticview.AgentDeclarations(source)
+	if len(declarations) != 1 {
+		t.Fatalf("canonical declarations = %#v, want one physical declaration", declarations)
+	}
+	joined := joinErrors(ValidateSource(source))
+	want := `agent "public-sender" must not expose provider connector tool "telegram.send_message" directly`
+	if count := strings.Count(joined, want); count != 1 {
+		t.Fatalf("provider-connector exposure count = %d in %q, want one physical-declaration error", count, joined)
+	}
+}
+
+func loadNestedProviderConnectorAgentSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", path, err)
+		}
+	}
+	write(filepath.Join(root, "package.yaml"), `
+name: nested-provider-agent
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - {path: parent}
+`)
+	write(filepath.Join(root, "schema.yaml"), "name: nested-provider-agent\n")
+	for _, name := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		write(filepath.Join(root, name), "{}\n")
+	}
+	write(filepath.Join(root, "parent", "package.yaml"), `
+name: parent
+version: "1.0.0"
+packages:
+  - {path: child}
+`)
+	write(filepath.Join(root, "parent", "child", "package.yaml"), `
+name: child
+version: "1.0.0"
+flows:
+  - {id: support, flow: support, mode: static}
+`)
+	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
+	write(filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
+	write(filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
+	write(filepath.Join(flowRoot, "agents.yaml"), `
+sender:
+  id: public-sender
+  role: sender
+  intent: {inline: Exercise nested provider connector projection.}
+  model: regular
+  memory: false
+  subscriptions: [work.requested]
+`)
+	write(filepath.Join(flowRoot, "events.yaml"), "work.requested: {}\n")
+	for _, name := range []string{"nodes.yaml", "policy.yaml", "tools.yaml"} {
+		write(filepath.Join(flowRoot, name), "{}\n")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	entry := bundle.FlowTree.ByID["support"].Agents["sender"]
+	entry.Tools = []string{"telegram.send_message"}
+	bundle.FlowTree.ByID["support"].Agents["sender"] = entry
+	for _, project := range bundle.ProjectViews() {
+		if _, ok := project.Agents["sender"]; ok {
+			project.Agents["sender"] = entry
+		}
+	}
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": telegramConnectorTool("https://api.telegram.org"),
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestSurfacesReportManagedCredentialRequirementsWithoutSecretValues(t *testing.T) {

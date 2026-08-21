@@ -294,44 +294,7 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 }
 
 func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
-	flow := runtimecontracts.FlowContractView{
-		Path: "analysis",
-		Paths: runtimecontracts.FlowContractPaths{
-			ID:         "analysis",
-			SchemaFile: "flows/analysis/schema.yaml",
-			AgentsFile: "flows/analysis/agents.yaml",
-		},
-		Schema: runtimecontracts.FlowSchemaDocument{RequiredAgentsDeclared: true},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"analyzer": {Subscriptions: []string{"analysis.requested"}},
-		},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{
-			RootSchemaFile:    "schema.yaml",
-			ProjectAgentsFile: "agents.yaml",
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"root-agent": {
-				Subscriptions: []string{"root.requested"},
-				EmitEvents:    []string{"root.done"},
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"analysis": flow.Schema,
-		},
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &runtimecontracts.FlowContractView{
-				Children: []runtimecontracts.FlowContractView{flow},
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"analysis": &flow,
-			},
-		},
-	}
-	addAuthoringViewAgentOwners(bundle)
-	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
+	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t, true), nil)
 
 	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
 		len(view.Root.RequiredAgents.Agents) != 1 ||
@@ -623,48 +586,7 @@ func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 }
 
 func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
-	flow := runtimecontracts.FlowContractView{
-		Path: "analysis",
-		Paths: runtimecontracts.FlowContractPaths{
-			ID:         "analysis",
-			SchemaFile: "flows/analysis/schema.yaml",
-			AgentsFile: "flows/analysis/agents.yaml",
-		},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "analysis"},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"analyzer": {
-				Model:         "regular",
-				Subscriptions: []string{"analysis.requested"},
-			},
-		},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{
-			RootSchemaFile:    "schema.yaml",
-			ProjectAgentsFile: "agents.yaml",
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"root-agent": {
-				Model:         "regular",
-				Subscriptions: []string{"root.requested"},
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"analysis": flow.Schema,
-		},
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &runtimecontracts.FlowContractView{
-				Children: []runtimecontracts.FlowContractView{flow},
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"analysis": &flow,
-			},
-		},
-	}
-	addAuthoringViewAgentOwners(bundle)
-
-	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
+	view := mustBuild(t, loadAuthoringAgentProvenanceSource(t, false), nil)
 
 	rootAgent := agentByID(t, view.Root.Agents, "root-agent")
 	assertDefaultedAgentField(t, rootAgent, "type", runtimecontracts.DefaultAgentType)
@@ -699,17 +621,6 @@ func TestBuildRendersEffectivePublicAgentNameInsteadOfLocalCoordinate(t *testing
 	view := mustBuild(t, semanticviewtest.WrapRootAgents(bundle), nil)
 	if len(view.Root.Agents) != 1 || view.Root.Agents[0].ID != "public-worker" {
 		t.Fatalf("root agents = %#v, want effective public-worker readback", view.Root.Agents)
-	}
-}
-
-func addAuthoringViewAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {
-	bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{
-		"root-agent": {
-			Kind: "agent", LocalID: "root-agent", Full: "swarm-test://root-agent",
-		},
-		"analysis/analyzer": {
-			Kind: "agent", FlowID: "analysis", LocalID: "analyzer", Path: "analysis", Full: "swarm-test://analysis/analyzer",
-		},
 	}
 }
 
@@ -1043,6 +954,53 @@ func interFlowRouteEdges(topology routingtopology.Topology) []routingtopology.Ed
 func loadRootPrimaryEntitySource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := writeRootPrimaryEntityContracts(t)
+	repo := authoringViewRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func loadAuthoringAgentProvenanceSource(t testing.TB, explicitFlowRequiredAgents bool) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
+name: authoring-agent-provenance
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - {id: analysis, flow: analysis, mode: static}
+`)
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: authoring-agent-provenance\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), `
+root-agent:
+  role: root-agent
+  intent: {inline: Coordinate root analysis work.}
+  model: regular
+  subscriptions: [root.requested]
+  emit_events: [root.done]
+`)
+	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeAuthoringViewTestFile(t, filepath.Join(root, file), "{}\n")
+	}
+	flowSchema := "name: analysis\nmode: static\n"
+	if explicitFlowRequiredAgents {
+		flowSchema += "required_agents: []\n"
+	}
+	flowRoot := filepath.Join(root, "flows", "analysis")
+	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "schema.yaml"), flowSchema)
+	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "agents.yaml"), `
+analyzer:
+  role: analyzer
+  intent: {inline: Analyze requested work.}
+  model: regular
+  subscriptions: [analysis.requested]
+`)
+	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeAuthoringViewTestFile(t, filepath.Join(flowRoot, file), "{}\n")
+	}
+
 	repo := authoringViewRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

@@ -117,11 +117,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	lineage.TaskID = in.TaskID
 	lineage.ExecutionMode = executionMode
 	sourceEntity := actor.EffectiveEntityID()
-	actorIdentity, err := actor.ConcreteIdentity()
-	if err != nil {
-		return nil, err
-	}
-	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actorIdentity, sourceEntity)
+	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, sourceEntity)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +224,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	if err != nil {
 		return nil, fmt.Errorf("admit schedule payload: %w", err)
 	}
-	executionSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, entityID)
+	executionSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, entityID)
 	if err != nil {
 		return nil, fmt.Errorf("admit schedule owner source: %w", err)
 	}

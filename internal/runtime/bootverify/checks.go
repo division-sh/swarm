@@ -507,13 +507,9 @@ func (c *checkerContext) intentResolution() []Finding {
 		return c.promptFindings
 	}
 	c.promptLoaded = true
-	for _, scope := range c.source.ProjectScopes() {
-		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		c.promptFindings = append(c.promptFindings, intentFindingsForScope(scopeLabel, scope.Agents)...)
-	}
-	for _, scope := range c.source.FlowScopes() {
-		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		c.promptFindings = append(c.promptFindings, intentFindingsForScope(scopeLabel, scope.Agents)...)
+	for _, declaration := range semanticview.AgentDeclarations(c.source) {
+		scopeLabel := agentDeclarationScopeLabel(c.source, declaration)
+		c.promptFindings = append(c.promptFindings, intentFindingsForDeclaration(scopeLabel, declaration.LocalID, declaration.Entry)...)
 	}
 	return c.promptFindings
 }
@@ -651,32 +647,6 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				Location: scopeLabel,
 			})
 		}
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			agentLabel := scopedObjectLabel(scopeLabel, agentID)
-			if agentID == "" {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent in scope %s missing required field id", scopeLabel),
-					Location: scopeLabel,
-				})
-				continue
-			}
-			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model, agent.Mock.Configured())
-			c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.ResolveAgentMemoryProof(c.source, semanticview.AgentMemoryLocator{
-				AgentID:         agentID,
-				ProjectScopeKey: scope.Key,
-			}), agentID, agent)
-			if len(agent.Subscriptions) == 0 {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field subscriptions", agentLabel),
-					Location: agentLabel,
-				})
-			}
-		}
 	}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
@@ -697,36 +667,39 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 			})
 		}
 	}
-	for _, scope := range c.source.FlowScopes() {
-		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			agentLabel := scopedObjectLabel(scopeLabel, agentID)
-			if agentID == "" {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent in scope %s missing required field id", scopeLabel),
-					Location: scopeLabel,
-				})
-				continue
-			}
-			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model, agent.Mock.Configured())
-			c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.ResolveAgentMemoryProof(c.source, semanticview.AgentMemoryLocator{
-				AgentID: agentID,
-				FlowID:  scope.ID,
-			}), agentID, agent)
-			if len(agent.Subscriptions) == 0 {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field subscriptions", agentLabel),
-					Location: agentLabel,
-				})
-			}
+	for _, declaration := range semanticview.AgentDeclarations(c.source) {
+		scopeLabel := agentDeclarationScopeLabel(c.source, declaration)
+		agentID := strings.TrimSpace(declaration.LocalID)
+		agent := declaration.Entry
+		agentLabel := scopedObjectLabel(scopeLabel, agentID)
+		if agentID == "" {
+			c.invalidFindings = append(c.invalidFindings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent in scope %s missing required field id", scopeLabel),
+				Location: scopeLabel,
+			})
+			continue
+		}
+		c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model, agent.Mock.Configured())
+		c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.AgentMemoryProofForDeclaration(c.source, declaration), agentID, agent)
+		if len(agent.Subscriptions) == 0 {
+			c.invalidFindings = append(c.invalidFindings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s missing required field subscriptions", agentLabel),
+				Location: agentLabel,
+			})
 		}
 	}
 	return c.invalidFindings
+}
+
+func agentDeclarationScopeLabel(source semanticview.Source, declaration semanticview.AgentDeclaration) string {
+	if strings.TrimSpace(declaration.OwnerFlowID) != "" {
+		return flowScopeLabel(declaration.OwnerFlowID, source.FlowPath(declaration.OwnerFlowID))
+	}
+	return projectScopeLabel(declaration.Source.PackageKey, "")
 }
 
 func (c *checkerContext) appendInvalidExecutableNodeFindings(record runtimecontracts.ScopedNodeRecord) {
@@ -1202,33 +1175,29 @@ func platformProducerClaimFinding(source semanticview.Source, eventType, locatio
 	}, true
 }
 
-func intentFindingsForScope(scopeLabel string, agents map[string]runtimecontracts.AgentRegistryEntry) []Finding {
-	out := make([]Finding, 0, len(agents))
-	for agentID, entry := range agents {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		location := scopedObjectLabel(scopeLabel, agentID)
-		if err := entry.ResolvedIntent.Validate(); err != nil {
-			out = append(out, Finding{
-				CheckID:  "intent_resolution",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("%s/%s: declare one valid intent: source: %v", strings.TrimSpace(scopeLabel), agentID, err),
-				Location: location,
-			})
-			continue
-		}
-		if intentHasOpenTODO(entry.ResolvedIntent.Content) {
-			out = append(out, Finding{
-				CheckID:  "intent_resolution",
-				Severity: "warning",
-				Message:  fmt.Sprintf("%s/%s: resolved intent contains TODO", strings.TrimSpace(scopeLabel), agentID),
-				Location: location,
-			})
-		}
+func intentFindingsForDeclaration(scopeLabel, agentID string, entry runtimecontracts.AgentRegistryEntry) []Finding {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil
 	}
-	return out
+	location := scopedObjectLabel(scopeLabel, agentID)
+	if err := entry.ResolvedIntent.Validate(); err != nil {
+		return []Finding{{
+			CheckID:  "intent_resolution",
+			Severity: SeverityHardInvalidity,
+			Message:  fmt.Sprintf("%s/%s: declare one valid intent: source: %v", strings.TrimSpace(scopeLabel), agentID, err),
+			Location: location,
+		}}
+	}
+	if intentHasOpenTODO(entry.ResolvedIntent.Content) {
+		return []Finding{{
+			CheckID:  "intent_resolution",
+			Severity: "warning",
+			Message:  fmt.Sprintf("%s/%s: resolved intent contains TODO", strings.TrimSpace(scopeLabel), agentID),
+			Location: location,
+		}}
+	}
+	return nil
 }
 
 func intentHasOpenTODO(text string) bool {

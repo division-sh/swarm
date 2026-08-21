@@ -770,7 +770,9 @@ func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowIns
 }
 
 func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
+	const owner = "test://review/reviewer"
 	reviewFlow := &runtimecontracts.FlowContractView{
+		Path:  "review",
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
@@ -784,14 +786,18 @@ func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
 				}).Intent,
 			},
 		},
+		AgentURIs: map[string]string{"reviewer": owner},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"review/reviewer": {
 					Kind: "agent", FlowID: "review", LocalID: "reviewer",
-					Full: "test://review/reviewer",
+					Full: owner,
 				},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				owner: {Kind: "agent", FlowID: "review", LocalID: "reviewer", Full: owner},
 			},
 		},
 		FlowTree: runtimecontracts.FlowTree{

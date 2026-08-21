@@ -160,7 +160,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		deadline = decisioncard.CanonicalTimestamp(now.Add(time.Duration(hours) * time.Hour))
 	}
 
-	source, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, requesterEntityID)
+	source, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, requesterEntityID)
 	if err != nil {
 		return nil, fmt.Errorf("admit human-task requester source: %w", err)
 	}

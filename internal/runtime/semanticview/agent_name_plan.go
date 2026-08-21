@@ -82,11 +82,9 @@ func (d AgentDeclaration) NamePlan() (AgentNamePlan, error) {
 }
 
 func ScopedAgentNamePlan(source Source, declaration AgentDeclaration) (AgentNamePlan, error) {
-	owner, ok := ScopedAgentDeclarationOwner(source, declaration)
-	if !ok {
+	if _, ok := ScopedAgentDeclarationOwner(source, declaration); !ok {
 		return AgentNamePlan{}, fmt.Errorf("agent declaration %q is missing a unique scoped owner", strings.TrimSpace(declaration.LocalID))
 	}
-	declaration.OwnerURI = owner
 	return declaration.NamePlan()
 }
 
@@ -112,7 +110,6 @@ func agentNamePlanForScope(source Source, scopeKind, scopeID, ownerFlowID, owner
 	}
 	ownerMatches := []AgentDeclaration{}
 	exact := []AgentDeclaration{}
-	projected := []AgentDeclaration{}
 	available := []string{}
 	for _, declaration := range AgentDeclarations(source) {
 		if strings.TrimSpace(declaration.LocalID) != localID {
@@ -128,10 +125,6 @@ func agentNamePlanForScope(source Source, scopeKind, scopeID, ownerFlowID, owner
 			exact = append(exact, declaration)
 			continue
 		}
-		if scopeKind == "flow" && strings.TrimSpace(declaration.ScopeKind) == "project" &&
-			strings.TrimSpace(declaration.OwnerFlowID) == ownerFlowID {
-			projected = append(projected, declaration)
-		}
 	}
 	if len(ownerMatches) > 1 {
 		return AgentNamePlan{}, fmt.Errorf("agent declaration %q at owner %q resolved to multiple declarations", localID, ownerURI)
@@ -144,11 +137,6 @@ func agentNamePlanForScope(source Source, scopeKind, scopeID, ownerFlowID, owner
 	}
 	if len(exact) == 1 {
 		return ScopedAgentNamePlan(source, exact[0])
-	}
-	// Package-backed flow declarations canonicalize to their project scope.
-	// The flow projection may consume that owner only when it is unique.
-	if scopeKind == "flow" && len(projected) == 1 {
-		return ScopedAgentNamePlan(source, projected[0])
 	}
 	return AgentNamePlan{}, fmt.Errorf("agent declaration %q in %s scope %q is not canonical; candidates: %s", localID, scopeKind, scopeID, strings.Join(available, ", "))
 }

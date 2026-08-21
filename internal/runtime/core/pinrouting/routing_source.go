@@ -6,7 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -54,21 +54,21 @@ func AdmitNodeExecutionRoutingSource(source semanticview.Source, node runtimeide
 }
 
 // AdmitAgentExecutionRoutingSource admits the exact source fact from the
-// actor's typed identity. Tool-produced events copy this value unchanged.
-func AdmitAgentExecutionRoutingSource(source semanticview.Source, identity agentidentity.Identity, entityID string) (events.RoutingSource, error) {
+// actor's declaration-owned execution scope. Tool-produced events copy this
+// value unchanged.
+func AdmitAgentExecutionRoutingSource(source semanticview.Source, actor models.AgentConfig, entityID string) (events.RoutingSource, error) {
 	if source == nil {
 		return events.RoutingSource{}, fmt.Errorf("agent execution routing source requires semantic source")
 	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return events.RoutingSource{}, fmt.Errorf("agent execution routing source requires typed identity: %w", err)
+	scope, err := semanticview.ResolveAgentExecutionSemanticScope(source, actor)
+	if err != nil {
+		return events.RoutingSource{}, err
 	}
-	scopeKey, _, instancePath, present := identity.Route.Fields()
-	owner := runtimecontracts.ContractItemSource{Layer: "project"}
+	identity := scope.Identity()
+	owner := scope.ContractSource()
 	route := events.RouteIdentity{EntityID: strings.TrimSpace(entityID)}
-	if present {
-		owner = runtimecontracts.ContractItemSource{Layer: "flow", FlowID: scopeKey}
-		route.FlowID = scopeKey
+	if instancePath := strings.TrimSpace(identity.Route.Normalize().InstancePath); instancePath != "" {
+		route.FlowID = strings.TrimSpace(scope.Declaration().OwnerFlowID)
 		route.FlowInstance = instancePath
 	}
 	return admitDeclaredExecutionRoutingSource(source, "agent", identity.AgentID(), owner, route)

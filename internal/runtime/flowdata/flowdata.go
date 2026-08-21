@@ -108,40 +108,40 @@ func ValidateSource(source semanticview.Source) []Finding {
 		return nil
 	}
 	var findings []Finding
-	for _, scope := range source.ProjectScopes() {
-		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			for _, filename := range agent.FlowDataAccess {
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		agentID := strings.TrimSpace(declaration.LocalID)
+		scopeLabel := declaration.Label(true)
+		if strings.TrimSpace(declaration.OwnerFlowID) == "" {
+			for _, filename := range declaration.Entry.FlowDataAccess {
 				findings = append(findings, Finding{
-					AgentLabel: scopedLabel(scopeLabel, agentID),
+					AgentLabel: scopeLabel,
 					Filename:   strings.TrimSpace(filename),
 					Message:    "flow_data_access is only valid on flow-scoped agents",
 				})
 			}
+			continue
 		}
-	}
-	for _, scope := range source.FlowScopes() {
-		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			for _, raw := range agent.FlowDataAccess {
-				filename, err := NormalizeFilename(raw)
-				if err != nil {
-					findings = append(findings, Finding{
-						AgentLabel: scopedLabel(scopeLabel, agentID),
-						Filename:   strings.TrimSpace(raw),
-						Message:    fmt.Sprintf("invalid flow_data_access path: %v", err),
-					})
-					continue
-				}
-				if _, err := resolveUnderDataRoot(scope.DataDir, filename); err != nil {
-					findings = append(findings, Finding{
-						AgentLabel: scopedLabel(scopeLabel, agentID),
-						Filename:   filename,
-						Message:    err.Error(),
-					})
-				}
+		scope, ok := source.FlowScopeByID(declaration.OwnerFlowID)
+		if !ok {
+			findings = append(findings, Finding{AgentLabel: scopeLabel, Message: fmt.Sprintf("agent %s references missing owning flow %s", agentID, declaration.OwnerFlowID)})
+			continue
+		}
+		for _, raw := range declaration.Entry.FlowDataAccess {
+			filename, err := NormalizeFilename(raw)
+			if err != nil {
+				findings = append(findings, Finding{
+					AgentLabel: scopeLabel,
+					Filename:   strings.TrimSpace(raw),
+					Message:    fmt.Sprintf("invalid flow_data_access path: %v", err),
+				})
+				continue
+			}
+			if _, err := resolveUnderDataRoot(scope.DataDir, filename); err != nil {
+				findings = append(findings, Finding{
+					AgentLabel: scopeLabel,
+					Filename:   filename,
+					Message:    err.Error(),
+				})
 			}
 		}
 	}

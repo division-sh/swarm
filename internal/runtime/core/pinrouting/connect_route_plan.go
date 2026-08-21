@@ -2014,26 +2014,32 @@ func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint sem
 }
 
 func staticConnectReceiverAgent(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint, logicalID string) (string, string, bool) {
-	packageKey := strings.TrimSpace(endpoint.PackageKey)
-	if packageKey != "" {
-		for _, scope := range source.ProjectScopes() {
-			if strings.TrimSpace(scope.Key) != packageKey {
-				continue
-			}
-			namePlan, err := semanticview.ProjectAgentNamePlan(source, scope, logicalID)
-			if err == nil {
-				return namePlan.AgentID, namePlan.OwnerURI, true
-			}
-			break
-		}
+	packageKey := strings.Trim(strings.TrimSpace(endpoint.PackageKey), "/")
+	if packageKey == "" {
+		packageKey = runtimeidentity.RootPackageKey
 	}
 	flowID := strings.TrimSpace(endpoint.FlowID)
-	if flowID != "" {
-		if scope, ok := source.FlowScopeByID(flowID); ok {
-			namePlan, err := semanticview.FlowAgentNamePlan(source, scope, logicalID)
-			if err == nil {
-				return namePlan.AgentID, namePlan.OwnerURI, true
-			}
+	sourceFile := strings.TrimSpace(endpoint.SourceFile)
+	var matched semanticview.AgentDeclaration
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		candidatePackage := strings.Trim(strings.TrimSpace(declaration.Source.PackageKey), "/")
+		if candidatePackage == "" {
+			candidatePackage = runtimeidentity.RootPackageKey
+		}
+		if strings.TrimSpace(declaration.LocalID) != strings.TrimSpace(logicalID) ||
+			strings.TrimSpace(declaration.OwnerFlowID) != flowID || candidatePackage != packageKey ||
+			(sourceFile != "" && strings.TrimSpace(declaration.Source.File) != sourceFile) {
+			continue
+		}
+		if strings.TrimSpace(matched.LocalID) != "" {
+			return "", "", false
+		}
+		matched = declaration
+	}
+	if strings.TrimSpace(matched.LocalID) != "" {
+		namePlan, err := semanticview.ScopedAgentNamePlan(source, matched)
+		if err == nil {
+			return namePlan.AgentID, namePlan.OwnerURI, true
 		}
 	}
 	return "", "", false

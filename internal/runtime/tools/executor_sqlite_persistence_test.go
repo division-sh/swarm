@@ -297,13 +297,23 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			}}
 			requester := models.AgentConfig{
 				ExecutionMode: "live",
-				ID:            "requester", Identity: agentidentitytest.Runtime(t, "requester", "human-task-test", "provider", "provider", "provider"),
-				Role: "worker", FlowID: "provider", FlowPath: "provider", EntityID: uuid.NewString(),
+				ID:            "requester",
+				Role:          "worker", FlowID: "provider", FlowPath: "provider", EntityID: uuid.NewString(),
 				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
 			}
 			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "types: {}\n", "provider_record:\n  status: text\n")
+			source := semanticview.Wrap(bundle)
+			declarations := semanticview.AgentDeclarations(source)
+			if len(declarations) != 1 {
+				t.Fatalf("requester declarations = %#v, want one", declarations)
+			}
+			plan, err := semanticview.ScopedAgentNamePlan(source, declarations[0])
+			if err != nil {
+				t.Fatalf("requester declaration name: %v", err)
+			}
+			requester.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, "provider", "provider", "provider")
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
-				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: semanticview.Wrap(bundle),
+				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source,
 			})
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn/tool-call-1")
@@ -328,6 +338,10 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			}
 			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != "provider-turn/tool-call-1" || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != "provider" {
 				t.Fatalf("human-task anchor = %#v", anchor)
+			}
+			wantSourceRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: requester.EntityID}
+			if got := anchor.Source.Route().Normalized(); got != wantSourceRoute {
+				t.Fatalf("human-task routing source = %#v, want %#v", got, wantSourceRoute)
 			}
 			continuation, err := tc.store.LoadHumanTaskContinuation(context.Background(), cardID)
 			if err != nil {

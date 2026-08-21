@@ -60,13 +60,40 @@ func hostileScopedMapKeyAgentID(view runtimecontracts.FlowContractView) []string
 	return out
 }
 
+func hostileArbitraryReceiverIndex(arbitrary FlowScope, id string) runtimecontracts.AgentRegistryEntry {
+	return arbitrary.Agents[id]
+}
+
+func hostileContractViewIndex(arbitrary runtimecontracts.FlowContractView, id string) runtimecontracts.AgentRegistryEntry {
+	return arbitrary.Agents[id]
+}
+
 func hostileLegacyContractLookup(bundle *runtimecontracts.WorkflowContractBundle, actorID string) {
 	bundle.AgentContractSource(actorID)
 	bundle.ScopedAgentContractSource(runtimecontracts.ContractItemSource{FlowID: "hostile"}, actorID)
 }
-`)}
+	`)}
+	toolsPath := filepath.Join(root, "internal", "runtime", "tools", "agent_source_guard_hostile.go")
+	overlay[toolsPath] = []byte(`package tools
+
+import (
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+func hostileSixthAgentSourceProducer(source semanticview.Source, actor models.AgentConfig) {
+	runtimepinrouting.AdmitAgentExecutionRoutingSource(source, actor, "entity")
+}
+`)
 	findings := loadAgentNameOwnershipFindings(t, root, overlay)
-	want := map[string]bool{"raw_agent_registry_id": false, "unclassified_agent_map_range": false, "legacy_agent_contract_lookup": false}
+	want := map[string]bool{
+		"raw_agent_registry_id":             false,
+		"raw_agent_scope_map_read":          false,
+		"unclassified_agent_map_range":      false,
+		"legacy_agent_contract_lookup":      false,
+		"unapproved_agent_source_admission": false,
+	}
 	for _, finding := range findings {
 		if _, ok := want[finding.Kind]; ok && strings.Contains(finding.Enclosing, "hostile") {
 			want[finding.Kind] = true
@@ -130,6 +157,9 @@ func collectAgentNameOwnershipFindings(path string, file *ast.File, info *types.
 			if statement, ok := node.(*ast.RangeStmt); ok && agentNameGuardIsAgentMapRange(statement, info) && !agentNameGuardAgentMapRangeAllowed(path, enclosing) {
 				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "unclassified_agent_map_range"})
 			}
+			if call, ok := node.(*ast.CallExpr); ok && agentNameGuardIsAgentSourceAdmission(call, info) && !agentNameGuardAgentSourceAdmissionAllowed(path, enclosing) {
+				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "unapproved_agent_source_admission"})
+			}
 			selector, ok := node.(*ast.SelectorExpr)
 			if !ok {
 				return true
@@ -139,6 +169,9 @@ func collectAgentNameOwnershipFindings(path string, file *ast.File, info *types.
 			}
 			if agentNameGuardIsLegacyContractLookup(selector, info) && !agentNameGuardLegacyContractLookupAllowed(path, enclosing) {
 				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "legacy_agent_contract_lookup"})
+			}
+			if agentNameGuardIsRawAgentScopeMap(selector, info) && !agentNameGuardRawAgentScopeMapAllowed(path, enclosing) {
+				findings = append(findings, agentNameOwnershipFinding{Path: path, Enclosing: enclosing, Kind: "raw_agent_scope_map_read"})
 			}
 			return true
 		})
@@ -158,10 +191,93 @@ func agentNameGuardIsLegacyContractLookup(selector *ast.SelectorExpr, info *type
 }
 
 func agentNameGuardLegacyContractLookupAllowed(path, enclosing string) bool {
-	if path != "internal/runtime/semanticview/agent_contract_projection.go" {
+	return false
+}
+
+func agentNameGuardIsAgentSourceAdmission(call *ast.CallExpr, info *types.Info) bool {
+	if call == nil || info == nil {
 		return false
 	}
-	return enclosing == "ScopedAgentContractProjection" || enclosing == "exactAgentContractSource"
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || selector.Sel == nil || selector.Sel.Name != "AdmitAgentExecutionRoutingSource" {
+		return false
+	}
+	function, ok := info.Uses[selector.Sel].(*types.Func)
+	return ok && function.Pkg() != nil && function.Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+}
+
+func agentNameGuardAgentSourceAdmissionAllowed(path, enclosing string) bool {
+	allowed := map[string]struct{}{
+		"internal/runtime/tools/channel_runtime.go::(*Executor).execChannelOperation":      {},
+		"internal/runtime/tools/executor_agents.go::(*Executor).execAgentMessage":          {},
+		"internal/runtime/tools/executor_agents.go::(*Executor).execSchedule":              {},
+		"internal/runtime/tools/executor_emit.go::(*Executor).handleEmitTool":              {},
+		"internal/runtime/tools/executor_human_tasks.go::(*Executor).execHumanTaskRequest": {},
+	}
+	_, ok := allowed[path+"::"+enclosing]
+	return ok
+}
+
+func agentNameGuardIsRawAgentScopeMap(selector *ast.SelectorExpr, info *types.Info) bool {
+	if selector == nil || selector.Sel == nil || selector.Sel.Name != "Agents" || info == nil {
+		return false
+	}
+	typ := info.TypeOf(selector)
+	if named, ok := typ.(*types.Named); ok {
+		typ = named.Underlying()
+	}
+	mapping, ok := typ.(*types.Map)
+	if !ok {
+		return false
+	}
+	key, ok := mapping.Key().Underlying().(*types.Basic)
+	if !ok || key.Kind() != types.String {
+		return false
+	}
+	element := mapping.Elem()
+	if pointer, ok := element.(*types.Pointer); ok {
+		element = pointer.Elem()
+	}
+	entry, ok := element.(*types.Named)
+	return ok && entry.Obj() != nil && entry.Obj().Pkg() != nil &&
+		entry.Obj().Name() == "AgentRegistryEntry" &&
+		entry.Obj().Pkg().Path() == "github.com/division-sh/swarm/internal/runtime/contracts"
+}
+
+func agentNameGuardRawAgentScopeMapAllowed(path, enclosing string) bool {
+	allowed := map[string]struct{}{
+		"internal/runtime/authoringview/view.go::agentViews":                                                          {},
+		"internal/runtime/authoringview/view.go::buildFlows":                                                          {},
+		"internal/runtime/authoringview/view.go::resolveAgentScope":                                                   {},
+		"internal/runtime/authoringview/view.go::rootAgentViewEntries":                                                {},
+		"internal/runtime/bootverify/workflow_flow_boundary_checks.go::flowHasScopedInputEscapeHatch":                 {},
+		"internal/runtime/contracts/agent_registry_resolution.go::bundleAgentRecords":                                 {},
+		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                              {},
+		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":                 {},
+		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":                          {},
+		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformances":                    {},
+		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntries":           {},
+		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).AgentEntry":             {},
+		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).flowRequiredAgentScope": {},
+		"internal/runtime/contracts/workflow_contract_accessors.go::(*WorkflowContractBundle).rootRequiredAgentScope": {},
+		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":                    {},
+		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                                {},
+		"internal/runtime/contracts/workflow_contract_paths.go::cloneAgentRegistryEntryMap":                           {},
+		"internal/runtime/contracts/workflow_contract_tree.go::buildFlowTree":                                         {},
+		"internal/runtime/contracts/workflow_contract_tree.go::loadFlowContractView":                                  {},
+		"internal/runtime/contracts/workflow_contract_tree.go::loadProjectContractView":                               {},
+		"internal/runtime/contracts/workflow_contract_tree.go::populateMergedPackageViews":                            {},
+		"internal/runtime/requiredagents/fulfillment.go::CheckScope":                                                  {},
+		"internal/runtime/requiredagents/fulfillment.go::FlowScopes":                                                  {},
+		"internal/runtime/requiredagents/fulfillment.go::RootScope":                                                   {},
+		"internal/runtime/semanticview/bundle_source.go::(bundleSource).ProjectScopes":                                {},
+		"internal/runtime/semanticview/scopes.go::flowScopeFromView":                                                  {},
+		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryFlowWildcardSubscriptions":         {},
+		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryProjectWildcardSubscriptions":      {},
+		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                                 {},
+	}
+	_, ok := allowed[path+"::"+enclosing]
+	return ok
 }
 
 func agentNameGuardIsAgentMapRange(statement *ast.RangeStmt, info *types.Info) bool {
@@ -216,9 +332,6 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 	// new range over the wire map must be classified here or consume a name plan.
 	allowed := map[string]struct{}{
 		"internal/runtime/authoringview/view.go::agentViews":                                                     {},
-		"internal/runtime/bootverify/checks.go::(*checkerContext).invalidFieldDetection":                         {},
-		"internal/runtime/bootverify/checks.go::intentFindingsForScope":                                          {},
-		"internal/runtime/bootverify/workflow_entity_contract_coverage_checks.go::wave1ScopedAgentRecords":       {},
 		"internal/runtime/bootverify/workflow_flow_boundary_checks.go::flowHasScopedInputEscapeHatch":            {},
 		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                         {},
 		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":            {},
@@ -227,15 +340,8 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":               {},
 		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                           {},
 		"internal/runtime/contracts/workflow_contract_paths.go::cloneAgentRegistryEntryMap":                      {},
-		"internal/runtime/flowdata/flowdata.go::ValidateSource":                                                  {},
-		"internal/runtime/flowdata/flowdata.go::sortedAgentLocalIDs":                                             {},
 		"internal/runtime/manager/flow_activation.go::(*AgentManager).flowInstanceAgentRecords":                  {},
-		"internal/runtime/manager/flow_activation.go::StaticAgentMaterializationRecords":                         {},
-		"internal/runtime/manager/flow_activation.go::flowAgentNamePlans":                                        {},
-		"internal/runtime/manager/flow_activation.go::projectAgentNamePlans":                                     {},
-		"internal/runtime/manager/flow_activation.go::staticAgentsForScope":                                      {},
 		"internal/runtime/manager/flow_activation.go::staticFlowLocalEventSet":                                   {},
-		"internal/runtime/semanticview/agent_declarations.go::AgentDeclarations":                                 {},
 		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryFlowWildcardSubscriptions":    {},
 		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryProjectWildcardSubscriptions": {},
 		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                            {},

@@ -50,42 +50,52 @@ func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(
 		ID:             "public-worker",
 		AuthoredFields: map[string]bool{"id": true},
 	}
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
-			omittedOwner: {Kind: "agent", LocalID: "worker", Full: omittedOwner},
-			literalOwner: {Kind: "agent", LocalID: "worker", Full: literalOwner},
-		}},
-	})
-	source := staticConnectAgentScopeSource{
-		Source: base,
-		projects: []semanticview.ProjectScope{
-			{
-				Key: "packages/first", OwningFlowID: "support",
-				Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": omittedEntry},
-				AgentURIs: map[string]string{"worker": omittedOwner},
-			},
-			{
-				Key: "packages/second", OwningFlowID: "support",
-				Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": literalEntry},
-				AgentURIs: map[string]string{"worker": literalOwner},
+	first := runtimecontracts.FlowContractView{
+		Path: "first-support",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: "first-support", PackageKey: "packages/first",
+		},
+		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": omittedEntry},
+		AgentURIs: map[string]string{"worker": omittedOwner},
+	}
+	second := runtimecontracts.FlowContractView{
+		Path: "second-support",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: "second-support", PackageKey: "packages/second",
+		},
+		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": literalEntry},
+		AgentURIs: map[string]string{"worker": literalOwner},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{first, second}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"first-support":  &root.Children[0],
+				"second-support": &root.Children[1],
 			},
 		},
-	}
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+			omittedOwner: {Kind: "agent", FlowID: "first-support", LocalID: "worker", Full: omittedOwner},
+			literalOwner: {Kind: "agent", FlowID: "second-support", LocalID: "worker", Full: literalOwner},
+		}},
+	})
 
 	for _, tc := range []struct {
 		name       string
 		packageKey string
+		flowID     string
 		publicID   string
 		owner      string
 	}{
-		{name: "omitted id", packageKey: "packages/first", publicID: "worker", owner: omittedOwner},
-		{name: "literal override", packageKey: "packages/second", publicID: "public-worker", owner: literalOwner},
+		{name: "omitted id", packageKey: "packages/first", flowID: "first-support", publicID: "worker", owner: omittedOwner},
+		{name: "literal override", packageKey: "packages/second", flowID: "second-support", publicID: "public-worker", owner: literalOwner},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			endpoint := semanticview.AuthoredEventEndpoint{
 				Kind:         semanticview.EventEndpointAgent,
 				PackageKey:   tc.packageKey,
-				FlowID:       "support",
+				FlowID:       tc.flowID,
 				AgentLocalID: "worker",
 				AgentID:      tc.publicID,
 			}
@@ -101,15 +111,6 @@ func TestStaticConnectReceiverAgentPreservesExactProjectScopeAndLocalCoordinate(
 			}
 		})
 	}
-}
-
-type staticConnectAgentScopeSource struct {
-	semanticview.Source
-	projects []semanticview.ProjectScope
-}
-
-func (s staticConnectAgentScopeSource) ProjectScopes() []semanticview.ProjectScope {
-	return append([]semanticview.ProjectScope(nil), s.projects...)
 }
 
 func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {

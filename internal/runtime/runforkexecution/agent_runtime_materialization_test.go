@@ -516,6 +516,9 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 				EmitEvents:     []string{"analysis.done"},
 			},
 		},
+		AgentURIs: map[string]string{
+			"analyzer": "test://selected-contract/analysis/analyzer",
+		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
@@ -532,6 +535,12 @@ func TestSelectedContractStaticAgentRecordsIncludeInferredFlowRequiredAgents(t *
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"analysis/analyzer": {
+					Kind: "agent", FlowID: "analysis", LocalID: "analyzer",
+					Full: "test://selected-contract/analysis/analyzer",
+				},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				"test://selected-contract/analysis/analyzer": {
 					Kind: "agent", FlowID: "analysis", LocalID: "analyzer",
 					Full: "test://selected-contract/analysis/analyzer",
 				},

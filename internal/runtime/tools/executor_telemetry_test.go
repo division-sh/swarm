@@ -320,7 +320,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForToolDiagnostics(t *testing.T)
 
 func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) {
 	bus := &telemetryBusStub{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -332,7 +332,8 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 				Required: []string{"category"},
 			},
 		},
-	})
+	}
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-1", "")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -403,7 +404,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 
 func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T) {
 	bus := &telemetryBusStub{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -415,7 +416,8 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 				Required: []string{"category"},
 			},
 		},
-	})
+	}
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "selected-agent", "")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
@@ -436,7 +438,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 
 func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPublishFailure(t *testing.T) {
 	bus := &telemetryBusStub{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -448,7 +450,8 @@ func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPubl
 				Required: []string{"category"},
 			},
 		},
-	})
+	}
+	source := semanticview.Wrap(bundle)
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -554,7 +557,7 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 
 func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(t *testing.T) {
 	bus := &telemetryBusStub{publishErr: errors.New("publish down")}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"category.assessed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -566,7 +569,8 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 				Required: []string{"category"},
 			},
 		},
-	})
+	}
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "agent-emit-3", "")
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -577,8 +581,12 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 	})
 	ctx = runtimebus.WithInboundEvent(ctx, toolTestInboundEvent("trigger.input", nil, events.EventEnvelope{}, executionmode.Live))
 
-	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "finops"}); err == nil {
+	_, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{"category": "finops"})
+	if err == nil {
 		t.Fatal("expected publish failure")
+	}
+	if !strings.Contains(err.Error(), "event_publish_failed") {
+		t.Fatalf("Execute(emit) error = %v, want canonical publish failure", err)
 	}
 	if len(bus.logs) != 1 {
 		t.Fatalf("runtime log count = %d, want 1", len(bus.logs))

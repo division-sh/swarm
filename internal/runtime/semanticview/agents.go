@@ -35,6 +35,9 @@ func ResolveAgentDeclaration(source Source, cfg models.AgentConfig) (AgentDeclar
 		}
 		return AgentDeclaration{}, false
 	}
+	if name != (agentidentity.Name{}) {
+		return AgentDeclaration{}, false
+	}
 	if declaration, ok := resolveAgentDeclarationByID(source, flowID, agentID); ok {
 		return declaration, true
 	}
@@ -85,38 +88,32 @@ func retiredLocalAgentAlias(source Source, flowID, candidate string) bool {
 }
 
 func AgentDeclarationOwner(source Source, flowID, logicalID string) (string, bool) {
-	return agentDeclarationOwner(source, AgentDeclaration{OwnerFlowID: flowID, LocalID: logicalID})
+	flowID = strings.TrimSpace(flowID)
+	logicalID = strings.TrimSpace(logicalID)
+	var matched AgentDeclaration
+	for _, declaration := range AgentDeclarations(source) {
+		if strings.TrimSpace(declaration.OwnerFlowID) != flowID || strings.TrimSpace(declaration.LocalID) != logicalID {
+			continue
+		}
+		if strings.TrimSpace(matched.LocalID) != "" {
+			return "", false
+		}
+		matched = declaration
+	}
+	if strings.TrimSpace(matched.LocalID) == "" {
+		return "", false
+	}
+	return agentDeclarationOwner(source, matched)
 }
 
 func ScopedAgentDeclarationOwner(source Source, declaration AgentDeclaration) (string, bool) {
-	declarations := AgentDeclarations(source)
-	for _, candidate := range declarations {
-		if strings.TrimSpace(candidate.ScopeKind) != strings.TrimSpace(declaration.ScopeKind) ||
-			strings.TrimSpace(candidate.ScopeID) != strings.TrimSpace(declaration.ScopeID) ||
-			strings.TrimSpace(candidate.LocalID) != strings.TrimSpace(declaration.LocalID) {
-			continue
-		}
-		ownerURI := strings.TrimSpace(candidate.OwnerURI)
-		for _, other := range declarations {
-			if strings.TrimSpace(other.ScopeKind) == strings.TrimSpace(candidate.ScopeKind) &&
-				strings.TrimSpace(other.ScopeID) == strings.TrimSpace(candidate.ScopeID) &&
-				strings.TrimSpace(other.LocalID) == strings.TrimSpace(candidate.LocalID) {
-				continue
-			}
-			if ownerURI != "" && strings.TrimSpace(other.OwnerURI) == ownerURI {
-				return "", false
-			}
-		}
-		return agentDeclarationOwner(source, candidate)
-	}
-	return "", false
+	return agentDeclarationOwner(source, declaration)
 }
 
 func agentDeclarationOwner(source Source, declaration AgentDeclaration) (string, bool) {
 	if source == nil {
 		return "", false
 	}
-	flowID := strings.TrimSpace(declaration.OwnerFlowID)
 	logicalID := strings.TrimSpace(declaration.LocalID)
 	if logicalID == "" {
 		return "", false
@@ -126,80 +123,24 @@ func agentDeclarationOwner(source Source, declaration AgentDeclaration) (string,
 	if !ok || bundle == nil {
 		return "", false
 	}
-	if owner := strings.TrimSpace(declaration.OwnerURI); owner != "" {
-		ref, exists := bundle.URIRegistry.ByURI[owner]
-		if exists && strings.TrimSpace(ref.Kind) == "agent" && strings.TrimSpace(ref.LocalID) == logicalID {
-			return owner, true
-		}
+	owner := strings.TrimSpace(declaration.OwnerURI)
+	if owner == "" {
 		return "", false
 	}
-	owners := map[string]struct{}{}
-	for _, ref := range bundle.URIRegistry.Agents {
-		if strings.TrimSpace(ref.LocalID) != logicalID {
-			continue
-		}
-		switch strings.TrimSpace(declaration.ScopeKind) {
-		case "flow":
-			if strings.TrimSpace(ref.FlowID) != flowID {
-				continue
-			}
-		case "project":
-			if strings.TrimSpace(ref.FlowID) != "" || !projectAgentRefOwnedByFlow(source, ref, flowID, logicalID) {
-				continue
-			}
-		default:
-			refFlowID := strings.TrimSpace(ref.FlowID)
-			if refFlowID != flowID {
-				if refFlowID != "" || !projectAgentRefOwnedByFlow(source, ref, flowID, logicalID) {
-					continue
-				}
-			}
-		}
-		owner := strings.TrimSpace(ref.Full)
-		if owner == "" {
-			owner = strings.TrimSpace(ref.Absolute)
-		}
-		if owner != "" {
-			owners[owner] = struct{}{}
-		}
+	ref, exists := bundle.URIRegistry.ByURI[owner]
+	if !exists || strings.TrimSpace(ref.Kind) != "agent" || strings.TrimSpace(ref.LocalID) != logicalID {
+		return "", false
 	}
-	if len(owners) == 1 {
-		for owner := range owners {
+	for _, candidate := range AgentDeclarations(source) {
+		if candidate.Source == declaration.Source &&
+			strings.TrimSpace(candidate.ScopeKind) == strings.TrimSpace(declaration.ScopeKind) &&
+			strings.TrimSpace(candidate.ScopeID) == strings.TrimSpace(declaration.ScopeID) &&
+			strings.TrimSpace(candidate.OwnerFlowID) == strings.TrimSpace(declaration.OwnerFlowID) &&
+			strings.TrimSpace(candidate.LocalID) == logicalID && strings.TrimSpace(candidate.OwnerURI) == owner {
 			return owner, true
 		}
 	}
 	return "", false
-}
-
-func projectAgentRefOwnedByFlow(source Source, ref runtimecontracts.ContractURIRef, flowID, logicalID string) bool {
-	refPath := strings.Trim(strings.TrimSpace(ref.Path), "/")
-	matchingScopes := 0
-	for _, scope := range source.ProjectScopes() {
-		if strings.TrimSpace(scope.OwningFlowID) != strings.TrimSpace(flowID) {
-			continue
-		}
-		if _, ok := scope.Agents[strings.TrimSpace(logicalID)]; !ok {
-			continue
-		}
-		matchingScopes++
-		if strings.Trim(strings.TrimSpace(scope.Key), "/") == refPath {
-			return true
-		}
-	}
-	if matchingScopes != 1 {
-		return false
-	}
-	matchingRefs := 0
-	bundle, ok := Bundle(source)
-	if !ok || bundle == nil {
-		return false
-	}
-	for _, candidate := range bundle.URIRegistry.Agents {
-		if strings.TrimSpace(candidate.FlowID) == "" && strings.TrimSpace(candidate.LocalID) == strings.TrimSpace(logicalID) {
-			matchingRefs++
-		}
-	}
-	return matchingRefs == 1
 }
 
 func resolveAgentDeclarationByName(source Source, flowID, agentID, ownerURI string) (AgentDeclaration, bool) {
