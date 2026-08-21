@@ -76,6 +76,7 @@ type providerOriginRecoveryDisposition uint8
 
 const (
 	providerOriginRecoveryCurrent providerOriginRecoveryDisposition = iota + 1
+	providerOriginRecoveryExpiredExact
 	providerOriginRecoveryAlreadyTerminal
 )
 
@@ -867,9 +868,14 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 	if err != nil {
 		return 0, err
 	}
-	if record.Status == StatusInProgress && record.claimToken == claim.PersistenceToken() && record.ClaimVersion == claim.Version() &&
-		!record.ClaimExpiresAt.IsZero() && record.ClaimExpiresAt.After(now) {
-		return providerOriginRecoveryCurrent, nil
+	if record.Status == StatusInProgress && record.claimToken == claim.PersistenceToken() && record.ClaimVersion == claim.Version() {
+		if record.ClaimExpiresAt.IsZero() {
+			return 0, fmt.Errorf("%w: provider origin recovery exact claim has no lease", ErrConflict)
+		}
+		if record.ClaimExpiresAt.After(now) {
+			return providerOriginRecoveryCurrent, nil
+		}
+		return providerOriginRecoveryExpiredExact, nil
 	}
 	if !record.Status.Terminal() || record.ClaimVersion != claim.Version() {
 		return 0, fmt.Errorf("%w: provider origin recovery claim is stale", ErrConflict)
@@ -898,6 +904,68 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 		return 0, fmt.Errorf("%w: provider origin recovery terminal claim lacks exact settlement", ErrConflict)
 	}
 	return providerOriginRecoveryAlreadyTerminal, nil
+}
+
+func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
+	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
+	if err != nil {
+		return false, err
+	}
+	switch disposition {
+	case providerOriginRecoveryCurrent:
+		return false, nil
+	case providerOriginRecoveryAlreadyTerminal:
+		return true, nil
+	case providerOriginRecoveryExpiredExact:
+	default:
+		return false, fmt.Errorf("provider origin recovery disposition %d is invalid", disposition)
+	}
+	now, err := a.databaseNow(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	expiresAt := now.Add(DefaultLeaseTTL)
+	attemptQuery := `
+		UPDATE event_delivery_attempts
+		SET lease_expires_at=$1
+		WHERE delivery_id=$2::uuid AND claim_version=$3 AND claim_token=$4::uuid
+		  AND open_marker=TRUE AND lease_expires_at<=$5`
+	deliveryQuery := `
+		UPDATE event_deliveries
+		SET updated_at=$1
+		WHERE delivery_id=$2::uuid AND status='in_progress' AND claim_version=$3
+		  AND current_attempt_version=$3 AND current_attempt_open=TRUE`
+	if a.dialect == DialectSQLite {
+		attemptQuery = `
+			UPDATE event_delivery_attempts
+			SET lease_expires_at=?
+			WHERE delivery_id=? AND claim_version=? AND claim_token=?
+			  AND open_marker=TRUE AND lease_expires_at<=?`
+		deliveryQuery = `
+			UPDATE event_deliveries
+			SET updated_at=?
+			WHERE delivery_id=? AND status='in_progress' AND claim_version=?
+			  AND current_attempt_version=? AND current_attempt_open=TRUE`
+	}
+	result, err := tx.ExecContext(ctx, attemptQuery, expiresAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(), now)
+	if err != nil {
+		return false, fmt.Errorf("restore exact provider origin recovery lease: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return false, fmt.Errorf("%w: provider origin recovery lost exact expired claim", ErrConflict)
+	}
+	deliveryArgs := []any{now, claim.DeliveryID(), claim.Version()}
+	if a.dialect == DialectSQLite {
+		deliveryArgs = []any{now, claim.DeliveryID(), claim.Version(), claim.Version()}
+	}
+	result, err = tx.ExecContext(ctx, deliveryQuery, deliveryArgs...)
+	if err != nil {
+		return false, fmt.Errorf("record provider origin recovery lease: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return false, fmt.Errorf("%w: provider origin recovery lost delivery lifecycle owner", ErrConflict)
+	}
+	return false, nil
 }
 
 func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {
@@ -2087,7 +2155,9 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 		return deliveryRecord{}, time.Time{}, err
 	}
 	if record.Status != StatusInProgress || record.claimToken != claim.PersistenceToken() || record.ClaimVersion != claim.Version() ||
-		events.EncodeDeliveryRouteIdentity(record.RouteIdentity) != claim.RouteIdentity() || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
+		record.RunID != claim.RunID() || events.EncodeDeliveryRouteIdentity(record.RouteIdentity) != claim.RouteIdentity() ||
+		record.SubscriberClass != claim.SubscriberClass() || record.SubscriberID != claim.SubscriberID() ||
+		record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
 	}
 	return record, now, nil

@@ -235,6 +235,127 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 	})
 }
 
+func TestProviderAttemptHeartbeatAuthorityParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, base completionSettlementFixture) {
+		for _, candidate := range []struct {
+			name    string
+			drained bool
+		}{
+			{name: "current"},
+			{name: "drained", drained: true},
+		} {
+			t.Run(candidate.name, func(t *testing.T) {
+				fixture := freshProviderDrainFixture(t, base.sqlite)
+				ctx := providerDrainContext(t, fixture, "heartbeat-"+candidate.name)
+				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
+				if candidate.drained {
+					transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+					if transition.ProviderDrainCount != 1 {
+						t.Fatalf("capture heartbeat drain: %+v", transition)
+					}
+				}
+				now := time.Now().UTC()
+				shortLease := now.Add(20 * time.Second)
+				setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, shortLease)
+				setProviderOriginLease(t, fixture, fixture.origin, shortLease)
+				if candidate.drained {
+					setProviderDrainLease(t, fixture, handle.Attempt().AttemptID, shortLease)
+				}
+				if err := fixture.store.HeartbeatCompletionAttempt(ctx, handle.Attempt(), now, 2*time.Minute); err != nil {
+					t.Fatalf("heartbeat exact provider authority: %v", err)
+				}
+				minimum := now.Add(time.Minute)
+				if lease := completionAttemptLease(t, fixture, handle.Attempt().AttemptID); !lease.After(minimum) {
+					t.Fatalf("effect lease=%s, want after %s", lease, minimum)
+				}
+				if lease := providerOriginLease(t, fixture, fixture.origin); !lease.After(minimum) {
+					t.Fatalf("origin lease=%s, want after %s", lease, minimum)
+				}
+				if candidate.drained {
+					if lease := providerDrainLease(t, fixture, handle.Attempt().AttemptID); !lease.After(minimum) {
+						t.Fatalf("drain lease=%s, want after %s", lease, minimum)
+					}
+				}
+
+				before := completionAttemptLease(t, fixture, handle.Attempt().AttemptID)
+				stale := handle.Attempt()
+				foreign, err := runtimedelivery.AdmitPersistedClaim(
+					fixture.origin.DeliveryID(), fixture.origin.RunID(), fixture.origin.RouteIdentity(),
+					uuid.NewString(), fixture.origin.Version()+1, fixture.origin.SubscriberClass(), fixture.origin.SubscriberID(),
+				)
+				if err != nil {
+					t.Fatalf("admit foreign heartbeat claim: %v", err)
+				}
+				stale.OriginDelivery = foreign
+				if err := fixture.store.HeartbeatCompletionAttempt(ctx, stale, now.Add(time.Second), 3*time.Minute); err == nil {
+					t.Fatal("foreign provider origin renewed authority")
+				}
+				if after := completionAttemptLease(t, fixture, handle.Attempt().AttemptID); !after.Equal(before) {
+					t.Fatalf("failed heartbeat changed effect lease from %s to %s", before, after)
+				}
+			})
+		}
+	})
+}
+
+func TestProviderAttemptCompletionAfterOriginalOriginExpiryParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, base completionSettlementFixture) {
+		for _, candidate := range []struct {
+			name    string
+			drained bool
+		}{
+			{name: "current"},
+			{name: "drained", drained: true},
+		} {
+			t.Run(candidate.name, func(t *testing.T) {
+				fixture := freshProviderDrainFixture(t, base.sqlite)
+				ctx := providerDrainContext(t, fixture, "completion-after-origin-expiry-"+candidate.name)
+				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
+				if candidate.drained {
+					transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+					if transition.ProviderDrainCount != 1 {
+						t.Fatalf("capture delayed-completion drain: %+v", transition)
+					}
+				}
+				now := time.Now().UTC()
+				// Keep the synthetic deadline beyond PostgreSQL's persisted start and
+				// SQLite's second-granularity expiry comparisons.
+				originalExpiry := now.Add(2 * time.Second)
+				setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, originalExpiry)
+				setProviderOriginLease(t, fixture, fixture.origin, originalExpiry)
+				if candidate.drained {
+					setProviderDrainLease(t, fixture, handle.Attempt().AttemptID, originalExpiry)
+				}
+				if err := fixture.store.HeartbeatCompletionAttempt(ctx, handle.Attempt(), now, 2*time.Minute); err != nil {
+					t.Fatalf("retain delayed provider authority: %v", err)
+				}
+				if delay := time.Until(originalExpiry.Add(20 * time.Millisecond)); delay > 0 {
+					timer := time.NewTimer(delay)
+					<-timer.C
+				}
+				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "provider-head-delayed")
+				if candidate.drained {
+					settlement.ProviderHead = nil
+				}
+				if err := handle.SettleCompletion(ctx, settlement); err != nil {
+					t.Fatalf("settle after original origin expiry: %v", err)
+				}
+				if !candidate.drained {
+					deliveryStore := fixture.store.(runtimedelivery.Store)
+					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0); err != nil {
+						t.Fatalf("settle renewed current origin: %v", err)
+					}
+				}
+				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
+				requireOriginDeliveryOutcome(t, fixture, "delivered", "")
+				if candidate.drained {
+					requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+				}
+			})
+		}
+	})
+}
+
 func TestProviderAttemptDrainAdapterParity(t *testing.T) {
 	adapters := []string{"anthropic_api", "openai_compatible", "openai_responses", "claude_cli", "mock_python"}
 	forEachProviderDrainStore(t, func(t *testing.T, base completionSettlementFixture) {
@@ -397,15 +518,18 @@ func TestProviderAttemptDrainSettlementRollbackParity(t *testing.T) {
 
 func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 	cases := []struct {
-		name     string
-		observe  bool
-		expire   bool
-		capture  bool
-		wantCode string
+		name          string
+		observe       bool
+		expire        bool
+		capture       bool
+		originExpired bool
+		wantCode      string
 	}{
 		{name: "after_launch", capture: false, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_capture", capture: true, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_response", observe: true, capture: true, wantCode: "effect_recovery_outcome_unconfirmed"},
+		{name: "after_launch_expired_origin", capture: false, originExpired: true, wantCode: "effect_recovery_outcome_unconfirmed"},
+		{name: "after_capture_expired_origin", capture: true, originExpired: true, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "drain_expiry", observe: true, capture: true, expire: true, wantCode: "provider_attempt_drain_expired"},
 	}
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
@@ -430,6 +554,9 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 					transition = supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
 				} else {
 					setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, time.Now().UTC().Add(-time.Minute))
+				}
+				if candidate.originExpired {
+					expireProviderOriginLease(t, fixture, fixture.origin)
 				}
 				now := time.Now().UTC()
 				if candidate.expire {
@@ -459,6 +586,22 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 				}
 			})
 		}
+	})
+}
+
+func TestProviderAttemptDrainRecoveryRejectsNewerOriginClaimParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := providerDrainContext(t, fixture, "recovery-newer-origin")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "newer-origin")
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+		expireProviderOriginLease(t, fixture, fixture.origin)
+		replaceProviderOriginClaim(t, fixture, fixture.origin)
+		if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC())); err == nil {
+			t.Fatal("provider recovery accepted a newer origin claim")
+		}
+		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
+		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
 	})
 }
 
@@ -579,6 +722,123 @@ func requireProviderDrainState(t *testing.T, fixture completionSettlementFixture
 	var state string
 	if err := fixture.db.QueryRow(query, attemptID).Scan(&state); err != nil || state != want {
 		t.Fatalf("provider drain state=%q err=%v, want %q", state, err, want)
+	}
+}
+
+func setProviderOriginLease(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim, lease time.Time) {
+	t.Helper()
+	query := `UPDATE event_delivery_attempts SET lease_expires_at=? WHERE delivery_id=? AND claim_version=? AND claim_token=? AND open_marker=TRUE`
+	if !fixture.sqlite {
+		query = `UPDATE event_delivery_attempts SET lease_expires_at=$1 WHERE delivery_id=$2::uuid AND claim_version=$3 AND claim_token=$4::uuid AND open_marker=TRUE`
+	}
+	result, err := fixture.db.Exec(query, lease.UTC(), claim.DeliveryID(), claim.Version(), claim.PersistenceToken())
+	if err != nil {
+		t.Fatalf("set provider origin lease: %v", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		t.Fatalf("set provider origin lease rows=%d, want 1", rows)
+	}
+}
+
+func expireProviderOriginLease(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim) {
+	t.Helper()
+	expiresAt := time.Now().UTC().Add(-time.Second)
+	startedAt := expiresAt.Add(-time.Minute)
+	query := `UPDATE event_delivery_attempts SET started_at=?,lease_expires_at=? WHERE delivery_id=? AND claim_version=? AND claim_token=? AND open_marker=TRUE`
+	if !fixture.sqlite {
+		query = `UPDATE event_delivery_attempts SET started_at=$1,lease_expires_at=$2 WHERE delivery_id=$3::uuid AND claim_version=$4 AND claim_token=$5::uuid AND open_marker=TRUE`
+	}
+	result, err := fixture.db.Exec(query, startedAt, expiresAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken())
+	if err != nil {
+		t.Fatalf("expire provider origin lease: %v", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		t.Fatalf("expire provider origin lease rows=%d, want 1", rows)
+	}
+	deliveryQuery := `UPDATE event_deliveries SET started_at=? WHERE delivery_id=? AND status='in_progress' AND claim_version=?`
+	if !fixture.sqlite {
+		deliveryQuery = `UPDATE event_deliveries SET started_at=$1 WHERE delivery_id=$2::uuid AND status='in_progress' AND claim_version=$3`
+	}
+	result, err = fixture.db.Exec(deliveryQuery, startedAt, claim.DeliveryID(), claim.Version())
+	if err != nil {
+		t.Fatalf("align expired provider origin lifecycle start: %v", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		t.Fatalf("align expired provider origin lifecycle rows=%d, want 1", rows)
+	}
+}
+
+func providerOriginLease(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim) time.Time {
+	t.Helper()
+	query := `SELECT lease_expires_at FROM event_delivery_attempts WHERE delivery_id=? AND claim_version=? AND claim_token=?`
+	if !fixture.sqlite {
+		query = `SELECT lease_expires_at FROM event_delivery_attempts WHERE delivery_id=$1::uuid AND claim_version=$2 AND claim_token=$3::uuid`
+	}
+	return providerLeaseTime(t, fixture, query, claim.DeliveryID(), claim.Version(), claim.PersistenceToken())
+}
+
+func setProviderDrainLease(t *testing.T, fixture completionSettlementFixture, attemptID string, lease time.Time) {
+	t.Helper()
+	query := `UPDATE runtime_provider_attempt_drains SET expires_at=? WHERE attempt_id=? AND state='pending'`
+	if !fixture.sqlite {
+		query = `UPDATE runtime_provider_attempt_drains SET expires_at=$1 WHERE attempt_id=$2::uuid AND state='pending'`
+	}
+	result, err := fixture.db.Exec(query, lease.UTC(), attemptID)
+	if err != nil {
+		t.Fatalf("set provider drain lease: %v", err)
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		t.Fatalf("set provider drain lease rows=%d, want 1", rows)
+	}
+}
+
+func providerDrainLease(t *testing.T, fixture completionSettlementFixture, attemptID string) time.Time {
+	t.Helper()
+	query := `SELECT expires_at FROM runtime_provider_attempt_drains WHERE attempt_id=?`
+	if !fixture.sqlite {
+		query = `SELECT expires_at FROM runtime_provider_attempt_drains WHERE attempt_id=$1::uuid`
+	}
+	return providerLeaseTime(t, fixture, query, attemptID)
+}
+
+func providerLeaseTime(t *testing.T, fixture completionSettlementFixture, query string, args ...any) time.Time {
+	t.Helper()
+	if fixture.sqlite {
+		var lease conversationForkTimeValue
+		if err := fixture.db.QueryRow(query, args...).Scan(&lease); err != nil || !lease.Valid {
+			t.Fatalf("load SQLite provider lease: valid=%v err=%v", lease.Valid, err)
+		}
+		return lease.Time.UTC()
+	}
+	var lease time.Time
+	if err := fixture.db.QueryRow(query, args...).Scan(&lease); err != nil {
+		t.Fatalf("load PostgreSQL provider lease: %v", err)
+	}
+	return lease.UTC()
+}
+
+func replaceProviderOriginClaim(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim) {
+	t.Helper()
+	deliveryStore, ok := fixture.store.(runtimedelivery.Store)
+	if !ok {
+		t.Fatalf("completion store %T does not expose delivery reclaim", fixture.store)
+	}
+	ctx := testAuthorActivityContext()
+	snapshot, err := deliveryStore.Snapshot(ctx, claim.DeliveryID())
+	if err != nil {
+		t.Fatalf("load provider origin before reclaim: %v", err)
+	}
+	event := eventtest.ExistingRunRootIngress(
+		snapshot.EventID, "completion.origin", "gateway", "", []byte(`{}`), 0,
+		snapshot.RunID, events.EventEnvelope{}, snapshot.CreatedAt,
+	)
+	result, err := deliveryStore.ClaimDelivery(ctx, snapshot.Authority, event, snapshot.Route)
+	if err != nil {
+		t.Fatalf("reclaim provider origin: %v", err)
+	}
+	claimed, ok := result.Acquired()
+	if !ok || claimed.Claim.Version() != claim.Version()+1 || claimed.Claim.Same(claim) {
+		t.Fatalf("newer provider origin claim=%+v disposition=%s, want version %d", claimed.Claim, result.Disposition, claim.Version()+1)
 	}
 }
 

@@ -260,6 +260,16 @@ func (s *DeliverySQLiteOwner) ValidateProviderOriginTx(ctx context.Context, tx *
 	return sqliteDeliveryAdapter.ValidateCurrentClaim(ctx, tx, claim)
 }
 
+func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, lease time.Duration) error {
+	_, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+	return err
+}
+
+func (s *DeliverySQLiteOwner) RenewProviderOriginTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, lease time.Duration) error {
+	_, err := sqliteDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+	return err
+}
+
 func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -341,8 +351,8 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginRecoveryFailureTx(
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
 ) error {
-	disposition, err := postgresDeliveryAdapter.providerOriginRecoveryDisposition(ctx, tx, claim)
-	if err != nil || disposition == providerOriginRecoveryAlreadyTerminal {
+	alreadyTerminal, err := postgresDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
+	if err != nil || alreadyTerminal {
 		return err
 	}
 	return s.SettleProviderOriginFailureTx(ctx, tx, story, claim, settlement)
@@ -355,8 +365,8 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginRecoveryFailureTx(
 	claim runtimedelivery.Claim,
 	settlement runtimedelivery.Settlement,
 ) error {
-	disposition, err := sqliteDeliveryAdapter.providerOriginRecoveryDisposition(ctx, tx, claim)
-	if err != nil || disposition == providerOriginRecoveryAlreadyTerminal {
+	alreadyTerminal, err := sqliteDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
+	if err != nil || alreadyTerminal {
 		return err
 	}
 	return s.SettleProviderOriginFailureTx(ctx, tx, story, claim, settlement)

@@ -222,6 +222,69 @@ func validateProviderDrainPermit(attempt runtimeeffects.Attempt, permit provider
 	return nil
 }
 
+func loadProviderAttemptOriginPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (runtimedelivery.Claim, error) {
+	return loadProviderAttemptOrigin(ctx, tx, attempt, true)
+}
+
+func loadProviderAttemptOriginSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (runtimedelivery.Claim, error) {
+	return loadProviderAttemptOrigin(ctx, tx, attempt, false)
+}
+
+func loadProviderAttemptOrigin(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (runtimedelivery.Claim, error) {
+	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
+		return runtimedelivery.Claim{}, fmt.Errorf("provider attempt origin requires normal-agent authority")
+	}
+	var deliveryID, runID, routeIdentity, claimToken, subscriberType, subscriberID string
+	var claimVersion int64
+	var err error
+	if postgres {
+		err = tx.QueryRowContext(ctx, `
+			SELECT COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),
+			       COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
+			       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_type,''),
+			       COALESCE(origin_subscriber_id,'')
+			FROM runtime_external_effect_attempts
+			WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
+			FOR UPDATE
+		`, attempt.AttemptID, attempt.OperationID).Scan(
+			&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriberType, &subscriberID,
+		)
+	} else {
+		err = tx.QueryRowContext(ctx, `
+			SELECT COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),
+			       COALESCE(origin_route_identity,''),COALESCE(origin_claim_token,''),
+			       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_type,''),
+			       COALESCE(origin_subscriber_id,'')
+			FROM runtime_external_effect_attempts
+			WHERE attempt_id=? AND operation_id=?
+		`, attempt.AttemptID, attempt.OperationID).Scan(
+			&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriberType, &subscriberID,
+		)
+	}
+	if err != nil {
+		return runtimedelivery.Claim{}, fmt.Errorf("load provider attempt origin: %w", err)
+	}
+	if subscriberType != string(runtimedelivery.SubscriberAgent) {
+		return runtimedelivery.Claim{}, fmt.Errorf("provider attempt origin subscriber type %q is invalid", subscriberType)
+	}
+	claim, err := runtimedelivery.AdmitPersistedClaim(
+		deliveryID, runID, routeIdentity, claimToken, claimVersion, runtimedelivery.SubscriberAgent, subscriberID,
+	)
+	if err != nil {
+		return runtimedelivery.Claim{}, err
+	}
+	if !attempt.OriginDelivery.Same(claim) {
+		return runtimedelivery.Claim{}, runtimefailures.New(
+			runtimefailures.ClassLifecycleConflict,
+			"provider_attempt_origin_mismatch",
+			"external-effects",
+			"heartbeat_attempt",
+			map[string]any{"attempt_id": attempt.AttemptID},
+		)
+	}
+	return claim, nil
+}
+
 type providerDrainRecoveryResolution struct {
 	Kind    completionSettlementPermitKind
 	Drain   providerDrainPermit

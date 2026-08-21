@@ -12771,6 +12771,7 @@ platform_tables:
       - destructive reset coordinator plan/result/lock/idempotency owner has accepted the operation
       - destructive reset quiescence has terminalized active runs and retryable deliveries for the same operation envelope
       - expired succeeded/failed agent directive operations for the cleanup run set have been removed; any remaining directive operation authority blocks cleanup
+      - every normal-provider attempt and provider-attempt drain for the cleanup run set is terminal; nonterminal provider authority blocks cleanup
     invariants:
       - No production cleanup owner may use all-table truncate, cascading bulk truncation, table name heuristics, entity_id-only predicates, or flow_instance-only predicates.
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
@@ -12779,7 +12780,7 @@ platform_tables:
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
-      - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, and provider-attempt drain evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry.
+      - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, and provider-attempt drain evidence are replay, reconciliation, and no-redispatch authority. They survive destructive reset with the preserved agent registry. Exact provider-origin coordinates are immutable snapshots, not foreign keys into deleted delivery attempts; cleanup rejects nonterminal attempts or pending drains before deleting their delivery history.
       - Generated node-state tables remain split-preserved under their contract-owned identity. Runtime boot may create a
         missing generated node-state table only after platform-schema acceptance.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
@@ -13554,7 +13555,10 @@ platform_tables:
             INDEX idx_runtime_external_effect_operations_recovery (state, updated_at)
         );
     runtime_external_effect_attempts:
-      description: One actual transport/process/write attempt under a durable external-effect operation.
+      description: >-
+        One actual transport/process/write attempt under a durable external-effect operation. Normal-provider origin
+        columns are a validated immutable snapshot rather than a foreign key: destructive reset may delete mutable
+        delivery history only after all provider authority is terminal, while no-redispatch evidence survives.
       ddl: |
         CREATE TABLE runtime_external_effect_attempts (
             attempt_id         UUID PRIMARY KEY,
@@ -13591,7 +13595,6 @@ platform_tables:
             CHECK ((usage_target_kind IS NULL AND usage_target_id IS NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'agent_turn' AND usage_target_id IS NOT NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'conversation_fork_turn_completion' AND usage_target_id IS NOT NULL AND target_ordinal > 0)),
             CHECK ((usage_target_kind = 'conversation_fork_turn_completion' AND capability_surface_id IS NULL) OR (COALESCE(usage_target_kind, '') <> 'conversation_fork_turn_completion' AND capability_surface_id IS NOT NULL)),
             CHECK ((origin_delivery_id IS NULL AND origin_run_id IS NULL AND origin_route_identity IS NULL AND origin_claim_token IS NULL AND origin_claim_version IS NULL AND origin_subscriber_type IS NULL AND origin_subscriber_id IS NULL) OR (origin_delivery_id IS NOT NULL AND origin_run_id IS NOT NULL AND NULLIF(TRIM(origin_route_identity), '') IS NOT NULL AND origin_claim_token IS NOT NULL AND origin_claim_version > 0 AND origin_subscriber_type = 'agent' AND NULLIF(TRIM(origin_subscriber_id), '') IS NOT NULL)),
-            FOREIGN KEY (origin_delivery_id, origin_claim_version, origin_claim_token) REFERENCES event_delivery_attempts(delivery_id, claim_version, claim_token),
             INDEX idx_runtime_external_effect_attempts_recovery (state, lease_expires_at, updated_at),
             INDEX idx_runtime_external_effect_attempts_target (usage_target_kind, usage_target_id) WHERE usage_target_id IS NOT NULL
         );
@@ -13600,7 +13603,9 @@ platform_tables:
         Exact normal-agent predecessor provider attempts captured atomically by lifecycle supersession after launch.
         A pending row authorizes only immutable completion evidence, budget settlement, and the exact originating delivery
         outcome. Running successors remain running; terminal targets expose draining until their last row settles or expires.
-        The row never authorizes provider dispatch, mutable session/provider-head projection, output publication, or successor work.
+        Origin columns are a validated immutable snapshot and deliberately do not retain a foreign key into delivery
+        history deleted by destructive reset. The row never authorizes provider dispatch, mutable session/provider-head
+        projection, output publication, or successor work.
       ddl: |
         CREATE TABLE runtime_provider_attempt_drains (
             drain_id                 UUID PRIMARY KEY,
@@ -13636,7 +13641,6 @@ platform_tables:
             CHECK (expires_at > captured_at),
             CHECK ((state = 'pending' AND failure IS NULL AND settled_at IS NULL) OR (state = 'settled' AND settled_at IS NOT NULL) OR (state = 'expired' AND failure IS NOT NULL AND settled_at IS NOT NULL)),
             FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
-            FOREIGN KEY (origin_delivery_id, origin_claim_version, origin_claim_token) REFERENCES event_delivery_attempts(delivery_id, claim_version, claim_token),
             INDEX idx_runtime_provider_attempt_drains_pending (state, expires_at, captured_at),
             INDEX idx_runtime_provider_attempt_drains_agent (agent_id, flow_instance, predecessor_generation)
         );
@@ -34383,11 +34387,11 @@ managed_external_effect_authority:
       permit: Current and drained completion permits are distinct closed variants. The drained input structurally permits only immutable agent_turns evidence, exact effect terminal evidence, exact spend and reservation release, the exact originating delivery terminal outcome/receipt, drain settlement, and last-drain terminal lifecycle finalization.
       atomicity: The drained operation commits or rolls back every permitted fact together. Exact origin mismatch, mutable provider-head/session/conversation/watchdog/output intent, stale drain identity, duplicate non-exact evidence, or any subordinate writer failure changes nothing.
       lifecycle_truth: Terminated or failed targets remain draining until their last pending drain settles or expires with a typed loud failure, then atomically finalize to their target. A running successor stays running while predecessor drains remain exact sidecar facts. A drained predecessor cannot mutate or block the successor.
-      process_lifetime: Provider heartbeat and post-tool tail execution are process-owned after launch. Generation retirement rejects new work and may cancel generation-local consumers, but it cannot discard the accepted process-local tail before exact terminal settlement.
+      process_lifetime: Provider heartbeat and post-tool tail execution are process-owned after launch. Before launch, the generation-owned delivery heartbeat yields renewal authority while one selected-store provider heartbeat atomically renews the effect attempt, its exact origin claim, and its pending drain when present. At provider-tail completion that authority returns only when the generation remains current; supersession instead consumes the exact drained settlement. Generation retirement rejects new work and may cancel generation-local consumers, but it cannot discard the accepted process-local tail before exact terminal settlement.
       forbidden: [provider redispatch, provider-head mutation, session or conversation mutation, watchdog mutation, output publication, successor projection, inferred event-to-delivery lookup, latest-claim lookup, stale-error fallback, compatibility settlement]
   recovery:
     authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
-    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact originating delivery and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. If the same origin claim token/version already has a terminal attempt and outcome, recovery verifies and preserves that exact settlement; a newer claim, nonterminal outcome, or identity mismatch fails closed. Delivery recovery starts only after this phase reaches explicit completion.
+    launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact originating delivery and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. Recovery may restore a bounded lease only for the exact still-open origin token/version after expiry while holding the delivery lifecycle row; any newer token/version or identity mismatch fails closed. If the same origin claim token/version already has a terminal attempt and outcome, recovery verifies and preserves that exact settlement. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   invariant_ids:
     runtime.provider_attempt.origin_claim_exact:
@@ -34406,6 +34410,14 @@ managed_external_effect_authority:
       owner: selected-store external-effect recovery before delivery recovery
       rule: Every captured or crash-stranded provider attempt converges to exact terminal evidence and origin outcome without provider dispatch, and repeated recovery is idempotent.
       negative_proof: TestProviderAttemptDrainStartupRecoveryParity and TestClaudeProviderHeadCommitFailureSettlesUncertain
+    runtime.provider_attempt.tail_lease_coupled:
+      owner: selected-store completion heartbeat plus the exact generation-to-process renewal handoff
+      rule: A live normal-provider tail retains its effect attempt, exact origin claim, and pending drain through one atomic heartbeat; no generation-owned delivery heartbeat concurrently interprets origin liveness during that tail.
+      negative_proof: TestProviderAttemptHeartbeatAuthorityParity, TestProviderAttemptCompletionAfterOriginalOriginExpiryParity, and TestCompletionHeartbeatYieldsExactOriginRenewal
+    runtime.provider_attempt.destructive_reset_terminal_only:
+      owner: destructive-reset provider-authority guard plus immutable provider origin snapshots
+      rule: runtime.nuke rejects nonterminal normal-provider attempts and pending drains, while terminal attempt/drain no-redispatch evidence survives deletion of mutable delivery history without a foreign-key dependency.
+      negative_proof: TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix
     runtime.provider_attempt.mock_tail_timing:
       owner: generation-owned mockperformance Performance and mock runtime
       rule: Authored deterministic post-tool tail latency delays response observation on tool-result rounds and remains cancellation-aware.

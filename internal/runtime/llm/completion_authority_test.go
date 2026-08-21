@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -175,6 +176,64 @@ func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
 	}
 	if _, err := process.Join(waitCtx); err != nil {
 		t.Fatalf("join process: %v", err)
+	}
+}
+
+type completionOriginHeartbeatStore struct {
+	runtimedelivery.Store
+	renewals atomic.Int32
+}
+
+func (s *completionOriginHeartbeatStore) RenewClaim(context.Context, runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+	s.renewals.Add(1)
+	now := time.Now().UTC()
+	return runtimedelivery.Snapshot{UpdatedAt: now, ClaimExpiresAt: now.Add(30 * time.Millisecond)}, nil
+}
+
+func TestCompletionHeartbeatYieldsExactOriginRenewal(t *testing.T) {
+	harness := effecttest.New()
+	ctx := llmTestWorkContext(t, harness.CompletionContext("origin-renewal-handoff"))
+	owner, ok := worklifetime.OccurrenceFromContext(ctx)
+	if !ok {
+		t.Fatal("completion context has no runtime occurrence")
+	}
+	claim, ok := runtimedelivery.ClaimFromContext(ctx)
+	if !ok {
+		t.Fatal("completion context has no exact origin claim")
+	}
+	deliveryStore := &completionOriginHeartbeatStore{}
+	deliveryHeartbeat, err := runtimedelivery.StartClaimHeartbeat(ctx, owner, deliveryStore, claim)
+	if err != nil {
+		t.Fatalf("start origin heartbeat: %v", err)
+	}
+	ctx = deliveryHeartbeat.Context()
+	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	if err != nil {
+		t.Fatalf("authorize completion: %v", err)
+	}
+	_, completionHeartbeat, err := startCompletionAttemptHeartbeatWithTiming(ctx, handle, time.Hour, time.Minute)
+	if err != nil {
+		t.Fatalf("start completion heartbeat: %v", err)
+	}
+	baseline := deliveryStore.renewals.Load()
+	time.Sleep(25 * time.Millisecond)
+	if got := deliveryStore.renewals.Load(); got != baseline {
+		t.Fatalf("generation origin renewals during provider handoff=%d, want %d", got, baseline)
+	}
+	if err := completionHeartbeat.Stop(); err != nil {
+		t.Fatalf("stop completion heartbeat: %v", err)
+	}
+	deadline := time.After(time.Second)
+	for deliveryStore.renewals.Load() == baseline {
+		select {
+		case <-deadline:
+			t.Fatal("generation origin renewal did not resume after provider tail")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if err := deliveryHeartbeat.Stop(); err != nil {
+		t.Fatalf("stop origin heartbeat: %v", err)
 	}
 }
 

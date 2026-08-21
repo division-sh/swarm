@@ -11,11 +11,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -164,6 +167,88 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	if got := countRows(t, ctx, pg, "decision_cards"); got != 1 {
 		t.Fatalf("decision_cards after dry-run = %d, want 1", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *testing.T) {
+	for _, candidate := range []struct {
+		name     string
+		drained  bool
+		terminal bool
+	}{
+		{name: "terminal_current", terminal: true},
+		{name: "terminal_drain", drained: true, terminal: true},
+		{name: "pending_current"},
+		{name: "pending_drain", drained: true},
+	} {
+		t.Run(candidate.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			store := admitTestPostgresStore(t, db)
+			fixture := newCompletionSettlementFixture(t, store, db, false)
+			ctx := providerDrainContext(t, fixture, "destructive-reset-"+candidate.name)
+			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
+			if candidate.drained {
+				transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+				if transition.ProviderDrainCount != 1 {
+					t.Fatalf("provider drain transition=%+v, want one drain", transition)
+				}
+			}
+			if candidate.terminal {
+				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "provider-head-after-reset")
+				if candidate.drained {
+					settlement.ProviderHead = nil
+				}
+				if err := handle.SettleCompletion(ctx, settlement); err != nil {
+					t.Fatalf("settle provider attempt before reset: %v", err)
+				}
+				if !candidate.drained {
+					deliveryStore, ok := fixture.store.(runtimedelivery.Store)
+					if !ok {
+						t.Fatalf("completion store %T does not expose delivery settlement", fixture.store)
+					}
+					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0); err != nil {
+						t.Fatalf("settle current provider origin before reset: %v", err)
+					}
+				}
+			}
+
+			now := time.Now().UTC().Add(time.Minute)
+			request := destructivereset.CleanupRequest{
+				ActorTokenID: "operator-token", RequestedAt: now,
+				Result: destructivereset.Result{
+					OperationName: destructivereset.DefaultOperationName,
+					PlannedAt:     now.Add(-time.Minute), Plan: cleanupPlanForRunIDs(fixture.authority.Target.RunID),
+				},
+				Quiescence: destructivereset.QuiescenceResult{
+					OperationName: destructivereset.DefaultOperationName, AppliedAt: now.Add(-30 * time.Second),
+				},
+			}
+			_, err := store.ApplyDestructiveResetCleanup(testAuthorActivityContext(), request)
+			if !candidate.terminal {
+				if !errors.Is(err, destructivereset.ErrInvalidRequest) || !strings.Contains(err.Error(), "nonterminal provider authority") {
+					t.Fatalf("pending provider cleanup error=%v, want provider-authority refusal", err)
+				}
+				requireExternalAttemptState(t, fixture.db, false, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
+				if candidate.drained {
+					requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("clean terminal provider evidence: %v", err)
+			}
+			var attempts int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE attempt_id=$1::uuid`, handle.Attempt().AttemptID).Scan(&attempts); err != nil || attempts != 1 {
+				t.Fatalf("preserved provider attempts=%d err=%v, want 1", attempts, err)
+			}
+			if candidate.drained {
+				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+			}
+			var deliveryAttempts int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1::uuid`, fixture.origin.DeliveryID()).Scan(&deliveryAttempts); err != nil || deliveryAttempts != 0 {
+				t.Fatalf("origin delivery attempts after cleanup=%d err=%v, want 0", deliveryAttempts, err)
+			}
+		})
 	}
 }
 

@@ -1162,6 +1162,16 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 	if err != nil {
 		return err
 	}
+	var origin runtimedelivery.Claim
+	if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		origin, err = loadProviderAttemptOriginPostgres(ctx, tx, attempt)
+		if err != nil {
+			return err
+		}
+		if permit.Kind == completionSettlementDrained && !origin.Same(permit.Drain.Origin) {
+			return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_origin_mismatch", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+		}
+	}
 	expires := now.UTC().Add(lease)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE runtime_external_effect_attempts
@@ -1172,6 +1182,14 @@ func (s *EffectPostgresOwner) HeartbeatCompletionAttempt(ctx context.Context, at
 	`, attempt.AttemptID, attempt.OperationID, expires, now.UTC(), attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
 	if err := requireExternalAttemptTransition(res, err); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
+	}
+	if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		if s.delivery == nil {
+			return fmt.Errorf("provider-drain delivery owner is not bound")
+		}
+		if err := s.delivery.RenewProviderOriginTx(ctx, tx, origin, lease); err != nil {
+			return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
+		}
 	}
 	if permit.Kind == completionSettlementDrained {
 		if _, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET expires_at=GREATEST(expires_at,$2) WHERE drain_id=$1::uuid AND state='pending'`, permit.Drain.DrainID, expires); err != nil {
@@ -1193,6 +1211,16 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 		if err != nil {
 			return err
 		}
+		var origin runtimedelivery.Claim
+		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			origin, err = loadProviderAttemptOriginSQLite(txctx, tx, attempt)
+			if err != nil {
+				return err
+			}
+			if permit.Kind == completionSettlementDrained && !origin.Same(permit.Drain.Origin) {
+				return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_origin_mismatch", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+			}
+		}
 		expires := now.UTC().Add(lease)
 		res, err := tx.ExecContext(txctx, `
 			UPDATE runtime_external_effect_attempts
@@ -1203,6 +1231,14 @@ func (s *EffectSQLiteOwner) HeartbeatCompletionAttempt(ctx context.Context, atte
 		`, expires, expires, now.UTC(), attempt.AttemptID, attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
 		if err := requireExternalAttemptTransition(res, err); err != nil {
 			return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
+		}
+		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
+			if s.delivery == nil {
+				return fmt.Errorf("provider-drain delivery owner is not bound")
+			}
+			if err := s.delivery.RenewProviderOriginTx(txctx, tx, origin, lease); err != nil {
+				return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_heartbeat_conflict", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": attempt.AttemptID}, err)
+			}
 		}
 		if permit.Kind == completionSettlementDrained {
 			if _, err := tx.ExecContext(txctx, `UPDATE runtime_provider_attempt_drains SET expires_at=CASE WHEN expires_at>? THEN expires_at ELSE ? END WHERE drain_id=? AND state='pending'`, expires, expires, permit.Drain.DrainID); err != nil {

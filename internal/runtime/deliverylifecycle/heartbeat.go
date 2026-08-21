@@ -26,6 +26,16 @@ type ClaimHeartbeat struct {
 	settled   bool
 }
 
+type claimHeartbeatContextKey struct{}
+
+// ClaimRenewalHandoff pauses the generation-owned renewal loop while a
+// process-owned provider tail renews the same exact claim atomically with its
+// effect authority.
+type ClaimRenewalHandoff struct {
+	heartbeat *ClaimHeartbeat
+	once      sync.Once
+}
+
 // ClaimSettlementGuard excludes periodic renewal while the exact selected-
 // store settlement transaction commits. It is intentionally tied to one
 // heartbeat and cannot settle or mutate a different claim.
@@ -77,8 +87,48 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 		ctx: heartbeatCtx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{}), workLease: workLease,
 		store: store, claim: claim,
 	}
+	h.ctx = context.WithValue(h.ctx, claimHeartbeatContextKey{}, h)
 	go h.run(store, claim, interval)
 	return h, nil
+}
+
+// ClaimHeartbeatFromContext returns the exact generation-owned claim
+// heartbeat, when the caller is executing inside one.
+func ClaimHeartbeatFromContext(ctx context.Context) (*ClaimHeartbeat, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	heartbeat, ok := ctx.Value(claimHeartbeatContextKey{}).(*ClaimHeartbeat)
+	return heartbeat, ok && heartbeat != nil
+}
+
+// BeginRenewalHandoff excludes the generation-owned renewal loop until Finish.
+// The new owner must establish its durable lease while this handoff is held.
+func (h *ClaimHeartbeat) BeginRenewalHandoff() (*ClaimRenewalHandoff, error) {
+	if h == nil {
+		return nil, fmt.Errorf("delivery claim renewal handoff requires a heartbeat")
+	}
+	h.renewMu.Lock()
+	if err := h.currentRenewalError(); err != nil {
+		h.renewMu.Unlock()
+		return nil, err
+	}
+	if h.settled {
+		h.renewMu.Unlock()
+		return nil, fmt.Errorf("delivery claim heartbeat is already settled")
+	}
+	if err := h.ctx.Err(); err != nil {
+		h.renewMu.Unlock()
+		return nil, fmt.Errorf("delivery claim heartbeat cannot transfer after retirement: %w", err)
+	}
+	return &ClaimRenewalHandoff{heartbeat: h}, nil
+}
+
+func (h *ClaimRenewalHandoff) Finish() {
+	if h == nil || h.heartbeat == nil {
+		return
+	}
+	h.once.Do(func() { h.heartbeat.renewMu.Unlock() })
 }
 
 // BeginSettlement renews the claim immediately and prevents the heartbeat

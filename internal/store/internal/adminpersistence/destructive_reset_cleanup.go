@@ -85,6 +85,9 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 	if err := guardDestructiveResetDirectiveAuthority(ctx, tx, runIDs, now); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
+	if err := guardDestructiveResetProviderAuthority(ctx, tx, runIDs); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
 	if req.Result.IncludeBundles {
 		if err := prepareDestructiveResetBundleCatalogDelete(ctx, tx, runIDs); err != nil {
 			return destructivereset.CleanupResult{}, err
@@ -281,6 +284,38 @@ func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, ru
 		detail += " expires_at=" + expiresAt.Time.UTC().Format(time.RFC3339Nano)
 	}
 	return fmt.Errorf("%w: runtime.nuke cannot delete retained agent directive authority (%s)", destructivereset.ErrInvalidRequest, detail)
+}
+
+func guardDestructiveResetProviderAuthority(ctx context.Context, tx *sql.Tx, runIDs []string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	var authorityKind, authorityID, state string
+	err := tx.QueryRowContext(ctx, `
+		SELECT authority_kind,authority_id,state
+		FROM (
+			SELECT 'attempt'::text AS authority_kind,attempt_id::text AS authority_id,state,authorized_at AS ordered_at
+			FROM runtime_external_effect_attempts
+			WHERE origin_run_id=ANY($1::uuid[])
+			  AND state IN ('authorized','launched','response_observed')
+			UNION ALL
+			SELECT 'drain'::text AS authority_kind,drain_id::text AS authority_id,state,captured_at AS ordered_at
+			FROM runtime_provider_attempt_drains
+			WHERE origin_run_id=ANY($1::uuid[]) AND state='pending'
+		) retained
+		ORDER BY ordered_at,authority_kind,authority_id
+		LIMIT 1
+	`, pq.Array(runIDs)).Scan(&authorityKind, &authorityID, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect provider authority before destructive reset: %w", err)
+	}
+	return fmt.Errorf(
+		"%w: runtime.nuke cannot delete a run with nonterminal provider authority (kind=%s id=%s state=%s)",
+		destructivereset.ErrInvalidRequest, authorityKind, authorityID, state,
+	)
 }
 
 func prepareDestructiveResetBundleCatalogDelete(ctx context.Context, tx *sql.Tx, runIDs []string) error {
