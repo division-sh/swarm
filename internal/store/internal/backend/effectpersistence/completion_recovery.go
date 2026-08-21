@@ -106,7 +106,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND (o.authority_kind='normal_agent' OR `+postgresExternalEffectActiveOwnerPredicate+`)
+		  AND `+postgresProviderCompletionRecoveryOwnerPredicate+`
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
@@ -158,7 +158,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND (o.authority_kind='normal_agent' OR `+sqliteExternalEffectActiveOwnerPredicate+`)
+		  AND `+sqliteProviderCompletionRecoveryOwnerPredicate+`
 		  AND (
 		    a.lease_expires_at <= ? OR
 		    (o.authority_kind='normal_agent' AND (

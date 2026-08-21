@@ -42,6 +42,15 @@ const sqliteExternalEffectActiveOwnerPredicate = `(o.authority_kind = 'conversat
 	  AND run.status IN (` + runLifecycleActiveStateSQLValues + `)
 ))`
 
+const postgresProviderCompletionRecoveryOwnerPredicate = `(o.authority_kind = 'normal_agent' OR ` + postgresExternalEffectActiveOwnerPredicate + `)`
+const sqliteProviderCompletionRecoveryOwnerPredicate = `(o.authority_kind = 'normal_agent' OR ` + sqliteExternalEffectActiveOwnerPredicate + `)`
+
+// The posture census must include every open attempt that startup recovery can
+// mutate. Normal-agent provider attempts remain recoverable after their run is
+// terminal, while other effect classes remain bounded by active ownership.
+const postgresExternalEffectRecoveryAdmissionPredicate = `(` + postgresExternalEffectActiveOwnerPredicate + ` OR (o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL AND ` + postgresProviderCompletionRecoveryOwnerPredicate + `))`
+const sqliteExternalEffectRecoveryAdmissionPredicate = `(` + sqliteExternalEffectActiveOwnerPredicate + ` OR (o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL AND ` + sqliteProviderCompletionRecoveryOwnerPredicate + `))`
+
 func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Context, request runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error) {
 	if err := request.Validate(); err != nil {
 		return runtimeeffects.RecoverySummary{}, err
@@ -561,9 +570,9 @@ func (c externalEffectRecoveryCandidate) runID() (string, error) {
 }
 
 func loadExternalEffectRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool) ([]externalEffectRecoveryCandidate, error) {
-	query := `SELECT CAST(o.operation_id AS TEXT), CAST(a.attempt_id AS TEXT), o.execution_mode, a.execution_mode, o.authority_evidence, COALESCE(json_extract(o.lineage, '$.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.run_id'), '') FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteExternalEffectActiveOwnerPredicate + ` ORDER BY a.attempt_id`
+	query := `SELECT CAST(o.operation_id AS TEXT), CAST(a.attempt_id AS TEXT), o.execution_mode, a.execution_mode, o.authority_evidence, COALESCE(json_extract(o.lineage, '$.run_id'), ''), COALESCE(json_extract(o.authority_evidence, '$.usage_target.run_id'), '') FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + sqliteExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id`
 	if postgres {
-		query = `SELECT o.operation_id::text, a.attempt_id::text, o.execution_mode, a.execution_mode, o.authority_evidence::text, COALESCE(o.lineage->>'run_id', ''), COALESCE(o.authority_evidence #>> '{usage_target,run_id}', '') FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresExternalEffectActiveOwnerPredicate + ` ORDER BY a.attempt_id FOR UPDATE OF o,a`
+		query = `SELECT o.operation_id::text, a.attempt_id::text, o.execution_mode, a.execution_mode, o.authority_evidence::text, COALESCE(o.lineage->>'run_id', ''), COALESCE(o.authority_evidence #>> '{usage_target,run_id}', '') FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND ` + postgresExternalEffectRecoveryAdmissionPredicate + ` ORDER BY a.attempt_id FOR UPDATE OF o,a`
 	}
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
