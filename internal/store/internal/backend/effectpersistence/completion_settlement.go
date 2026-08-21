@@ -101,7 +101,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	}
 	return runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: disposition, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
-		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: originSettled, Finalization: finalization,
+		Origin: attempt.Origin, OriginSettled: originSettled, Finalization: finalization,
 	}, providerHeadErr
 }
 
@@ -185,7 +185,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	}
 	return runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: disposition, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
-		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: originSettled, Finalization: finalization,
+		Origin: attempt.Origin, OriginSettled: originSettled, Finalization: finalization,
 	}, providerHeadErr
 }
 

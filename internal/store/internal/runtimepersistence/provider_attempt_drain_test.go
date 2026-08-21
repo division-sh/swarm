@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -220,7 +221,7 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 					t.Fatalf("completion disposition=%q, want drained", settled.Disposition)
 				}
 				wantFinalization := target.phase != runtimemanager.AgentLifecycleRunning
-				if !settled.Committed || !settled.SpendRecorded || !settled.OriginDeliverySettled || (settled.Finalization != nil) != wantFinalization {
+				if !settled.Committed || !settled.SpendRecorded || !settled.OriginSettled || (settled.Finalization != nil) != wantFinalization {
 					t.Fatalf("drained settlement result=%+v, want complete immutable commit with finalization=%t", settled, wantFinalization)
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
@@ -285,7 +286,7 @@ func TestProviderAttemptHeartbeatAuthorityParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("admit foreign heartbeat claim: %v", err)
 				}
-				stale.OriginDelivery = foreign
+				stale.Origin = runtimeeffects.CompletionOrigin{Kind: runtimeeffects.CompletionOriginDelivery, Delivery: foreign}
 				if err := fixture.store.HeartbeatCompletionAttempt(ctx, stale, now.Add(time.Second), 3*time.Minute); err == nil {
 					t.Fatal("foreign provider origin renewed authority")
 				}
@@ -617,6 +618,73 @@ func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
 	})
 }
 
+func TestProviderAttemptDrainRejectsTransitionWhilePendingParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := providerDrainContext(t, fixture, "pending-drain-transition-fence")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "pending-drain-transition-fence")
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+		selected, ok := fixture.store.(agentfixture.Store)
+		if !ok {
+			t.Fatalf("completion store %T does not support lifecycle transitions", fixture.store)
+		}
+		for _, operation := range []string{"restart", "reconfigure"} {
+			_, err := agentfixture.Commit(testAuthorActivityContext(), selected, runtimemanager.AgentLifecycleTransition{
+				OperationID: uuid.NewString(), OperationKind: operation, RequestHash: "pending-drain-" + operation,
+				Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
+				ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: transition.Generation,
+				ExpectedPhase: runtimemanager.AgentLifecycleDraining,
+				TargetEpoch:   fixture.authority.Normal.RuntimeEpoch, TargetGeneration: transition.Generation + 1,
+				TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "pending-drain-reintroduction",
+				RunMode: runtimemanager.AgentRunModeStandard, Now: time.Now().UTC(),
+			})
+			failure, matched := runtimefailures.As(err)
+			if err == nil || !matched || failure.Failure.Detail.Code != "provider_attempt_drain_transition_blocked" {
+				t.Fatalf("%s pending-drain transition error=%v, want provider_attempt_drain_transition_blocked", operation, err)
+			}
+		}
+		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
+	})
+}
+
+func TestProviderAttemptDrainTerminalRunRecoveryParity(t *testing.T) {
+	type runQuiescenceStore interface {
+		ApplyActiveRunQuiescence(context.Context, runtimerunquiescence.Request) (runtimerunquiescence.Result, error)
+	}
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := providerDrainContext(t, fixture, "terminal-run-recovery")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "terminal-run-recovery")
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleRunning)
+		selected, ok := fixture.store.(runQuiescenceStore)
+		if !ok {
+			t.Fatalf("completion store %T does not expose run quiescence", fixture.store)
+		}
+		quiesced, err := selected.ApplyActiveRunQuiescence(testAuthorActivityContext(), runtimerunquiescence.Request{
+			OperationName: "provider_attempt_terminal_run_recovery", RequestedAt: time.Now().UTC(),
+			RunIDs: []string{fixture.authority.Target.RunID}, ReasonCode: runtimerunquiescence.ServeAbandonReasonCode,
+			ControlledBy: "provider-drain-test", DeliveryNote: "terminal provider drain recovery proof",
+		})
+		if err != nil || len(quiesced.Runs) != 1 || !quiesced.Runs[0].Changed || len(quiesced.Deliveries) != 1 {
+			t.Fatalf("terminalize provider run: result=%+v err=%v, want one run and one origin delivery", quiesced, err)
+		}
+		requireTerminalizedOriginDelivery(t, fixture, runtimerunquiescence.ServeAbandonReasonCode)
+
+		now := time.Now().UTC()
+		summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+		if err != nil || summary.OutcomeUncertain != 1 {
+			t.Fatalf("recover terminal-run provider drain: summary=%+v err=%v", summary, err)
+		}
+		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, transition.Generation)
+		requireTerminalizedOriginDelivery(t, fixture, runtimerunquiescence.ServeAbandonReasonCode)
+		again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+		if err != nil || again != (runtimeeffects.RecoverySummary{}) {
+			t.Fatalf("repeat terminal-run recovery: summary=%+v err=%v", again, err)
+		}
+	})
+}
+
 func TestProviderAttemptDrainRecoveryRejectsNewerOriginClaimParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		ctx := providerDrainContext(t, fixture, "recovery-newer-origin")
@@ -902,6 +970,38 @@ func requireAgentCoarseStatus(t *testing.T, fixture completionSettlementFixture,
 func requireOriginDeliveryOutcome(t *testing.T, fixture completionSettlementFixture, wantState, wantReason string) {
 	t.Helper()
 	requireDeliveryClaimOutcome(t, fixture, fixture.origin, wantState, wantReason)
+}
+
+func requireTerminalizedOriginDelivery(t *testing.T, fixture completionSettlementFixture, wantReason string) {
+	t.Helper()
+	query := `
+		SELECT d.status,d.claim_version,COALESCE(o.reason_code,''),
+		       (SELECT COUNT(*) FROM event_delivery_outcomes all_o WHERE all_o.delivery_id=d.delivery_id),
+		       (SELECT COUNT(*) FROM event_delivery_attempts a
+		        WHERE a.delivery_id=d.delivery_id AND a.claim_version=? AND a.claim_token=?
+		          AND a.open_marker=FALSE AND a.completed_at IS NOT NULL AND a.outcome='terminalized')
+		FROM event_deliveries d
+		JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version
+		WHERE d.delivery_id=?`
+	args := []any{fixture.origin.Version(), fixture.origin.PersistenceToken(), fixture.origin.DeliveryID()}
+	if !fixture.sqlite {
+		query = `
+			SELECT d.status,d.claim_version,COALESCE(o.reason_code,''),
+			       (SELECT COUNT(*) FROM event_delivery_outcomes all_o WHERE all_o.delivery_id=d.delivery_id),
+			       (SELECT COUNT(*) FROM event_delivery_attempts a
+			        WHERE a.delivery_id=d.delivery_id AND a.claim_version=$1 AND a.claim_token=$2::uuid
+			          AND a.open_marker=FALSE AND a.completed_at IS NOT NULL AND a.outcome='terminalized')
+			FROM event_deliveries d
+			JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version
+			WHERE d.delivery_id=$3::uuid`
+	}
+	var state, reason string
+	var version int64
+	var outcomes, interrupted int
+	if err := fixture.db.QueryRow(query, args...).Scan(&state, &version, &reason, &outcomes, &interrupted); err != nil ||
+		state != "dead_letter" || version != fixture.origin.Version()+1 || reason != wantReason || outcomes != 1 || interrupted != 1 {
+		t.Fatalf("terminalized origin state=%q version=%d reason=%q outcomes=%d interrupted=%d err=%v", state, version, reason, outcomes, interrupted, err)
+	}
 }
 
 func requireDeliveryClaimOutcome(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim, wantState, wantReason string) {

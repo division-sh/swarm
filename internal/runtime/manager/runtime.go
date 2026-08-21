@@ -636,9 +636,15 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	admitted := admission.Operation
+	directiveOrigin, err := runtimeagentcontrol.NewDirectiveExecutionOrigin(admitted)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
 	directiveEvent := admission.Event.Event()
 	directiveCtx := runtimecorrelation.WithRunID(lease.Context, strings.TrimSpace(directiveEvent.RunID()))
 	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
+	directiveCtx = runtimeeffects.WithDirectiveCompletionOrigin(directiveCtx, directiveOrigin)
+	directiveCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(directiveCtx)
 	heartbeatConfig := am.directiveHeartbeat.normalized()
 	heartbeatLease, err := am.beginWork(ctx, "directive heartbeat")
 	if err != nil {
@@ -657,6 +663,7 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		OperatorID:      admitted.OperatorID,
 		Source:          admitted.Source,
 	})
+	providerSettlement := completionSettlement()
 	stopHeartbeat()
 	heartbeatShutdown := time.NewTimer(heartbeatConfig.shutdownTimeout)
 	select {
@@ -677,6 +684,9 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		}
 	}
 	if executionErr != nil {
+		if terminal, terminalErr := consumeProviderSettledDirective(ctx, store, admitted, directiveOrigin, providerSettlement); terminal || terminalErr != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, terminalErr
+		}
 		executionFailure := runtimeagentcontrol.DirectiveBoardStepFailure(executionErr)
 		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, executionFailure, time.Now().UTC(), directiveOperationTTL)
 		if persistErr != nil {
@@ -714,6 +724,33 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveCompletionPending, Operation: executed}
 	}
 	return directiveResultFromOperation(finalized)
+}
+
+func consumeProviderSettledDirective(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, admitted runtimeagentcontrol.DirectiveOperation, origin runtimeagentcontrol.DirectiveExecutionOrigin, observation runtimeeffects.CompletionSettlementObservation) (bool, error) {
+	if observation.OriginSettled {
+		if observation.Disposition != runtimeeffects.CompletionSettlementDrained || observation.Origin.Kind != runtimeeffects.CompletionOriginDirective || !observation.Origin.Directive.Same(origin) {
+			return true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "directive_completion_settlement_origin_mismatch", "agent-manager", "execute_directive", map[string]any{"operation_id": admitted.OperationID, "attempt_id": observation.AttemptID})
+		}
+	}
+	persisted, found, err := store.LoadDirectiveOperation(ctx, admitted.OperationID)
+	if err != nil {
+		return true, err
+	}
+	if !found {
+		return true, fmt.Errorf("directive operation %s disappeared after provider settlement", admitted.OperationID)
+	}
+	if persisted.ExecutionOwnerID != origin.ExecutionOwnerID {
+		return true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "directive_completion_execution_owner_mismatch", "agent-manager", "execute_directive", map[string]any{"operation_id": admitted.OperationID})
+	}
+	switch persisted.State {
+	case runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+		return true, runtimeagentcontrol.ErrorForDirectiveOperation(persisted)
+	default:
+		if observation.OriginSettled {
+			return true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "directive_completion_origin_not_terminal", "agent-manager", "execute_directive", map[string]any{"operation_id": admitted.OperationID, "state": persisted.State})
+		}
+		return false, nil
+	}
 }
 
 func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, store runtimeagentcontrol.DirectiveOperationStore, operationID, ownerID string, config directiveHeartbeatConfig) {

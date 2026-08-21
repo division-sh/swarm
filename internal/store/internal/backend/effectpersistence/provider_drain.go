@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -16,15 +17,18 @@ import (
 )
 
 type providerAttemptDrainCandidate struct {
-	AttemptID           string
-	OperationID         string
-	State               runtimeeffects.State
-	OriginDeliveryID    string
-	OriginRunID         string
-	OriginRouteIdentity string
-	OriginClaimToken    string
-	OriginClaimVersion  int64
-	OriginSubscriber    string
+	AttemptID            string
+	OperationID          string
+	State                runtimeeffects.State
+	OriginDeliveryID     string
+	OriginRunID          string
+	OriginRouteIdentity  string
+	OriginClaimToken     string
+	OriginClaimVersion   int64
+	OriginSubscriber     string
+	OriginKind           string
+	OriginDirectiveID    string
+	OriginDirectiveOwner string
 }
 
 type completionSettlementPermitKind uint8
@@ -40,7 +44,7 @@ type providerDrainPermit struct {
 	Target                runtimeeffects.ProviderDrainTarget
 	SuccessorEpoch        int64
 	SuccessorGeneration   uint64
-	Origin                runtimedelivery.Claim
+	Origin                runtimeeffects.CompletionOrigin
 	ExpiresAt             time.Time
 }
 
@@ -145,13 +149,14 @@ func resolveCompletionSettlementPermitSQLite(
 func loadProviderDrainPermitPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (providerDrainPermit, error) {
 	var permit providerDrainPermit
 	var generation int64
-	var target, deliveryID, runID, routeIdentity, claimToken, subscriber string
+	var target, originKind, deliveryID, runID, routeIdentity, claimToken, subscriber, directiveID, directiveOwner string
 	var claimVersion int64
 	err := tx.QueryRowContext(ctx, `
 		SELECT drain_id::text, lifecycle_transition_id::text, target_phase,
 		       successor_runtime_epoch, successor_generation,
-		       origin_delivery_id::text, origin_run_id::text, origin_route_identity,
-		       origin_claim_token::text, origin_claim_version, origin_subscriber_id
+		       origin_kind,COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),COALESCE(origin_route_identity,''),
+		       COALESCE(origin_claim_token::text,''),COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),
+		       COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,'')
 		FROM runtime_provider_attempt_drains
 		WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
 		  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4
@@ -160,14 +165,14 @@ func loadProviderDrainPermitPostgres(ctx context.Context, tx *sql.Tx, attempt ru
 	`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 		&permit.DrainID, &permit.LifecycleTransitionID, &target,
 		&permit.SuccessorEpoch, &generation,
-		&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber,
+		&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner,
 	)
 	if err != nil {
 		return providerDrainPermit{}, providerDrainPermitError(attempt, err)
 	}
 	permit.SuccessorGeneration = uint64(generation)
 	permit.Target = runtimeeffects.ProviderDrainTarget(target)
-	permit.Origin, err = runtimedelivery.AdmitPersistedClaim(deliveryID, runID, routeIdentity, claimToken, claimVersion, runtimedelivery.SubscriberAgent, subscriber)
+	permit.Origin, err = decodeCompletionOrigin(originKind, deliveryID, runID, routeIdentity, claimToken, claimVersion, subscriber, directiveID, directiveOwner)
 	if err != nil {
 		return providerDrainPermit{}, err
 	}
@@ -177,13 +182,14 @@ func loadProviderDrainPermitPostgres(ctx context.Context, tx *sql.Tx, attempt ru
 func loadProviderDrainPermitSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (providerDrainPermit, error) {
 	var permit providerDrainPermit
 	var generation int64
-	var target, deliveryID, runID, routeIdentity, claimToken, subscriber string
+	var target, originKind, deliveryID, runID, routeIdentity, claimToken, subscriber, directiveID, directiveOwner string
 	var claimVersion int64
 	err := tx.QueryRowContext(ctx, `
 		SELECT drain_id, lifecycle_transition_id, target_phase,
 		       successor_runtime_epoch, successor_generation,
-		       origin_delivery_id, origin_run_id, origin_route_identity,
-		       origin_claim_token, origin_claim_version, origin_subscriber_id
+		       origin_kind,COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),COALESCE(origin_route_identity,''),
+		       COALESCE(origin_claim_token,''),COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),
+		       COALESCE(origin_directive_operation_id,''),COALESCE(origin_directive_owner_id,'')
 		FROM runtime_provider_attempt_drains
 		WHERE attempt_id=? AND operation_id=?
 		  AND predecessor_runtime_epoch=? AND predecessor_generation=?
@@ -191,14 +197,14 @@ func loadProviderDrainPermitSQLite(ctx context.Context, tx *sql.Tx, attempt runt
 	`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 		&permit.DrainID, &permit.LifecycleTransitionID, &target,
 		&permit.SuccessorEpoch, &generation,
-		&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber,
+		&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner,
 	)
 	if err != nil {
 		return providerDrainPermit{}, providerDrainPermitError(attempt, err)
 	}
 	permit.SuccessorGeneration = uint64(generation)
 	permit.Target = runtimeeffects.ProviderDrainTarget(target)
-	permit.Origin, err = runtimedelivery.AdmitPersistedClaim(deliveryID, runID, routeIdentity, claimToken, claimVersion, runtimedelivery.SubscriberAgent, subscriber)
+	permit.Origin, err = decodeCompletionOrigin(originKind, deliveryID, runID, routeIdentity, claimToken, claimVersion, subscriber, directiveID, directiveOwner)
 	if err != nil {
 		return providerDrainPermit{}, err
 	}
@@ -216,65 +222,63 @@ func validateProviderDrainPermit(attempt runtimeeffects.Attempt, permit provider
 	if !permit.Target.Valid() || permit.SuccessorEpoch <= 0 || permit.SuccessorGeneration == 0 {
 		return fmt.Errorf("provider attempt drain permit is invalid")
 	}
-	if !attempt.OriginDelivery.Same(permit.Origin) {
+	if !attempt.Origin.Same(permit.Origin) {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_origin_mismatch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 	}
 	return nil
 }
 
-func loadProviderAttemptOriginPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (runtimedelivery.Claim, error) {
+func loadProviderAttemptOriginPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (runtimeeffects.CompletionOrigin, error) {
 	return loadProviderAttemptOrigin(ctx, tx, attempt, true)
 }
 
-func loadProviderAttemptOriginSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (runtimedelivery.Claim, error) {
+func loadProviderAttemptOriginSQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt) (runtimeeffects.CompletionOrigin, error) {
 	return loadProviderAttemptOrigin(ctx, tx, attempt, false)
 }
 
-func loadProviderAttemptOrigin(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (runtimedelivery.Claim, error) {
+func loadProviderAttemptOrigin(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (runtimeeffects.CompletionOrigin, error) {
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
-		return runtimedelivery.Claim{}, fmt.Errorf("provider attempt origin requires normal-agent authority")
+		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("provider attempt origin requires normal-agent authority")
 	}
-	var deliveryID, runID, routeIdentity, claimToken, subscriberType, subscriberID string
+	var originKind, deliveryID, runID, routeIdentity, claimToken, subscriberType, subscriberID, directiveID, directiveOwner string
 	var claimVersion int64
 	var err error
 	if postgres {
 		err = tx.QueryRowContext(ctx, `
-			SELECT COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),
-			       COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
-			       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_type,''),
-			       COALESCE(origin_subscriber_id,'')
+				SELECT COALESCE(origin_kind,''),COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),
+				       COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
+				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_type,''),
+				       COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,'')
 			FROM runtime_external_effect_attempts
 			WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
 			FOR UPDATE
 		`, attempt.AttemptID, attempt.OperationID).Scan(
-			&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriberType, &subscriberID,
+			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriberType, &subscriberID, &directiveID, &directiveOwner,
 		)
 	} else {
 		err = tx.QueryRowContext(ctx, `
-			SELECT COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),
-			       COALESCE(origin_route_identity,''),COALESCE(origin_claim_token,''),
-			       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_type,''),
-			       COALESCE(origin_subscriber_id,'')
+				SELECT COALESCE(origin_kind,''),COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),
+				       COALESCE(origin_route_identity,''),COALESCE(origin_claim_token,''),
+				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_type,''),
+				       COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id,''),COALESCE(origin_directive_owner_id,'')
 			FROM runtime_external_effect_attempts
 			WHERE attempt_id=? AND operation_id=?
 		`, attempt.AttemptID, attempt.OperationID).Scan(
-			&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriberType, &subscriberID,
+			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriberType, &subscriberID, &directiveID, &directiveOwner,
 		)
 	}
 	if err != nil {
-		return runtimedelivery.Claim{}, fmt.Errorf("load provider attempt origin: %w", err)
+		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("load provider attempt origin: %w", err)
 	}
-	if subscriberType != string(runtimedelivery.SubscriberAgent) {
-		return runtimedelivery.Claim{}, fmt.Errorf("provider attempt origin subscriber type %q is invalid", subscriberType)
+	if originKind == string(runtimeeffects.CompletionOriginDelivery) && subscriberType != string(runtimedelivery.SubscriberAgent) {
+		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("provider attempt origin subscriber type %q is invalid", subscriberType)
 	}
-	claim, err := runtimedelivery.AdmitPersistedClaim(
-		deliveryID, runID, routeIdentity, claimToken, claimVersion, runtimedelivery.SubscriberAgent, subscriberID,
-	)
+	origin, err := decodeCompletionOrigin(originKind, deliveryID, runID, routeIdentity, claimToken, claimVersion, subscriberID, directiveID, directiveOwner)
 	if err != nil {
-		return runtimedelivery.Claim{}, err
+		return runtimeeffects.CompletionOrigin{}, err
 	}
-	if !attempt.OriginDelivery.Same(claim) {
-		return runtimedelivery.Claim{}, runtimefailures.New(
+	if !attempt.Origin.Same(origin) {
+		return runtimeeffects.CompletionOrigin{}, runtimefailures.New(
 			runtimefailures.ClassLifecycleConflict,
 			"provider_attempt_origin_mismatch",
 			"external-effects",
@@ -282,7 +286,22 @@ func loadProviderAttemptOrigin(ctx context.Context, tx *sql.Tx, attempt runtimee
 			map[string]any{"attempt_id": attempt.AttemptID},
 		)
 	}
-	return claim, nil
+	return origin, nil
+}
+
+func decodeCompletionOrigin(kind, deliveryID, runID, routeIdentity, claimToken string, claimVersion int64, subscriberID, directiveID, directiveOwner string) (runtimeeffects.CompletionOrigin, error) {
+	switch runtimeeffects.CompletionOriginKind(kind) {
+	case runtimeeffects.CompletionOriginDelivery:
+		claim, err := runtimedelivery.AdmitPersistedClaim(deliveryID, runID, routeIdentity, claimToken, claimVersion, runtimedelivery.SubscriberAgent, subscriberID)
+		if err != nil {
+			return runtimeeffects.CompletionOrigin{}, err
+		}
+		return runtimeeffects.DeliveryCompletionOrigin(claim)
+	case runtimeeffects.CompletionOriginDirective:
+		return runtimeeffects.DirectiveCompletionOrigin(runtimeagentcontrol.DirectiveExecutionOrigin{OperationID: directiveID, ExecutionOwnerID: directiveOwner})
+	default:
+		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("provider completion origin kind %q is invalid", kind)
+	}
 }
 
 type providerDrainRecoveryResolution struct {
@@ -359,33 +378,33 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	var permit providerDrainPermit
 	var expires conversationForkTimeValue
 	var generation int64
-	var target, deliveryID, runID, routeIdentity, claimToken, subscriber string
+	var target, originKind, deliveryID, runID, routeIdentity, claimToken, subscriber, directiveID, directiveOwner string
 	var claimVersion int64
 	var err error
 	if postgres {
 		err = tx.QueryRowContext(ctx, `
 			SELECT drain_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
-			       origin_delivery_id::text,origin_run_id::text,origin_route_identity,origin_claim_token::text,
-			       origin_claim_version,origin_subscriber_id,expires_at
+				       origin_kind,COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
+				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
 			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND state='pending'
 			FOR UPDATE
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
-			&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &expires,
+			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)
 	} else {
 		err = tx.QueryRowContext(ctx, `
 			SELECT drain_id,lifecycle_transition_id,target_phase,successor_runtime_epoch,successor_generation,
-			       origin_delivery_id,origin_run_id,origin_route_identity,origin_claim_token,
-			       origin_claim_version,origin_subscriber_id,expires_at
+				       origin_kind,COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token,''),
+				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=? AND operation_id=?
 			  AND predecessor_runtime_epoch=? AND predecessor_generation=? AND state='pending'
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
-			&deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &expires,
+			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)
 	}
 	if err == sql.ErrNoRows {
@@ -400,7 +419,7 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	permit.ExpiresAt = expires.Time
 	permit.SuccessorGeneration = uint64(generation)
 	permit.Target = runtimeeffects.ProviderDrainTarget(target)
-	permit.Origin, err = runtimedelivery.AdmitPersistedClaim(deliveryID, runID, routeIdentity, claimToken, claimVersion, runtimedelivery.SubscriberAgent, subscriber)
+	permit.Origin, err = decodeCompletionOrigin(originKind, deliveryID, runID, routeIdentity, claimToken, claimVersion, subscriber, directiveID, directiveOwner)
 	if err != nil {
 		return providerDrainPermit{}, false, err
 	}
@@ -418,7 +437,7 @@ func (s *EffectPostgresOwner) settleProviderDrainTx(
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, s.delivery); err != nil {
+	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, s.delivery, s.directives); err != nil {
 		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=$2 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, settlement.Now.UTC())
@@ -436,7 +455,7 @@ func (s *EffectSQLiteOwner) settleProviderDrainTx(
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, s.delivery); err != nil {
+	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, s.delivery, s.directives); err != nil {
 		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=? WHERE drain_id=? AND state='pending'`, settlement.Now.UTC(), permit.DrainID)
@@ -456,8 +475,9 @@ func settleProviderDrainRecovery(
 	expired bool,
 	postgres bool,
 	delivery providerDrainDeliveryOwner,
+	directives providerDrainDirectiveOwner,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, permit.Origin, delivery); err != nil {
+	if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, permit.Origin, delivery, directives); err != nil {
 		return nil, err
 	}
 	state := "settled"
@@ -491,24 +511,32 @@ func settleProviderDrainOrigin(
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
 	settlement runtimeeffects.CompletionSettlement,
-	claim runtimedelivery.Claim,
+	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
+	directives providerDrainDirectiveOwner,
 ) error {
-	if delivery == nil {
-		return fmt.Errorf("provider-drain delivery owner is not bound")
+	if origin.Kind == runtimeeffects.CompletionOriginDirective {
+		if directives == nil {
+			return fmt.Errorf("provider-drain directive owner is not bound")
+		}
+		failure := directiveDrainFailure(settlement)
+		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, settlement.Now.UTC())
+	}
+	if origin.Kind != runtimeeffects.CompletionOriginDelivery || delivery == nil {
+		return fmt.Errorf("provider-drain delivery origin owner is not bound")
 	}
 	duration := time.Duration(0)
 	if settlement.AgentTurn != nil && settlement.AgentTurn.LatencyMS > 0 {
 		duration = time.Duration(settlement.AgentTurn.LatencyMS) * time.Millisecond
 	}
 	if settlement.Settlement.State == runtimeeffects.StateSettled {
-		return delivery.SettleProviderOriginSuccessTx(ctx, tx, story, claim, nil, duration)
+		return delivery.SettleProviderOriginSuccessTx(ctx, tx, story, origin.Delivery, nil, duration)
 	}
 	reason := "provider_attempt_drained_without_confirmed_success"
 	if settlement.Settlement.Failure != nil && strings.TrimSpace(settlement.Settlement.Failure.Detail.Code) != "" {
 		reason = settlement.Settlement.Failure.Detail.Code
 	}
-	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, claim, runtimedelivery.Settlement{
+	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  reason,
 		Failure:     settlement.Settlement.Failure,
@@ -521,14 +549,21 @@ func settleProviderDrainOriginRecovery(
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
 	settlement runtimeeffects.CompletionSettlement,
-	claim runtimedelivery.Claim,
+	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
+	directives providerDrainDirectiveOwner,
 ) error {
-	if delivery == nil {
-		return fmt.Errorf("provider-drain delivery owner is not bound")
-	}
 	if settlement.Settlement.State == runtimeeffects.StateSettled || settlement.Settlement.Failure == nil {
 		return fmt.Errorf("provider drain recovery requires a failed or uncertain completion settlement")
+	}
+	if origin.Kind == runtimeeffects.CompletionOriginDirective {
+		if directives == nil {
+			return fmt.Errorf("provider-drain directive owner is not bound")
+		}
+		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, *settlement.Settlement.Failure, settlement.Now.UTC())
+	}
+	if origin.Kind != runtimeeffects.CompletionOriginDelivery || delivery == nil {
+		return fmt.Errorf("provider-drain delivery origin owner is not bound")
 	}
 	duration := time.Duration(0)
 	if settlement.AgentTurn != nil && settlement.AgentTurn.LatencyMS > 0 {
@@ -538,12 +573,21 @@ func settleProviderDrainOriginRecovery(
 	if code := strings.TrimSpace(settlement.Settlement.Failure.Detail.Code); code != "" {
 		reason = code
 	}
-	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, claim, runtimedelivery.Settlement{
+	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  reason,
 		Failure:     settlement.Settlement.Failure,
 		Duration:    duration,
 	})
+}
+
+func directiveDrainFailure(settlement runtimeeffects.CompletionSettlement) runtimefailures.Envelope {
+	if settlement.Settlement.Failure != nil {
+		return *runtimefailures.CloneEnvelope(settlement.Settlement.Failure)
+	}
+	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "provider_attempt_drained_before_directive_completion", "external-effects", "settle_completion", map[string]any{"attempt_id": settlement.Settlement.AttemptID})
+	failure, _ := runtimefailures.EnvelopeFromError(err)
+	return failure
 }
 
 func finalizeProviderDrainPostgres(
@@ -628,19 +672,11 @@ func providerDrainFinalization(attempt runtimeeffects.Attempt, permit providerDr
 	}
 }
 
-func (c providerAttemptDrainCandidate) claim(agentID string) (runtimedelivery.Claim, error) {
-	if strings.TrimSpace(c.OriginSubscriber) != strings.TrimSpace(agentID) {
-		return runtimedelivery.Claim{}, fmt.Errorf("provider attempt %s origin subscriber does not match lifecycle identity", c.AttemptID)
+func (c providerAttemptDrainCandidate) origin(agentID string) (runtimeeffects.CompletionOrigin, error) {
+	if c.OriginKind == string(runtimeeffects.CompletionOriginDelivery) && strings.TrimSpace(c.OriginSubscriber) != strings.TrimSpace(agentID) {
+		return runtimeeffects.CompletionOrigin{}, fmt.Errorf("provider attempt %s origin subscriber does not match lifecycle identity", c.AttemptID)
 	}
-	return runtimedelivery.AdmitPersistedClaim(
-		c.OriginDeliveryID,
-		c.OriginRunID,
-		c.OriginRouteIdentity,
-		c.OriginClaimToken,
-		c.OriginClaimVersion,
-		runtimedelivery.SubscriberAgent,
-		c.OriginSubscriber,
-	)
+	return decodeCompletionOrigin(c.OriginKind, c.OriginDeliveryID, c.OriginRunID, c.OriginRouteIdentity, c.OriginClaimToken, c.OriginClaimVersion, c.OriginSubscriber, c.OriginDirectiveID, c.OriginDirectiveOwner)
 }
 
 func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
@@ -658,9 +694,10 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT a.attempt_id::text, a.operation_id::text, a.state,
-		       COALESCE(a.origin_delivery_id::text,''), COALESCE(a.origin_run_id::text,''),
+		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''), COALESCE(a.origin_run_id::text,''),
 		       COALESCE(a.origin_route_identity,''), COALESCE(a.origin_claim_token::text,''),
-		       COALESCE(a.origin_claim_version,0), COALESCE(a.origin_subscriber_id,'')
+		       COALESCE(a.origin_claim_version,0), COALESCE(a.origin_subscriber_id,''),
+		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		WHERE o.authority_kind='normal_agent' AND o.effect_kind='provider_turn'
@@ -699,9 +736,10 @@ func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT a.attempt_id, a.operation_id, a.state,
-		       COALESCE(a.origin_delivery_id,''), COALESCE(a.origin_run_id,''),
+		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''), COALESCE(a.origin_run_id,''),
 		       COALESCE(a.origin_route_identity,''), COALESCE(a.origin_claim_token,''),
-		       COALESCE(a.origin_claim_version,0), COALESCE(a.origin_subscriber_id,'')
+		       COALESCE(a.origin_claim_version,0), COALESCE(a.origin_subscriber_id,''),
+		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		WHERE o.authority_kind='normal_agent' AND o.effect_kind='provider_turn'
@@ -733,12 +771,15 @@ func scanProviderAttemptDrainCandidates(rows *sql.Rows) ([]providerAttemptDrainC
 			&candidate.AttemptID,
 			&candidate.OperationID,
 			&candidate.State,
+			&candidate.OriginKind,
 			&candidate.OriginDeliveryID,
 			&candidate.OriginRunID,
 			&candidate.OriginRouteIdentity,
 			&candidate.OriginClaimToken,
 			&candidate.OriginClaimVersion,
 			&candidate.OriginSubscriber,
+			&candidate.OriginDirectiveID,
+			&candidate.OriginDirectiveOwner,
 		); err != nil {
 			return nil, err
 		}
@@ -755,7 +796,7 @@ func (s *EffectPostgresOwner) captureProviderAttemptDrains(
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	return captureProviderAttemptDrains(ctx, tx, story, capture, candidates, postgres, s.delivery)
+	return captureProviderAttemptDrains(ctx, tx, story, capture, candidates, postgres, s.delivery, s.directives)
 }
 
 func (s *EffectSQLiteOwner) captureProviderAttemptDrains(
@@ -766,7 +807,7 @@ func (s *EffectSQLiteOwner) captureProviderAttemptDrains(
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	return captureProviderAttemptDrains(ctx, tx, story, capture, candidates, postgres, s.delivery)
+	return captureProviderAttemptDrains(ctx, tx, story, capture, candidates, postgres, s.delivery, s.directives)
 }
 
 func captureProviderAttemptDrains(
@@ -777,23 +818,24 @@ func captureProviderAttemptDrains(
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 	delivery providerDrainDeliveryOwner,
+	directives providerDrainDirectiveOwner,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	if len(candidates) != 0 && delivery == nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, fmt.Errorf("provider-drain delivery owner is not bound")
+	if len(candidates) != 0 && (delivery == nil || directives == nil) {
+		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, fmt.Errorf("provider-drain origin owners are not bound")
 	}
 	result := runtimeeffects.ProviderAttemptDrainCaptureResult{}
 	for _, candidate := range candidates {
-		claim, err := candidate.claim(capture.Predecessor.AgentID)
+		origin, err := candidate.origin(capture.Predecessor.AgentID)
 		if err != nil {
 			return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 		}
 		switch candidate.State {
 		case runtimeeffects.StateAuthorized:
-			if err := abandonPrelaunchProviderAttempt(ctx, tx, story, candidate, claim, capture.CapturedAt, postgres, delivery); err != nil {
+			if err := abandonPrelaunchProviderAttempt(ctx, tx, story, candidate, origin, capture.CapturedAt, postgres, delivery, directives); err != nil {
 				return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 			}
 		case runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved:
-			if err := insertProviderAttemptDrain(ctx, tx, capture, candidate, claim, postgres); err != nil {
+			if err := insertProviderAttemptDrain(ctx, tx, capture, candidate, origin, postgres); err != nil {
 				return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 			}
 			result.Captured++
@@ -809,10 +851,11 @@ func abandonPrelaunchProviderAttempt(
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
 	candidate providerAttemptDrainCandidate,
-	claim runtimedelivery.Claim,
+	origin runtimeeffects.CompletionOrigin,
 	now time.Time,
 	postgres bool,
 	delivery providerDrainDeliveryOwner,
+	directives providerDrainDirectiveOwner,
 ) error {
 	failureErr := runtimefailures.New(
 		runtimefailures.ClassLifecycleConflict,
@@ -822,12 +865,14 @@ func abandonPrelaunchProviderAttempt(
 		map[string]any{"attempt_id": candidate.AttemptID},
 	)
 	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
-	if err := delivery.SettleProviderOriginFailureTx(ctx, tx, story, claim, runtimedelivery.Settlement{
-		Disposition: runtimedelivery.FailureDeadLetter,
-		ReasonCode:  "provider_attempt_superseded_before_launch",
-		Failure:     &failure,
+	if origin.Kind == runtimeeffects.CompletionOriginDirective {
+		if err := directives.SettleProviderDirectiveOriginTx(ctx, tx, story, origin.Directive, runtimeagentcontrol.DirectiveOperationFailed, failure, now.UTC()); err != nil {
+			return fmt.Errorf("settle superseded prelaunch directive origin: %w", err)
+		}
+	} else if err := delivery.SettleProviderOriginFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
+		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "provider_attempt_superseded_before_launch", Failure: &failure,
 	}); err != nil {
-		return fmt.Errorf("settle superseded prelaunch provider origin: %w", err)
+		return fmt.Errorf("settle superseded prelaunch delivery origin: %w", err)
 	}
 	failureJSON, err := json.Marshal(failure)
 	if err != nil {
@@ -872,7 +917,7 @@ func insertProviderAttemptDrain(
 	tx *sql.Tx,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidate providerAttemptDrainCandidate,
-	claim runtimedelivery.Claim,
+	origin runtimeeffects.CompletionOrigin,
 	postgres bool,
 ) error {
 	fields, err := agentIdentityFields(capture.Predecessor.Identity)
@@ -884,18 +929,19 @@ func insertProviderAttemptDrain(
 		drainID, candidate.AttemptID, candidate.OperationID, capture.LifecycleOperationID, capture.LifecycleTransitionID,
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, capture.SuccessorRuntimeEpoch, capture.SuccessorGeneration, string(capture.Target),
-		claim.DeliveryID(), claim.RunID(), claim.RouteIdentity(), claim.PersistenceToken(), claim.Version(), string(claim.SubscriberClass()), claim.SubscriberID(),
 		capture.CapturedAt.UTC(), capture.ExpiresAt.UTC(),
 	}
+	originValues := completionOriginValues(origin)
+	args = append(args[:17], append(originValues, args[17:]...)...)
 	if postgres {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO runtime_provider_attempt_drains (
 				drain_id, attempt_id, operation_id, lifecycle_operation_id, lifecycle_transition_id,
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 				predecessor_runtime_epoch, predecessor_generation, successor_runtime_epoch, successor_generation, target_phase,
-				origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token, origin_claim_version, origin_subscriber_type, origin_subscriber_id,
+				origin_kind,origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token, origin_claim_version, origin_subscriber_type, origin_subscriber_id,origin_directive_operation_id,origin_directive_owner_id,
 				state, captured_at, expires_at
-			) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::uuid,$19::uuid,$20,$21::uuid,$22,$23,$24,'pending',$25,$26)
+			) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NULLIF($19,'')::uuid,NULLIF($20,'')::uuid,NULLIF($21,''),NULLIF($22,'')::uuid,NULLIF($23,0),NULLIF($24,''),NULLIF($25,''),NULLIF($26,'')::uuid,NULLIF($27,''),'pending',$28,$29)
 		`, args...)
 		return err
 	}
@@ -904,9 +950,9 @@ func insertProviderAttemptDrain(
 			drain_id, attempt_id, operation_id, lifecycle_operation_id, lifecycle_transition_id,
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			predecessor_runtime_epoch, predecessor_generation, successor_runtime_epoch, successor_generation, target_phase,
-			origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token, origin_claim_version, origin_subscriber_type, origin_subscriber_id,
+				origin_kind,origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token, origin_claim_version, origin_subscriber_type, origin_subscriber_id,origin_directive_operation_id,origin_directive_owner_id,
 			state, captured_at, expires_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,0),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),NULLIF(?,''),'pending',?,?)
 	`, args...)
 	return err
 }

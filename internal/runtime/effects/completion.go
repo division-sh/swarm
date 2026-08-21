@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
@@ -255,14 +254,14 @@ func (d CompletionSettlementDisposition) Valid() bool {
 // settlement. Committed may be true with a non-nil error when the transaction
 // deliberately committed an outcome-uncertain provider-head conflict.
 type CompletionSettlementResult struct {
-	Committed             bool
-	Disposition           CompletionSettlementDisposition
-	SpendRecorded         bool
-	AttemptID             string
-	EntityID              string
-	OriginDelivery        runtimedelivery.Claim
-	OriginDeliverySettled bool
-	Finalization          *ProviderDrainFinalization
+	Committed     bool
+	Disposition   CompletionSettlementDisposition
+	SpendRecorded bool
+	AttemptID     string
+	EntityID      string
+	Origin        CompletionOrigin
+	OriginSettled bool
+	Finalization  *ProviderDrainFinalization
 }
 
 func (r CompletionSettlementResult) Drained() bool {

@@ -339,6 +339,12 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	if err != nil {
 		return "", err
 	}
+	if resp == nil {
+		if observation := runtimeeffects.CompletionSettlementObservationFromContext(ctx); observation.OriginSettled && observation.Disposition == runtimeeffects.CompletionSettlementDrained && observation.Origin.Kind == runtimeeffects.CompletionOriginDirective {
+			return "", runtimeagentcontrol.ErrDirectiveProviderDrained
+		}
+		return "", fmt.Errorf("directive provider returned no response")
+	}
 	if boardDirectiveSatisfied(recorder, a.conversation.Messages[beforeMessages:]) {
 		return strings.TrimSpace(resp.Message.Content), nil
 	}
@@ -350,6 +356,12 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	})
 	if err != nil {
 		return "", err
+	}
+	if resp == nil {
+		if observation := runtimeeffects.CompletionSettlementObservationFromContext(ctx); observation.OriginSettled && observation.Disposition == runtimeeffects.CompletionSettlementDrained && observation.Origin.Kind == runtimeeffects.CompletionOriginDirective {
+			return "", runtimeagentcontrol.ErrDirectiveProviderDrained
+		}
+		return "", fmt.Errorf("directive remediation provider returned no response")
 	}
 	if boardDirectiveSatisfied(recorder, a.conversation.Messages[beforeRemediation:]) {
 		return strings.TrimSpace(resp.Message.Content), nil

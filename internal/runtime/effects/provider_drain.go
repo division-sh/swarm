@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type ProviderDrainTarget string
@@ -58,11 +56,24 @@ type ProviderDrainFinalization struct {
 }
 
 type CompletionSettlementObservation struct {
-	AttemptID             string
-	Disposition           CompletionSettlementDisposition
-	OriginDelivery        runtimedelivery.Claim
-	OriginDeliverySettled bool
-	Finalization          *ProviderDrainFinalization
+	AttemptID     string
+	Disposition   CompletionSettlementDisposition
+	Origin        CompletionOrigin
+	OriginSettled bool
+	Finalization  *ProviderDrainFinalization
+}
+
+func CompletionSettlementObservationFromContext(ctx context.Context) CompletionSettlementObservation {
+	if ctx == nil {
+		return CompletionSettlementObservation{}
+	}
+	observer, ok := ctx.Value(completionSettlementObserverKey{}).(*completionSettlementObserver)
+	if !ok || observer == nil {
+		return CompletionSettlementObservation{}
+	}
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	return observer.observation
 }
 
 type completionSettlementObserver struct {

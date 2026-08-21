@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -21,39 +20,42 @@ import (
 )
 
 type completionRecoveryAttempt struct {
-	OperationID         string
-	AttemptID           string
-	AuthorityKind       string
-	AuthorityID         string
-	AuthorityEvidence   string
-	OperationMode       string
-	AttemptMode         string
-	Adapter             string
-	Transport           string
-	State               string
-	TargetKind          string
-	TargetID            string
-	TargetOrdinal       int
-	CapabilitySurfaceID string
-	CapabilitySurface   string
-	ExecutionOwner      string
-	FenceGeneration     int64
-	LeaseExpiresAt      time.Time
-	AgentID             string
-	AgentNameOwner      string
-	AgentNameSource     string
-	AgentRoutePresence  string
-	FlowScopeKey        string
-	FlowInstanceID      string
-	FlowInstance        string
-	RuntimeEpoch        int64
-	Generation          int64
-	OriginDeliveryID    string
-	OriginRunID         string
-	OriginRouteIdentity string
-	OriginClaimToken    string
-	OriginClaimVersion  int64
-	OriginSubscriber    string
+	OperationID          string
+	AttemptID            string
+	AuthorityKind        string
+	AuthorityID          string
+	AuthorityEvidence    string
+	OperationMode        string
+	AttemptMode          string
+	Adapter              string
+	Transport            string
+	State                string
+	TargetKind           string
+	TargetID             string
+	TargetOrdinal        int
+	CapabilitySurfaceID  string
+	CapabilitySurface    string
+	ExecutionOwner       string
+	FenceGeneration      int64
+	LeaseExpiresAt       time.Time
+	AgentID              string
+	AgentNameOwner       string
+	AgentNameSource      string
+	AgentRoutePresence   string
+	FlowScopeKey         string
+	FlowInstanceID       string
+	FlowInstance         string
+	RuntimeEpoch         int64
+	Generation           int64
+	OriginDeliveryID     string
+	OriginRunID          string
+	OriginRouteIdentity  string
+	OriginClaimToken     string
+	OriginClaimVersion   int64
+	OriginSubscriber     string
+	OriginKind           string
+	OriginDirectiveID    string
+	OriginDirectiveOwner string
 }
 
 type CompletionRecoveryAttempt = completionRecoveryAttempt
@@ -78,7 +80,7 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
-func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,
 		       o.execution_mode,a.execution_mode,
@@ -88,8 +90,9 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
-		       COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),
-		       COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,'')
+		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),
+		       COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
+		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
@@ -103,12 +106,17 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND `+postgresExternalEffectActiveOwnerPredicate+`
+		  AND (o.authority_kind='normal_agent' OR `+postgresExternalEffectActiveOwnerPredicate+`)
 		  AND (
 		    a.lease_expires_at <= $1 OR
 		    (o.authority_kind='normal_agent' AND (
 		      g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS DISTINCT FROM o.runtime_epoch OR
 		      g.lifecycle_generation IS DISTINCT FROM o.generation OR g.lifecycle_phase <> 'running'
+		    )) OR
+		    (o.authority_kind='normal_agent' AND NOT EXISTS (
+		      SELECT 1 FROM runs run
+		      WHERE run.run_id=COALESCE(NULLIF(o.lineage->>'run_id',''),NULLIF(o.authority_evidence #>> '{usage_target,run_id}',''))::uuid
+		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		    ))
 		  )
 		ORDER BY a.authorized_at,a.attempt_id
@@ -121,10 +129,10 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, story, true, attempts, now)
+	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, story, true, attempts, now)
 }
 
-func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,
 		       o.execution_mode,a.execution_mode,
@@ -134,8 +142,9 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
-		       COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),
-		       COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,'')
+		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),
+		       COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
+		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
@@ -149,12 +158,17 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		  AND g.flow_instance=o.flow_instance
 		WHERE o.effect_kind='provider_turn' AND a.usage_target_kind IS NOT NULL
 		  AND a.state IN ('authorized','launched','response_observed')
-		  AND `+sqliteExternalEffectActiveOwnerPredicate+`
+		  AND (o.authority_kind='normal_agent' OR `+sqliteExternalEffectActiveOwnerPredicate+`)
 		  AND (
 		    a.lease_expires_at <= ? OR
 		    (o.authority_kind='normal_agent' AND (
 		      g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS NOT o.runtime_epoch OR
 		      g.lifecycle_generation IS NOT o.generation OR g.lifecycle_phase <> 'running'
+		    )) OR
+		    (o.authority_kind='normal_agent' AND NOT EXISTS (
+		      SELECT 1 FROM runs run
+		      WHERE run.run_id=COALESCE(NULLIF(json_extract(o.lineage,'$.run_id'),''),NULLIF(json_extract(o.authority_evidence,'$.usage_target.run_id'),''))
+		        AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		    ))
 		  )
 		ORDER BY a.authorized_at,a.attempt_id
@@ -166,7 +180,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, story, false, attempts, now)
+	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, story, false, attempts, now)
 }
 
 func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt, error) {
@@ -183,8 +197,9 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 			&attempt.AgentID, &attempt.AgentNameOwner, &attempt.AgentNameSource, &attempt.AgentRoutePresence,
 			&attempt.FlowScopeKey, &attempt.FlowInstanceID, &attempt.FlowInstance,
 			&attempt.RuntimeEpoch, &attempt.Generation,
-			&attempt.OriginDeliveryID, &attempt.OriginRunID, &attempt.OriginRouteIdentity,
-			&attempt.OriginClaimToken, &attempt.OriginClaimVersion, &attempt.OriginSubscriber); err != nil {
+			&attempt.OriginKind, &attempt.OriginDeliveryID, &attempt.OriginRunID, &attempt.OriginRouteIdentity,
+			&attempt.OriginClaimToken, &attempt.OriginClaimVersion, &attempt.OriginSubscriber,
+			&attempt.OriginDirectiveID, &attempt.OriginDirectiveOwner); err != nil {
 			return nil, fmt.Errorf("scan completion attempt for recovery: %w", err)
 		}
 		if !lease.Valid {
@@ -199,7 +214,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 	return attempts, nil
 }
 
-func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, story *privateauthoractivity.Mutation, postgres bool, attempts []completionRecoveryAttempt, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, postgres bool, attempts []completionRecoveryAttempt, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
 	for _, recovered := range attempts {
 		state := runtimeeffects.StateTerminalFailure
@@ -284,10 +299,10 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		}
 		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
 			if resolution.Kind == completionSettlementDrained {
-				if _, err := settleProviderDrainRecovery(ctx, tx, story, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery); err != nil {
+				if _, err := settleProviderDrainRecovery(ctx, tx, story, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-			} else if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, attempt.OriginDelivery, delivery); err != nil {
+			} else if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, attempt.Origin, delivery, directives); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}
@@ -350,18 +365,14 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Kind: runtimeeffects.KindProviderTurn, Adapter: recovered.Adapter, Transport: recovered.Transport,
 	}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
-		origin, err := runtimedelivery.AdmitPersistedClaim(
-			recovered.OriginDeliveryID, recovered.OriginRunID, recovered.OriginRouteIdentity,
-			recovered.OriginClaimToken, recovered.OriginClaimVersion,
-			runtimedelivery.SubscriberAgent, recovered.OriginSubscriber,
-		)
+		origin, err := decodeCompletionOrigin(recovered.OriginKind, recovered.OriginDeliveryID, recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginClaimToken, recovered.OriginClaimVersion, recovered.OriginSubscriber, recovered.OriginDirectiveID, recovered.OriginDirectiveOwner)
 		if err != nil {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim for attempt %s: %w", recovered.AttemptID, err)
 		}
-		if origin.RunID() != target.RunID || origin.SubscriberID() != authority.Normal.AgentID {
+		if origin.Kind == runtimeeffects.CompletionOriginDelivery && (origin.Delivery.RunID() != target.RunID || origin.Delivery.SubscriberID() != authority.Normal.AgentID) {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery origin claim conflicts for attempt %s", recovered.AttemptID)
 		}
-		attempt.OriginDelivery = origin
+		attempt.Origin = origin
 	}
 	agentID := strings.TrimSpace(target.AgentID)
 	if agentID == "" {

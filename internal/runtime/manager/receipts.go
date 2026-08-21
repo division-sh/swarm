@@ -171,7 +171,13 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	}
 	attemptCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(attemptCtx)
 	out, err := agent.OnEvent(attemptCtx, evt)
-	if observation := completionSettlement(); observation.OriginDeliverySettled {
+	if observation := completionSettlement(); observation.OriginSettled {
+		if observation.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
+			originErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_consumer_mismatch", "agent-manager", "process_event", map[string]any{
+				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID, "origin_kind": observation.Origin.Kind,
+			})
+			return eventProcessResult{record: record, err: originErr}
+		}
 		if observation.Disposition != runtimeeffects.CompletionSettlementDrained {
 			dispositionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_settled_without_drained_disposition", "agent-manager", "process_event", map[string]any{
 				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID, "disposition": observation.Disposition,
@@ -181,7 +187,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 			record.Failure = failureEnvelope(dispositionErr, "agent-manager", "observe_completion_settlement")
 			return eventProcessResult{record: record, err: dispositionErr}
 		}
-		if !claim.Same(observation.OriginDelivery) {
+		if !claim.Same(observation.Origin.Delivery) {
 			claimErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_settled_foreign_origin_delivery", "agent-manager", "process_event", map[string]any{
 				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID,
 			})

@@ -27,7 +27,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -567,6 +569,124 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 	}
 	if rt.frames[1].Turn.ParentFrameID != rt.frames[0].FrameID || rt.frames[1].FrameID == rt.frames[0].FrameID {
 		t.Fatalf("board remediation chronology = first %q second parent %q second %q", rt.frames[0].FrameID, rt.frames[1].Turn.ParentFrameID, rt.frames[1].FrameID)
+	}
+}
+
+type drainedDirectiveProviderRuntime struct {
+	calls int
+}
+
+func (r *drainedDirectiveProviderRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{ID: "drained-directive", AgentID: agentID, SystemPrompt: systemPrompt, Tools: tools}, nil
+}
+
+func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Context, session *llm.Session, _ llm.ManagedCall) (*llm.Response, error) {
+	r.calls++
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("directive provider capability surface missing")
+	}
+	usageTarget := runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: surface.Authority.ID, RunID: surface.Authority.RunID,
+		AgentID: session.AgentID, AgentIdentity: session.MemoryIdentity.Agent, SessionID: session.ID,
+		Memory: session.Memory, FlowInstance: session.MemoryIdentity.FlowInstance(),
+	}
+	if !usageTarget.Valid() {
+		return nil, fmt.Errorf("directive provider usage target is invalid: %+v", usageTarget)
+	}
+	ctx = runtimeeffects.WithUsageTarget(ctx, usageTarget)
+	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("directive"), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := handle.MarkLaunched(ctx); err != nil {
+		return nil, err
+	}
+	if err := handle.MarkResponseObserved(ctx, map[string]any{"directive": true}); err != nil {
+		return nil, err
+	}
+	target := handle.Attempt().Authority.Target
+	surfaceJSON, err := json.Marshal(surface)
+	if err != nil {
+		return nil, err
+	}
+	input, output := int64(1), int64(1)
+	result, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled},
+		Usage: runtimeeffects.CompletionUsage{
+			ResolvedModel: "effect-test", Exactness: runtimeeffects.CompletionUsageExact,
+			InputTokens: &input, OutputTokens: &output,
+		},
+		AgentTurn: &runtimeeffects.CompletionAgentTurn{
+			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
+			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity}, Memory: target.Memory,
+			FlowInstance: target.FlowInstance, CapabilitySurfaceID: surface.ID, CapabilitySurface: surfaceJSON,
+		},
+		Spend: runtimeeffects.CompletionSpend{
+			FlowInstance: target.FlowInstance, AgentID: target.AgentID, AgentIdentity: target.AgentIdentity,
+			Model: "effect-test", BackendProfile: "effect-test", Provider: "effect-test", Transport: "api",
+			ResolvedModel: "effect-test", InvocationType: "directive",
+		},
+		Now: time.Now().UTC(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !result.Drained() || !result.OriginSettled {
+		return nil, fmt.Errorf("directive completion was not drained: %+v", result)
+	}
+	return nil, nil
+}
+
+func TestBoardStep_DrainedDirectiveStopsBeforeRemediation(t *testing.T) {
+	harness := effecttest.New()
+	harness.SettleOrigin = true
+	harness.CompletionDisposition = runtimeeffects.CompletionSettlementDrained
+	runtime := &drainedDirectiveProviderRuntime{}
+	agent := mustBuildLLMAgent(t, models.AgentConfig{
+		ExecutionMode: "live", ID: harness.Token.AgentID, Identity: harness.Token.Identity,
+		FlowPath: harness.Token.Identity.FlowInstance(), Role: "coordinator",
+	}, runtime, boardEmitExecutor{}, nil)
+
+	ctx := runtimedelivery.WithoutClaim(harness.CompletionContext(t.Name()))
+	origin := runtimeagentcontrol.DirectiveExecutionOrigin{
+		OperationID: "00000000-0000-0000-0000-000000000901", ExecutionOwnerID: "00000000-0000-0000-0000-000000000902",
+	}
+	ctx = runtimeeffects.WithDirectiveCompletionOrigin(ctx, origin)
+	ctx, observation := runtimeeffects.WithCompletionSettlementObserver(ctx)
+	fact, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if err != nil {
+		t.Fatalf("directive test bundle source: %v", err)
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("directive completion authority missing")
+	}
+	target := authority.Target
+	ctx = runtimecorrelation.WithRunID(ctx, target.RunID)
+	directive := runtimeagentcontrol.BoardDirective{
+		Directive: "continue",
+		Event: eventtest.DiagnosticDirect(
+			"00000000-0000-0000-0000-000000000903", events.EventType(runtimeagentcontrol.DirectiveEventType),
+			"runtime", "", []byte(`{"directive_text":"continue","mode":"directive"}`), 0,
+			target.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
+		),
+		RunIDResolution: runtimeagentcontrol.RunResolutionSpecified,
+		Source:          runtimeagentcontrol.DirectiveSourceV1RPC,
+	}
+	if _, err := agent.BoardStep(ctx, directive); !errors.Is(err, runtimeagentcontrol.ErrDirectiveProviderDrained) {
+		if failure, ok := runtimefailures.EnvelopeFromError(err); ok {
+			t.Fatalf("drained directive BoardStep error=%v attributes=%v", err, failure.Detail.Attributes)
+		}
+		t.Fatalf("drained directive BoardStep error=%v", err)
+	}
+	if runtime.calls != 1 {
+		t.Fatalf("drained directive provider calls=%d, want one without remediation", runtime.calls)
+	}
+	observed := observation()
+	if !observed.OriginSettled || observed.Disposition != runtimeeffects.CompletionSettlementDrained || !observed.Origin.Directive.Same(origin) {
+		t.Fatalf("drained directive observation=%+v", observed)
 	}
 }
 

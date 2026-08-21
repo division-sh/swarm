@@ -535,6 +535,7 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 	recovered.FlowInstance = identityFields.FlowInstancePath
 	recovered.RuntimeEpoch = 1
 	recovered.Generation = 1
+	recovered.OriginKind = string(runtimeeffects.CompletionOriginDelivery)
 	recovered.OriginDeliveryID = uuid.NewString()
 	recovered.OriginRunID = targetA.RunID
 	recovered.OriginRouteIdentity = "managed-capability-recovery-origin"
