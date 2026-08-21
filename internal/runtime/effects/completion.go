@@ -212,13 +212,11 @@ type DrainedCompletionSettlement struct {
 	Now        time.Time
 }
 
-func AdmitDrainedCompletionSettlement(attempt Attempt, settlement CompletionSettlement) (DrainedCompletionSettlement, error) {
-	if settlement.ProviderHead != nil {
-		return DrainedCompletionSettlement{}, fmt.Errorf("drained completion cannot mutate provider head")
-	}
+func ProjectDrainedCompletionSettlement(attempt Attempt, settlement CompletionSettlement) (DrainedCompletionSettlement, error) {
 	if settlement.AgentTurn == nil {
 		return DrainedCompletionSettlement{}, fmt.Errorf("drained completion requires immutable agent-turn evidence")
 	}
+	settlement.ProviderHead = nil
 	if err := settlement.Validate(attempt); err != nil {
 		return DrainedCompletionSettlement{}, err
 	}
@@ -242,17 +240,33 @@ func (s DrainedCompletionSettlement) CompletionSettlement() CompletionSettlement
 	}
 }
 
+type CompletionSettlementDisposition string
+
+const (
+	CompletionSettlementCurrent CompletionSettlementDisposition = "current"
+	CompletionSettlementDrained CompletionSettlementDisposition = "drained"
+)
+
+func (d CompletionSettlementDisposition) Valid() bool {
+	return d == CompletionSettlementCurrent || d == CompletionSettlementDrained
+}
+
 // CompletionSettlementResult is selected-store truth about a terminal
 // settlement. Committed may be true with a non-nil error when the transaction
 // deliberately committed an outcome-uncertain provider-head conflict.
 type CompletionSettlementResult struct {
 	Committed             bool
+	Disposition           CompletionSettlementDisposition
 	SpendRecorded         bool
 	AttemptID             string
 	EntityID              string
 	OriginDelivery        runtimedelivery.Claim
 	OriginDeliverySettled bool
 	Finalization          *ProviderDrainFinalization
+}
+
+func (r CompletionSettlementResult) Drained() bool {
+	return r.Disposition == CompletionSettlementDrained
 }
 
 type CompletionSpendProjection struct {

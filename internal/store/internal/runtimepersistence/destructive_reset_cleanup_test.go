@@ -198,7 +198,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 				if candidate.drained {
 					settlement.ProviderHead = nil
 				}
-				if err := handle.SettleCompletion(ctx, settlement); err != nil {
+				if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 					t.Fatalf("settle provider attempt before reset: %v", err)
 				}
 				if !candidate.drained {

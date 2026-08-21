@@ -26,23 +26,28 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	var spendRecorded bool
 	var originSettled bool
 	var finalization *runtimeeffects.ProviderDrainFinalization
+	var disposition runtimeeffects.CompletionSettlementDisposition
 	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
 		return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			providerHeadErr = nil
 			spendRecorded = false
 			originSettled = false
 			finalization = nil
+			disposition = ""
 			attemptSettlement := settlement
 			permit, err := resolveCompletionSettlementPermitPostgres(txctx, tx, attempt)
 			if err != nil {
 				return err
 			}
 			if permit.Kind == completionSettlementDrained {
-				drained, err := runtimeeffects.AdmitDrainedCompletionSettlement(attempt, attemptSettlement)
+				drained, err := runtimeeffects.ProjectDrainedCompletionSettlement(attempt, attemptSettlement)
 				if err != nil {
 					return err
 				}
 				attemptSettlement = drained.CompletionSettlement()
+				disposition = runtimeeffects.CompletionSettlementDrained
+			} else {
+				disposition = runtimeeffects.CompletionSettlementCurrent
 			}
 			if err := requireCompletionAttemptPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
 				return err
@@ -95,7 +100,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
 	return runtimeeffects.CompletionSettlementResult{
-		Committed: true, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
+		Committed: true, Disposition: disposition, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
 		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: originSettled, Finalization: finalization,
 	}, providerHeadErr
 }
@@ -105,23 +110,28 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	var spendRecorded bool
 	var originSettled bool
 	var finalization *runtimeeffects.ProviderDrainFinalization
+	var disposition runtimeeffects.CompletionSettlementDisposition
 	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			providerHeadErr = nil
 			spendRecorded = false
 			originSettled = false
 			finalization = nil
+			disposition = ""
 			attemptSettlement := settlement
 			permit, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt)
 			if err != nil {
 				return err
 			}
 			if permit.Kind == completionSettlementDrained {
-				drained, err := runtimeeffects.AdmitDrainedCompletionSettlement(attempt, attemptSettlement)
+				drained, err := runtimeeffects.ProjectDrainedCompletionSettlement(attempt, attemptSettlement)
 				if err != nil {
 					return err
 				}
 				attemptSettlement = drained.CompletionSettlement()
+				disposition = runtimeeffects.CompletionSettlementDrained
+			} else {
+				disposition = runtimeeffects.CompletionSettlementCurrent
 			}
 			if err := requireCompletionAttemptSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
 				return err
@@ -174,7 +184,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
 	return runtimeeffects.CompletionSettlementResult{
-		Committed: true, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
+		Committed: true, Disposition: disposition, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
 		OriginDelivery: attempt.OriginDelivery, OriginDeliverySettled: originSettled, Finalization: finalization,
 	}, providerHeadErr
 }

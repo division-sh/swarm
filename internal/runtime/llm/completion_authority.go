@@ -285,18 +285,18 @@ func completionBudgetScopes(cfg *config.Config, entityID string) []runtimeeffect
 	return scopes
 }
 
-func settleCompletionTurn(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any) error {
+func settleCompletionTurn(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any) (runtimeeffects.CompletionSettlementResult, error) {
 	return settleCompletionTurnWithProviderHead(ctx, dispatch, targetID, turn, response, profile, usage, state, failure, evidence, nil)
 }
 
-func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any, providerHead *runtimeeffects.CompletionProviderHead) error {
+func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any, providerHead *runtimeeffects.CompletionProviderHead) (runtimeeffects.CompletionSettlementResult, error) {
 	if dispatch == nil || dispatch.handle == nil {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
+		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
 	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
 		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
 		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
-		return fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
+		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
 	}
 	// The dispatch state can narrow a provider-call failure to a proven
 	// prelaunch failure. A successful transport does not make later response

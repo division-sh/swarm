@@ -558,7 +558,7 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 		t.Fatalf("observe forkchat completion: %v", err)
 	}
 	input, output := int64(2), int64(1)
-	err = handle.SettleCompletion(completionCtx, runtimeeffects.CompletionSettlement{
+	_, err = handle.SettleCompletion(completionCtx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled, Evidence: map[string]any{"test": true}},
 		Usage: runtimeeffects.CompletionUsage{
 			ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,

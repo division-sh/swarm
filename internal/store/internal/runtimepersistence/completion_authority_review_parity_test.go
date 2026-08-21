@@ -166,7 +166,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure, Evidence: map[string]any{"launch_rejected": true}}
 	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
 	settlement.AgentTurn.Failure = &failure
-	if err := handle.SettleCompletion(ctx, settlement); err != nil {
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle generation-1 prelaunch failure: %v", err)
 	}
 
@@ -218,13 +218,13 @@ func proveCommittedCompletionBudgetProjection(t *testing.T, sqlite bool) {
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "budget-projection")
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
 	settlement.ProviderHead = nil
-	if err := handle.SettleCompletion(ctx, settlement); err != nil {
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle projected completion: %v", err)
 	}
 	if len(projection.items) != 1 || projection.items[0].AttemptID != handle.Attempt().AttemptID {
 		t.Fatalf("completion projections=%#v, want exact committed attempt", projection.items)
 	}
-	if err := handle.SettleCompletion(ctx, settlement); err == nil {
+	if _, err := handle.SettleCompletion(ctx, settlement); err == nil {
 		t.Fatal("duplicate completion settlement unexpectedly succeeded")
 	}
 	if len(projection.items) != 1 {

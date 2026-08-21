@@ -789,7 +789,7 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 		Now: now,
 	}
 	applyManagedCompletionContextSurface(t, ctx, settlement.AgentTurn)
-	err := handle.SettleCompletion(ctx, settlement)
+	_, err := handle.SettleCompletion(ctx, settlement)
 	if err != nil {
 		t.Fatalf("settle selected completion: %v", err)
 	}

@@ -175,6 +175,9 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil {
+		return nil, nil
+	}
 
 	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
 		return resp, nil
@@ -190,6 +193,9 @@ func (c *Conversation) stepForkChat(ctx context.Context, msg Message) (*Response
 	resp, err := c.continueForkChatOnce(ctx, msg)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
 	}
 	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
 		return resp, nil
@@ -256,6 +262,9 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil {
+		return nil, nil
+	}
 	msg, err := call.providerMessage()
 	if err != nil {
 		return nil, err
@@ -283,6 +292,9 @@ func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*
 	resp, err := runtime.ContinueForkChatSession(ctx, c.Session, call)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
 	}
 	c.Messages = append(c.Messages, msg, resp.Message)
 	c.TurnCount++
@@ -356,6 +368,9 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		}
 		if err != nil {
 			return nil, err
+		}
+		if next == nil {
+			return nil, nil
 		}
 		resp = next
 	}

@@ -172,6 +172,15 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 	attemptCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(attemptCtx)
 	out, err := agent.OnEvent(attemptCtx, evt)
 	if observation := completionSettlement(); observation.OriginDeliverySettled {
+		if observation.Disposition != runtimeeffects.CompletionSettlementDrained {
+			dispositionErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_settled_without_drained_disposition", "agent-manager", "process_event", map[string]any{
+				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID, "disposition": observation.Disposition,
+			})
+			record.Outcome = startupManagerReplayOutcomeDropped
+			record.ReasonCode = startupManagerReplayReasonProcessFailed
+			record.Failure = failureEnvelope(dispositionErr, "agent-manager", "observe_completion_settlement")
+			return eventProcessResult{record: record, err: dispositionErr}
+		}
 		if !claim.Same(observation.OriginDelivery) {
 			claimErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_settled_foreign_origin_delivery", "agent-manager", "process_event", map[string]any{
 				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID,

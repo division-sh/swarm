@@ -186,7 +186,7 @@ func settleEffectTestCompletionFailure(t *testing.T, ctx context.Context, dispat
 	if err != nil {
 		t.Fatalf("marshal managed capability surface: %v", err)
 	}
-	err = dispatch.handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+	_, err = dispatch.handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: state, Failure: &failure.Failure},
 		Usage:      runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
 		AgentTurn: &runtimeeffects.CompletionAgentTurn{

@@ -21,8 +21,139 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
+
+func TestAnthropicDrainedCompletionStopsBeforeMutableProjection(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"done"}]}`))
+	}))
+	defer provider.Close()
+
+	harness := effecttest.New()
+	harness.CompletionDisposition = runtimeeffects.CompletionSettlementDrained
+	harness.SettleOrigin = true
+	conversations := &captureConversationStore{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Second), "worker-1", conversations, nil)
+	runtime.apiURL = provider.URL
+	runtime.apiKey = "test-key"
+	runtime.httpClient = provider.Client()
+	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
+
+	conversation := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", nil, testMemory(), 1, runtime)
+	conversation.SetToolExecutor(openAIToolExecutor{})
+	response, err := conversation.RunManaged(
+		testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support"),
+		agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("agent-1")},
+	)
+	if err != nil {
+		t.Fatalf("RunManaged drained completion: %v", err)
+	}
+	if response != nil {
+		t.Fatalf("drained response=%#v, want nil", response)
+	}
+	if conversation.TurnCount != 0 || len(conversation.Messages) != 0 || conversation.Session == nil || conversation.Session.TurnCount != 0 || len(conversation.Session.Messages) != 0 {
+		t.Fatalf("drained conversation mutated: conversation_turns=%d conversation_messages=%d session=%#v", conversation.TurnCount, len(conversation.Messages), conversation.Session)
+	}
+	if conversations.upsertCount != 0 {
+		t.Fatalf("drained conversation upserts=%d, want zero", conversations.upsertCount)
+	}
+}
+
+func TestClaudeMemoryDrainedCompletionStopsBeforeProviderHeadProjection(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "0")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "fake-docker.sh")
+	script := `#!/bin/sh
+set -eu
+session_id=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--session-id" ]; then
+    shift
+    session_id="${1:-}"
+  fi
+  shift || true
+done
+cat >/dev/null
+printf '{"result":"done","session_id":"%s"}\n' "$session_id"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake Claude transport: %v", err)
+	}
+
+	harness := effecttest.New()
+	harness.CompletionDisposition = runtimeeffects.CompletionSettlementDrained
+	harness.SettleOrigin = true
+	conversations := &captureConversationStore{}
+	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
+	cfg.LLM.ClaudeCLI.Command = "claude"
+	cfg.LLM.ClaudeCLI.OutputFormat = "json"
+	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)}
+	runtime := NewClaudeCLIRuntime(cfg, registry, "worker-1", workspaceResolverStub{
+		target: &workspace.Target{Container: "swarm-agent-agent-1", Workdir: "/workspace"},
+	}, conversations, nil)
+	runtime.liveSessions = registry
+	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	runtime.completionController = liveTestCompletionController(harness, harness, harness, harness)
+
+	conversation := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", nil, testMemory(), 1, runtime)
+	conversation.SetToolExecutor(openAIToolExecutor{})
+	response, err := conversation.RunManaged(
+		testManagedConversationContext(t, harness, "agent-1", "support/inst-1", "support"),
+		agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("agent-1")},
+	)
+	if err != nil {
+		t.Fatalf("RunManaged drained Claude completion: %v", err)
+	}
+	if response != nil {
+		t.Fatalf("drained Claude response=%#v, want nil", response)
+	}
+	if conversation.Session == nil || conversation.Session.ProviderSessionID != "" || conversation.Session.TurnCount != 0 || len(conversation.Session.Messages) != 0 {
+		t.Fatalf("drained Claude session mutated: %#v", conversation.Session)
+	}
+	settlements := harness.CompletionSettlementsForAdapter("claude_cli")
+	if len(settlements) != 1 || settlements[0].ProviderHead == nil {
+		t.Fatalf("Claude settlements=%#v, want one current-head candidate classified drained by the store", settlements)
+	}
+	if conversations.upsertCount != 0 {
+		t.Fatalf("drained Claude conversation upserts=%d, want zero", conversations.upsertCount)
+	}
+}
+
+func TestAllNormalProviderSuccessPathsConsumeCanonicalDrainedDisposition(t *testing.T) {
+	for _, candidate := range []struct {
+		file          string
+		settlement    string
+		mutableMarker string
+	}{
+		{file: "api_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
+		{file: "openai_compatible_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
+		{file: "openai_responses_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
+		{file: "cli_runtime.go", settlement: "var settled runtimeeffects.CompletionSettlementResult", mutableMarker: "s.Messages = append("},
+		{file: "mock_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "session.Messages = append("},
+	} {
+		t.Run(candidate.file, func(t *testing.T) {
+			raw, err := os.ReadFile(candidate.file)
+			if err != nil {
+				t.Fatalf("read adapter: %v", err)
+			}
+			source := string(raw)
+			settlement := strings.LastIndex(source, candidate.settlement)
+			if settlement < 0 {
+				t.Fatalf("adapter has no canonical settlement result consumer")
+			}
+			drained := strings.Index(source[settlement:], "if settled.Drained()")
+			mutable := strings.Index(source[settlement:], candidate.mutableMarker)
+			if drained < 0 || mutable < 0 || drained >= mutable {
+				t.Fatalf("adapter chronology settlement=%d drained=%d mutable=%d", settlement, drained, mutable)
+			}
+		})
+	}
+}
 
 func TestManagedSessionAdoptionFailsClosedBeforeProviderDispatch(t *testing.T) {
 	harness := effecttest.New()

@@ -133,8 +133,9 @@ type outputRecordingAgent struct {
 }
 
 type drainedCompletionObservationAgent struct {
-	id         string
-	withOutput bool
+	id                string
+	withOutput        bool
+	bypassDisposition bool
 }
 
 func (a drainedCompletionObservationAgent) ID() string                      { return a.id }
@@ -158,7 +159,7 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, _ events
 	}
 	target := handle.Attempt().Authority.Target
 	input, output := int64(1), int64(1)
-	err = handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
+	settled, err := handle.SettleCompletion(ctx, runtimeeffects.CompletionSettlement{
 		Settlement: runtimeeffects.Settlement{State: runtimeeffects.StateSettled},
 		Usage: runtimeeffects.CompletionUsage{
 			ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageExact,
@@ -180,6 +181,9 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, _ events
 	if err != nil {
 		return nil, err
 	}
+	if settled.Drained() && !a.bypassDisposition {
+		return nil, nil
+	}
 	if !a.withOutput {
 		return nil, nil
 	}
@@ -200,6 +204,7 @@ func TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrO
 		t.Run(test.name, func(t *testing.T) {
 			harness := effecttest.New()
 			harness.SettleOrigin = true
+			harness.CompletionDisposition = runtimeeffects.CompletionSettlementDrained
 			bus := &recordingReceiptBus{}
 			deliveryStore := newManagerDeliveryTestStore(t)
 			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
@@ -207,7 +212,7 @@ func TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrO
 				uuid.NewString(), "work.requested", "source", "", nil, 0,
 				"33333333-3333-4333-8333-333333333333", "", events.EventEnvelope{}, time.Now().UTC(),
 			)
-			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput}
+			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput, bypassDisposition: test.withOutput}
 			base := testAuthorActivityContext(harness.CompletionContext(t.Name()))
 			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 			claim, ok := runtimedelivery.ClaimFromContext(ctx)
