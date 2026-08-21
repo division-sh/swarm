@@ -3497,11 +3497,9 @@ func TestNormalizedFlowAgentEmitEvents_ExternalizesInstanceLocalEvents(t *testin
 		[]string{"task.started", "shared.event"},
 		nil,
 		map[string]struct{}{"task.started": {}},
-		"review/inst-1",
-		"review",
-		"inst-1",
+		"parent/review/inst-1",
 	)
-	if len(got) != 2 || got[0] != "review/inst-1/task.started" || got[1] != "shared.event" {
+	if len(got) != 2 || got[0] != "parent/review/inst-1/task.started" || got[1] != "shared.event" {
 		t.Fatalf("normalizedFlowAgentEmitEvents = %#v", got)
 	}
 }
@@ -3772,7 +3770,7 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	}
 }
 
-func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t *testing.T) {
+func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsAndEmitEventsFromExactFlowPath(t *testing.T) {
 	source := semanticview.Wrap(testNestedFlowBundle())
 	cfg, err := buildFlowAgentConfig(
 		source,
@@ -3787,6 +3785,7 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t 
 			Type:          "generic",
 			Role:          "worker",
 			Subscriptions: []string{"micro.started"},
+			EmitEvents:    []string{"micro.started"},
 		}),
 		map[string]string{"instance_id": "inst-1"},
 		map[string]struct{}{"micro.started": {}},
@@ -3797,6 +3796,9 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t 
 	}
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "child/grandchild/inst-1/micro.started" {
 		t.Fatalf("subscriptions = %#v, want [child/grandchild/inst-1/micro.started]", cfg.Subscriptions)
+	}
+	if len(cfg.EmitEvents) != 1 || cfg.EmitEvents[0] != "child/grandchild/inst-1/micro.started" {
+		t.Fatalf("emit_events = %#v, want [child/grandchild/inst-1/micro.started]", cfg.EmitEvents)
 	}
 }
 
