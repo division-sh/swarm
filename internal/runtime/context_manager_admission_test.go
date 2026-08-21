@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
@@ -195,8 +196,55 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossReplacementWi
 
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenceAndAbort(t *testing.T) {
 	ctx := context.Background()
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	fact := testBundleSourceFact(t, runtimeTestBundleHash)
+	cfg := &config.Config{}
+	cfg.Runtime.ExecutionPosture = "live"
+	rt, err := NewRuntime(testAuthorActivityContext(ctx), RuntimeDeps{
+		Config: cfg,
+		Options: RuntimeOptions{
+			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  fact,
+			ProcessWorkOwner:  runtimeTestProcessWorkOwner(t),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	t.Cleanup(func() {
+		if shutdownErr := rt.Shutdown(); shutdownErr != nil {
+			t.Errorf("Shutdown: %v", shutdownErr)
+		}
+	})
+	capability, grant, err := newRuntimeTestProcessCapability(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID)
+	if err != nil {
+		t.Fatalf("new process capability: %v", err)
+	}
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		t.Fatalf("InstallStartupGrant: %v", err)
+	}
+	if err := rt.Start(testAuthorActivityContext(ctx)); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	plan, err := grant.SourceSetPlan(ctx)
+	if err != nil {
+		t.Fatalf("SourceSetPlan: %v", err)
+	}
+	if err := plan.Validate(); err != nil {
+		t.Fatalf("source-set plan: %v", err)
+	}
+	bundleHash, bundleSource := fact.StorageValues()
+	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != bundleHash || plan.Sources[0].BundleSource != bundleSource {
+		t.Fatalf("source-set coordinates = %#v, want exact runtime coordinate", plan.Sources)
+	}
+
 	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	contextDef := runtimeAdmissionTestContext(t, runtimeTestBundleHash, "primary", catalog)
+	contextDef.BundleSourceFact = fact
+	contextDef.Source = module.source
+	contextDef.Runtime = rt
+	contextDef.WorkOwner = rt.WorkOccurrence()
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -208,39 +256,25 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		errCh <- projectionErr
 	}()
 	<-blocking.entered
-	manager.mu.Lock()
-	entry := manager.contexts[runtimeContextTestHashA]
-	err = manager.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-		entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseSourceSetTransition,
-	})
-	manager.mu.Unlock()
+	transition, err := manager.PrepareSourceSetTransition(ctx, plan)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("PrepareSourceSetTransition: %v", err)
 	}
 	close(blocking.release)
 	assertRuntimeAdmissionProjectionStale(t, <-errCh)
 	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
-
-	transition := &PreparedRuntimeSourceSetTransition{
-		manager: manager,
-		entries: []runtimeSourceSetTransitionEntry{{bundleHash: runtimeContextTestHashA, entry: entry, fresh: true}},
-	}
-	if err := transition.abortFresh(); err != nil {
-		t.Fatal(err)
+	if err := transition.Abort(); err != nil {
+		t.Fatalf("Abort: %v", err)
 	}
 	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 1)
 
-	manager.mu.Lock()
-	err = manager.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
-		entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseSourceSetTransition,
-	})
-	manager.mu.Unlock()
+	transition, err = manager.PrepareSourceSetTransition(ctx, plan)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("PrepareSourceSetTransition retry: %v", err)
 	}
 	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
-	if err := transition.publishCommittedVisibility(); err != nil {
-		t.Fatal(err)
+	if err := transition.Commit(ctx, capability); err != nil {
+		t.Fatalf("Commit: %v", err)
 	}
 	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 1)
 	subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
