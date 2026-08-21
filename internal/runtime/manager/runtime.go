@@ -970,14 +970,11 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if am.store == nil {
 		return summary, nil
 	}
-	if recoveryStore := am.roles.EffectsRecovery; recoveryStore != nil {
-		request := runtimeeffects.NewRecoveryRequest(time.Now().UTC(), am.executionPosture)
-		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
-			return summary, fmt.Errorf("reconcile external effect attempts: %w", err)
-		}
-		if err := am.lifecycle.refreshRecoveredProviderDrainFinalizations(ctx); err != nil {
-			return summary, err
-		}
+	if err := am.reconcileExternalEffectsForStartup(ctx); err != nil {
+		return summary, err
+	}
+	if err := am.lifecycle.refreshRecoveredProviderDrainFinalizations(ctx); err != nil {
+		return summary, err
 	}
 	if am.budget != nil {
 		if err := am.budget.ProjectRecoveryBudgetState(ctx); err != nil {
@@ -1004,6 +1001,25 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 		return summary, err
 	}
 	return summary, nil
+}
+
+func (am *AgentManager) reconcileExternalEffectsForStartup(ctx context.Context) error {
+	if am == nil {
+		return nil
+	}
+	am.startupEffectsMu.Lock()
+	defer am.startupEffectsMu.Unlock()
+	if am.startupEffectsReconciled {
+		return nil
+	}
+	if recoveryStore := am.roles.EffectsRecovery; recoveryStore != nil {
+		request := runtimeeffects.NewRecoveryRequest(time.Now().UTC(), am.executionPosture)
+		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, request); err != nil {
+			return fmt.Errorf("reconcile external effect attempts: %w", err)
+		}
+	}
+	am.startupEffectsReconciled = true
+	return nil
 }
 
 func (am *AgentManager) RecoverAfterStartupAdmission(ctx context.Context) (StartupReplaySummary, error) {

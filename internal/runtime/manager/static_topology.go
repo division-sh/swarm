@@ -61,11 +61,16 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 	return out, nil
 }
 
-// ReconcileStaticTopologyForStartup linearizes the declaration diff before
-// HydrateForStartup constructs any process-local execution.
+// ReconcileStaticTopologyForStartup settles predecessor effect authority,
+// then linearizes the declaration diff before constructing process-local
+// execution. Recovery must finalize terminal drains before a declaration can
+// compute a reintroduction generation.
 func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, source semanticview.Source) error {
 	if am == nil || source == nil || am.store == nil || am.lifecycle == nil || am.lifecycle.persistence() == nil {
 		return nil
+	}
+	if err := am.reconcileExternalEffectsForStartup(ctx); err != nil {
+		return err
 	}
 	admission, err := am.staticTopologyAdmission()
 	if err != nil {
