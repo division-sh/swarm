@@ -268,6 +268,75 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 			})
 
+			t.Run("normal_authority_activation_reclaims_predecessor_attempt", func(t *testing.T) {
+				event := deliveryLifecycleEvent("activation-reclaim-" + backend.name)
+				route := deliveryLifecycleConformanceRoute(t, "agent", "activation-reclaim-agent")
+				storetest.CommitSemanticEventWithInitialFacts(
+					t,
+					ctx,
+					backend.selected,
+					event,
+					[]events.DeliveryRoute{route},
+					runtimepipelineobligation.ScopeSubscribed,
+					storetest.AcknowledgedPipelineDisposition(),
+				)
+				claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
+				if err != nil {
+					t.Fatalf("claim predecessor delivery: %v", err)
+				}
+				predecessor := claimed.Snapshot.Authority
+				successor, err := runtimedelivery.NewNormalExecutionAuthority(
+					predecessor.BundleSource(),
+					"delivery-recovery-successor-"+backend.name,
+					predecessor.Generation()+1,
+				)
+				if err != nil {
+					t.Fatalf("construct successor authority: %v", err)
+				}
+				if err := backend.restart.ActivateDeliveryAuthority(ctx, successor); err != nil {
+					t.Fatalf("activate successor authority: %v", err)
+				}
+
+				deadline := time.Now().Add(time.Second)
+				for {
+					observation, err := backend.restart.ObserveDeliveryContinuation(ctx, successor, claimed.Snapshot.DeliveryID)
+					if err != nil {
+						t.Fatalf("observe successor continuation: %v", err)
+					}
+					if observation.Disposition == runtimedelivery.ClaimReclaimable {
+						break
+					}
+					if observation.Disposition != runtimedelivery.ClaimBusy {
+						t.Fatalf("successor observation = %s, want busy or reclaimable", observation.Disposition)
+					}
+					after, ok := observation.Wake.After()
+					if !ok || after > time.Until(deadline) {
+						t.Fatalf("successor busy wake = %s, %v; want bounded store wake", after, ok)
+					}
+					timer := time.NewTimer(after)
+					select {
+					case <-timer.C:
+					case <-time.After(time.Until(deadline)):
+						timer.Stop()
+						t.Fatal("successor claim did not become reclaimable")
+					}
+				}
+
+				reclaimed, err := backend.restart.ClaimDelivery(ctx, successor, event, route)
+				if err != nil {
+					t.Fatalf("reclaim successor delivery: %v", err)
+				}
+				if _, ok := reclaimed.Acquired(); !ok || reclaimed.Previous != runtimedelivery.ClaimReclaimable {
+					t.Fatalf("successor claim = %#v, want acquired from reclaimable", reclaimed)
+				}
+				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("predecessor settlement error = %v, want stale claim conflict", err)
+				}
+				if _, err := backend.restart.SettleSuccess(ctx, reclaimed.Claimed.Claim, nil, 0); err != nil {
+					t.Fatalf("settle successor delivery: %v", err)
+				}
+			})
+
 			t.Run("class_retry_budgets_are_structural", func(t *testing.T) {
 				assertDeliveryRetryBudget(t, ctx, backend, runtimedelivery.SubscriberAgent, "retry-agent", runtimedelivery.AgentMaxRetries)
 				assertDeliveryRetryBudget(t, ctx, backend, runtimedelivery.SubscriberNode, "retry-node", runtimedelivery.NodeMaxRetries)

@@ -14,7 +14,6 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const coordinatorTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -99,6 +98,8 @@ type coordinatorTestDispatcher struct {
 	mu         sync.Mutex
 	err        error
 	errs       []error
+	result     DispatchResult
+	results    []DispatchResult
 	calls      []string
 	dispatched chan struct{}
 }
@@ -111,17 +112,17 @@ func (d *coordinatorCancellationDispatcher) DispatchDeliveryContinuation(
 	ctx context.Context,
 	_ events.Event,
 	_ events.DeliveryRoute,
-) error {
+) DispatchResult {
 	close(d.started)
 	<-ctx.Done()
-	return ctx.Err()
+	return Fatal(ctx.Err())
 }
 
 func (d *coordinatorTestDispatcher) DispatchDeliveryContinuation(
 	_ context.Context,
 	event events.Event,
 	route events.DeliveryRoute,
-) error {
+) DispatchResult {
 	d.mu.Lock()
 	d.calls = append(d.calls, event.ID()+"\x00"+route.Recipient.ID())
 	err := d.err
@@ -129,12 +130,23 @@ func (d *coordinatorTestDispatcher) DispatchDeliveryContinuation(
 		err = d.errs[0]
 		d.errs = d.errs[1:]
 	}
+	result := d.result
+	if len(d.results) > 0 {
+		result = d.results[0]
+		d.results = d.results[1:]
+	}
 	d.mu.Unlock()
 	select {
 	case d.dispatched <- struct{}{}:
 	default:
 	}
-	return err
+	if err != nil {
+		return Fatal(err)
+	}
+	if result.Disposition() != 0 {
+		return result
+	}
+	return Transferred()
 }
 
 func (d *coordinatorTestDispatcher) callCount() int {
@@ -285,7 +297,93 @@ func TestCoordinatorCarrierReturnSignalsRedispatch(t *testing.T) {
 	}
 }
 
-func TestCoordinatorRetriesScanAfterTransientStoreFailure(t *testing.T) {
+func TestDispatchResultIsClosedOverDispositionAndWakeAuthority(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     DispatchResult
+		wantValid  bool
+		wantWake   DispatchWakeAuthority
+		wantFailed bool
+	}{
+		{name: "transferred", result: Transferred(), wantValid: true},
+		{name: "terminal", result: TerminallySettled(), wantValid: true},
+		{name: "agent_route", result: Deferred(DispatchWakeAgentRouteLifecycle), wantValid: true, wantWake: DispatchWakeAgentRouteLifecycle},
+		{name: "internal_subscription", result: Deferred(DispatchWakeInternalSubscriptionLifecycle), wantValid: true, wantWake: DispatchWakeInternalSubscriptionLifecycle},
+		{name: "carrier_return", result: Deferred(DispatchWakeCarrierReturn), wantValid: true, wantWake: DispatchWakeCarrierReturn},
+		{name: "fatal", result: Fatal(errors.New("fatal dispatch")), wantValid: true, wantFailed: true},
+		{name: "zero", result: DispatchResult{}},
+		{name: "deferred_without_owner", result: DispatchResult{disposition: DispatchDeferred}},
+		{name: "transferred_with_owner", result: DispatchResult{disposition: DispatchTransferred, wake: DispatchWakeAgentRouteLifecycle}, wantWake: DispatchWakeAgentRouteLifecycle},
+		{name: "fatal_without_failure", result: DispatchResult{disposition: DispatchFatal}},
+		{name: "fatal_with_owner", result: DispatchResult{disposition: DispatchFatal, wake: DispatchWakeCarrierReturn, err: errors.New("mixed authority")}, wantWake: DispatchWakeCarrierReturn, wantFailed: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.result.Validate()
+			if test.wantValid != (err == nil) {
+				t.Fatalf("Validate() error = %v, want valid=%t", err, test.wantValid)
+			}
+			if got := test.result.WakeAuthority(); got != test.wantWake {
+				t.Fatalf("wake authority = %s, want %s", got, test.wantWake)
+			}
+			if got := test.result.Failure() != nil; got != test.wantFailed {
+				t.Fatalf("failure present = %t, want %t", got, test.wantFailed)
+			}
+		})
+	}
+}
+
+func TestCoordinatorSynchronizationReturnsExactFatalScanResult(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	store := &coordinatorTestStore{scanned: make(chan struct{}, 8)}
+	reported := make(chan error, 1)
+	coordinator, err := New(
+		store,
+		authority,
+		owner,
+		&coordinatorTestDispatcher{dispatched: make(chan struct{}, 1)},
+		func(_ context.Context, err error) { reported <- err },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Start(context.Background()); err != nil {
+		t.Fatalf("start coordinator: %v", err)
+	}
+	defer func() {
+		if err := coordinator.Retire(context.Background()); err != nil {
+			t.Errorf("retire coordinator: %v", err)
+		}
+	}()
+	for store.scanCalls() < 2 {
+		select {
+		case <-store.scanned:
+		case <-time.After(time.Second):
+			t.Fatal("coordinator did not complete initial run-loop scan")
+		}
+	}
+	store.mu.Lock()
+	store.scanErr = errors.New("synchronized selected-store failure")
+	store.mu.Unlock()
+	err = coordinator.Synchronize(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "synchronized selected-store failure") {
+		t.Fatalf("Synchronize() error = %v, want exact scan failure", err)
+	}
+	select {
+	case reportedErr := <-reported:
+		if !strings.Contains(reportedErr.Error(), "synchronized selected-store failure") {
+			t.Fatalf("reported error = %v", reportedErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fatal synchronized scan was not reported")
+	}
+	if repeated := coordinator.Synchronize(context.Background()); repeated == nil || !strings.Contains(repeated.Error(), "synchronized selected-store failure") {
+		t.Fatalf("repeated Synchronize() error = %v, want retained fatal result", repeated)
+	}
+}
+
+func TestCoordinatorStopsAfterUnownedStoreFailure(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
 	store := &coordinatorTestStore{scanned: make(chan struct{}, 8)}
@@ -313,47 +411,40 @@ func TestCoordinatorRetriesScanAfterTransientStoreFailure(t *testing.T) {
 		}
 	}
 
-	event := coordinatorTestEvent("transient-store-failure")
-	route := coordinatorTestAgentRoute(t, "agent-a")
-	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), route)
-	if err != nil {
-		t.Fatal(err)
-	}
 	store.mu.Lock()
-	store.scanErrs = []error{errors.New("transient selected-store failure")}
-	store.pages = []runtimedelivery.ContinuationPage{{
-		Items: []runtimedelivery.ContinuationItem{{
-			DeliveryID: deliveryID,
-			Event:      event,
-			Snapshot: runtimedelivery.Snapshot{
-				DeliveryID: deliveryID,
-				Route:      route,
-				Status:     runtimedelivery.StatusPending,
-				Authority:  authority,
-			},
-			Disposition: runtimedelivery.ClaimAcquired,
-		}},
-		Exhausted: true,
-	}}
+	store.scanErrs = []error{errors.New("selected-store failure without wake authority")}
 	store.mu.Unlock()
 	coordinator.Signal()
 
 	select {
 	case err := <-reported:
-		if !strings.Contains(err.Error(), "transient selected-store failure") {
+		if !strings.Contains(err.Error(), "selected-store failure without wake authority") {
 			t.Fatalf("reported error = %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("transient selected-store failure was not reported")
+		t.Fatal("selected-store failure was not reported")
 	}
+	for {
+		select {
+		case <-store.scanned:
+		default:
+			goto drained
+		}
+	}
+drained:
+	scansAfterFailure := store.scanCalls()
+	coordinator.Signal()
 	select {
-	case <-dispatcher.dispatched:
-	case <-time.After(2 * scanFailureRetryDelay):
-		t.Fatal("coordinator did not retry the failed scan")
+	case <-store.scanned:
+		t.Fatal("fatal selected-store failure was retried")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if calls := store.scanCalls(); calls != scansAfterFailure {
+		t.Fatalf("scan calls after fatal failure = %d, want %d", calls, scansAfterFailure)
 	}
 }
 
-func TestCoordinatorRetriesNonTopologyDispatchWithoutExternalSignal(t *testing.T) {
+func TestCoordinatorStopsAfterFatalDispatchWithoutPolling(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
 	event := coordinatorTestEvent("dispatch-retry")
@@ -377,12 +468,11 @@ func TestCoordinatorRetriesNonTopologyDispatchWithoutExternalSignal(t *testing.T
 		pages: []runtimedelivery.ContinuationPage{
 			{Exhausted: true},
 			{Items: []runtimedelivery.ContinuationItem{item}, Exhausted: true},
-			{Items: []runtimedelivery.ContinuationItem{item}, Exhausted: true},
 		},
 		scanned: make(chan struct{}, 8),
 	}
 	dispatcher := &coordinatorTestDispatcher{
-		errs:       []error{errors.New("injected execution failure"), nil},
+		result:     Fatal(errors.New("dispatch failure without wake authority")),
 		dispatched: make(chan struct{}, 2),
 	}
 	reported := make(chan error, 1)
@@ -403,18 +493,25 @@ func TestCoordinatorRetriesNonTopologyDispatchWithoutExternalSignal(t *testing.T
 
 	select {
 	case err := <-reported:
-		if !strings.Contains(err.Error(), "injected execution failure") {
+		if !strings.Contains(err.Error(), "dispatch failure without wake authority") {
 			t.Fatalf("reported error = %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("non-topology dispatch failure was not reported")
+		t.Fatal("fatal dispatch failure was not reported")
 	}
-	for dispatcher.callCount() < 2 {
-		select {
-		case <-dispatcher.dispatched:
-		case <-time.After(2 * dispatchRetryDelay):
-			t.Fatal("non-topology dispatch was not retried without an external signal")
-		}
+	select {
+	case <-dispatcher.dispatched:
+	default:
+		t.Fatal("fatal dispatch did not record its exact attempt")
+	}
+	coordinator.Signal()
+	select {
+	case <-dispatcher.dispatched:
+		t.Fatal("fatal dispatch was retried")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if calls := dispatcher.callCount(); calls != 1 {
+		t.Fatalf("fatal dispatch calls = %d, want 1", calls)
 	}
 }
 
@@ -630,7 +727,7 @@ func TestCoordinatorRetirementCancellationIsNotReportedAsExecutionFailure(t *tes
 	}
 }
 
-func TestCoordinatorTopologyBlockRetainsWorkUntilSignal(t *testing.T) {
+func TestCoordinatorNamedRouteDeferralRetainsWorkUntilSignal(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()
 	event := coordinatorTestEvent("topology")
@@ -660,13 +757,7 @@ func TestCoordinatorTopologyBlockRetainsWorkUntilSignal(t *testing.T) {
 		scanned: make(chan struct{}, 4),
 	}
 	dispatcher := &coordinatorTestDispatcher{
-		err: runtimefailures.New(
-			runtimefailures.ClassTargetUnreachable,
-			"authoritative_delivery_incomplete",
-			"eventbus",
-			"dispatch",
-			nil,
-		),
+		result:     Deferred(DispatchWakeAgentRouteLifecycle),
 		dispatched: make(chan struct{}, 2),
 	}
 	reported := make(chan error, 1)
@@ -687,12 +778,24 @@ func TestCoordinatorTopologyBlockRetainsWorkUntilSignal(t *testing.T) {
 	select {
 	case <-dispatcher.dispatched:
 	case <-time.After(time.Second):
-		t.Fatal("topology-blocked continuation was not dispatched")
+		t.Fatal("route-deferred continuation was not dispatched")
 	}
+	for {
+		select {
+		case <-store.scanned:
+		default:
+			goto scansDrained
+		}
+	}
+scansDrained:
 	scansAfterBlock := store.scanCalls()
-	time.Sleep(dispatchRetryDelay + 100*time.Millisecond)
+	select {
+	case <-store.scanned:
+		t.Fatal("named route deferral armed an implicit retry")
+	case <-time.After(100 * time.Millisecond):
+	}
 	if calls := store.scanCalls(); calls != scansAfterBlock {
-		t.Fatalf("topology blockage armed a retry timer: scan calls %d -> %d", scansAfterBlock, calls)
+		t.Fatalf("named route deferral armed a retry: scan calls %d -> %d", scansAfterBlock, calls)
 	}
 	select {
 	case err := <-reported:
@@ -701,10 +804,10 @@ func TestCoordinatorTopologyBlockRetainsWorkUntilSignal(t *testing.T) {
 	}
 	capability, err := coordinator.Acquire(deliveryID)
 	if err != nil {
-		t.Fatalf("topology-blocked continuation was not retained: %v", err)
+		t.Fatalf("route-deferred continuation was not retained: %v", err)
 	}
 	if resolution, err := capability.Resolve(context.Background(), worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
-		t.Fatalf("return topology-blocked continuation: %v", err)
+		t.Fatalf("return route-deferred continuation: %v", err)
 	}
 }
 

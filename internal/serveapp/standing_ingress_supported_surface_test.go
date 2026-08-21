@@ -717,6 +717,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("delivery entities = %q and %q, want one standing entity", firstEntity, secondEntity)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 42, 42)
+	waitForStandingDeliveryQuiescence(t, sqlitePath)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -759,6 +760,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("restart entity = %q, want %q", restartedEntity, firstEntity)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
+	waitForStandingDeliveryQuiescence(t, sqlitePath)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -982,6 +984,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("second entity = %q, want %q", got, entity)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 42, 42)
+	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
@@ -996,6 +999,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("restart entity = %q, want %q", got, entity)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
+	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -1291,6 +1295,39 @@ func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sql
 				diagnostics = standingSQLiteDiagnostics(sqlitePath)
 			}
 			t.Fatalf("timed out waiting for Telegram reply %d/%d; diagnostics: %s", i+1, len(chatIDs), diagnostics)
+		}
+	}
+}
+
+func waitForStandingDeliveryQuiescence(t testing.TB, selectedStore string) {
+	t.Helper()
+	driver, dsn := "sqlite", selectedStore
+	if strings.HasPrefix(selectedStore, "postgres:") {
+		driver, dsn = "postgres", strings.TrimPrefix(selectedStore, "postgres:")
+	}
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		t.Fatalf("open %s delivery observation: %v", driver, err)
+	}
+	defer db.Close()
+
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var unfinished int
+		err := db.QueryRow(`
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE status IN ('pending', 'failed', 'in_progress')`).Scan(&unfinished)
+		if err == nil && unfinished == 0 {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("wait for %s delivery quiescence: unfinished=%d err=%v", driver, unfinished, err)
+		case <-ticker.C:
 		}
 	}
 }

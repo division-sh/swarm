@@ -5995,7 +5995,10 @@ engine:
         publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level
         obligation before enumerating delivery continuations.
         Recovery-enabled startup first drives the event-level pipeline scope to explicit exhaustion, then performs the
-        normal coordinator's bounded authority-scoped selected-store scan to explicit exhaustion before runtime readiness.
+        normal coordinator's bounded authority-scoped selected-store scan to explicit exhaustion. After restored agent
+        routes and manager execution loops become live, startup synchronizes one further event-driven scan through that
+        same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and
+        cannot manufacture eligibility or wait for a future durable due time.
         Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or
         reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The
         coordinator receives only an opaque relative wake duration computed from the same selected-store time observation
@@ -6016,7 +6019,14 @@ engine:
         eligibility authority: every execution decision is rechecked by the selected store. The
         cursor is opaque and monotonic; an empty or under-filled page is not exhaustion. Claim and scan results are closed
         over acquired, deferred, busy, reclaimable, terminal, wrong-authority, absent, invariant-invalid, and explicit
-        exhaustion. Corrupt or missing durable facts fail closed.
+        exhaustion. Exact continuation dispatch is separately closed over transferred, terminally settled, deferred under
+        one named live agent-route/internal-subscription/carrier-return wake authority, and fatal. A materializing node
+        route executes through its exact compiled receiver and cannot defer behind topology that only its own execution
+        creates. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not
+        continuation authority. Corrupt or missing durable facts and fatal dispatch results fail closed. Activating a
+        successor normal authority atomically shortens any exact predecessor open-attempt lease in the same bundle source
+        using selected-store time; the ordinary fenced claim path then reports it reclaimable, and the stale predecessor
+        capability remains unable to settle.
         Manager, workflow pipeline, public API, CLI, and dashboard code do not poll, enumerate, or manually claim a delivery
         backlog. Event-targeted event and agent replay remain named producers and transfer their newly committed exact
         obligations through the same owner.
@@ -35057,7 +35067,7 @@ process_local_work_lifetime_authority:
   durable_handoff:
     rule: Local publication ownership may end before execution only after the private selected-store adapter commits and returns the exact event and exact delivery route obligations. The publication transfers each returned delivery identity to one carrier or the one normal runtime-generation continuation coordinator before release.
     delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes return rather than consume the carrier, then release the exact durable continuation. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. Duplicate resolution, cross-authority transfer, or resolution after coordinator retirement fails closed.
-    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. Canonical route, topology, and authentication lifecycle changes signal it; no fixed delivery sweep, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A materializing node cannot defer behind topology created only by its own execution. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
     boundary: The durable handoff proof itself carries no eligibility, retry, claim, outcome, settlement, liveness, or replay semantics. Those remain governed by the delivery lifecycle owner and are rechecked at every selected-store boundary.
     failure: Missing, forged, wrong-event, wrong-route, wrong-authority, or unreadable proof fails closed and leaves local ownership unsettled. The exact retained owner remains reachable until a typed transfer or terminal settlement succeeds.
   replacement_and_standing:

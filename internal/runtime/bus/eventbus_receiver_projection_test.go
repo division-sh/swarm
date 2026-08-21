@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -49,6 +50,22 @@ func (receiverProjectionEffectStore) SettleExternalAttempt(context.Context, runt
 type receiverProjectionInterceptor struct {
 	eventErr error
 	routeErr error
+}
+
+type continuationPassthroughInterceptor struct{}
+
+type continuationEventPassthroughInterceptor struct{}
+
+func (continuationEventPassthroughInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func (continuationPassthroughInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func (continuationPassthroughInterceptor) InterceptDeliveryRoute(context.Context, events.DeliveryEvent, events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
 func TestEventBusWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
@@ -139,11 +156,123 @@ func TestDeliveryContinuationUsesClosedReceiverProjection(t *testing.T) {
 		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
 		Context:   events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-continuation"}},
 	}
-	if err := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route); err != nil {
-		t.Fatalf("dispatch continuation receiver: %v", err)
+	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
+	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
+		t.Fatalf("dispatch continuation receiver = %d, err=%v", result.Disposition(), err)
 	}
 	if interceptor.routeErr != nil {
 		t.Fatal(interceptor.routeErr)
+	}
+}
+
+func TestDeliveryContinuationDispatchResultNamesExactLiveWakeOwner(t *testing.T) {
+	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{Interceptors: []EventInterceptor{
+		continuationEventPassthroughInterceptor{}, continuationPassthroughInterceptor{},
+	}})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	evt := deliveryContinuationProjectionEvent("continuation-result", events.EventType("custom.continuation_result"))
+	tests := []struct {
+		name     string
+		route    events.DeliveryRoute
+		want     runtimedeliverycontinuation.DispatchDisposition
+		wantWake runtimedeliverycontinuation.DispatchWakeAuthority
+	}{
+		{
+			name: "missing_agent_route",
+			route: events.DeliveryRoute{
+				Recipient:     events.MustAgentDeliveryRecipient("missing-agent"),
+				AgentIdentity: testAgentRouteIdentity(t, "missing-agent", ""),
+			},
+			want:     runtimedeliverycontinuation.DispatchDeferred,
+			wantWake: runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle,
+		},
+		{
+			name: "missing_internal_subscription",
+			route: events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "missing-node")),
+				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+			},
+			want:     runtimedeliverycontinuation.DispatchDeferred,
+			wantWake: runtimedeliverycontinuation.DispatchWakeInternalSubscriptionLifecycle,
+		},
+		{
+			name:  "invalid_route",
+			route: events.DeliveryRoute{},
+			want:  runtimedeliverycontinuation.DispatchFatal,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, test.route)
+			if err := result.Validate(); err != nil {
+				t.Fatalf("dispatch result: %v", err)
+			}
+			if got := result.Disposition(); got != test.want {
+				t.Fatalf("disposition = %d, want %d, failure=%v", got, test.want, result.Failure())
+			}
+			if got := result.WakeAuthority(); got != test.wantWake {
+				t.Fatalf("wake authority = %s, want %s", got, test.wantWake)
+			}
+		})
+	}
+}
+
+func TestDeliveryContinuationDispatchTransfersToExactAgentCarrier(t *testing.T) {
+	eventBus, err := newScopedTestEventBus(InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	eventType := events.EventType("custom.continuation_agent_transfer")
+	const agentID = "continuation-agent"
+	deliveries := subscribeTestAgent(t, eventBus, agentID, eventType)
+	defer unsubscribeTestAgent(eventBus, agentID)
+	evt := deliveryContinuationProjectionEvent("continuation-agent-transfer", eventType)
+	route := events.DeliveryRoute{
+		Recipient:     events.MustAgentDeliveryRecipient(agentID),
+		AgentIdentity: testAgentRouteIdentity(t, agentID, ""),
+	}
+	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
+	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
+		t.Fatalf("dispatch result = %d, failure=%v, err=%v", result.Disposition(), result.Failure(), err)
+	}
+	select {
+	case delivery := <-deliveries:
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete exact agent carrier: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("exact agent carrier was not enqueued")
+	}
+}
+
+func TestDeliveryContinuationDispatchTransfersToExactInternalCarrier(t *testing.T) {
+	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{Interceptors: []EventInterceptor{
+		continuationEventPassthroughInterceptor{}, continuationPassthroughInterceptor{},
+	}})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	eventType := events.EventType("custom.continuation_internal_transfer")
+	node := testRootNode(t, "continuation-node")
+	deliveries := subscribeInternalDeliveriesForTest(t, eventBus, node.Key(), eventType)
+	evt := deliveryContinuationProjectionEvent("continuation-internal-transfer", eventType)
+	route := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(node),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+	}
+	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route)
+	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
+		t.Fatalf("dispatch result = %d, failure=%v, err=%v", result.Disposition(), result.Failure(), err)
+	}
+	select {
+	case delivery := <-deliveries:
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete exact internal carrier: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("exact internal carrier was not enqueued")
 	}
 }
 
@@ -429,6 +558,14 @@ func receiverProjectionEventForType(suffix string, eventType events.EventType) e
 	evt := eventtest.RuntimeControl(
 		uuid.NewString(), eventType, "receiver-projection-test", "", []byte(`{}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	return eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-" + suffix}})
+}
+
+func deliveryContinuationProjectionEvent(suffix string, eventType events.EventType) events.Event {
+	evt := eventtest.RuntimeControl(
+		uuid.NewString(), eventType, "receiver-projection-test", "", []byte(`{}`), 0,
+		"", "", events.EventEnvelope{}, time.Now().UTC(),
 	)
 	return eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-" + suffix}})
 }

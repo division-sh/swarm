@@ -1724,6 +1724,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 			return fmt.Errorf("start managed execution loops: %w", err)
 		}
+		if rt.deliveryContinuations != nil {
+			if err := rt.deliveryContinuations.Synchronize(startCtx); err != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+				return fmt.Errorf("converge startup delivery continuations after route activation: %w", err)
+			}
+		}
 		rt.emitBootProgress(16, "manager_event_loop_start", "ok", "")
 	} else {
 		rt.emitBootProgress(16, "manager_event_loop_start", "skipped", "manager unavailable")

@@ -93,24 +93,24 @@ func (d *settlingDeliveryContinuationDispatcher) DispatchDeliveryContinuation(
 	ctx context.Context,
 	event events.Event,
 	route events.DeliveryRoute,
-) error {
+) runtimedeliverycontinuation.DispatchResult {
 	result, err := d.store.ClaimDelivery(ctx, d.authority, event, route)
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	claimed, ok := result.Acquired()
 	if !ok {
-		return fmt.Errorf("continuation dispatch disposition = %s", result.Disposition)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("continuation dispatch disposition = %s", result.Disposition))
 	}
 	snapshot, err := d.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	if err := d.coordinator.Release(snapshot.DeliveryID); err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	d.dispatches.Add(1)
-	return nil
+	return runtimedeliverycontinuation.TerminallySettled()
 }
 
 type startupRecoveryOrderStore interface {
@@ -211,6 +211,36 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			)
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
+			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
+			agentRoute := startupRecoveryAgentRoute(t, agentID)
+			agentEvent := eventtest.ExistingRunRootIngress(
+				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
+				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
+			)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
+			agentProof, err := selected.ProveHandoff(ctx, agentEventID, agentRoute)
+			if err != nil {
+				t.Fatalf("prove startup agent handoff: %v", err)
+			}
+			agentSnapshot, err := selected.Snapshot(ctx, agentProof.DeliveryID())
+			if err != nil {
+				t.Fatalf("load startup agent authority: %v", err)
+			}
+			predecessorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
+				agentSnapshot.Authority.BundleSource(), "startup-predecessor-"+backend.name, 41,
+			)
+			if err != nil {
+				t.Fatalf("construct startup predecessor authority: %v", err)
+			}
+			if err := selected.ActivateDeliveryAuthority(ctx, predecessorAuthority); err != nil {
+				t.Fatalf("activate startup predecessor authority: %v", err)
+			}
+			if result, err := selected.ClaimDelivery(ctx, predecessorAuthority, agentEvent, agentRoute); err != nil {
+				t.Fatalf("claim startup predecessor agent delivery: %v", err)
+			} else if _, ok := result.Acquired(); !ok {
+				t.Fatalf("startup predecessor claim = %#v, want acquired", result)
+			}
+
 			processOwner := worklifetime.NewProcess()
 			hydrated := atomic.Bool{}
 			runtime, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
@@ -271,6 +301,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatalf("Start: %v", err)
 			}
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, nodeRoute, 1)
+			waitForRecoveredNodeDelivery(t, ctx, selected, agentEventID, agentRoute, 1)
 			if !hydrated.Load() {
 				t.Fatal("startup order proof delivered the workflow node before persisted agent hydration")
 			}
@@ -405,7 +436,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					processOwner := worklifetime.NewProcess()
 					activationProbe := &startupRecoveryActivationProbe{Store: selected}
 					handlerStarts := atomic.Int64{}
-					runtime, runtimeErr := swarmruntime.NewRuntime(currentCtx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
+					runtime, runtimeErr := swarmruntime.NewRuntime(runtimeCtx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 						Config: &config.Config{
 							Runtime: config.RuntimeConfig{RecoveryOnStartup: mode.recoveryOnStartup},
 							LLM:     config.LLMConfig{Backend: "anthropic"},
@@ -594,7 +625,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 
 func startupRecoveryAgentRoute(t *testing.T, agentID string) events.DeliveryRoute {
 	t.Helper()
-	name, err := runtimeagentidentity.DeclaredName(agentID, "global")
+	name, err := runtimeagentidentity.DeclaredName(agentID, "swarm-test://root/agents/"+agentID)
 	if err != nil {
 		t.Fatalf("construct startup recovery agent name: %v", err)
 	}
@@ -1226,7 +1257,8 @@ func waitForRecoveredNodeDelivery(t *testing.T, ctx context.Context, selected ru
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("standing recovery status = %q failure=%+v, want delivered", snapshot.Status, snapshot.Failure)
+			outcomes, outcomesErr := selected.Outcomes(ctx, snapshot.DeliveryID)
+			t.Fatalf("standing recovery snapshot = %#v outcomes=%#v outcomes_err=%v, want delivered", snapshot, outcomes, outcomesErr)
 		}
 		<-ticker.C
 	}
