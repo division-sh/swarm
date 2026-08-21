@@ -4,12 +4,31 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
 type failingSnapshotStore struct {
 	Store
 	err error
+}
+
+type sequenceSnapshotStore struct {
+	Store
+	mu        sync.Mutex
+	snapshots []AtomicSnapshot
+	calls     int
+}
+
+func (s *sequenceSnapshotStore) Snapshot(context.Context, string) (AtomicSnapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index := s.calls
+	s.calls++
+	if index >= len(s.snapshots) {
+		index = len(s.snapshots) - 1
+	}
+	return s.snapshots[index], nil
 }
 
 func (s failingSnapshotStore) Snapshot(context.Context, string) (AtomicSnapshot, error) {
@@ -71,6 +90,47 @@ func TestCredentialSnapshotOwnerTypesSecretBindingObservationFailure(t *testing.
 	var observationErr *SecretBindingObservationError
 	if !errors.As(err, &observationErr) || !errors.Is(err, sentinel) || observationErr.Key != "webhook_signing.acme" {
 		t.Fatalf("ObserveSecretBinding error = %#v, want typed observation failure wrapping sentinel", err)
+	}
+}
+
+func TestSecretBindingProjectionReusesExactKeyAndRejectsRotation(t *testing.T) {
+	bound := NewAtomicSnapshot(Metadata{Key: "webhook_signing.acme", Present: true}, "secret-a")
+	unbound := NewAtomicSnapshot(Metadata{Key: "webhook_signing.acme"}, "")
+	for _, tc := range []struct {
+		name      string
+		snapshots []AtomicSnapshot
+		wantStale bool
+	}{
+		{name: "stable", snapshots: []AtomicSnapshot{bound, bound}},
+		{name: "rotated", snapshots: []AtomicSnapshot{bound, unbound}, wantStale: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &sequenceSnapshotStore{Store: EnvStore{}, snapshots: tc.snapshots}
+			owner, err := NewSnapshotOwner(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection := owner.BeginSecretBindingProjection()
+			first, err := projection.ObserveSecretBinding(context.Background(), "webhook_signing.acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := projection.ObserveSecretBinding(context.Background(), " webhook_signing.acme ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.Epoch() != second.Epoch() || store.calls != 1 {
+				t.Fatalf("shared-key observations epochs=%q/%q calls=%d, want one capture", first.Epoch(), second.Epoch(), store.calls)
+			}
+			err = projection.ValidateCurrent(context.Background())
+			var staleErr *SecretBindingProjectionStaleError
+			if errors.As(err, &staleErr) != tc.wantStale {
+				t.Fatalf("ValidateCurrent error = %v, want stale=%t", err, tc.wantStale)
+			}
+			if store.calls != 2 {
+				t.Fatalf("snapshot calls = %d, want one capture plus one validation", store.calls)
+			}
+		})
 	}
 }
 

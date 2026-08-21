@@ -10008,11 +10008,15 @@ tool_model:
       READY/NOT_READY projection, webhook admission, and the target-signing prerequisite of channel-backed public
       registration. Webhook admission fails before signature verification, dedupe persistence, or publish when unbound;
       public registration fails before provider identify/apply, external-effect launch/settlement, or readiness publication.
-      The immutable target subject remains the lifecycle owner and deployment truth is evaluated at read/admission time with
-      manager/target revision currentness, so removal, rotation, replacement, suppression, and unload cannot retain stale
-      BOUND/READY state. Flow-instance config, store-entry presence alone, caller-computed booleans, and provider-specific
-      runtime readers are non-authoritative. Secret values remain process-private and are never returned by webhook responses
-      or readback surfaces; an external vault may back the deployment credential store without changing this semantic boundary.
+      Within one returned readiness projection, each normalized exact credential key is observed once, shared by every target
+      that declares it, and revalidated against its captured private epoch before return. The immutable target subject remains
+      the lifecycle owner, and every loaded-target visibility mutation atomically rebuilds the manager's base capability census
+      and advances its revision under the manager lock. Deployment truth is evaluated at read/admission time against both
+      credential and manager/target currentness, so removal, rotation, replacement, suppression, source-set fencing, and unload
+      cannot retain stale or internally contradictory BOUND/READY state. Flow-instance config, store-entry presence alone,
+      caller-computed booleans, and provider-specific runtime readers are non-authoritative. Secret values remain process-private
+      and are never returned by webhook responses or readback surfaces; an external vault may back the deployment credential
+      store without changing this semantic boundary.
     configured_provider_manifests:
     - provider: github
       signature: >

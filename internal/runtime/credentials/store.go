@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +114,22 @@ func (e *SecretBindingObservationError) Error() string {
 
 func (e *SecretBindingObservationError) Unwrap() error { return e.Err }
 
+type SecretBindingProjectionStaleError struct {
+	Key string
+}
+
+func (e *SecretBindingProjectionStaleError) Error() string {
+	return fmt.Sprintf("credential binding projection became stale while %q was observed", e.Key)
+}
+
+// SecretBindingProjection is one readback-scoped observation session. Each
+// exact key is observed once regardless of how many targets consume it, then
+// revalidated before the caller publishes the projection.
+type SecretBindingProjection struct {
+	owner    *SnapshotOwner
+	bindings map[string]SecretBinding
+}
+
 type SnapshotOwner struct {
 	store Snapshotter
 	mu    sync.Mutex
@@ -166,6 +183,53 @@ func (o *SnapshotOwner) ObserveSecretBinding(ctx context.Context, key string) (S
 		status = SecretBindingBound
 	}
 	return SecretBinding{status: status, snapshot: snapshot}, nil
+}
+
+func (o *SnapshotOwner) BeginSecretBindingProjection() *SecretBindingProjection {
+	return &SecretBindingProjection{owner: o, bindings: map[string]SecretBinding{}}
+}
+
+func (p *SecretBindingProjection) ObserveSecretBinding(ctx context.Context, key string) (SecretBinding, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return SecretBinding{}, fmt.Errorf("credential snapshot key is required")
+	}
+	if p == nil || p.owner == nil {
+		return SecretBinding{}, fmt.Errorf("credential snapshot owner is required")
+	}
+	if p.bindings == nil {
+		p.bindings = map[string]SecretBinding{}
+	}
+	if binding, ok := p.bindings[key]; ok {
+		return binding, nil
+	}
+	binding, err := p.owner.ObserveSecretBinding(ctx, key)
+	if err != nil {
+		return SecretBinding{}, err
+	}
+	p.bindings[key] = binding
+	return binding, nil
+}
+
+func (p *SecretBindingProjection) ValidateCurrent(ctx context.Context) error {
+	if p == nil || len(p.bindings) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(p.bindings))
+	for key := range p.bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		current, err := p.owner.ObserveSecretBinding(ctx, key)
+		if err != nil {
+			return err
+		}
+		if current.Epoch() != p.bindings[key].Epoch() {
+			return &SecretBindingProjectionStaleError{Key: key}
+		}
+	}
+	return nil
 }
 
 func cloneAtomicSnapshot(snapshot AtomicSnapshot) AtomicSnapshot {
