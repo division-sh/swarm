@@ -1295,7 +1295,7 @@ func TestDeliveryPlanner_ImportBoundaryWildcardUsesSubscriberScopeInsteadOfNeste
 		routeSource:  subscriberRouteSourceImportBoundaryWildcardGrant,
 	}
 
-	if intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(evt, []Subscriber{subscriber}); len(intents) != 0 {
+	if intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(nil, evt, []Subscriber{subscriber}); len(intents) != 0 {
 		t.Fatalf("same-instance intents = %#v, want import-boundary wildcard excluded", intents)
 	}
 	intents := routedImportBoundaryNoTargetNodeDeliveryIntents(evt, []Subscriber{subscriber})
@@ -1307,6 +1307,70 @@ func TestDeliveryPlanner_ImportBoundaryWildcardUsesSubscriberScopeInsteadOfNeste
 	}
 	if got := intents[0].Producer; got != routeIntentProducerScopedNodeRoute {
 		t.Fatalf("intent producer = %q, want scoped node route", got)
+	}
+}
+
+func TestDeliveryPlanner_ExactSameInstanceTargetUsesCompiledReceiverMode(t *testing.T) {
+	tests := []struct {
+		name             string
+		mode             string
+		routingSource    events.RoutingSource
+		wantFlowInstance string
+	}{
+		{
+			name:             "template_preserves_concrete_instance",
+			mode:             runtimecontracts.FlowModeTemplate,
+			routingSource:    eventtest.ConcreteTemplateRoutingSource("validation", "validation/instance-a", eventtest.UUID("template-source")),
+			wantFlowInstance: "validation/instance-a",
+		},
+		{
+			name:             "static_uses_declared_receiver_scope",
+			mode:             runtimecontracts.FlowModeStatic,
+			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation/instance-a", eventtest.UUID("static-source")),
+			wantFlowInstance: "validation",
+		},
+		{
+			name:             "singleton_uses_declared_receiver_scope",
+			mode:             runtimecontracts.FlowModeSingleton,
+			routingSource:    eventtest.StaticFlowRoutingSource("validation", "validation/instance-a", eventtest.UUID("singleton-source")),
+			wantFlowInstance: "validation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flow := runtimecontracts.FlowContractView{
+				Path:   "validation",
+				Paths:  runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+				Schema: runtimecontracts.FlowSchemaDocument{Mode: tt.mode},
+			}
+			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+					Root: &root,
+					ByID: map[string]*runtimecontracts.FlowContractView{"validation": &root.Children[0]},
+				},
+			})
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+				uuid.NewString(), "validation/thing.reviewed", "validator", "", nil, 0, uuid.NewString(),
+				events.EnvelopeForFlowInstance(events.EventEnvelope{}, "validation/instance-a"),
+				tt.routingSource, time.Now().UTC(),
+			)
+			subscriber := Subscriber{
+				Recipient:    events.MustNodeDeliveryRecipient(testFlowNode(t, "validation", "entity-writer")),
+				Path:         "validation",
+				MatchPattern: "validation/thing.reviewed",
+				routeSource:  subscriberRouteSourceSubscription,
+			}
+
+			intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(source, evt, []Subscriber{subscriber})
+			if len(intents) != 1 {
+				t.Fatalf("delivery intents = %#v, want one", intents)
+			}
+			if got := intents[0].TargetBlueprint.FlowInstance; got != tt.wantFlowInstance {
+				t.Fatalf("target flow instance = %q, want %q for compiled mode %q", got, tt.wantFlowInstance, tt.mode)
+			}
+		})
 	}
 }
 
