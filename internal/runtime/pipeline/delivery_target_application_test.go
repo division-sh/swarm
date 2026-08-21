@@ -281,6 +281,39 @@ func TestDeliveryTargetApplicationProjectsScopedGatesWithoutMutatingPersistenceO
 	}
 }
 
+func TestDeliveryTargetApplicationProjectsExactOwnerIntoEmptyPreviewAndRejectsConflict(t *testing.T) {
+	source := handlerEntityRequirementExecutionSource()
+	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
+	node := pipelineNode(t, "review", "node-a")
+	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+	entityID := eventtest.UUID("preview-exact-target")
+	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/preview", EntityID: entityID}
+	evt := handlerTestRootIngress(
+		uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
+		handlerTestWorkflowEnvelope("review", target.FlowInstance, entityID), time.Now().UTC(),
+	)
+
+	application, err := pc.prepareDeliveryTargetApplication(
+		context.Background(), node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target),
+		WorkflowState{Stage: "active", Metadata: map[string]any{"marker": "preview"}},
+	)
+	if err != nil {
+		t.Fatalf("prepare empty-identity preview: %v", err)
+	}
+	if got := application.State(); got.EntityID != entityID || got.Control.FlowPath != target.FlowInstance || got.Metadata["marker"] != "preview" {
+		t.Fatalf("projected preview state = %#v", got)
+	}
+
+	_, err = pc.prepareDeliveryTargetApplication(
+		context.Background(), node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target),
+		WorkflowState{EntityID: eventtest.UUID("conflicting-preview-target"), Stage: "active", Metadata: map[string]any{}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "entity disagrees with admitted owner") {
+		t.Fatalf("conflicting preview error = %v", err)
+	}
+}
+
 func TestCompileDeliveryTargetCompatibilityPolicyKeepsDependencyAndAcquisitionIndependent(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{

@@ -169,6 +169,9 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			return DeliveryTargetApplication{}, fmt.Errorf("delivery target application accepts at most one exact preview state")
 		}
 		application.state = cloneDeliveryTargetApplicationState(previewState[0])
+		if strings.TrimSpace(application.state.EntityID) == "" {
+			application.state.EntityID = application.entityID
+		}
 		if application.state.Control.FlowPath == "" {
 			application.state.Control = runtimeStateControlForDeliveryTarget(route)
 		}
