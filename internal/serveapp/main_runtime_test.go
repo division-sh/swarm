@@ -9183,7 +9183,11 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load provider packs for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, providerPacks.Loaded, providerPacks.Catalog, cliapp.ChannelPackLoad{})
+	providerCredentials, err := cliapp.BuildProviderCredentialStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, providerPacks.Loaded, providerPacks.Catalog, providerCredentials, cliapp.ChannelPackLoad{})
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}

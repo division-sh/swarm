@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -157,7 +158,15 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := runtime.ProviderTriggerCapabilitySubjects(semanticview.Wrap(bundle), catalog)
+	providerCredentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := runtimecredentials.NewSnapshotOwner(providerCredentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := runtime.ProviderTriggerCapabilitySubjects(context.Background(), semanticview.Wrap(bundle), catalog, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,6 +179,16 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 			installed++
 		case "effective":
 			effective++
+			if subject.TriggerAdmission == nil {
+				t.Fatalf("effective subject %q has no admission facts", subject.ID)
+			}
+			if subject.TriggerAdmission.RequestAuthentication == "UNAUTHENTICATED" {
+				if subject.Status != packs.StatusReady || len(subject.Requirements) != 0 {
+					t.Fatalf("unsigned effective subject = %#v, want READY without requirement", subject)
+				}
+			} else if subject.Status != packs.StatusNotReady || len(subject.Requirements) != 1 || subject.Requirements[0].Status != packs.RequirementStatusUnbound {
+				t.Fatalf("unbound authenticated effective subject = %#v, want NOT_READY/UNBOUND", subject)
+			}
 			if subject.TriggerAdmission != nil && subject.TriggerAdmission.PolicySource == "raw_declaration" {
 				raw++
 			}

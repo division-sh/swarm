@@ -238,6 +238,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets("doctor"),
 		ProviderTriggerPacks:   providerPackLoad.Loaded,
 		ProviderTriggerCatalog: providerPackLoad.Catalog,
+		ProviderCredentials:    providerCredentials,
 		ChannelPacks:           channelPacks,
 	})
 	report.SchemaInventory = configReport.SchemaInventory

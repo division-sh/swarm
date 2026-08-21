@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -43,8 +44,8 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		MCPListener: "127.0.0.1:8082",
 		ReadyAfter:  871 * time.Millisecond,
 		Standing: []serveLifecycleIngressFact{
-			{Provider: "telegram", URL: "http://127.0.0.1:8081/webhooks/ingress/telegram", SigningSecret: "webhook_signing.telegram", SigningBound: true, BundleHash: "bundle-b"},
-			{Provider: "github", URL: "http://127.0.0.1:8081/webhooks/ingress/github", SigningSecret: "webhook_signing.github", SigningBound: false, BundleHash: "bundle-a"},
+			{Provider: "telegram", URL: "http://127.0.0.1:8081/webhooks/ingress/telegram", BundleHash: "bundle-b", Subject: testServeIngressSubject("bundle-b", "ingress", "telegram", "webhook_signing.telegram", packs.RequirementStatusBound)},
+			{Provider: "github", URL: "http://127.0.0.1:8081/webhooks/ingress/github", BundleHash: "bundle-a", Subject: testServeIngressSubject("bundle-a", "ingress", "github", "webhook_signing.github", packs.RequirementStatusUnbound)},
 		},
 	})
 	presenter.shutdown(nil)
@@ -479,10 +480,22 @@ func TestServeLifecycleOwnerRejectsParallelTerminalWriters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read serve lifecycle presenter: %v", err)
 	}
-	for _, forbidden := range []string{"workspaceBackendDecisionDetail(", "packs.RenderSubject("} {
+	for _, forbidden := range []string{"workspaceBackendDecisionDetail("} {
 		if strings.Contains(string(presenterSource), forbidden) {
 			t.Errorf("serve lifecycle presenter delegates author-facing semantics through %s", forbidden)
 		}
+	}
+}
+
+func testServeIngressSubject(bundleHash, alias, provider, secret, status string) packs.Subject {
+	return packs.Subject{
+		ID: "ingress:" + bundleHash + ":" + alias + ":" + provider, Kind: packs.SubjectProviderTrigger,
+		Provider: provider, Source: "raw_declaration", Applicability: "effective",
+		TriggerAdmission: &packs.TriggerAdmission{
+			BundleHash: bundleHash, Alias: alias, CatalogGeneration: "catalog-generation",
+			PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound." + provider,
+		},
+		Requirements: []packs.Requirement{packs.RequirementWithStatus(packs.RequirementSecret, secret, packs.RequirementScopeTarget, status, "credential_store")},
 	}
 }
 

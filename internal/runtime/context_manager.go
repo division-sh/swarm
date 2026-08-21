@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -422,6 +423,7 @@ type RuntimeContextManager struct {
 	admissionGeneration        triggergeneration.Generation
 	installedTriggerSubjects   []packs.Subject
 	capabilitySubjects         []packs.Subject
+	capabilityRevision         uint64
 	suppressedStandingServices map[string]struct{}
 }
 
@@ -763,8 +765,13 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 	if err != nil {
 		return fmt.Errorf("normalize process provider capability subjects: %w", err)
 	}
-	m.capabilitySubjects = normalized
+	m.setBaseCapabilitySubjectsLocked(normalized)
 	return nil
+}
+
+func (m *RuntimeContextManager) setBaseCapabilitySubjectsLocked(subjects []packs.Subject) {
+	m.capabilitySubjects = packs.CloneSubjects(subjects)
+	m.capabilityRevision++
 }
 
 func (m *RuntimeContextManager) AdmissionState() ProcessAdmissionState {
@@ -776,13 +783,69 @@ func (m *RuntimeContextManager) AdmissionState() ProcessAdmissionState {
 	return ProcessAdmissionState{Generation: m.admissionGeneration, InstalledSubjects: packs.CloneSubjects(m.installedTriggerSubjects)}
 }
 
-func (m *RuntimeContextManager) CapabilitySubjects() []packs.Subject {
+func (m *RuntimeContextManager) BaseCapabilitySubjects() []packs.Subject {
 	if m == nil {
 		return nil
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return packs.CloneSubjects(m.capabilitySubjects)
+}
+
+func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context, owner *runtimecredentials.SnapshotOwner) ([]packs.Subject, error) {
+	if m == nil {
+		return nil, fmt.Errorf("runtime context manager is required")
+	}
+	m.mu.RLock()
+	revision := m.capabilityRevision
+	base := packs.CloneSubjects(m.capabilitySubjects)
+	targets := make(map[string]StandingTarget)
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		for _, target := range entry.context.StandingTargets {
+			if m.standingServiceSuppressedLocked(target.ServiceID) {
+				continue
+			}
+			subject, err := target.CapabilitySubject()
+			if err != nil {
+				m.mu.RUnlock()
+				return nil, fmt.Errorf("derive standing ingress capability subject: %w", err)
+			}
+			targets[subject.ID] = target
+		}
+	}
+	m.mu.RUnlock()
+
+	evaluated := make([]packs.Subject, 0, len(base))
+	for _, subject := range base {
+		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
+			evaluated = append(evaluated, subject)
+			continue
+		}
+		target, ok := targets[subject.ID]
+		if !ok {
+			return nil, fmt.Errorf("effective provider trigger subject %q has no current standing target", subject.ID)
+		}
+		current, err := EvaluateStandingIngressCapabilitySubject(ctx, target, subject, owner)
+		if err != nil {
+			return nil, err
+		}
+		evaluated = append(evaluated, current)
+	}
+	normalized, err := packs.NormalizeSubjects(evaluated)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.RLock()
+	currentRevision := m.capabilityRevision
+	m.mu.RUnlock()
+	if currentRevision != revision {
+		return nil, fmt.Errorf("provider ingress capability projection became stale while credentials were observed")
+	}
+	return normalized, nil
 }
 
 func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming BundleContext) (BundleContext, BundleContext, string, bool) {
@@ -1872,7 +1935,7 @@ func (m *RuntimeContextManager) restoreWithdrawnReplacementPredecessor(publicati
 	}
 	m.admissionGeneration = publication.predecessorAdmissionGeneration
 	m.installedTriggerSubjects = packs.CloneSubjects(publication.predecessorInstalledSubjects)
-	m.capabilitySubjects = packs.CloneSubjects(publication.predecessorCapabilitySubjects)
+	m.setBaseCapabilitySubjectsLocked(publication.predecessorCapabilitySubjects)
 	return nil
 }
 
@@ -1910,7 +1973,7 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	if publication.admissionGeneration.Valid() {
 		m.admissionGeneration = publication.admissionGeneration
 		m.installedTriggerSubjects = publication.installedSubjects
-		m.capabilitySubjects = publication.capabilitySubjects
+		m.setBaseCapabilitySubjectsLocked(publication.capabilitySubjects)
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
@@ -82,6 +83,10 @@ func (s providerTriggerSmokeCredentialStore) Get(_ context.Context, key string) 
 func (providerTriggerSmokeCredentialStore) Set(context.Context, string, string) error { return nil }
 func (providerTriggerSmokeCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (providerTriggerSmokeCredentialStore) Delete(context.Context, string) error      { return nil }
+func (s providerTriggerSmokeCredentialStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	value, present, err := s.Get(ctx, key)
+	return runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: key, Present: present}, value), err
+}
 
 func (w *providerTriggerSmokeCaptureWriter) WriteHeader(statusCode int) {
 	w.status = statusCode

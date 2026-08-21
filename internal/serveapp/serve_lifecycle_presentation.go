@@ -24,13 +24,11 @@ type serveLifecycleWorkspaceFact struct {
 }
 
 type serveLifecycleIngressFact struct {
-	Provider      string
-	Alias         string
-	URL           string
-	SigningSecret string
-	SigningBound  bool
-	BundleHash    string
-	Subject       packs.Subject
+	Provider   string
+	Alias      string
+	URL        string
+	BundleHash string
+	Subject    packs.Subject
 }
 
 type serveLifecycleReadyFacts struct {
@@ -645,14 +643,7 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 	})
 	for _, fact := range sorted {
 		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+" webhook", strings.TrimSpace(fact.URL))
-		if strings.TrimSpace(fact.SigningSecret) == "" {
-			continue
-		}
-		state := "unbound"
-		if fact.SigningBound {
-			state = "bound"
-		}
-		fmt.Fprintf(p.out, "  %-27s %s %s\n", "signing", strings.TrimSpace(fact.SigningSecret), state)
+		fmt.Fprintf(p.out, "  %-27s %s\n", "capability", packs.RenderEffectiveTriggerReadiness(fact.Subject))
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -195,6 +196,10 @@ func (identityInboundCredentialStore) Get(_ context.Context, key string) (string
 func (identityInboundCredentialStore) Set(context.Context, string, string) error { return nil }
 func (identityInboundCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (identityInboundCredentialStore) Delete(context.Context, string) error      { return nil }
+func (s identityInboundCredentialStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	value, present, err := s.Get(ctx, key)
+	return runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: key, Present: present}, value), err
+}
 
 type failingInboundEventStore struct{}
 
@@ -1044,6 +1049,50 @@ func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testi
 	}
 	if len(eventStore.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGatewayRejectsUnusableSigningBindingBeforeMarkerAndPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		set   bool
+	}{
+		{name: "missing"},
+		{name: "empty", set: true},
+		{name: "whitespace", value: " \t\n", set: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := newRuntimeTestEventBus(t, eventStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &recordingInboundStore{target: testInboundTarget("customer-a", "webhook_signing.slack"), inserted: true}
+			gateway := newTestInboundGateway(t, bus, nil, nil, store)
+			credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.set {
+				if err := credentials.Set(context.Background(), "webhook_signing.slack", tc.value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := gateway.SetCredentialStore(credentials); err != nil {
+				t.Fatal(err)
+			}
+			body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
+			req := newSignedSlackRequest("/webhooks/customer-a/slack", "unused", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+			rec := httptest.NewRecorder()
+			gateway.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "UNBOUND") {
+				t.Fatalf("response = %d %q, want UNBOUND 503", rec.Code, rec.Body.String())
+			}
+			if store.recorded || len(eventStore.events) != 0 {
+				t.Fatalf("unusable signing binding mutated marker=%t events=%d", store.recorded, len(eventStore.events))
+			}
+		})
 	}
 }
 

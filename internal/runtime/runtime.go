@@ -575,6 +575,7 @@ func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llms
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials, posture)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
+	validationOpts.ProviderCredentials = opts.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.LLMProfile = profile
 	validationOpts.ChannelPlans = opts.ChannelPlans
@@ -1316,7 +1317,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
-		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)
+		if err := rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials); err != nil {
+			return nil, fmt.Errorf("configure inbound gateway provider credentials: %w", err)
+		}
 	}
 	if opts.EnableToolGateway {
 		toolGatewayToken := opts.ToolGatewayBinding.AuthToken()

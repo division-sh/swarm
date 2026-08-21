@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 	if targets, err := ResolveStandingTargetDeclarations(wrapper, catalog); err != nil || len(targets) != 0 {
 		t.Fatalf("schema-only import standing targets = (%#v, %v), want none", targets, err)
 	}
-	if subjects, err := EffectiveStandingIngressCapabilitySubjects(wrapper, catalog); err != nil || len(subjects) != 0 {
+	if subjects, err := EffectiveStandingIngressCapabilitySubjects(context.Background(), wrapper, catalog, nil); err != nil || len(subjects) != 0 {
 		t.Fatalf("schema-only import effective ingress subjects = (%#v, %v), want none", subjects, err)
 	}
 	graph := runtimepinrouting.CompileConnectGraph(wrapper)

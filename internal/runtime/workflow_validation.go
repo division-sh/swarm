@@ -23,6 +23,7 @@ import (
 type WorkflowContractValidationOptions struct {
 	ExecutionPosture               executionposture.Posture
 	Credentials                    runtimecredentials.Store
+	ProviderCredentials            runtimecredentials.Store
 	ManagedCredentials             runtimemanagedcredentials.Store
 	CheckMCPReachable              bool
 	StrictEmitSchemas              bool
@@ -170,7 +171,14 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		result.BootReport.Add(finding)
 	}
 	result.BootReport.Sort()
-	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(source, opts.ProviderTriggerCatalog)
+	var providerCredentialOwner *runtimecredentials.SnapshotOwner
+	if opts.ProviderCredentials != nil {
+		providerCredentialOwner, err = runtimecredentials.NewSnapshotOwner(opts.ProviderCredentials)
+		if err != nil {
+			return result, fmt.Errorf("provider credential projection failed: %w", err)
+		}
+	}
+	result.CapabilitySubjects, err = ProviderTriggerCapabilitySubjects(ctx, source, opts.ProviderTriggerCatalog, providerCredentialOwner)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}

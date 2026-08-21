@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -217,6 +219,10 @@ func recoveryGuardActivation(t *testing.T, key string) runtimegenericschedule.Ac
 
 func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	providerCredentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	catalog, err := providertriggers.NewCatalogSnapshot()
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
@@ -225,7 +231,7 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	corrupt := &recordingInboundStore{integrityErr: sentinel}
 	_, err = newScopedTestRuntime(t, context.Background(), RuntimeDeps{
 		Config: testOperationalRuntimeConfig(), InboundStore: corrupt,
-		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderTriggerCatalog: catalog},
+		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderCredentials: providerCredentials, ProviderTriggerCatalog: catalog},
 	})
 
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "validate inbound publication integrity at startup") {
@@ -238,7 +244,7 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	healthy := &recordingInboundStore{}
 	rt, err := newScopedTestRuntime(t, context.Background(), RuntimeDeps{
 		Config: testOperationalRuntimeConfig(), InboundStore: healthy,
-		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderTriggerCatalog: catalog},
+		Options: RuntimeOptions{WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, ProviderCredentials: providerCredentials, ProviderTriggerCatalog: catalog},
 	})
 
 	if err != nil {
