@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -147,6 +148,21 @@ func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Conte
 func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context) ([]runtimebus.ActiveTargetDescriptor, error) {
 	return nil, nil
 }
+func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+	return runtimepipeline.WorkflowInstance{}, false, nil
+}
+func (managedNativeDurableRoles) ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) SelectActiveWorkflowInstances(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
+}
+func (managedNativeDurableRoles) SelectActiveWorkflowEntityStates(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return nil, nil
+}
 func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
 	return nil, nil
 }
@@ -166,6 +182,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
 		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
 		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		WorkflowInstances:     roles,
 		PreparedEvents:        roles,
 		TargetFailureRecorder: roles, RunOrigins: roles,
 	}
