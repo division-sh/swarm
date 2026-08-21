@@ -202,7 +202,7 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		packageDir := filepath.Dir(packageFile)
 		key := "."
 		if rel, err := filepath.Rel(rootDir, packageDir); err == nil && strings.TrimSpace(rel) != "" {
-			key = filepath.Clean(rel)
+			key = filepath.ToSlash(filepath.Clean(rel))
 		}
 		pkg := ProjectPackagePaths{
 			Key:               key,

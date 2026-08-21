@@ -22,7 +22,10 @@ func TestDiscoverProjectPackagePathsIncludesNestedFlowPackages(t *testing.T) {
 	}
 	var found bool
 	for _, pkg := range paths.ProjectPackages {
-		if pkg.Key == filepath.Clean(filepath.Join("flows", "parent")) {
+		if strings.Contains(pkg.Key, `\`) {
+			t.Fatalf("package key %q uses an OS-native separator; want portable slash identity", pkg.Key)
+		}
+		if pkg.Key == "flows/parent" {
 			found = true
 			if pkg.ParentKey != "." {
 				t.Fatalf("expected nested flow package parent '.'; got %q", pkg.ParentKey)
@@ -30,7 +33,7 @@ func TestDiscoverProjectPackagePathsIncludesNestedFlowPackages(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("expected nested flow package %q in discovered package tree", filepath.Clean(filepath.Join("flows", "parent")))
+		t.Fatal("expected nested flow package \"flows/parent\" in discovered package tree")
 	}
 }
 
