@@ -6515,14 +6515,16 @@ engine:
         authoring:
           runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
           agent_performance:
-            shape: '{mock: {kind: python, module: <contracts-root-relative .py file>}}'
+            shape: '{mock: {kind: python, module: <declaring-package-relative .py file>}}'
             kind: python
             entrypoint: handle
             rule: >
               Every agent selected by the mock backend must declare exactly one Python performance. The module must be a
-              regular non-symlink file below the contracts root. Contract compilation reads it once and captures its exact
-              path, bytes, and sha256 digest into the generation-owned agent descriptor; runtime execution never rereads the
-              ambient file.
+              regular non-symlink file below the exact package that declares the containing agents.yaml and below the active
+              outer contracts root. The authored module path is package-relative authoring truth. Contract compilation reads
+              it once and captures the package-relative Module, canonical outer-contract-relative SourcePath, exact bytes, and
+              sha256 digest into the generation-owned agent descriptor; runtime execution never rereads the ambient file and
+              no composition-root fallback or second path dialect exists.
         python_abi:
           runtime: cpython-wasi-3.13.14-wasi_sdk-24 through Wasmtime
           input: >
@@ -16547,6 +16549,12 @@ multi_bundle_persistence:
           contract-root-relative label with intent policy. Inline content is covered by agents.yaml. No directory is scanned
           for implicit or unreferenced intent files. The file bytes must still equal the already resolved artifact content;
           mutation between resolution and hashing fails closed.
+        agent_mock_modules: >
+          For every compiled agent mock performance, include the exact module bytes as raw data under the canonical
+          `bundle/<SourcePath>` label. SourcePath is the single outer-contract-relative identity compiled from the exact
+          declaring-package-relative Module; hashing, build, and registration never reinterpret Module. The ambient file bytes
+          must still equal the compiled Source and its sha256 Digest; mutation between contract compilation and any identity or
+          materialization read fails closed.
         flow_data: every non-ignored regular file under each flow data/ as raw bytes
         flow_policy_modules: >
           For each flow policy.yaml modules declaration, include the referenced module bytes as raw bytes under their

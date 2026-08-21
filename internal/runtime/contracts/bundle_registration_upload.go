@@ -71,7 +71,11 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 			return BundleRegistrationUpload{}, fmt.Errorf("read %s: %w", rel, err)
 		}
 		if entry.ExpectedExact != nil && !bytes.Equal(raw, entry.ExpectedExact) {
-			return BundleRegistrationUpload{}, fmt.Errorf("read %s: canonical input changed after exact agent intent resolution", rel)
+			owner := strings.TrimSpace(entry.ExactOwner)
+			if owner == "" {
+				owner = "exact artifact compilation"
+			}
+			return BundleRegistrationUpload{}, fmt.Errorf("read %s: canonical input changed after %s", rel, owner)
 		}
 		switch entry.Policy {
 		case bundleHashRaw:

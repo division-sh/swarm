@@ -45,7 +45,11 @@ func loadProjectContractView(contractsRoot string, paths ProjectPackagePaths, ma
 	if err != nil {
 		return view, err
 	}
-	view.Agents, err = materializeAgentMockPerformances(contractsRoot, paths.ProjectAgentsFile, view.Agents)
+	view.Agents, err = materializeAgentMockPerformances(agentMockMaterializationSource{
+		ContractsRoot: contractsRoot,
+		PackageRoot:   paths.Dir,
+		Declaration:   ContractItemSource{PackageKey: paths.Key, Layer: "project", File: paths.ProjectAgentsFile},
+	}, view.Agents)
 	if err != nil {
 		return view, err
 	}
@@ -89,7 +93,11 @@ func loadFlowContractView(contractsRoot string, paths FlowContractPaths, schema 
 	if err != nil {
 		return view, err
 	}
-	view.Agents, err = materializeAgentMockPerformances(contractsRoot, paths.AgentsFile, view.Agents)
+	view.Agents, err = materializeAgentMockPerformances(agentMockMaterializationSource{
+		ContractsRoot: contractsRoot,
+		PackageRoot:   paths.PackageDir,
+		Declaration:   ContractItemSource{PackageKey: paths.PackageKey, FlowID: paths.ID, Layer: "flow", File: paths.AgentsFile},
+	}, view.Agents)
 	if err != nil {
 		return view, err
 	}

@@ -131,6 +131,69 @@ func TestBundleHashV1IncludesAgentMockModuleBytes(t *testing.T) {
 	}
 }
 
+func TestBundleHashV1RejectsMockModuleMutationAfterCompilation(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load mocked agent bundle: %v", err)
+	}
+	writeBundleHashText(t, filepath.Join(root, "mocks", "assistant.py"), strings.Replace(mockAssistantSource, "hello from mock", "mutated behavior", 1))
+	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "changed after exact agent mock module compilation") {
+		t.Fatalf("BundleHash error = %v, want compiled mock exact-byte rejection", err)
+	}
+}
+
+func TestBundleHashV1RejectsCompiledMockDigestContradiction(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load mocked agent bundle: %v", err)
+	}
+	view, ok := bundle.ProjectViewByKey(".")
+	if !ok {
+		t.Fatal("root project view missing")
+	}
+	entry := view.Agents["assistant"]
+	entry.Mock.Digest = "sha256:" + strings.Repeat("0", 64)
+	view.Agents["assistant"] = entry
+	bundle.projectContracts["."] = view
+	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "does not match compiled source bytes") {
+		t.Fatalf("BundleHash error = %v, want compiled source/digest rejection", err)
+	}
+}
+
+func TestBundleHashV1RejectsNonCanonicalCompiledMockSourcePath(t *testing.T) {
+	tests := []string{
+		" mocks/assistant.py",
+		"C:/mocks/assistant.py",
+		"mocks\\assistant.py",
+		"mocks/../assistant.py",
+	}
+	for _, sourcePath := range tests {
+		t.Run(sourcePath, func(t *testing.T) {
+			repo := repoRootForContractsTest(t)
+			root := writeMockedAgentContractsDir(t)
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatalf("load mocked agent bundle: %v", err)
+			}
+			view, ok := bundle.ProjectViewByKey(".")
+			if !ok {
+				t.Fatal("root project view missing")
+			}
+			entry := view.Agents["assistant"]
+			entry.Mock.SourcePath = sourcePath
+			view.Agents["assistant"] = entry
+			bundle.projectContracts["."] = view
+			if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "not a canonical contracts-root-relative path") {
+				t.Fatalf("BundleHash error = %v, want non-canonical compiled source path rejection", err)
+			}
+		})
+	}
+}
+
 func TestBundleHashV1IncludesPolicyModuleBytes(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()

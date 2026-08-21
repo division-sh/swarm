@@ -393,10 +393,10 @@ root-node:
 	} {
 		dir := filepath.Join(root, "packages", project.name)
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project.name+"\nversion: \"1.0.0\"\nflows: []\n")
-		module := filepath.ToSlash(filepath.Join("packages", project.name, "mocks", "shared-worker.py"))
+		module := "mocks/shared-worker.py"
 		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, project.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !project.live {
-			writeBootverifyFixtureFile(t, filepath.Join(root, module), "def handle(input):\n    return {'text': 'mock'}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(dir, filepath.FromSlash(module)), "def handle(input):\n    return {'text': 'mock'}\n")
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "nodes.yaml"), scopedReachabilityNodeYAML())
 	}

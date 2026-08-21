@@ -375,7 +375,11 @@ func materializeBundleInputs(entries []bundleHashEntry, outputDir string) error 
 			return fmt.Errorf("read bundle build input %s: %w", rel, err)
 		}
 		if entry.ExpectedExact != nil && !bytes.Equal(raw, entry.ExpectedExact) {
-			return fmt.Errorf("read bundle build input %s: canonical input changed after exact agent intent resolution", rel)
+			owner := strings.TrimSpace(entry.ExactOwner)
+			if owner == "" {
+				owner = "exact artifact compilation"
+			}
+			return fmt.Errorf("read bundle build input %s: canonical input changed after %s", rel, owner)
 		}
 		if err := os.WriteFile(dst, raw, 0o644); err != nil {
 			return fmt.Errorf("write materialized input %s: %w", rel, err)
