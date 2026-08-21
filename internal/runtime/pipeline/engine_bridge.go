@@ -148,14 +148,33 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		workflowEventEntityID(triggerCtx.Event),
 	))
 	stampedOwner, exactDelivery := stampedDeliveryTargetOwnership(ctx)
+	application := DeliveryTargetApplication{}
 	if exactDelivery {
-		if targetFlowID := strings.TrimSpace(stampedOwner.Route().FlowID); targetFlowID != "" {
-			flowID = targetFlowID
+		admittedApplication, ok := deliveryTargetApplicationFromContext(ctx)
+		if !ok {
+			exactHandler := handlerFact.ForEvent(events.EventType(firstNonEmptyString(triggerCtx.HandlerEventKey, string(triggerCtx.Event.Type()))))
+			var err error
+			if preview {
+				admittedApplication, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), exactHandler, handler, triggerCtx.Event, stampedOwner, triggerCtx.State)
+			} else {
+				admittedApplication, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), exactHandler, handler, triggerCtx.Event, stampedOwner)
+			}
+			if err != nil {
+				return contractHandlerExecutionResult{}, err
+			}
+			ctx = withDeliveryTargetApplication(ctx, admittedApplication)
 		}
-		entityID = stampedOwner.Route().EntityID
-		if err := prepareStampedSelectOrCreateState(source, flowID, handler, triggerCtx.Event, stampedOwner, &triggerCtx.State); err != nil {
+		if admittedApplication.Owner() != stampedOwner {
+			return contractHandlerExecutionResult{}, fmt.Errorf("durable handler execution requires its exact delivery target application")
+		}
+		application = admittedApplication
+		if err := application.Validate(); err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
+		flowID = application.FlowID()
+		entityID = application.EntityID()
+		triggerCtx.Event = application.Event()
+		triggerCtx.State = application.State()
 	}
 	if !exactDelivery && handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
 		selected, err := pc.selectHandlerEntityForFlow(ctx, flowID, node.Key(), handler, triggerCtx.Event)
@@ -177,16 +196,14 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	originalEntityID := entityID
 	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
-	var targetOwnership []events.DeliveryTargetOwnership
-	if exactDelivery {
-		targetOwnership = append(targetOwnership, stampedOwner)
+	if !exactDelivery {
+		resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	}
-	resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State, targetOwnership...)
-	if err != nil {
-		return contractHandlerExecutionResult{}, err
-	}
-	entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
-	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
+	if !exactDelivery && !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
 		stateRoute, err := canonicalHandlerRoute(
 			source,
 			flowID,
@@ -205,7 +222,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			triggerCtx.State.EntityID = entityID
 		}
 	}
-	if !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
+	if !exactDelivery && !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
 		triggerCtx.State.EntityID = entityID
 	}
 	if handler.Join == nil && terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler) {
@@ -249,7 +266,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	statePath := firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance())
 	if exactDelivery {
-		statePath = stampedOwner.Route().FlowInstance
+		statePath = application.Route().InstancePath
 	}
 	stateRoute, err := canonicalHandlerRoute(
 		source,

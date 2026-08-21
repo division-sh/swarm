@@ -21,6 +21,7 @@ import (
 	agentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	attemptgeneration "github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	identity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	managedcapabilities "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	deadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -739,6 +740,10 @@ func (s *PostgresStore) LoadRunTestQuiescence(ctx context.Context, runID string,
 
 func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressPostgresOwner.LoadRuntimeIngressState(ctx)
+}
+
+func (s *PostgresStore) LoadWorkflowEntityState(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	return s.pipelinePostgresOwner.LoadWorkflowEntityState(ctx, route, entityID)
 }
 
 func (s *PostgresStore) LoadWorkflowInstance(ctx context.Context, route flowidentity.Route) (pipeline.WorkflowInstance, bool, error) {
@@ -1735,6 +1740,10 @@ func (s *SQLiteRuntimeStore) LoadRunTestQuiescence(ctx context.Context, runID st
 
 func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressSQLiteOwner.LoadRuntimeIngressState(ctx)
+}
+
+func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	return s.pipelineSQLiteOwner.LoadWorkflowEntityState(ctx, route, entityID)
 }
 
 func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, route flowidentity.Route) (pipeline.WorkflowInstance, bool, error) {

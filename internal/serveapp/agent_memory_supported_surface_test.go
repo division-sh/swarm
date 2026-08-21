@@ -1,10 +1,12 @@
 package serveapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/operatorread"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -119,7 +123,7 @@ func (r *standingMemoryProviderRecorder) waitForCount(t testing.TB, want int) {
 	t.Fatalf("OpenAI-compatible requests = %d, want at least %d", len(r.snapshot()), want)
 }
 
-func TestStandingTelegramMemorySupportedSurfaceSQLitePostgres(t *testing.T) {
+func TestStandingTelegramMemoryAndTargetOwnershipSupportedSurfaceSQLitePostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runStandingTelegramMemorySupportedSurface(t, backend)
@@ -222,6 +226,14 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	entity := sendStandingTelegramUpdate(t, firstURL, 101, 42, firstDiagnostics)
 	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
+	providerCalls := len(recorder.snapshot())
+	if got := sendStandingTelegramDuplicate(t, firstURL, 101, 42); got != entity {
+		t.Fatalf("exact duplicate entity = %q, want %q", got, entity)
+	}
+	requireNoStandingTelegramCall(t, telegramCalls, "same-process exact duplicate")
+	if got := len(recorder.snapshot()); got != providerCalls {
+		t.Fatalf("same-process exact duplicate provider calls = %d, want %d", got, providerCalls)
+	}
 	if got := sendStandingTelegramUpdate(t, firstURL, 102, 42, firstDiagnostics); got != entity {
 		t.Fatalf("A2 entity = %q, want A1 entity %q", got, entity)
 	}
@@ -239,6 +251,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	recorder.waitForCount(t, 5)
 	waitForStandingMemoryCompletion(t, backend, storeLocation, 3)
+	requireStandingPayloadOnlyTargetReadback(t, firstURL, bundleHash, 3)
 	before := loadStandingMemorySessions(t, backend, storeLocation)
 	requireStandingMemorySessionShape(t, before)
 	if code := first.stop(); code != 0 {
@@ -251,6 +264,14 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
+	providerCalls = len(recorder.snapshot())
+	if got := sendStandingTelegramDuplicate(t, secondURL, 101, 42); got != entity {
+		t.Fatalf("post-restart exact duplicate entity = %q, want %q", got, entity)
+	}
+	requireNoStandingTelegramCall(t, telegramCalls, "post-restart exact duplicate")
+	if got := len(recorder.snapshot()); got != providerCalls {
+		t.Fatalf("post-restart exact duplicate provider calls = %d, want %d", got, providerCalls)
+	}
 	if got := sendStandingTelegramUpdate(t, secondURL, 104, 42); got != entity {
 		t.Fatalf("A3 entity = %q, want standing entity %q", got, entity)
 	}
@@ -262,12 +283,106 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	recorder.waitForCount(t, 7)
 	waitForStandingMemoryCompletion(t, backend, storeLocation, 4)
+	requireStandingPayloadOnlyTargetReadback(t, secondURL, bundleHash, 4)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
 	after := loadStandingMemorySessions(t, backend, storeLocation)
 	assertStandingMemorySessionContinuity(t, before, after)
 	assertStandingMemoryProviderHistory(t, recorder.snapshot())
+}
+
+func requireNoStandingTelegramCall(t testing.TB, calls <-chan map[string]any, label string) {
+	t.Helper()
+	select {
+	case call := <-calls:
+		t.Fatalf("%s produced duplicate Telegram side effect: %#v", label, call)
+	case <-time.After(250 * time.Millisecond):
+	}
+}
+
+func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatID int) string {
+	t.Helper()
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new duplicate webhook request: %v", err)
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send duplicate webhook: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read duplicate webhook response: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode duplicate webhook response status=%d body=%q: %v", resp.StatusCode, strings.TrimSpace(string(raw)), err)
+	}
+	if resp.StatusCode != http.StatusOK || strings.TrimSpace(fmt.Sprint(payload["status"])) != "duplicate" {
+		t.Fatalf("duplicate webhook status=%d payload=%#v, want 200 duplicate", resp.StatusCode, payload)
+	}
+	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
+}
+
+func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash string, wantEvents int) {
+	t.Helper()
+	endpoint := strings.TrimRight(baseURL, "/") + "/v1/rpc"
+	var runs struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{
+		"bundle_hash": bundleHash,
+		"limit":       500,
+	}, &runs)
+	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "telegram-chat", "telegram-responder")
+	if err != nil {
+		t.Fatalf("admit package-backed responder identity: %v", err)
+	}
+	owners := map[string]string{}
+	seen := 0
+	for _, run := range runs.Runs {
+		var result operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+			"filter": map[string]any{"run_id": run.RunID},
+			"limit":  500,
+		}, &result)
+		for _, event := range result.Events {
+			if !strings.HasSuffix(event.EventName, "/telegram.reply_requested") {
+				continue
+			}
+			seen++
+			if event.NoDelivery != nil || len(event.DeadLetters) != 0 {
+				t.Fatalf("reply event %s settlement = no_delivery:%#v dead_letters:%#v", event.EventID, event.NoDelivery, event.DeadLetters)
+			}
+			matched := 0
+			for _, delivery := range event.Deliveries {
+				if delivery.SubscriberID != responder.Key() {
+					continue
+				}
+				matched++
+				target := delivery.Target
+				if target.Kind != "existing_entity" || target.FlowID != "telegram-chat" || target.FlowInstance == "" || target.EntityID == "" ||
+					target.EntityID != event.EntityID || delivery.Status != "delivered" || !delivery.Terminal {
+					t.Fatalf("reply event %s responder delivery = %#v event_entity=%q, want terminal exact existing owner", event.EventID, delivery, event.EntityID)
+				}
+				if previous, ok := owners[target.FlowInstance]; ok && previous != target.EntityID {
+					t.Fatalf("flow instance %q changed owner from %q to %q", target.FlowInstance, previous, target.EntityID)
+				}
+				owners[target.FlowInstance] = target.EntityID
+			}
+			if matched != 1 {
+				t.Fatalf("reply event %s responder deliveries = %d, want exactly one %q: %#v", event.EventID, matched, responder.Key(), event.Deliveries)
+			}
+		}
+	}
+	if seen != wantEvents || len(owners) != 2 {
+		t.Fatalf("reply readback = events:%d owners:%#v, want %d events over two exact chat owners", seen, owners, wantEvents)
+	}
 }
 
 type standingMemorySession struct {

@@ -78,6 +78,53 @@ type WorkflowInstancePersistenceReader interface {
 	SelectActiveWorkflowInstances(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error)
 }
 
+// WorkflowEntityStatePersistenceReader owns exact state-row reads for an
+// admitted route and entity. Scenario setup can establish this state before a
+// flow_instances lifecycle row exists; callers must not broaden this lookup.
+type WorkflowEntityStatePersistenceReader interface {
+	LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
+}
+
+type WorkflowEntityStatePersistenceRecord struct {
+	EntityID       string
+	FlowInstance   string
+	EntityType     string
+	Slug           string
+	Name           string
+	CurrentState   string
+	Revision       int64
+	EnteredStageAt time.Time
+	Gates          json.RawMessage
+	Fields         json.RawMessage
+	Bookkeeping    json.RawMessage
+	Accumulator    json.RawMessage
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersistenceRecord, route runtimeflowidentity.Route, workflowName, workflowVersion string) (WorkflowInstance, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() || strings.TrimSpace(record.FlowInstance) != route.InstancePath {
+		return WorkflowInstance{}, fmt.Errorf("workflow entity state row disagrees with admitted route")
+	}
+	config, err := json.Marshal(map[string]any{
+		"workflow_version": strings.TrimSpace(workflowVersion),
+		"instance_id":      route.InstanceID,
+		"storage_ref":      route.InstancePath,
+		"flow_path":        route.InstancePath,
+	})
+	if err != nil {
+		return WorkflowInstance{}, fmt.Errorf("encode workflow entity state control: %w", err)
+	}
+	return DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
+		EntityID: record.EntityID, WorkflowName: strings.TrimSpace(workflowName), WorkflowVersion: strings.TrimSpace(workflowVersion),
+		Status: "active", CurrentState: record.CurrentState, Revision: record.Revision, EnteredStageAt: record.EnteredStageAt,
+		Gates: record.Gates, Fields: record.Fields, Bookkeeping: record.Bookkeeping, Accumulator: record.Accumulator,
+		Config: config, FlowInstance: record.FlowInstance, EntityType: record.EntityType,
+		Slug: record.Slug, Name: record.Name, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+	})
+}
+
 // WorkflowInstancePersistenceRecord is the exact backend-neutral row shape
 // consumed by the semantic workflow decoder. Store adapters scan backend
 // values into this value; runtime owns interpretation of workflow metadata.
@@ -237,28 +284,29 @@ type workflowInstancePersistedControl struct {
 }
 
 type workflowInstanceStore struct {
-	entityQuery      entityquery.Reader
-	routeRecovery    runtimeworkflowroute.RecoveryReader
-	activityResults  runtimeactivityresult.Reader
-	activityJournal  ActivityAttemptJournal
-	gateRoutes       GateRouteAdmissionReader
-	timerObligations runtimetimerobligation.Reader
-	deliveryStore    runtimedelivery.Store
-	pipelineStore    runtimepipelineobligation.Store
-	decisionCards    decisioncard.Store
-	lifecycleOwner   workflowInstanceLifecycleOwner
-	runLifecycle     runtimerunlifecycle.OperationOwner
-	engineMutations  WorkflowEngineMutationOwner
-	cardMutations    DecisionCardMutationOwner
-	timerOccurrences WorkflowTimerOccurrenceOwner
-	timerActivations WorkflowTimerActivationPersistence
-	readiness        DynamicFlowRuntimeReadinessPersistence
-	standingServices StandingServicePersistence
-	decisionRoutes   WorkflowDecisionRouteOwner
-	instanceReader   WorkflowInstancePersistenceReader
-	initialCommits   WorkflowInitialMaterializationCommitOwner
-	deliverySignalMu sync.RWMutex
-	deliverySignals  map[runtimedelivery.ExecutionAuthority]func()
+	entityQuery       entityquery.Reader
+	routeRecovery     runtimeworkflowroute.RecoveryReader
+	activityResults   runtimeactivityresult.Reader
+	activityJournal   ActivityAttemptJournal
+	gateRoutes        GateRouteAdmissionReader
+	timerObligations  runtimetimerobligation.Reader
+	deliveryStore     runtimedelivery.Store
+	pipelineStore     runtimepipelineobligation.Store
+	decisionCards     decisioncard.Store
+	lifecycleOwner    workflowInstanceLifecycleOwner
+	runLifecycle      runtimerunlifecycle.OperationOwner
+	engineMutations   WorkflowEngineMutationOwner
+	cardMutations     DecisionCardMutationOwner
+	timerOccurrences  WorkflowTimerOccurrenceOwner
+	timerActivations  WorkflowTimerActivationPersistence
+	readiness         DynamicFlowRuntimeReadinessPersistence
+	standingServices  StandingServicePersistence
+	decisionRoutes    WorkflowDecisionRouteOwner
+	instanceReader    WorkflowInstancePersistenceReader
+	entityStateReader WorkflowEntityStatePersistenceReader
+	initialCommits    WorkflowInitialMaterializationCommitOwner
+	deliverySignalMu  sync.RWMutex
+	deliverySignals   map[runtimedelivery.ExecutionAuthority]func()
 }
 
 type DeliveryContinuationSignalRegistration struct {
@@ -320,6 +368,7 @@ type WorkflowPersistenceOwner interface {
 	StandingServicePersistence
 	WorkflowDecisionRouteOwner
 	WorkflowInstancePersistenceReader
+	WorkflowEntityStatePersistenceReader
 	WorkflowInitialMaterializationCommitOwner
 }
 
@@ -333,6 +382,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		engineMutations: owner, cardMutations: owner, timerOccurrences: owner,
 		timerActivations: owner, readiness: owner, standingServices: owner,
 		decisionRoutes: owner, instanceReader: owner, initialCommits: owner,
+		entityStateReader: owner,
 	}}
 }
 
@@ -355,7 +405,14 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.timerObligations != nil && p.store.engineMutations != nil && p.store.cardMutations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.initialCommits != nil
+		p.store.entityStateReader != nil && p.store.initialCommits != nil
+}
+
+func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
+	if s == nil || s.entityStateReader == nil {
+		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")
+	}
+	return s.entityStateReader.LoadWorkflowEntityState(ctx, route, entityID)
 }
 
 // RegisterDeliveryContinuationSignal installs the exact runtime-generation

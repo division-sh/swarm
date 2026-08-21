@@ -117,6 +117,7 @@ type deliveryRecipientManifest struct {
 type deliveryRecipientPolicy struct {
 	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
+	workflowInstances           runtimepipeline.WorkflowInstancePersistenceReader
 	semanticSource              semanticview.Source
 	requireTargetOwners         bool
 }
@@ -529,6 +530,7 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors:  eb.activeAgentDescriptors,
 			loadActiveTargetDescriptors: eb.activeTargetDescriptors,
+			workflowInstances:           eb.durable.WorkflowInstances,
 			semanticSource:              eb.semanticSource,
 			requireTargetOwners:         !eb.ephemeral,
 		},

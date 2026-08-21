@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -91,6 +92,9 @@ func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
 		}
 		for nodeID, node := range scope.Nodes {
 			for eventType, handler := range node.EventHandlers {
+				if _, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, flowID, events.EventType(eventType), handler); err != nil {
+					continue
+				}
 				hasSelect := handler.SelectEntity != nil && !handler.SelectEntity.Empty()
 				hasSelectOrCreate := handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()
 				if !hasSelect && !hasSelectOrCreate {
@@ -148,7 +152,8 @@ func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
 				if _, ok := inputs[eventType]; !ok {
 					continue
 				}
-				if handler.CreateEntity || (handler.SelectEntity != nil && !handler.SelectEntity.Empty()) || (handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()) {
+				policy, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, flowID, events.EventType(eventType), handler)
+				if err == nil && policy.Acquisition != runtimepipeline.DeliveryTargetAcquisitionNone {
 					continue
 				}
 				if !c.pinRoutingEventExternalSource(flowID, eventType) {

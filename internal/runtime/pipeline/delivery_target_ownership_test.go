@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -110,15 +113,29 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 			want: "disagrees with canonical handler identity",
 		},
 		{
-			name: "raw blueprint entity is not ownership evidence", nodeID: "entity-reader",
-			want: "owner is missing",
+			name: "malformed candidate missing instance", nodeID: "entity-reader",
+			candidates: []DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowID: "review", EntityID: canonicalID},
+			}},
+			want: "requires exact flow instance and entity identity",
 		},
 		{
-			name: "selected entity contradicts entityless handler", nodeID: "entityless",
+			name: "malformed candidate missing entity", nodeID: "entity-reader",
 			candidates: []DeliveryTargetOwnerCandidate{{
-				Route: events.RouteIdentity{FlowInstance: "review/one", EntityID: canonicalID},
+				Route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
 			}},
-			want: "entityless-safe handler has selected entity ownership evidence",
+			want: "requires exact flow instance and entity identity",
+		},
+		{
+			name: "exact candidate disagrees with blueprint entity", nodeID: "entity-reader",
+			candidates: []DeliveryTargetOwnerCandidate{{
+				Route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: eventtest.UUID("contradictory-owner")},
+			}},
+			want: "disagrees with receiver entity",
+		},
+		{
+			name: "raw blueprint entity is not ownership evidence", nodeID: "entity-reader",
+			want: "owner is missing",
 		},
 	}
 	for _, test := range tests {
@@ -129,7 +146,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 				t.Fatalf("admit handler: %v", err)
 			}
 			blueprint := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}
-			if test.name == "raw blueprint entity is not ownership evidence" {
+			if test.name == "raw blueprint entity is not ownership evidence" || test.name == "exact candidate disagrees with blueprint entity" {
 				blueprint.EntityID = canonicalID
 			}
 			_, err = ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
@@ -144,13 +161,13 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 	}
 }
 
-func TestClassifyDeliveryTargetOwnershipUsesUnambiguousHandlerFlowOwner(t *testing.T) {
+func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.T) {
 	source := deliveryTargetOwnershipSource()
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-handler-flow"), events.EventType("review/one/work.ready"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
 	)
-	node := pipelineNode(t, "review", "existing")
+	node := pipelineNode(t, "review", "entity-reader")
 	handler, err := AdmitDeliveryTargetHandler(source, node)
 	if err != nil {
 		t.Fatalf("admit handler: %v", err)
@@ -164,19 +181,54 @@ func TestClassifyDeliveryTargetOwnershipUsesUnambiguousHandlerFlowOwner(t *testi
 			FlowID: "review", FlowInstance: "review/one", EntityID: entityID,
 		}}},
 	}
-	owner, err := ClassifyDeliveryTargetOwnership(request)
-	if err != nil {
-		t.Fatalf("classify unambiguous handler-flow owner: %v", err)
-	}
-	if !owner.ExistingEntity() || owner.Route().FlowInstance != "review/one" || owner.Route().EntityID != entityID {
-		t.Fatalf("owner = %#v, want exact existing handler-flow owner", owner)
+	if _, err := ClassifyDeliveryTargetOwnership(request); err == nil || !strings.Contains(err.Error(), "owner is missing") {
+		t.Fatalf("single sibling classification error = %v, want exact-owner rejection", err)
 	}
 
 	request.Candidates = append(request.Candidates, DeliveryTargetOwnerCandidate{Route: events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/two", EntityID: eventtest.UUID("second-handler-flow-owner"),
 	}})
-	if _, err := ClassifyDeliveryTargetOwnership(request); err == nil || !strings.Contains(err.Error(), "ambiguous") {
-		t.Fatalf("ambiguous handler-flow classification error = %v, want fail closed", err)
+	if _, err := ClassifyDeliveryTargetOwnership(request); err == nil || !strings.Contains(err.Error(), "owner is missing") {
+		t.Fatalf("multiple sibling classification error = %v, want same exact-owner rejection", err)
+	}
+
+	exactEntityID := eventtest.UUID("exact-handler-flow-owner")
+	request.Candidates = append(request.Candidates, DeliveryTargetOwnerCandidate{Route: events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/producer-child", EntityID: exactEntityID,
+	}})
+	owner, err := ClassifyDeliveryTargetOwnership(request)
+	if err != nil {
+		t.Fatalf("classify exact owner with hostile siblings: %v", err)
+	}
+	if !owner.ExistingEntity() || owner.Route().FlowInstance != "review/producer-child" || owner.Route().EntityID != exactEntityID {
+		t.Fatalf("owner = %#v, want exact owner with siblings untouched", owner)
+	}
+}
+
+func TestClassifyDeliveryTargetOwnershipPreservesExactOwnerForEntityOptionalHandler(t *testing.T) {
+	source := deliveryTargetOwnershipSource()
+	evt := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("delivery-target-optional-owner"), events.EventType("review/one/work.ready"),
+		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
+	)
+	node := pipelineNode(t, "review", "entityless")
+	handler, err := AdmitDeliveryTargetHandler(source, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entityID := eventtest.UUID("optional-existing-owner")
+	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+		Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
+		Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"},
+		Handler:   handler.ForEvent("work.ready"), Candidates: []DeliveryTargetOwnerCandidate{{
+			Route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: entityID},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("classify optional exact owner: %v", err)
+	}
+	if !owner.ExistingEntity() || owner.Route().EntityID != entityID {
+		t.Fatalf("owner = %#v, want exact existing owner", owner)
 	}
 }
 
@@ -269,9 +321,9 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 		},
 		{name: "select pin rejects missing owner", nodeID: "pin-selector", eventType: "work.selected", wantError: "owner is missing"},
 		{
-			name: "select pin consumes planned future owner", nodeID: "pin-selector", eventType: "work.selected",
+			name: "select pin consumes exact ordered materialization", nodeID: "pin-selector", eventType: "work.selected",
 			candidates: []DeliveryTargetOwnerCandidate{{Route: events.RouteIdentity{FlowInstance: "review/one", EntityID: FlowInstanceEntityID("review/one")}, Materializing: true}},
-			wantKind:   "materializing_entity",
+			wantKind:   "materializing_entity", wantEntity: FlowInstanceEntityID("review/one"),
 		},
 		{
 			name: "create pin rejects wrong future owner", nodeID: "pin-creator", eventType: "work.created",
@@ -312,6 +364,128 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 			}
 		})
 	}
+}
+
+func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.T) {
+	source := deliveryTargetOwnershipSource()
+	evt := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("declared-key-target"), events.EventType("review/work.keyed"),
+		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "", events.EventEnvelope{}, time.Time{},
+	)
+	instance := WorkflowInstance{
+		EntityID: eventtest.UUID("declared-key-existing"), WorkflowName: "review", InstanceID: "one",
+		StorageRef: "review/one", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+	}
+	tests := []struct {
+		name      string
+		nodeID    string
+		reader    deliveryTargetWorkflowReader
+		wantKind  string
+		wantRoute string
+		wantError string
+	}{
+		{name: "select zero", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{}, wantError: "select_entity_no_match"},
+		{name: "select one ignores supplied path", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance}}, wantKind: "existing_entity", wantRoute: "review/one"},
+		{name: "select many", nodeID: "key-selector", reader: deliveryTargetWorkflowReader{selected: []WorkflowInstance{instance, withDeliveryTargetInstanceIdentity(instance, "two", eventtest.UUID("declared-key-second"))}}, wantError: "select_entity_ambiguous"},
+		{name: "select or create zero", nodeID: "key-upserter", reader: deliveryTargetWorkflowReader{}, wantKind: "materializing_entity"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			node := pipelineNode(t, "review", test.nodeID)
+			handler, err := AdmitDeliveryTargetHandler(source, node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+				Context: context.Background(), Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
+				Blueprint: events.RouteIdentity{FlowID: "review", FlowInstance: "review/hostile-preselection"},
+				Handler:   handler.ForEvent("work.keyed"), WorkflowInstances: test.reader,
+			})
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("classification error = %v, want %q", err, test.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if owner.Code() != test.wantKind {
+				t.Fatalf("owner kind = %s, want %s", owner.Code(), test.wantKind)
+			}
+			if test.wantRoute != "" && owner.Route().FlowInstance != test.wantRoute {
+				t.Fatalf("owner route = %#v, want %s", owner.Route(), test.wantRoute)
+			}
+			if owner.Route().FlowInstance == "review/hostile-preselection" {
+				t.Fatalf("declared-key acquisition retained supplied preselection: %#v", owner.Route())
+			}
+		})
+	}
+}
+
+func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppearanceAndRejectsConflict(t *testing.T) {
+	source := deliveryTargetOwnershipSource()
+	evt := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("declared-key-race"), events.EventType("review/work.keyed"),
+		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "", events.EventEnvelope{}, time.Time{},
+	)
+	instanceID, err := selectOrCreateEntityInstanceID(source, "review", map[string]any{"account_id": "account-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := deriveFlowInstanceIdentity(source, "review", instanceID)
+	matching := WorkflowInstance{
+		EntityID: identity.EntityID, WorkflowName: "review", InstanceID: identity.InstanceID, StorageRef: identity.InstancePath,
+		Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+	}
+	node := pipelineNode(t, "review", "key-upserter")
+	handler, err := AdmitDeliveryTargetHandler(source, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	classify := func(reader deliveryTargetWorkflowReader) (events.DeliveryTargetOwnership, error) {
+		return ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+			Context: context.Background(), Source: source, Event: evt, Recipient: events.MustNodeDeliveryRecipient(node),
+			Handler: handler.ForEvent("work.keyed"), WorkflowInstances: reader,
+		})
+	}
+	owner, err := classify(deliveryTargetWorkflowReader{loaded: map[string]WorkflowInstance{identity.InstancePath: matching}})
+	if err != nil {
+		t.Fatalf("same-key exact appearance: %v", err)
+	}
+	if !owner.ExistingEntity() || owner.Route().FlowInstance != identity.InstancePath {
+		t.Fatalf("owner = %#v, want exact appearing row", owner)
+	}
+	conflicting := matching
+	conflicting.Fields = map[string]any{"account_id": "other"}
+	if _, err := classify(deliveryTargetWorkflowReader{loaded: map[string]WorkflowInstance{identity.InstancePath: conflicting}}); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
+		t.Fatalf("conflicting exact appearance error = %v", err)
+	}
+}
+
+type deliveryTargetWorkflowReader struct {
+	selected []WorkflowInstance
+	loaded   map[string]WorkflowInstance
+}
+
+func (r deliveryTargetWorkflowReader) LoadWorkflowInstance(_ context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
+	instance, ok := r.loaded[route.InstancePath]
+	return instance, ok, nil
+}
+
+func (r deliveryTargetWorkflowReader) ListWorkflowInstances(context.Context) ([]WorkflowInstance, error) {
+	return append([]WorkflowInstance(nil), r.selected...), nil
+}
+
+func (r deliveryTargetWorkflowReader) SelectActiveWorkflowInstances(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error) {
+	return append([]WorkflowInstance(nil), r.selected...), nil
+}
+
+func withDeliveryTargetInstanceIdentity(instance WorkflowInstance, instanceID, entityID string) WorkflowInstance {
+	instance.InstanceID = instanceID
+	instance.StorageRef = "review/" + instanceID
+	instance.EntityID = entityID
+	return instance
 }
 
 func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t *testing.T) {
@@ -378,19 +552,19 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if handlerExecutionEntityRequirement(nil, "review", test.handler) == handlerEntitylessSafe {
+			if handlerExecutionEntityRequirement(nil, "review", test.handler) == DeliveryTargetEntityOptional {
 				t.Fatalf("handler execution requirement = entityless-safe, want entity ownership for %s", test.name)
 			}
 		})
 	}
 	if handlerExecutionEntityRequirement(nil, "review", runtimecontracts.SystemNodeEventHandler{
 		FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
-	}) != handlerEntitylessSafe {
+	}) != DeliveryTargetEntityOptional {
 		t.Fatal("payload-only fan out classified as entity-scoped")
 	}
 	if handlerExecutionEntityRequirement(nil, "review", runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{Check: `_entity.flow_instance == "review/one"`},
-	}) != handlerEntitylessSafe {
+	}) != DeliveryTargetEntityOptional {
 		t.Fatal("flow-instance-only platform metadata classified as entity-scoped")
 	}
 }
@@ -399,39 +573,39 @@ func TestHandlerExecutionEntityRequirementOwnsDurableBehaviorCapabilities(t *tes
 	tests := []struct {
 		name    string
 		handler runtimecontracts.SystemNodeEventHandler
-		want    handlerEntityRequirement
+		want    DeliveryTargetEntityDependency
 	}{
 		{name: "payload accumulator persists state bucket", handler: runtimecontracts.SystemNodeEventHandler{
 			Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-		}, want: handlerExistingEntityRequired},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "approval activity persists proposed effect", handler: runtimecontracts.SystemNodeEventHandler{
 			Activity: runtimecontracts.ActivitySpec{Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
-		}, want: handlerExistingEntityRequired},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "nested approval activity persists proposed effect", handler: runtimecontracts.SystemNodeEventHandler{
 			Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}}}},
-		}, want: handlerExistingEntityRequired},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "guard kill persists lifecycle transition", handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"},
-		}, want: handlerExistingEntityRequired},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "accumulator clear persists state bucket mutation", handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}},
-		}, want: handlerExistingEntityRequired},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "pending dedup clear persists metadata mutation", handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup"}},
-		}, want: handlerExistingEntityRequired},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "unrooted clear persists entity field mutation", handler: runtimecontracts.SystemNodeEventHandler{
 			Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}},
-		}, want: handlerExistingEntityRequired},
-		{name: "explicit creation may materialize", handler: runtimecontracts.SystemNodeEventHandler{
+		}, want: DeliveryTargetExistingEntityRequired},
+		{name: "explicit creation is acquisition independent from execution", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
-		}, want: handlerMaterializingEntity},
-		{name: "creation dominates platform entity identity", handler: runtimecontracts.SystemNodeEventHandler{
+		}, want: DeliveryTargetEntityOptional},
+		{name: "creation preserves platform entity identity dependency", handler: runtimecontracts.SystemNodeEventHandler{
 			CreateEntity: true,
 			Guard:        &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		}, want: handlerMaterializingEntity},
+		}, want: DeliveryTargetExistingEntityRequired},
 		{name: "payload-only fanout is entityless safe", handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", Emit: runtimecontracts.EmitSpec{Event: "work.item", From: "payload"}},
-		}, want: handlerEntitylessSafe},
+		}, want: DeliveryTargetEntityOptional},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -500,7 +674,7 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := handlerExecutionEntityRequirement(nil, "review", tc.handler); got != handlerEntitylessSafe {
+			if got := handlerExecutionEntityRequirement(nil, "review", tc.handler); got != DeliveryTargetEntityOptional {
 				t.Fatalf("handler execution requirement = %d, want entityless-safe for unevaluated field", got)
 			}
 		})
@@ -518,7 +692,7 @@ func deliveryTargetOwnershipSource() semanticview.Source {
 				{Name: "work_upserted", Event: "work.upserted", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate}},
 			}}},
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.created": {}, "work.selected": {}, "work.upserted": {}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.created": {}, "work.selected": {}, "work.upserted": {}, "work.keyed": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"existing":     deliveryTargetOwnershipNode("existing", runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}),
 			"materializer": deliveryTargetOwnershipNode("materializer", runtimecontracts.SystemNodeEventHandler{CreateEntity: true}),
@@ -530,6 +704,12 @@ func deliveryTargetOwnershipSource() semanticview.Source {
 			"pin-creator":  deliveryTargetOwnershipEventNode("pin-creator", "work.created", runtimecontracts.SystemNodeEventHandler{}),
 			"pin-selector": deliveryTargetOwnershipEventNode("pin-selector", "work.selected", runtimecontracts.SystemNodeEventHandler{}),
 			"pin-upserter": deliveryTargetOwnershipEventNode("pin-upserter", "work.upserted", runtimecontracts.SystemNodeEventHandler{}),
+			"key-selector": deliveryTargetOwnershipEventNode("key-selector", "work.keyed", runtimecontracts.SystemNodeEventHandler{
+				SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: paths.Parse("payload.account_id")}}},
+			}),
+			"key-upserter": deliveryTargetOwnershipEventNode("key-upserter", "work.keyed", runtimecontracts.SystemNodeEventHandler{
+				SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: paths.Parse("payload.account_id")}}},
+			}),
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}

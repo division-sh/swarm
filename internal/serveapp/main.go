@@ -481,7 +481,7 @@ func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence
 	durable := runtimebus.DurableDependencies{
 		ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 		FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-		ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
+		ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, WorkflowInstances: pg, PreparedEvents: pg,
 		TargetFailureRecorder: pg, RunOrigins: pg,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{
@@ -515,7 +515,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
+			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, WorkflowInstances: pg, PreparedEvents: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg,
 		},
 		EventPayloadValidationBinder:   pg,
@@ -2590,7 +2590,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			EventBusDurable: runtimebus.DurableDependencies{
 				ReplyContext: sqliteStore, RunLifecycle: sqliteStore, DeliveryLifecycle: sqliteStore,
 				FlowRoutes: sqliteStore, FlowRouteRecords: sqliteStore, FlowRouteSets: sqliteStore, FlowRouteTopology: sqliteStore, FlowRouteRollback: sqliteStore,
-				ActiveAgents: sqliteStore, ActiveFlows: sqliteStore, TargetOwners: sqliteStore, PreparedEvents: sqliteStore,
+				ActiveAgents: sqliteStore, ActiveFlows: sqliteStore, TargetOwners: sqliteStore, WorkflowInstances: sqliteStore, PreparedEvents: sqliteStore,
 				TargetFailureRecorder: sqliteStore, RunOrigins: sqliteStore,
 			},
 			EventPayloadValidationBinder:   sqliteStore,

@@ -791,10 +791,12 @@ contract_formats:
           not_a_selector: The persisted event.target_set stores resolved route identities, not an authored producer selector.
           delivery_rule: Each persisted delivery row with a non-empty target MUST carry one target_set member as its delivery target. Explicitly targetless agent routes contribute no member. Dispatch exposes the row's per-recipient target as event.target for the receiver context. Planning, selection, retry, replay, and restart MUST consume exact persisted delivery routes and MUST NOT use target_set as route authority.
         receiver_context_order:
-        - event.target
-        - current_delivery_target_from_event.target_set
-        - select_entity_or_select_or_create_entity_late_binding
-        - event.source
+        - prepublication_declared_key_acquisition_when_admitted
+        - exact_admitted_delivery_target
+        - explicit_entityless_receiver_absence
+        rule: Receiver context is settled before event persistence. Handler execution, retry, replay, restart, and public
+          projection consume the persisted per-delivery target and MUST NOT late-bind against current rows, promote a
+          same-flow sibling, or use event.source as receiver ownership.
       retired:
       - Nested `payload:` wrapper blocks
       - Inline `type: object` without declared inner shape
@@ -1321,17 +1323,31 @@ contract_formats:
             one generation-consistent selected-run projection classifies every node target as exactly one closed typed variant:
             existing_entity carries the exact selected entity owner; materializing_entity carries the exact future entity ID
             produced by the canonical materialization owner; entityless_receiver carries explicit entity absence only when no
-            selected entity evidence exists and one closed execution-semantic requirement owner classifies the admitted
-            handler plus input acquisition as entityless_safe. The other exhaustive requirements are existing_required and
-            materializing. Classification accounts for durable state buckets, lifecycle transitions and gates, guard kill,
+            admitted receiver-owner evidence exists. One closed compatibility policy has two independent axes. The handler
+            execution dependency is entity_optional, existing_required, or materializing. Receiver acquisition is none,
+            create, select, or select_or_create. Classification accounts for durable state buckets, lifecycle transitions and gates, guard kill,
             approval lifecycle, persistent clears, evidence recording, accumulation, joins, and nested rule sites rather than
-            inferring ownership only from authored entity references. Selected entity evidence for an otherwise entityless
-            handler is contradictory and fails before mutation; only an admitted structural current-delivery owner may supply
-            shared existing ownership. References to persisted platform entity identity, state, or gates are existing-entity
+            inferring dependency only from authored entity references. Entity-optional means that execution can proceed without
+            entity state; it does not forbid an exact existing or admitted materializing receiver owner. No supported handler
+            class treats selected ownership as forbidden. An admitted structural current-delivery owner may supply shared
+            existing ownership. References to persisted platform entity identity, state, or gates are existing-entity
             requirements; flow-instance platform metadata alone remains route metadata and does not invent entity ownership.
-            An admitted materializing owner may satisfy a later select handler in the same plan.
+            An exact admitted same-plan materializing owner may satisfy an entity-optional or existing-required handler and a
+            later select handler in the same plan.
             Handler-derived materialization MUST agree with the canonical future identity. Routing, stamped validation,
-            and pipeline execution consume that same requirement owner, and pipeline consumes the persisted target variant
+            and pipeline execution consume that same compatibility owner. External or admitted mixed-provenance handlers using
+            select or select_or_create resolve 0/1/N declared-key cardinality before publication; that acquisition result
+            produces the exact receiving route instead of consuming a source/path-derived preselection. Zero select matches and
+            multiple matches fail closed. Zero select_or_create matches stamp the deterministic future route; if that exact row
+            appears before execution it is accepted only when its identity and declared key agree, otherwise execution fails.
+            Once committed, later matching rows cannot redirect the delivery. Pipeline computes one immutable
+            DeliveryTargetApplication from the stamped target and passes it through state preload, both production engines,
+            mutation ownership, and producer-source projection. Those consumers validate availability and agreement but do not
+            select ownership. An exact selected entity_state row may predate its flow_instances lifecycle companion, including
+            accepted scenario setup. The application reads that state only by the admitted run, route, and entity identity; the
+            first mutation may create the exact companion while preserving the existing state and revision. Broad state scans,
+            synthetic compatibility rows, and treating a missing companion as missing selected ownership are forbidden.
+            Pipeline consumes the persisted target variant
             directly; source-event identity, path text, descriptors, singleton fan-in, and missing-row fallback cannot repair
             or reinterpret it. Every explicitly
             targeted agent route resolves to existing_entity or materializing_entity; an untargeted agent route instead records
@@ -1351,7 +1367,9 @@ contract_formats:
             deduplicate, while absent or conflicting proofs fail closed. Root route absence is represented by AgentIdentity route presence, never by a nullable or inferred
             identity. Duplicate, restart, selected-fork, historical replay, claim/scan, settlement, handler execution, and
             public observation preserve the originally stamped target variant and AgentIdentity without current-owner
-            re-resolution.
+            re-resolution. Boot verification and runtime compile the same dependency/acquisition policy; unsupported explicit
+            static/default-static multi-row, template, stateless, and normal in-topology acquisition surfaces fail closed
+            before runtime.
           no_delivery_postcondition: |
             Every admitted persisted event settles atomically to exactly one typed arm: one or more durable DeliveryRoute
             obligations, or one closed no-delivery disposition. The six exhaustive write classes are normal EventBus
@@ -3024,8 +3042,9 @@ handler_specification:
         selected_context: The selected entity_id and flow_instance become the handler entity context for state, guard,
           data_accumulation, emit.fields, and state transition processing.
       pin_routing_interaction:
-        receiver_context_order: 'For pin-routed events, handler entity context resolves in this order: event.target when set;
-          otherwise select_entity late binding when declared; otherwise event.source.'
+        receiver_context_order: 'For admitted external or mixed-provenance no-target events, select_entity resolves exactly one
+          receiving-flow row by declared key before publication and stamps that exact delivery target. Other admitted routes
+          consume their exact target evidence. Handler execution never late-binds or falls back to event.source.'
         canonical_uses: External webhook ingress, events declared with swarm.source beginning with external, and rare mixed-provenance
           event types where in-topology producers set event.target but external producers arrive without target.
         non_canonical_use: In-topology receivers for pin-declared events whose producers are also in the pin topology. Pin routing
@@ -3081,9 +3100,10 @@ handler_specification:
         selected_context: The selected or created entity_id and flow_instance become the handler entity context for state,
           guard, data_accumulation, emit.fields, action, and state transition processing.
       pin_routing_interaction:
-        receiver_context_order: 'For pin-routed events, handler entity context resolves in this order: event.target when set;
-          otherwise current delivery target from event.target_set when present; otherwise select_or_create_entity late binding
-          when declared; otherwise event.source.'
+        receiver_context_order: 'For admitted external or mixed-provenance no-target events, select_or_create_entity resolves one
+          existing receiving-flow row or stamps one deterministic future row before publication. Other admitted routes consume
+          their exact delivery target. Execution accepts only that committed route and never late-binds or falls back to
+          event.source.'
         canonical_uses: External or mixed-provenance events where the receiving service owns the entity identity and may need
           to mint the entity on zero-match.
         non_canonical_use: In-topology pin routing where lowered parent connect, structural fallback, or target_set delivery
@@ -4585,9 +4605,9 @@ engine:
       non_canonical: In-topology parent-connect pin routing. Receivers should declare scalar instance/carry resolution rather
         than depend on select_entity to repair broadcast or connected delivery to the right entity.
       receiver_context_order:
-      - event.target
-      - select_entity_or_select_or_create_entity
-      - event.source
+      - prepublication_declared_key_acquisition_for_admitted_no_target_input
+      - exact_admitted_delivery_target
+      - explicit_entityless_receiver_absence
       boot_verify: Redundant normal in-topology select_entity/select_or_create_entity is hard invalidity. Stateful
         static/default-static handlers using receiver-side acquisition fail
         closed because static multi-row ownership is retired.

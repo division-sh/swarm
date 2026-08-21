@@ -307,14 +307,29 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	selectedState := WorkflowState{}
 	hasSelectedState := false
 	stampedOwner, exactDelivery := stampedDeliveryTargetOwnership(ctx)
+	application := DeliveryTargetApplication{}
 	if exactDelivery {
-		if targetFlowID := strings.TrimSpace(stampedOwner.Route().FlowID); targetFlowID != "" {
-			flowID = targetFlowID
+		admittedApplication, ok := deliveryTargetApplicationFromContext(ctx)
+		if !ok {
+			exactHandler := handlerFact.ForEvent(events.EventType(firstNonEmptyString(handlerEventKey, string(evt.Type()))))
+			var err error
+			admittedApplication, err = e.coordinator.prepareDeliveryTargetApplication(ctx, e.nodeRef.Key(), exactHandler, handler, evt, stampedOwner)
+			if err != nil {
+				return nil, err
+			}
+			ctx = withDeliveryTargetApplication(ctx, admittedApplication)
 		}
-		entityID = stampedOwner.Route().EntityID
-		if err := prepareStampedSelectOrCreateState(source, flowID, handler, evt, stampedOwner, &selectedState); err != nil {
+		if admittedApplication.Owner() != stampedOwner {
+			return nil, fmt.Errorf("durable handler execution requires its exact delivery target application")
+		}
+		application = admittedApplication
+		if err := application.Validate(); err != nil {
 			return nil, err
 		}
+		flowID = application.FlowID()
+		entityID = application.EntityID()
+		evt = application.Event()
+		selectedState = application.State()
 		hasSelectedState = strings.TrimSpace(selectedState.EntityID) != ""
 	}
 	if !exactDelivery && handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
@@ -337,18 +352,21 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		selectedState = selected.State
 		hasSelectedState = true
 	}
-	resolvedEntityID, resolvedEvent, err := ensureHandlerEntityID(source, flowID, handler, entityID, evt)
-	if err != nil {
-		return nil, err
+	if !exactDelivery {
+		resolvedEntityID, resolvedEvent, err := ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+		if err != nil {
+			return nil, err
+		}
+		entityID, evt = resolvedEntityID, resolvedEvent
 	}
-	entityID, evt = resolvedEntityID, resolvedEvent
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	statePath := firstNonEmptyString(selectedState.Control.FlowPath, evt.FlowInstance())
 	if exactDelivery {
-		statePath = stampedOwner.Route().FlowInstance
+		statePath = application.Route().InstancePath
 	}
 	var stateRoute runtimeflowidentity.Route
+	var err error
 	if exactDelivery {
 		stateRoute, err = workflowInstanceRouteForExecution(source, flowID, statePath)
 	} else {
@@ -363,7 +381,9 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return nil, err
 	}
 	currentState := WorkflowState{Metadata: map[string]any{}}
-	if !exactDelivery || !stampedOwner.EntitylessReceiver() {
+	if exactDelivery {
+		currentState = application.State()
+	} else {
 		currentState, err = e.coordinator.currentWorkflowState(ctx, stateRoute, identity.NormalizeEntityID(entityID))
 		if err != nil {
 			return nil, err
@@ -372,8 +392,10 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
 		currentState = selectedState
 	}
-	if err := prepareHandlerMaterializationState(source, flowID, handler, stateRoute, entityID, &currentState); err != nil {
-		return nil, err
+	if !exactDelivery {
+		if err := prepareHandlerMaterializationState(source, flowID, handler, stateRoute, entityID, &currentState); err != nil {
+			return nil, err
+		}
 	}
 	node := e.node
 	handlerEventKey = strings.TrimSpace(handlerEventKey)

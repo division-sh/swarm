@@ -39,62 +39,64 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 				ctx = testPipelineRunContext(t, db)
 			}
 
-			t.Run("accumulator", func(t *testing.T) {
-				nodeKey := pipelineNode(t, "review", "node-a").Key()
-				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "accumulator", runtimecontracts.SystemNodeEventHandler{
-					Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
-				}, json.RawMessage(`{"item_id":"a"}`), nil, nil)
-				if !result.Handled {
-					t.Fatal("accumulator execution was not handled")
-				}
-				nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any)
-				if !ok {
-					t.Fatalf("accumulator node bucket = %#v, want persisted node-a bucket", instance.StateBuckets)
-				}
-				if _, ok := nodeBucket["handler_accumulators"]; !ok {
-					t.Fatalf("accumulator bucket = %#v, want persisted handler_accumulators", nodeBucket)
-				}
-			})
-
-			t.Run("clear", func(t *testing.T) {
-				nodeKey := pipelineNode(t, "review", "node-a").Key()
-				initialMetadata := map[string]any{
-					"revision_count":    3,
-					"dedup_key":         "pending-a",
-					"accumulated_count": 1,
-				}
-				initialBuckets := map[string]any{nodeKey: map[string]any{
-					"handler_accumulators": map[string]any{nodeKey + ":work.ready": map[string]any{"items": []any{"a"}}},
-				}}
-				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "clear", runtimecontracts.SystemNodeEventHandler{
-					Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state", "pending_dedup", "revision_count"}},
-				}, nil, initialMetadata, initialBuckets)
-				if !result.Handled {
-					t.Fatal("clear execution was not handled")
-				}
-				for _, field := range []string{"revision_count", "dedup_key", "accumulated_count"} {
-					if _, ok := instance.Fields[field]; ok {
-						t.Fatalf("clear retained field %q in %#v", field, instance.Fields)
+			for _, engine := range []string{"bridge", "declarative"} {
+				t.Run(engine+"/accumulator", func(t *testing.T) {
+					nodeKey := pipelineNode(t, "review", "node-a").Key()
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-accumulator", runtimecontracts.SystemNodeEventHandler{
+						Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+					}, json.RawMessage(`{"item_id":"a"}`), nil, nil)
+					if !result.handled {
+						t.Fatal("accumulator execution was not handled")
 					}
-				}
-				if nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any); ok {
-					if _, retained := nodeBucket["handler_accumulators"]; retained {
-						t.Fatalf("clear retained handler accumulator state: %#v", nodeBucket)
+					nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any)
+					if !ok {
+						t.Fatalf("accumulator node bucket = %#v, want persisted node-a bucket", instance.StateBuckets)
 					}
-				}
-			})
+					if _, ok := nodeBucket["handler_accumulators"]; !ok {
+						t.Fatalf("accumulator bucket = %#v, want persisted handler_accumulators", nodeBucket)
+					}
+				})
 
-			t.Run("guard_kill", func(t *testing.T) {
-				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "guard-kill", runtimecontracts.SystemNodeEventHandler{
-					Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"},
-				}, nil, nil, nil)
-				if !result.Handled || result.Outcome == nil || result.Outcome.Status != HandlerOutcomeKilled {
-					t.Fatalf("guard kill outcome = %#v, want handled killed outcome", result.Outcome)
-				}
-				if got := strings.TrimSpace(instance.CurrentState); got != "killed" {
-					t.Fatalf("guard kill current state = %q, want killed", got)
-				}
-			})
+				t.Run(engine+"/clear", func(t *testing.T) {
+					nodeKey := pipelineNode(t, "review", "node-a").Key()
+					initialMetadata := map[string]any{
+						"revision_count":    3,
+						"dedup_key":         "pending-a",
+						"accumulated_count": 1,
+					}
+					initialBuckets := map[string]any{nodeKey: map[string]any{
+						"handler_accumulators": map[string]any{nodeKey + ":work.ready": map[string]any{"items": []any{"a"}}},
+					}}
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-clear", runtimecontracts.SystemNodeEventHandler{
+						Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state", "pending_dedup", "revision_count"}},
+					}, nil, initialMetadata, initialBuckets)
+					if !result.handled {
+						t.Fatal("clear execution was not handled")
+					}
+					for _, field := range []string{"revision_count", "dedup_key", "accumulated_count"} {
+						if _, ok := instance.Fields[field]; ok {
+							t.Fatalf("clear retained field %q in %#v", field, instance.Fields)
+						}
+					}
+					if nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any); ok {
+						if _, retained := nodeBucket["handler_accumulators"]; retained {
+							t.Fatalf("clear retained handler accumulator state: %#v", nodeBucket)
+						}
+					}
+				})
+
+				t.Run(engine+"/guard_kill", func(t *testing.T) {
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, engine, engine+"-guard-kill", runtimecontracts.SystemNodeEventHandler{
+						Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"},
+					}, nil, nil, nil)
+					if !result.handled || (result.status != "" && result.status != HandlerOutcomeKilled) {
+						t.Fatalf("guard kill outcome = handled:%t status:%q, want handled killed outcome", result.handled, result.status)
+					}
+					if got := strings.TrimSpace(instance.CurrentState); got != "killed" {
+						t.Fatalf("guard kill current state = %q, want killed", got)
+					}
+				})
+			}
 		})
 	}
 }
@@ -179,12 +181,13 @@ func executeExistingOwnerBehavior(
 	t *testing.T,
 	ctx context.Context,
 	pc *PipelineCoordinator,
+	engine string,
 	name string,
 	handler runtimecontracts.SystemNodeEventHandler,
 	payload json.RawMessage,
 	metadata map[string]any,
 	stateBuckets map[string]any,
-) (WorkflowInstance, contractHandlerExecutionResult) {
+) (WorkflowInstance, existingOwnerExecutionResult) {
 	t.Helper()
 	flowInstance := "review/" + name
 	entityID := eventtest.UUID("entity-requirement-" + name)
@@ -217,18 +220,39 @@ func executeExistingOwnerBehavior(
 		Recipient: events.MustNodeDeliveryRecipient(node),
 		Target:    events.MustExistingEntityTarget(target),
 	})
-	result, err := pc.executeNodeContractHandler(deliveryCtx, node, handler, workflowTriggerContext{
-		Event: evt,
-		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(flowInstance), entityID),
-	}, false)
+	result := existingOwnerExecutionResult{}
+	var err error
+	switch engine {
+	case "bridge":
+		var executed contractHandlerExecutionResult
+		executed, err = pc.executeNodeContractHandler(deliveryCtx, node, handler, workflowTriggerContext{
+			Event: evt,
+			State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(flowInstance), entityID),
+		}, false)
+		result.handled = executed.Handled
+		if executed.Outcome != nil {
+			result.status = executed.Outcome.Status
+		}
+	case "declarative":
+		var executed *HandlerOutcome
+		executed, err = newCoordinatorHandlerExecutionEngine(pc, node).ExecuteHandlerSteps(deliveryCtx, handler, evt, "work.ready")
+		result.handled = executed != nil && executed.Handled
+	default:
+		t.Fatalf("unknown handler execution engine %q", engine)
+	}
 	if err != nil {
-		t.Fatalf("execute %s handler: %v", name, err)
+		t.Fatalf("execute %s %s handler: %v", engine, name, err)
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, testWorkflowInstanceRoute(flowInstance))
 	if err != nil || !ok {
 		t.Fatalf("load %s workflow instance: found=%t err=%v", name, ok, err)
 	}
 	return instance, result
+}
+
+type existingOwnerExecutionResult struct {
+	handled bool
+	status  HandlerOutcomeStatus
 }
 
 func handlerEntityRequirementExecutionSource() semanticview.Source {

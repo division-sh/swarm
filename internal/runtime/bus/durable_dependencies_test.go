@@ -10,6 +10,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -110,6 +111,15 @@ func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Cont
 func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
+func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+	return runtimepipeline.WorkflowInstance{}, false, errUnexpectedDurableTestRole
+}
+func (unexpectedDurableTestRoles) ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
+	return nil, errUnexpectedDurableTestRole
+}
+func (unexpectedDurableTestRoles) SelectActiveWorkflowInstances(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowInstance, error) {
+	return nil, errUnexpectedDurableTestRole
+}
 func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error) {
 	return PreparedPublishEvent{}, false, errUnexpectedDurableTestRole
 }
@@ -159,6 +169,9 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.TargetOwners == nil {
 		deps.TargetOwners = defaults
 	}
+	if deps.WorkflowInstances == nil {
+		deps.WorkflowInstances = defaults
+	}
 	if deps.PreparedEvents == nil {
 		deps.PreparedEvents = defaults
 	}
@@ -207,6 +220,9 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	}
 	if role, ok := selected.(SelectedRunTargetOwnerLister); ok {
 		deps.TargetOwners = role
+	}
+	if role, ok := selected.(runtimepipeline.WorkflowInstancePersistenceReader); ok {
+		deps.WorkflowInstances = role
 	}
 	if role, ok := selected.(PreparedPublishEventReader); ok {
 		deps.PreparedEvents = role

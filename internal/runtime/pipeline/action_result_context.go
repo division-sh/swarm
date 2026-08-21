@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -19,9 +20,16 @@ func workflowNodeProducerSource(ctx context.Context, source semanticview.Source,
 	} else if strings.TrimSpace(entityID) != "" {
 		route.EntityID = strings.TrimSpace(entityID)
 	}
-	if delivery, ok := runtimedelivery.RouteFromContext(ctx); ok {
-		route = delivery.Target.Route()
-		route.EntityID = strings.TrimSpace(entityID)
+	if application, ok := deliveryTargetApplicationFromContext(ctx); ok {
+		if err := application.Validate(); err != nil {
+			return events.RoutingSource{}, err
+		}
+		if strings.TrimSpace(entityID) != application.EntityID() {
+			return events.RoutingSource{}, fmt.Errorf("workflow node producer entity disagrees with admitted delivery target application")
+		}
+		route = application.Owner().Route()
+	} else if _, ok := runtimedelivery.RouteFromContext(ctx); ok {
+		return events.RoutingSource{}, fmt.Errorf("stamped workflow node producer requires delivery target application")
 	}
 	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, node, flowID, route)
 }

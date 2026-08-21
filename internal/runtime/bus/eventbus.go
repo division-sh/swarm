@@ -113,6 +113,7 @@ type DurableDependencies struct {
 	ActiveAgents          ActiveAgentDescriptorLister
 	ActiveFlows           ActiveFlowInstanceDescriptorLister
 	TargetOwners          SelectedRunTargetOwnerLister
+	WorkflowInstances     runtimepipeline.WorkflowInstancePersistenceReader
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
