@@ -214,6 +214,73 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 	}
 }
 
+func TestDeliveryTargetApplicationProjectsScopedGatesWithoutMutatingPersistenceOnSQLiteAndPostgres(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			source := handlerEntityRequirementExecutionSource()
+			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+				Module:              staticSemanticWorkflowModule{source: source},
+				Persistence:         workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			var ctx context.Context
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+
+			instancePath := "review/scoped-gates"
+			entityID := eventtest.UUID("scoped-gates-existing-target")
+			persisted := materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
+				WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active",
+				Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"review/approved": true},
+			})
+			if err := store.upsert(ctx, persisted); err != nil {
+				t.Fatalf("seed exact scoped-gate target: %v", err)
+			}
+
+			node := pipelineNode(t, "review", "node-a")
+			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
+			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+			evt := handlerTestRootIngress(
+				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
+				handlerTestWorkflowEnvelope("review", instancePath, entityID), time.Now().UTC(),
+			)
+			target := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
+			application, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
+			if err != nil {
+				t.Fatalf("prepare scoped-gate application: %v", err)
+			}
+
+			snapshot, exists, err := application.persistedSnapshot()
+			if err != nil || !exists {
+				t.Fatalf("load execution snapshot: exists=%t err=%v", exists, err)
+			}
+			if !snapshot.StateCarrier.Gates["approved"] || !snapshot.StateCarrier.Gates["review/approved"] {
+				t.Fatalf("execution gates = %#v, want local and qualified facts", snapshot.StateCarrier.Gates)
+			}
+			snapshot.StateCarrier.Gates["approved"] = false
+			snapshot.StateCarrier.Fields["marker"] = "mutated"
+
+			fresh, exists, err := application.persistedSnapshot()
+			if err != nil || !exists || !fresh.StateCarrier.Gates["approved"] || fresh.StateCarrier.Fields["marker"] != "durable" {
+				t.Fatalf("fresh immutable snapshot = %#v exists=%t err=%v", fresh, exists, err)
+			}
+			raw, ok := application.persistedInstance()
+			if !ok || raw.Gates["approved"] || !raw.Gates["review/approved"] {
+				t.Fatalf("raw persisted application state = %#v", raw.Gates)
+			}
+			stored, exists, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+			if err != nil || !exists || stored.Gates["approved"] || !stored.Gates["review/approved"] || stored.Fields["marker"] != "durable" {
+				t.Fatalf("durable state changed by execution projection: exists=%t err=%v instance=%#v", exists, err, stored)
+			}
+		})
+	}
+}
+
 func TestCompileDeliveryTargetCompatibilityPolicyKeepsDependencyAndAcquisitionIndependent(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{

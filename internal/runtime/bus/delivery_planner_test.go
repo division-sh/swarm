@@ -1278,6 +1278,38 @@ func TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner(t *test
 	}
 }
 
+func TestDeliveryPlanner_ImportBoundaryWildcardUsesSubscriberScopeInsteadOfNestedSourceScope(t *testing.T) {
+	const (
+		rootPath  = "repo-scaffold"
+		childPath = "repo-scaffold/child-1"
+	)
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+		uuid.NewString(), "repo-scaffold/repo_commit_succeeded", "artifact-repo", "", nil, 0, uuid.NewString(),
+		events.EnvelopeForFlowInstance(events.EventEnvelope{}, childPath),
+		eventtest.StaticFlowRoutingSource(rootPath, childPath, eventtest.UUID("nested-artifact-source")), time.Now().UTC(),
+	)
+	subscriber := Subscriber{
+		Recipient:    events.MustNodeDeliveryRecipient(testRootNode(t, "repo-callback")),
+		Path:         rootPath,
+		MatchPattern: "repo-scaffold/*",
+		routeSource:  subscriberRouteSourceImportBoundaryWildcardGrant,
+	}
+
+	if intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(evt, []Subscriber{subscriber}); len(intents) != 0 {
+		t.Fatalf("same-instance intents = %#v, want import-boundary wildcard excluded", intents)
+	}
+	intents := routedImportBoundaryNoTargetNodeDeliveryIntents(evt, []Subscriber{subscriber})
+	if len(intents) != 1 {
+		t.Fatalf("import-boundary intents = %#v, want one exact subscriber-scope intent", intents)
+	}
+	if got := intents[0].TargetBlueprint.FlowInstance; got != rootPath {
+		t.Fatalf("target flow instance = %q, want subscriber scope %q instead of source scope %q", got, rootPath, childPath)
+	}
+	if got := intents[0].Producer; got != routeIntentProducerScopedNodeRoute {
+		t.Fatalf("intent producer = %q, want scoped node route", got)
+	}
+}
+
 func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *testing.T) {
 	runID := uuid.NewString()
 	planner := newDeliveryPlannerWithHandlers(t,

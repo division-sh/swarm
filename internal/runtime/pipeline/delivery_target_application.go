@@ -26,6 +26,7 @@ type DeliveryTargetApplication struct {
 	event     events.Event
 	state     WorkflowState
 	instance  WorkflowInstance
+	snapshot  runtimeengine.StateSnapshot
 	persisted bool
 }
 
@@ -79,18 +80,23 @@ func (a DeliveryTargetApplication) persistedInstance() (WorkflowInstance, bool) 
 }
 
 func (a DeliveryTargetApplication) persistedSnapshot() (runtimeengine.StateSnapshot, bool, error) {
-	instance, ok := a.persistedInstance()
-	if !ok {
+	if !a.persisted {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	carrier, err := workflowInstanceStateCarrier(instance)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(
+		a.snapshot.StateCarrier.PersistedFields(),
+		a.snapshot.StateCarrier.PersistedBookkeeping(),
+		a.snapshot.StateCarrier.Gates,
+		a.snapshot.StateCarrier.PersistedStateBuckets(),
+	)
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
+	carrier.Control = a.snapshot.StateCarrier.Control
 	return runtimeengine.StateSnapshot{
-		EntityID: identity.NormalizeEntityID(instance.EntityID), WorkflowName: strings.TrimSpace(instance.WorkflowName),
-		WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion), CurrentState: strings.TrimSpace(instance.CurrentState),
-		StateCarrier: carrier, EnteredStateAt: instance.EnteredStageAt,
+		EntityID: a.snapshot.EntityID, WorkflowName: a.snapshot.WorkflowName,
+		WorkflowVersion: a.snapshot.WorkflowVersion, CurrentState: a.snapshot.CurrentState,
+		StateCarrier: carrier, EnteredStateAt: a.snapshot.EnteredStateAt,
 	}, true, nil
 }
 
@@ -185,7 +191,9 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
-		application.applyPersistedInstance(instance)
+		if err := application.applyPersistedInstance(source, flowID, instance); err != nil {
+			return DeliveryTargetApplication{}, err
+		}
 	} else {
 		record, stateExists, stateErr := pc.workflowStore.LoadEntityState(ctx, route, identity.NormalizeEntityID(application.entityID))
 		if stateErr != nil {
@@ -208,7 +216,9 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
 				return DeliveryTargetApplication{}, err
 			}
-			application.applyPersistedInstance(instance)
+			if err := application.applyPersistedInstance(source, flowID, instance); err != nil {
+				return DeliveryTargetApplication{}, err
+			}
 		} else if owner.ExistingEntity() {
 			return DeliveryTargetApplication{}, fmt.Errorf("existing_entity target %q is missing at execution", owner.Route().FlowInstance)
 		} else {
@@ -224,13 +234,24 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	return application, nil
 }
 
-func (a *DeliveryTargetApplication) applyPersistedInstance(instance WorkflowInstance) {
+func (a *DeliveryTargetApplication) applyPersistedInstance(source semanticview.Source, flowID string, instance WorkflowInstance) error {
 	if a == nil {
-		return
+		return fmt.Errorf("delivery target application is required")
 	}
+	carrier, err := workflowInstanceStateCarrier(instance)
+	if err != nil {
+		return fmt.Errorf("project exact admitted delivery target state: %w", err)
+	}
+	carrier.Gates = workflowStateGatesForScope(source, flowID, carrier.Gates)
 	a.instance = cloneWorkflowInstanceForEngineMutation(instance)
+	a.snapshot = runtimeengine.StateSnapshot{
+		EntityID: identity.NormalizeEntityID(instance.EntityID), WorkflowName: strings.TrimSpace(instance.WorkflowName),
+		WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion), CurrentState: strings.TrimSpace(instance.CurrentState),
+		StateCarrier: carrier, EnteredStateAt: instance.EnteredStageAt,
+	}
 	a.state = workflowStateForDeliveryTargetInstance(instance)
 	a.persisted = true
+	return nil
 }
 
 func validateDeliveryTargetDeclaredKey(source semanticview.Source, flowID, nodeID string, handler SystemNodeEventHandler, evt events.Event, acquisition DeliveryTargetAcquisition, instance WorkflowInstance) error {

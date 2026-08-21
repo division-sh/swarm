@@ -92,9 +92,6 @@ func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
 		}
 		for nodeID, node := range scope.Nodes {
 			for eventType, handler := range node.EventHandlers {
-				if _, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, flowID, events.EventType(eventType), handler); err != nil {
-					continue
-				}
 				hasSelect := handler.SelectEntity != nil && !handler.SelectEntity.Empty()
 				hasSelectOrCreate := handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()
 				if !hasSelect && !hasSelectOrCreate {
