@@ -350,16 +350,16 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 			},
 		},
 	}
-	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, telegramConnectorSupportedSurfacePackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, telegramConnectorSupportedSurfacePackRegistry(t, baseURL))
 	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
 	return source
 }
 
 func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
 	t.Helper()
-	tool, ok := providerconnectors.BuiltinTool("telegram", "telegram.send_message")
+	tool, ok := embeddedConnectorTool(t, "telegram", "telegram.send_message")
 	if !ok {
 		t.Fatal("provider connector pack telegram.send_message not found")
 	}

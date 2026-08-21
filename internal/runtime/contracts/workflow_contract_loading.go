@@ -2,9 +2,17 @@ package contracts
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/packartifact"
 )
+
+type WorkflowContractLoadOptions struct {
+	PlatformPackBase *packartifact.PlatformPackInventory
+}
 
 func rootWorkflowPolicy(bundle *WorkflowContractBundle) PolicyDocument {
 	if bundle == nil {
@@ -19,12 +27,15 @@ func rootWorkflowPolicy(bundle *WorkflowContractBundle) PolicyDocument {
 	return PolicyDocument{Values: map[string]PolicyValue{}}
 }
 func LoadWorkflowContractBundle(repoRoot string) (*WorkflowContractBundle, error) {
-	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPaths(repoRoot))
+	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPaths(repoRoot), WorkflowContractLoadOptions{})
 }
 func LoadWorkflowContractBundleWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) (*WorkflowContractBundle, error) {
-	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride))
+	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride), WorkflowContractLoadOptions{})
 }
-func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractBundle, error) {
+func LoadWorkflowContractBundleWithOptions(repoRoot, workflowDirOverride, platformSpecFileOverride string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
+	return loadWorkflowContractBundleForPaths(ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride), options)
+}
+func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
 	bundle := &WorkflowContractBundle{
 		Paths:                 paths,
 		projectContracts:      map[string]ProjectContractView{},
@@ -142,6 +153,57 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 	if err := loadYAMLFile(paths.PlatformSpecFile, &bundle.Platform); err != nil {
 		return nil, err
 	}
+	base := options.PlatformPackBase
+	if base == nil {
+		var err error
+		base, err = packartifact.LoadEmbeddedPlatformPackInventory(strings.TrimSpace(bundle.Platform.Platform.Version))
+		if err != nil {
+			return nil, fmt.Errorf("load embedded platform pack inventory: %w", err)
+		}
+	}
+	projectPacks, err := packartifact.LoadProjectPackSet(paths.ContractsRoot)
+	if err != nil {
+		return nil, err
+	}
+	effective, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
+	if err != nil {
+		return nil, fmt.Errorf("resolve effective pack inventory: %w", err)
+	}
+	receiptBody, err := effective.SelectionReceiptBody()
+	if err != nil {
+		return nil, err
+	}
+	receiptPath := ""
+	if strings.TrimSpace(paths.ContractsRoot) != "" {
+		receiptPath = filepath.Join(paths.ContractsRoot, filepath.FromSlash(packartifact.PackSelectionRelativePath))
+	}
+	if receiptPath != "" {
+		info, statErr := os.Lstat(receiptPath)
+		if statErr != nil && !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("inspect pack selection receipt: %w", statErr)
+		}
+		if statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("pack selection receipt %s must be a regular file", packartifact.PackSelectionRelativePath)
+			}
+			persisted, readErr := os.ReadFile(receiptPath)
+			if readErr != nil {
+				return nil, fmt.Errorf("read pack selection receipt: %w", readErr)
+			}
+			receipt, parseErr := packartifact.ParsePackSelectionReceipt(persisted)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			if !receipt.Matches(base) {
+				return nil, fmt.Errorf("pack selection receipt requires %s base %s but current selection is %s base %s", receipt.BaseMode, receipt.BaseDigest, base.SelectionMode(), base.Digest())
+			}
+			bundle.PackSelectionPath = receiptPath
+			receiptBody = persisted
+		}
+	}
+	bundle.PackSelectionBody = receiptBody
+	bundle.ProjectPacks = projectPacks
+	bundle.PackInventory = effective
 	populateWorkflowSemantics(bundle)
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return nil, err

@@ -122,15 +122,26 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		}
 	}
 
+	platform := mustMappingValue(t, sections, "platform")
+	platformKeys := mustMappingValue(t, platform, "keys")
+	if got := scalarValue(mustMappingValue(t, platformKeys, "packs.platform_dirs")); got != "elevated" {
+		t.Fatalf("platform.packs.platform_dirs classification = %q", got)
+	}
+	for _, want := range []string{"optional and elevated", "complete development replacement", "no embedded fallback", "packs/manifest.yaml"} {
+		if !strings.Contains(scalarValue(mustMappingValue(t, platform, "path_rule")), want) {
+			t.Fatalf("platform pack path rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, platform, "path_rule")))
+		}
+	}
+
 	providerTriggers := mustMappingValue(t, sections, "provider_triggers")
 	providerTriggerKeys := mustMappingValue(t, providerTriggers, "keys")
-	if got := scalarValue(mustMappingValue(t, providerTriggerKeys, "packs.platform_dirs")); got != "elevated" {
+	if got := scalarValue(mustMappingValue(t, providerTriggerKeys, "packs.platform_dirs")); got != "split_unsupported_retired" {
 		t.Fatalf("provider_triggers.packs.platform_dirs classification = %q", got)
 	}
-	if got := scalarValue(mustMappingValue(t, providerTriggerKeys, "packs.external_dirs")); got != "project_contained_path_or_elevated" {
+	if got := scalarValue(mustMappingValue(t, providerTriggerKeys, "packs.external_dirs")); got != "split_unsupported_retired" {
 		t.Fatalf("provider_triggers.packs.external_dirs classification = %q", got)
 	}
-	for _, want := range []string{"Project config cannot declare", "project-contained relative directories", "declared that key"} {
+	for _, want := range []string{"retired", "swarm import <pack-id>", "platform.packs.platform_dirs", "no compatibility"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, providerTriggers, "path_rule")), want) {
 			t.Fatalf("provider trigger path rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, providerTriggers, "path_rule")))
 		}
@@ -153,8 +164,11 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"runtime_config_loader":                 "consumed_by_unified_owner_first_slice_implemented",
 		"executable_adjacent_config_yaml":       "invalid_ambient_reader_removed_by_1858",
 		"env_guard_delegated_env_sources":       "consumed_by_unified_owner_first_slice_implemented",
-		"provider_triggers_packs_platform_dirs": "consumed_by_unified_owner",
-		"provider_triggers_packs_external_dirs": "consumed_by_unified_owner",
+		"platform_packs_platform_dirs":          "consumed_by_unified_owner_complete_development_replacement",
+		"provider_triggers_packs_platform_dirs": "retired_fail_closed_use_platform_packs_platform_dirs",
+		"provider_triggers_packs_external_dirs": "retired_fail_closed_use_project_import",
+		"channels_packs_platform_dirs":          "retired_fail_closed_use_platform_packs_platform_dirs",
+		"channels_packs_external_dirs":          "retired_fail_closed_use_project_import",
 		"sharding_inline_extension":             "split_unsupported_retired",
 		"llm_retired_model_selection_keys":      "split_unsupported_retired_use_llm.models",
 		"llm_claude_cli_current_controls":       "split_unsupported_tracked_by_1803",

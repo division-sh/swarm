@@ -59,7 +59,7 @@ func testIngressBindingProjectionSharedKey(
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), primary, survivor)
+	manager, err := newTestRuntimeContextManager(t, nil, primary, survivor)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,8 +8,9 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packruntime"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,38 +23,31 @@ type ChannelPackLoad struct {
 	Loaded       []packs.LoadedChannelPack
 	Plans        []packs.SatisfactionPlan
 	Bindings     []packs.OutboundBindingPlan
-	PlatformDirs []string
-	ExternalDirs []string
 	PlatformSpec runtimecontracts.PlatformSpecDocument
 }
 
-func LoadConfiguredChannelPacks(ctx context.Context, repo string, cfgResult RuntimeConfigLoadResult, platformSpec runtimecontracts.PlatformSpecDocument, triggerCatalog *providertriggers.CatalogSnapshot, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (ChannelPackLoad, error) {
+func LoadConfiguredChannelPacks(ctx context.Context, cfgResult RuntimeConfigLoadResult, platformSpec runtimecontracts.PlatformSpecDocument, inventory *packartifact.EffectivePackInventory, triggerCatalog *providertriggers.CatalogSnapshot, connectorRegistry *providerconnectors.PackRegistry, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (ChannelPackLoad, error) {
 	if cfgResult.Config == nil {
 		return ChannelPackLoad{}, fmt.Errorf("runtime config is required")
 	}
 	if triggerCatalog == nil {
 		return ChannelPackLoad{}, fmt.Errorf("provider trigger catalog is required for channel satisfaction")
 	}
-	runningVersion, err := platform.PlatformVersion()
+	if inventory == nil {
+		return ChannelPackLoad{}, fmt.Errorf("effective pack inventory is required for channel satisfaction")
+	}
+	if connectorRegistry == nil {
+		return ChannelPackLoad{}, fmt.Errorf("provider connector registry is required for channel satisfaction")
+	}
+	loaded, err := packruntime.LoadChannelPacks(inventory, strings.TrimSpace(platformSpec.Platform.Version))
 	if err != nil {
 		return ChannelPackLoad{}, err
 	}
-	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "channels.packs.platform_dirs"), cfgResult.Config.Channels.Packs.PlatformDirs)
-	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "channels.packs.external_dirs"), cfgResult.Config.Channels.Packs.ExternalDirs)
-	platformPacks, err := packs.LoadChannelPackDirs(runningVersion, "platform", platformDirs...)
-	if err != nil {
-		return ChannelPackLoad{}, err
-	}
-	externalPacks, err := packs.LoadChannelPackDirs(runningVersion, "external", externalDirs...)
-	if err != nil {
-		return ChannelPackLoad{}, err
-	}
-	loaded := append(append([]packs.LoadedChannelPack(nil), platformPacks...), externalPacks...)
 	registry, err := packs.NewInterfaceRegistry(platformSpec)
 	if err != nil {
 		return ChannelPackLoad{}, err
 	}
-	plans, err := packs.CompileChannelInventory(registry, loaded, triggerCatalog.PackDescriptors(), providerconnectors.DefaultPackRegistry().PackDescriptors())
+	plans, err := packs.CompileChannelInventory(registry, loaded, triggerCatalog.PackDescriptors(), connectorRegistry.PackDescriptors())
 	if err != nil {
 		return ChannelPackLoad{}, err
 	}
@@ -63,7 +57,7 @@ func LoadConfiguredChannelPacks(ctx context.Context, repo string, cfgResult Runt
 	}
 	return ChannelPackLoad{
 		Loaded: loaded, Plans: plans, Bindings: bindings,
-		PlatformDirs: platformDirs, ExternalDirs: externalDirs, PlatformSpec: platformSpec,
+		PlatformSpec: platformSpec,
 	}, nil
 }
 

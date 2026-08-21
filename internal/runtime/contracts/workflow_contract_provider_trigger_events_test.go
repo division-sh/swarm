@@ -100,18 +100,17 @@ provider_trigger_events:
       event: inbound.telegram.text_message
 flows: []
 `)
-	plainHash, err := BundleHash(bundleHashTestBundleWithIntent(t, plainRoot, plainPlatform, "prompts/guide.md"))
+	plainBundle, err := LoadWorkflowContractBundleWithOverrides(repoRootForContractsTest(t), plainRoot, plainPlatform)
+	if err != nil {
+		t.Fatalf("load plain bundle: %v", err)
+	}
+	plainHash, err := BundleHash(plainBundle)
 	if err != nil {
 		t.Fatalf("plain BundleHash: %v", err)
 	}
-	withImport := bundleHashTestBundleWithIntent(t, importRoot, importPlatform, "prompts/guide.md")
-	withImport.Package = ProjectPackageDocument{
-		Name:            "provider-event-import",
-		Version:         "1.0.0",
-		PlatformVersion: ">=0.7.0 <0.8.0",
-		ProviderTriggerEvents: ProviderTriggerEventImports{Imports: []ProviderTriggerEventImport{
-			{Provider: "telegram", Event: "inbound.telegram.text_message"},
-		}},
+	withImport, err := LoadWorkflowContractBundleWithOverrides(repoRootForContractsTest(t), importRoot, importPlatform)
+	if err != nil {
+		t.Fatalf("load provider-trigger import bundle: %v", err)
 	}
 	projection, err := BuildBundleCatalogProjection(withImport)
 	if err != nil {

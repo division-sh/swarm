@@ -50,6 +50,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
@@ -99,16 +100,18 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 	supervisor := newRuntimeProjectSupervisor(
 		repo, spec, nil, storeBundle{}, &ready, cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{NoWorkspace: true, Source: "test"},
-		nil, nil, catalog, "/old", &runtimecontracts.WorkflowContractBundle{},
+		nil, nil, catalog, packfixture.EmbeddedBase(t), "/old", &runtimecontracts.WorkflowContractBundle{},
 		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime,
 	)
-	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != root {
 			t.Fatalf("contracts root = %q, want %q", contractsRoot, root)
 		}
 		return module, bundle, nil
 	}
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
+	})
 	supervisor.validateSource = func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
 		opts := runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 		opts.ProviderTriggerCatalog = catalog
@@ -192,18 +195,17 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	loads := 0
-	supervisor.SetChannelPackLoader(func(_ context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		loads++
-		if source == nil || catalog == nil {
-			t.Fatal("channel reload compiler received nil source or accepted trigger catalog")
+		if candidate == nil || candidate.PackInventory == nil {
+			t.Fatal("bundle pack reload compiler received no effective inventory")
 		}
 		cfg := &config.Config{Channels: config.ChannelsConfig{
-			Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
 			Bindings: map[string]config.ChannelBindingConfig{
 				"ops": {Pack: "provider.telegram.hitl_channel", Destination: "42"},
 			},
 		}}
-		return cliapp.LoadConfiguredChannelPacks(context.Background(), cliapp.RepoRoot(), cliapp.RuntimeConfigLoadResult{Config: cfg}, source.PlatformSpec(), catalog, nil, nil)
+		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: cfg}, candidate, nil, nil)
 	})
 
 	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
@@ -445,24 +447,27 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CompileAdmission(%s): %v", alias, err)
 		}
-		return runtimepkg.BundleContext{
+		installed, err := catalog.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatalf("InstalledCapabilitySubjects(%s): %v", alias, err)
+		}
+		contextDef := runtimepkg.BundleContext{
 			BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash), Source: source, Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
+			PackInventoryDigest:       bundle.PackInventory.Digest(),
+			ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			StandingTargets: []runtimepkg.StandingTarget{{
 				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", PackageKey: "telegram-package", FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
 				InstanceID: alias, EntityID: entityID, Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
-		}, persistence, eventsStore, credentialStore
+		}
+		return contextDef, persistence, eventsStore, credentialStore
 	}
 	hashA := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 	hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
 	contextA, persistenceA, eventsA, _ := makeContext(hashA, "chat-a", "41000000-0000-0000-0000-000000000001", "41000000-0000-0000-0000-000000000002")
 	contextB, persistenceB, eventsB, credentialsB := makeContext(hashB, "chat-b", "42000000-0000-0000-0000-000000000001", "42000000-0000-0000-0000-000000000002")
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}, contextA, contextB)
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -1396,7 +1401,6 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if err != nil {
 						t.Fatalf("installed capability subjects: %v", err)
 					}
-					admissionState := runtimepkg.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}
 					processWorkOwner := newSupervisorTestProcessOwner(t)
 					var manager *runtimepkg.RuntimeContextManager
 					var createdRuntimes []*runtimepkg.Runtime
@@ -1441,12 +1445,14 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if len(targets) != 1 || len(activations) != 1 || !activations[0].Created {
 						t.Fatalf("predecessor standing targets/activations = %#v/%#v", targets, activations)
 					}
-					manager, err = runtimepkg.NewRuntimeContextManagerWithAdmission(nil, admissionState, runtimepkg.BundleContext{
+					manager, err = runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 						BundleSourceFact: oldFact, Source: oldSource,
 						Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(), StandingTargets: targets,
+						ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
+						PackInventoryDigest: bundle.PackInventory.Digest(),
 					})
 					if err != nil {
-						t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
+						t.Fatalf("NewRuntimeContextManager: %v", err)
 					}
 					if changedHash {
 						writeStandingCandidateFile(t, filepath.Join(contractsRoot, "flows", "telegram-chat", "prompts", "phrase-bot.md"), "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference. Keep the response concise.\n")
@@ -1473,10 +1479,13 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					supervisor.runtimeInstanceID = "11111111-1111-1111-1111-111111111111"
 					supervisor.SetProcessCapability(processCapability)
 					supervisor.ready.Store(true)
-					admission := &processAdmissionCandidate{catalog: catalog, state: admissionState, survivingTargets: map[string][]runtimepkg.StandingTarget{}}
-					if _, err := supervisor.replaceCurrentRuntimeWithSourceAndAdmission(
+					packCandidate := &bundlePackCandidate{
+						catalog: catalog, generation: catalog.Generation(), installedSubjects: installed,
+						inventoryDigest: candidateBundle.PackInventory.Digest(),
+					}
+					if _, err := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 						context.Background(), contractsRoot, candidateSource, candidateBundle, newFact,
-						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(), admission,
+						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(), packCandidate,
 					); err != nil {
 						t.Fatalf("replace standing runtime: %v", err)
 					}
@@ -1578,15 +1587,23 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			}
 			var active, maxActive atomic.Int32
 			blocker := newReplacementQuiesceBlockNode(&active, &maxActive)
-			t.Cleanup(blocker.Release)
 			predecessor := newRuntime()
 			predecessor.SystemNodes = []runtimepipeline.BackgroundNode{blocker}
+			t.Cleanup(blocker.Release)
 			processCapability, _ := installSelectedStoreTestProcessTopology(t, stores, predecessor, source, fact, runtimeInstanceID)
 			t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
 			if err := predecessor.Start(context.Background()); err != nil {
 				t.Fatalf("start predecessor: %v", err)
 			}
-			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleSourceFact: fact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence()})
+			installedTriggerSubjects, err := providerRegistry.InstalledCapabilitySubjects()
+			if err != nil {
+				t.Fatalf("installed provider-trigger subjects: %v", err)
+			}
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+				BundleSourceFact: fact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(),
+				PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: providerRegistry.Generation(),
+				InstalledTriggerSubjects: installedTriggerSubjects,
+			})
 			if err != nil {
 				t.Fatalf("NewRuntimeContextManager: %v", err)
 			}
@@ -1623,7 +1640,10 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			server := newAPIServer(&ready, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), runtimeProcessInboundHandler{contexts: manager})
 			replacementDone := make(chan error, 1)
 			go func() {
-				_, err := supervisor.replaceCurrentRuntimeWithSource(context.Background(), "/new", source, bundle, fact, runtimecontracts.BundleIdentity{BundleHash: hash}, candidate, candidate.WorkOccurrence())
+				_, err := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
+					context.Background(), "/new", source, bundle, fact, runtimecontracts.BundleIdentity{BundleHash: hash}, candidate, candidate.WorkOccurrence(),
+					&bundlePackCandidate{generation: providerRegistry.Generation(), installedSubjects: installedTriggerSubjects, inventoryDigest: bundle.PackInventory.Digest()},
+				)
 				replacementDone <- err
 			}()
 			select {
@@ -2141,19 +2161,18 @@ func writeProjectRoot(t *testing.T) string {
 func testBuilderSupervisorBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	dir := t.TempDir()
-	platformPath := filepath.Join(t.TempDir(), "platform-spec.yaml")
-	if err := os.WriteFile(platformPath, []byte("platform:\n  name: swarm\n  version: test\n"), 0o644); err != nil {
-		t.Fatalf("write platform-spec.yaml: %v", err)
-	}
+	repoRoot := cliapp.RepoRoot()
+	platformPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	packagePath := filepath.Join(dir, "package.yaml")
 	if err := os.WriteFile(packagePath, []byte("name: test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
-	bundle := testWorkflowValidationBundle()
-	bundle.Paths = runtimecontracts.ResolveWorkflowContractPathsWithOverrides(filepath.Dir(dir), dir, platformPath)
-	bundle.Paths.ProjectPackageFile = packagePath
-	bundle.Semantics.Name = "test"
-	bundle.Semantics.Version = "1.0.0"
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, dir, platformPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBase: packfixture.EmbeddedBase(t),
+	})
+	if err != nil {
+		t.Fatalf("load supervisor workflow bundle: %v", err)
+	}
 	return bundle
 }
 
@@ -2167,12 +2186,15 @@ func newSupervisorForLoadProjectFailureTest(
 	bundle := testBuilderSupervisorBundle(t)
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
-	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, nil, "", nil, nil, nil)
+	base := packfixture.EmbeddedBase(t)
+	catalog := testProviderTriggerCatalog(t)
+	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, catalog, base, "", nil, nil, nil)
 	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = worklifetime.NewProcess()
-	catalog := testProviderTriggerCatalog(t)
 	supervisor.providerTriggers = catalog
-	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
+	})
 	supervisor.dev = true
 	supervisor.loadWorkflow = func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
@@ -2240,7 +2262,7 @@ func TestRuntimeProjectSupervisorDerivesProcessOwnerFromInitialRuntime(t *testin
 	initial := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: processOwner}}
 	supervisor := newRuntimeProjectSupervisor(
 		"", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
-		cliapp.WorkspaceBackendSelection{}, nil, nil, nil, "", nil, nil, initial,
+		cliapp.WorkspaceBackendSelection{}, nil, nil, nil, nil, "", nil, nil, initial,
 	)
 	if supervisor.processWorkOwner != processOwner {
 		t.Fatalf("supervisor process owner = %p, want initial runtime owner %p", supervisor.processWorkOwner, processOwner)
@@ -2300,7 +2322,14 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSo
 		return module, bundle, nil
 	}
 	supervisor.providerTriggers = bootCatalog
-	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		loaded, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
+		if err != nil {
+			return cliapp.BundlePackRuntimeLoad{}, err
+		}
+		loaded.ProviderTriggers.Catalog = candidateCatalog
+		return loaded, nil
+	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 
@@ -2350,7 +2379,6 @@ flows:
 	cfg.Runtime.ExecutionPosture = executionposture.Live
 	candidateCatalog := testProviderTriggerCatalog(t)
 	channelCfg := &config.Config{Channels: config.ChannelsConfig{
-		Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
 		Bindings: map[string]config.ChannelBindingConfig{
 			"ops": {Pack: "provider.telegram.hitl_channel", Destination: "42"},
 		},
@@ -2363,7 +2391,7 @@ flows:
 	supervisor := newRuntimeProjectSupervisor(
 		cliapp.RepoRoot(), runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()), cfg, stores, &ready,
 		cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"},
-		nil, processIngressCredentialStore{}, candidateCatalog, "", nil, nil, nil,
+		nil, processIngressCredentialStore{}, candidateCatalog, packfixture.EmbeddedBase(t), "", nil, nil, nil,
 	)
 	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = newSupervisorTestProcessOwner(t)
@@ -2378,12 +2406,13 @@ flows:
 		workspaceSource = semanticSource
 		return stubWorkspaceLifecycle{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
-	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
 	var candidateChannelLoad cliapp.ChannelPackLoad
-	supervisor.SetChannelPackLoader(func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
-		var loadErr error
-		candidateChannelLoad, loadErr = cliapp.LoadConfiguredChannelPacks(ctx, cliapp.RepoRoot(), cliapp.RuntimeConfigLoadResult{Config: channelCfg}, source.PlatformSpec(), catalog, nil, nil)
-		return candidateChannelLoad, loadErr
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		loaded, loadErr := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: channelCfg}, candidate, nil, nil)
+		if loadErr == nil {
+			candidateChannelLoad = loaded.Channels
+		}
+		return loaded, loadErr
 	})
 	if _, declared := rawSource.EventEntry("inbound.telegram.text_message"); declared {
 		t.Fatal("raw replacement source unexpectedly owns imported Telegram event")
@@ -2452,7 +2481,7 @@ flows:
 	if replacementRuntime.ScenarioProfileCatalog == nil || !replacementRuntime.ScenarioProfileCatalog.EffectiveSourceIdentity().Equal(replacementRuntime.EffectiveSourceIdentity) {
 		t.Fatal("replacement runtime did not retain the exact effective-source scenario profile catalog")
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailabilityStore, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailabilityStore, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		BundleSourceFact: replacementFact,
 		BundleIdentity:   replacementIdentity,
 		Source:           source,
@@ -2460,7 +2489,7 @@ flows:
 		PlatformSpecPath: cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
 		Runtime:          replacementRuntime,
 		WorkOwner:        replacementRuntime.WorkOccurrence(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -2533,10 +2562,15 @@ flows:
 	predecessorSource := supervisor.CurrentSource()
 	predecessorRuntime := supervisor.CurrentRuntime()
 	predecessorCatalog := predecessorRuntime.ScenarioProfileCatalog
-	supervisor.SetChannelPackLoader(func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		loaded, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: channelCfg}, candidate, nil, nil)
+		if err != nil {
+			return cliapp.BundlePackRuntimeLoad{}, err
+		}
 		conflicting := candidateChannelLoad
 		conflicting.Bindings = append(append([]packs.OutboundBindingPlan(nil), candidateChannelLoad.Bindings...), candidateChannelLoad.Bindings...)
-		return conflicting, nil
+		loaded.Channels = conflicting
+		return loaded, nil
 	})
 	if _, reloadErr := supervisor.ReloadProject(context.Background(), projectRoot); reloadErr == nil || !strings.Contains(reloadErr.Error(), `duplicate channel runtime tool "channel.ops.`) {
 		t.Fatalf("ReloadProject error = %v, want duplicate projected channel tool rejection", reloadErr)
@@ -2614,12 +2648,14 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 	supervisor := newRuntimeProjectSupervisor(
 		"", "", cfg, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true},
-		nil, nil, nil, "", nil, nil, nil,
+		nil, nil, nil, packfixture.EmbeddedBase(t), "", nil, nil, nil,
 	)
 	supervisor.dev = true
 	catalog := emptyProviderTriggerCatalog(t)
 	supervisor.providerTriggers = catalog
-	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return catalog, nil }
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: cfg}, candidate, nil, nil)
+	})
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if strings.TrimSpace(contractsRoot) != strings.TrimSpace(projectRoot) {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)

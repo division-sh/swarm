@@ -91,16 +91,13 @@ func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	channelPackDir := filepath.Join(cliapp.RepoRoot(), "packs", "channels", "telegram")
-	configured := string(rawConfig) + fmt.Sprintf(`
+	configured := string(rawConfig) + `
 channels:
-  packs:
-    platform_dirs: [%q]
   bindings:
     ops:
       pack: provider.telegram.hitl_channel
       destination: "42"
-`, channelPackDir)
+`
 	if err := os.WriteFile(configPath, []byte(configured), 0o644); err != nil {
 		t.Fatal(err)
 	}

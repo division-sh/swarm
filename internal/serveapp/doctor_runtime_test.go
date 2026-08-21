@@ -69,7 +69,7 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	}
 }
 
-func TestRunServeRuntimeRejectsDeclaredProviderTriggerPackBeforeStoreSelection(t *testing.T) {
+func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelection(t *testing.T) {
 	configDir := t.TempDir()
 	configPath := filepath.Join(configDir, "swarm.yaml")
 	writeRuntimeConfigText(t, configPath, strings.Join([]string{
@@ -84,7 +84,7 @@ func TestRunServeRuntimeRejectsDeclaredProviderTriggerPackBeforeStoreSelection(t
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
-		"provider_triggers:",
+		"platform:",
 		"  packs:",
 		"    platform_dirs:",
 		"      - packs/missing-provider",
@@ -130,10 +130,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	if strings.TrimSpace(dockerBin) != "" {
 		workspace = append(workspace, fmt.Sprintf("  docker_bin: %q", dockerBin))
 	}
-	providerPacks := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
-	for _, dir := range testProviderTriggerPackDirs(t) {
-		providerPacks = append(providerPacks, fmt.Sprintf("      - %q", dir))
-	}
 	writeRuntimeConfigText(t, path, strings.Join([]string{
 		"store:",
 		"  backend: sqlite",
@@ -153,7 +149,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		"    command: claude",
 		"    timeout: 2s",
 		"    output_format: json",
-		strings.Join(providerPacks, "\n"),
 	}, "\n")+"\n")
 	return path
 }

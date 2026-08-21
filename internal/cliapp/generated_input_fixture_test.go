@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestScenarioGeneratedPayloadGrammarIsScalarAndExplicit(t *testing.T) {
@@ -204,15 +205,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 
 	configPath := contractsPath + "/swarm.yaml"
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: mock\n"))
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: contractsPath, ExplicitPath: configPath})
-	if err != nil {
-		t.Fatalf("load unified config: %v", err)
-	}
-	configured, err := LoadConfiguredProviderTriggerPacks(contractsPath, configResult)
-	if err != nil {
-		t.Fatalf("load configured provider trigger packs: %v", err)
-	}
-	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), configured.Catalog)
+	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), packfixture.TriggerCatalog(t))
 	if err != nil {
 		t.Fatalf("compose effective provider source: %v", err)
 	}
@@ -273,15 +266,7 @@ func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *t
 	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
 	configPath := contractsPath + "/swarm.yaml"
 	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: mock\n"))
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: contractsPath, ExplicitPath: configPath})
-	if err != nil {
-		t.Fatalf("load unified config: %v", err)
-	}
-	configured, err := LoadConfiguredProviderTriggerPacks(contractsPath, configResult)
-	if err != nil {
-		t.Fatalf("load configured provider trigger packs: %v", err)
-	}
-	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), configured.Catalog)
+	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), packfixture.TriggerCatalog(t))
 	if err != nil {
 		t.Fatalf("compose effective provider source: %v", err)
 	}

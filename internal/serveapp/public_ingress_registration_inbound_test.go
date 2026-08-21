@@ -14,8 +14,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -30,6 +28,7 @@ import (
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -134,13 +133,11 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
-	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{
-		Generation: catalog.Generation(), InstalledSubjects: installed,
-	}, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash), Source: source,
 		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
-		StandingTargets: []runtimepkg.StandingTarget{target},
-	})
+		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
+	}))
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -273,15 +270,16 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
 	}
-	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{Generation: catalog.Generation()}, runtimepkg.BundleContext{
-		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash),
-		Source:           semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		Runtime:          &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus},
-		WorkOwner:        workOwner,
-		StandingTargets:  []runtimepkg.StandingTarget{target},
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+		BundleSourceFact:          mustServeTestEphemeralBundleSourceFact(bundleHash),
+		Source:                    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Runtime:                   &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus},
+		WorkOwner:                 workOwner,
+		StandingTargets:           []runtimepkg.StandingTarget{target},
+		ProviderTriggerGeneration: catalog.Generation(),
 	})
 	if err != nil {
-		t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
+		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	t.Cleanup(func() { _ = manager.QuiesceAllRuntimeContexts(context.Background()) })
 
@@ -313,10 +311,6 @@ func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegist
 func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
 	repo := cliapp.RepoRoot()
-	version, err := platform.PlatformVersion()
-	if err != nil {
-		t.Fatalf("PlatformVersion: %v", err)
-	}
 	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
@@ -329,16 +323,10 @@ func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	if err != nil {
 		t.Fatalf("NewInterfaceRegistry: %v", err)
 	}
-	channels, err := packs.LoadChannelPackDirs(version, "platform", filepath.Join(repo, "packs", "channels", "telegram"))
-	if err != nil || len(channels) != 1 {
-		t.Fatalf("load Telegram channel: count=%d err=%v", len(channels), err)
-	}
-	triggers, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(version, []string{filepath.Join(repo, "packs", "provider-triggers", "telegram")}, nil)
-	if err != nil {
-		t.Fatalf("load Telegram trigger: %v", err)
-	}
+	channels := packfixture.ChannelPacks(t)
+	triggers := packfixture.TriggerCatalog(t)
 	var connector packs.ConnectorPackDescriptor
-	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
+	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
 		if candidate.Identity.ID() == "provider.telegram.connector" {
 			connector = candidate
 			break

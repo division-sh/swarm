@@ -4,7 +4,7 @@ packs:
     provider: github
     profile: catalog/generator-profiles/github.yaml
     kind: builtin
-    output: packs/github
+    output: provider-connectors/github
   - id: provider.acme.connector
     provider: acme
     profile: catalog/generator-profiles/acme.yaml

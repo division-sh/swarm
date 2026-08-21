@@ -155,9 +155,9 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 		entry, ok = s.entryValueByID(pin)
 		if !ok {
 			if installed, exists := s.entryValueByProvider(provider); exists {
-				return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not loaded; verified pack for %q is %q; fix admission.pack.id or provider_triggers.packs.*", alias, provider, pin, provider, installed.identity.ID())
+				return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not selected; verified pack for %q is %q; fix admission.pack.id or the effective pack inventory", alias, provider, pin, provider, installed.identity.ID())
 			}
-			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not loaded; fix admission.pack.id or provider_triggers.packs.*", alias, provider, pin)
+			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q pins pack %q, but that id is not selected; fix admission.pack.id or the effective pack inventory", alias, provider, pin)
 		}
 		entryProvider := NormalizeProviderName(entry.manifest.Provider)
 		if entryProvider != provider {
@@ -166,7 +166,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	} else {
 		entry, ok = s.entryValueByProvider(provider)
 		if !ok {
-			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is pack-required, but no verified trigger pack provides %q; configure that pack in provider_triggers.packs.external_dirs, or declare admission.kind: raw with an explicit raw policy", alias, provider, provider)
+			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q is pack-required, but no verified trigger pack provides %q; import or select that pack, or declare admission.kind: raw with an explicit raw policy", alias, provider, provider)
 		}
 	}
 	auth, err := manifestRequestAuthentication(entry.manifest)

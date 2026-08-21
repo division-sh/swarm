@@ -35,6 +35,9 @@ type cliOutputSharedOwnerProof struct {
 
 var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm version":                      {Constructor: "newVersionCommand", Runner: "runVersionCommand"},
+	"swarm import":                       {Constructor: "newImportPackCommand", Runner: "newImportPackCommand"},
+	"swarm packs list":                   {Constructor: "newPacksListCommand", Runner: "newPacksListCommand"},
+	"swarm packs show":                   {Constructor: "newPacksShowCommand", Runner: "newPacksShowCommand"},
 	"swarm verify":                       {Constructor: "newVerifyCommand", Runner: "runVerifyCommandWithOutput"},
 	"swarm migrate-connect-delivery-one": {Constructor: "newMigrateConnectDeliveryOneCommand", Runner: "runMigrateConnectDeliveryOneCommand"},
 	"swarm migrate-producer-routing":     {Constructor: "newMigrateProducerRoutingCommand", Runner: "runMigrateProducerRoutingCommand"},
@@ -69,6 +72,7 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm":                        "exception",
 	"swarm help":                   "exception",
 	"swarm completion":             "exception",
+	"swarm packs":                  "exception",
 	"swarm doctor":                 "split",
 	"swarm test":                   "split",
 	"swarm new":                    "split",

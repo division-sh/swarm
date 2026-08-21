@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -36,6 +35,7 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestInboundGatewayStandingServiceAdmissionClosesDrainsAndReopens(t *testing.T) {
@@ -137,22 +137,7 @@ func (g *testInboundGateway) Handler() http.Handler {
 
 func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *testInboundGateway {
 	t.Helper()
-	root := filepath.Join("..", "..", "packs", "provider-triggers")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("read provider trigger pack root: %v", err)
-	}
-	dirs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirs = append(dirs, filepath.Join(root, entry.Name()))
-		}
-	}
-	sort.Strings(dirs)
-	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", dirs, nil)
-	if err != nil {
-		t.Fatalf("load provider trigger registry: %v", err)
-	}
+	registry := packfixture.TriggerCatalog(t)
 	if bus != nil {
 		bus.SetProviderOutputAuthorizationVerifier(registry)
 	}

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -404,37 +402,6 @@ func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedCh
 		Envelope: loaded.Envelope, Manifest: manifest, ManifestBody: append([]byte(nil), loaded.ManifestBody...),
 		Directory: loaded.Directory, Source: MustPackSource(loaded.Envelope.Provenance.Source, loaded.Envelope.ID),
 	}, nil
-}
-
-func LoadChannelPackDirs(runningPlatformVersion, provenance string, dirs ...string) ([]LoadedChannelPack, error) {
-	loaded := make([]LoadedChannelPack, 0, len(dirs))
-	seen := map[string]struct{}{}
-	for index, raw := range dirs {
-		dir := strings.TrimSpace(raw)
-		if dir == "" {
-			return nil, fmt.Errorf("channel pack directory %d is empty", index)
-		}
-		absolute, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, fmt.Errorf("resolve channel pack directory %q: %w", dir, err)
-		}
-		absolute = filepath.Clean(absolute)
-		if _, exists := seen[absolute]; exists {
-			return nil, fmt.Errorf("duplicate channel pack directory %q", absolute)
-		}
-		seen[absolute] = struct{}{}
-		pack, err := LoadChannelPackFS(os.DirFS(absolute), ".", runningPlatformVersion)
-		if err != nil {
-			return nil, fmt.Errorf("load channel pack %q: %w", absolute, err)
-		}
-		if got := strings.TrimSpace(pack.Envelope.Provenance.Source); got != strings.TrimSpace(provenance) {
-			return nil, fmt.Errorf("channel pack %q provenance %q does not match selected tier %q", pack.Envelope.ID, got, provenance)
-		}
-		pack.Directory = absolute
-		pack.Source = MustPackSource(provenance, absolute)
-		loaded = append(loaded, pack)
-	}
-	return loaded, nil
 }
 
 func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) ([]SatisfactionPlan, error) {

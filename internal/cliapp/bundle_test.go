@@ -733,7 +733,7 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 			t.Fatalf("ignored content leaked through %s", file.Path)
 		}
 	}
-	wantPaths := []string{"agents.yaml", "flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
+	wantPaths := []string{".swarm/pack-selection.yaml", "agents.yaml", "flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("content_yaml files = %#v, want %#v\n%s", paths, wantPaths, contentYAML)
 	}

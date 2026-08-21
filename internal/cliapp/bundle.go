@@ -645,7 +645,19 @@ func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string)
 	if err != nil {
 		return nil, fmt.Errorf("resolve contracts: %w", err)
 	}
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(RepoRoot, contractsRoot, paths.PlatformSpecPath)
+	configPath := ""
+	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
+		configPath = opts.apiOptions.rootFlags.configPath
+	}
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot, ExplicitPath: configPath})
+	if err != nil {
+		return nil, fmt.Errorf("load runtime config: %w", err)
+	}
+	packBase, err := LoadConfiguredPlatformPackBase(RepoRoot, cfgResult)
+	if err != nil {
+		return nil, fmt.Errorf("load platform pack base: %w", err)
+	}
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUploadWithOptions(RepoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: packBase})
 	if err != nil {
 		return nil, fmt.Errorf("package contracts directory: %w", err)
 	}

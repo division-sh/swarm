@@ -14,7 +14,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
@@ -342,17 +344,22 @@ func GenerateCatalog(fsys fs.FS) ([]GeneratedCatalogArtifact, error) {
 	return artifacts, nil
 }
 
-func WriteGeneratedCatalog(root string) error {
-	root = strings.TrimSpace(root)
-	if root == "" {
+func WriteGeneratedCatalog(catalogRoot, packRoot string) error {
+	catalogRoot = strings.TrimSpace(catalogRoot)
+	packRoot = strings.TrimSpace(packRoot)
+	if catalogRoot == "" || packRoot == "" {
 		return fmt.Errorf("connector catalog root is required")
 	}
-	artifacts, err := GenerateCatalog(os.DirFS(root))
+	artifacts, err := GenerateCatalog(os.DirFS(catalogRoot))
 	if err != nil {
 		return err
 	}
 	for _, artifact := range artifacts {
 		output := strings.Trim(strings.TrimSpace(artifact.IndexEntry.Output), "/")
+		root := catalogRoot
+		if artifact.IndexEntry.Kind == GeneratedPackKindBuiltin {
+			root = packRoot
+		}
 		if err := os.MkdirAll(path.Join(root, output), 0o755); err != nil {
 			return err
 		}
@@ -363,27 +370,108 @@ func WriteGeneratedCatalog(root string) error {
 			return err
 		}
 	}
-	return nil
+	return validateGeneratedInventoryMembership(os.DirFS(packRoot), artifacts)
 }
 
-func CheckGeneratedCatalog(fsys fs.FS) ([]GeneratedCatalogArtifact, error) {
-	artifacts, err := GenerateCatalog(fsys)
+func CheckGeneratedCatalog(catalogFS, packFS fs.FS) ([]GeneratedCatalogArtifact, error) {
+	if err := validateCheckedInGeneratedIdentity(catalogFS, packFS); err != nil {
+		return nil, err
+	}
+	artifacts, err := GenerateCatalog(catalogFS)
 	if err != nil {
 		return nil, err
 	}
 	for _, artifact := range artifacts {
 		output := strings.Trim(strings.TrimSpace(artifact.IndexEntry.Output), "/")
-		if err := compareGeneratedFile(fsys, path.Join(output, packs.ConnectorManifestFileName), artifact.ConnectorBody); err != nil {
+		outputFS := catalogFS
+		if artifact.IndexEntry.Kind == GeneratedPackKindBuiltin {
+			outputFS = packFS
+		}
+		if err := compareGeneratedFile(outputFS, path.Join(output, packs.ConnectorManifestFileName), artifact.ConnectorBody); err != nil {
 			return nil, err
 		}
-		if err := compareGeneratedFile(fsys, path.Join(output, packs.EnvelopeFileName), artifact.PackBody); err != nil {
+		if err := compareGeneratedFile(outputFS, path.Join(output, packs.EnvelopeFileName), artifact.PackBody); err != nil {
 			return nil, err
 		}
 	}
-	if err := ValidateCatalogConformance(fsys, artifacts); err != nil {
+	if err := ValidateCatalogConformance(catalogFS, artifacts); err != nil {
+		return nil, err
+	}
+	if err := validateGeneratedInventoryMembership(packFS, artifacts); err != nil {
 		return nil, err
 	}
 	return artifacts, nil
+}
+
+func validateCheckedInGeneratedIdentity(catalogFS, packFS fs.FS) error {
+	index, err := loadGeneratedPackIndex(catalogFS)
+	if err != nil {
+		return err
+	}
+	manifest, err := packartifact.LoadInventoryManifest(packFS, packartifact.InventoryManifestFileName)
+	if err != nil {
+		return fmt.Errorf("load explicit embedded inventory for generated connectors: %w", err)
+	}
+	runningPlatformVersion, err := platform.PlatformVersion()
+	if err != nil {
+		return fmt.Errorf("resolve platform version for generated connectors: %w", err)
+	}
+	expected := index.BuiltinByID()
+	seen := make(map[string]struct{}, len(expected))
+	for _, entry := range manifest.Packs {
+		if entry.Type != packartifact.TypeConnector {
+			continue
+		}
+		pack, err := LoadPackFS(packFS, entry.Path, runningPlatformVersion)
+		if err != nil {
+			return fmt.Errorf("load embedded connector pack %q for generated identity: %w", entry.ID, err)
+		}
+		indexed, ok := expected[entry.ID]
+		if !ok {
+			if pack.Manifest.Generation != nil {
+				return fmt.Errorf("builtin connector pack %q carries generation evidence but is not in the generated pack index", entry.ID)
+			}
+			continue
+		}
+		if strings.Trim(strings.TrimSpace(indexed.Output), "/") != entry.Path {
+			return fmt.Errorf("generated connector pack %q output %q contradicts explicit inventory path %q", entry.ID, indexed.Output, entry.Path)
+		}
+		if err := validateGeneratedPackIdentity(catalogFS, pack, indexed); err != nil {
+			return err
+		}
+		seen[entry.ID] = struct{}{}
+	}
+	for packID := range expected {
+		if _, ok := seen[packID]; !ok {
+			return fmt.Errorf("generated connector pack index references unknown builtin pack id %q", packID)
+		}
+	}
+	return nil
+}
+
+func validateGeneratedInventoryMembership(packFS fs.FS, artifacts []GeneratedCatalogArtifact) error {
+	manifest, err := packartifact.LoadInventoryManifest(packFS, packartifact.InventoryManifestFileName)
+	if err != nil {
+		return fmt.Errorf("load explicit embedded inventory for generated connectors: %w", err)
+	}
+	declared := make(map[string]packartifact.InventoryManifestPack, len(manifest.Packs))
+	for _, entry := range manifest.Packs {
+		declared[entry.ID] = entry
+	}
+	for _, artifact := range artifacts {
+		if artifact.IndexEntry.Kind != GeneratedPackKindBuiltin {
+			continue
+		}
+		entry, ok := declared[artifact.PackEnvelope.ID]
+		if !ok {
+			return fmt.Errorf("generated connector pack %q is absent from %s", artifact.PackEnvelope.ID, packartifact.InventoryManifestFileName)
+		}
+		output := strings.Trim(strings.TrimSpace(artifact.IndexEntry.Output), "/")
+		if entry.Type != packartifact.TypeConnector || entry.Path != output {
+			return fmt.Errorf("generated connector pack %q output %q contradicts explicit inventory type=%q path=%q", artifact.PackEnvelope.ID, output, entry.Type, entry.Path)
+		}
+	}
+	return nil
 }
 
 func compareGeneratedFile(fsys fs.FS, name string, want []byte) error {

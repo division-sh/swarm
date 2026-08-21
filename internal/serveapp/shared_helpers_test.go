@@ -6,16 +6,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -66,37 +65,12 @@ func setDoctorProviderSecret(t *testing.T, key, value string) {
 	}
 }
 
-func testProviderTriggerPackDirs(t *testing.T) []string {
-	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve provider trigger test fixture source path")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "packs", "provider-triggers"))
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("read provider trigger pack root: %v", err)
-	}
-	dirs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirs = append(dirs, filepath.Join(root, entry.Name()))
-		}
-	}
-	sort.Strings(dirs)
-	return dirs
-}
-
 func withTestProviderTriggerPlatformInventory(t *testing.T, configText string) string {
 	t.Helper()
 	if strings.Contains(configText, "\nprovider_triggers:") || strings.HasPrefix(configText, "provider_triggers:") {
-		t.Fatalf("test runtime config already declares provider_triggers; compose the intended inventory explicitly")
+		t.Fatalf("test runtime config declares retired provider_triggers; embedded packs require no configuration")
 	}
-	lines := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
-	for _, dir := range testProviderTriggerPackDirs(t) {
-		lines = append(lines, fmt.Sprintf("      - %q", dir))
-	}
-	return strings.TrimRight(configText, "\n") + "\n" + strings.Join(lines, "\n") + "\n"
+	return configText
 }
 
 func writeTestVerifyRuntimeConfig(t *testing.T) string {
@@ -188,31 +162,7 @@ func decodeAuthoritativeYAMLBytesForTest(t testing.TB, raw []byte, target any) {
 	}
 }
 
-func copyProviderTriggerPackFixture(t *testing.T, provider, target string, external bool) {
-	t.Helper()
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatalf("mkdir pack fixture: %v", err)
-	}
-	source := filepath.Join(cliapp.RepoRoot(), "packs", "provider-triggers", provider)
-	for _, name := range []string{"pack.yaml", "trigger.yaml"} {
-		body, err := os.ReadFile(filepath.Join(source, name))
-		if err != nil {
-			t.Fatalf("read %s fixture: %v", name, err)
-		}
-		if external && name == "pack.yaml" {
-			body = []byte(strings.Replace(string(body), "source: platform", "source: external", 1))
-		}
-		if err := os.WriteFile(filepath.Join(target, name), body, 0o644); err != nil {
-			t.Fatalf("write %s fixture: %v", name, err)
-		}
-	}
-}
-
 func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
 	t.Helper()
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", testProviderTriggerPackDirs(t), nil)
-	if err != nil {
-		t.Fatalf("load provider trigger catalog: %v", err)
-	}
-	return catalog
+	return packfixture.TriggerCatalog(t)
 }

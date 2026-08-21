@@ -15,9 +15,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/providerconnectors"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -30,6 +27,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -631,10 +629,6 @@ func TestProviderRegistrationControllerStartupHandoffParity(t *testing.T) {
 func selectedStoreTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRegistration {
 	t.Helper()
 	repo := filepath.Clean(filepath.Join("..", "..", "..", ".."))
-	version, err := platform.PlatformVersion()
-	if err != nil {
-		t.Fatalf("PlatformVersion: %v", err)
-	}
 	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
@@ -647,16 +641,10 @@ func selectedStoreTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRe
 	if err != nil {
 		t.Fatalf("NewInterfaceRegistry: %v", err)
 	}
-	channels, err := packs.LoadChannelPackDirs(version, "platform", filepath.Join(repo, "packs", "channels", "telegram"))
-	if err != nil || len(channels) != 1 {
-		t.Fatalf("load Telegram channel: count=%d err=%v", len(channels), err)
-	}
-	triggers, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(version, []string{filepath.Join(repo, "packs", "provider-triggers", "telegram")}, nil)
-	if err != nil {
-		t.Fatalf("load Telegram trigger: %v", err)
-	}
+	channels := packfixture.ChannelPacks(t)
+	triggers := packfixture.TriggerCatalog(t)
 	var connector packs.ConnectorPackDescriptor
-	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
+	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
 		if candidate.Identity.ID() == "provider.telegram.connector" {
 			connector = candidate
 			break

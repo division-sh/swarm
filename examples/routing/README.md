@@ -20,4 +20,4 @@ Verify any example with:
 swarm verify --contracts examples/routing/<example>
 ```
 
-A successful command prints the verified bundle summary and exits zero. If it reports a missing provider-trigger platform inventory, configure `provider_triggers.packs.platform_dirs` in the elevated local operator config before retrying. If it reports routing invalidity, do not add producer `target` or `broadcast`; compare the bundle to the applicable directory above.
+A successful command prints the verified bundle summary and exits zero. Built-in packs come from the binary's embedded inventory; use `swarm packs list` to inspect the exact selection and `swarm import <pack-id>` for an editable project-owned copy. If it reports routing invalidity, do not add producer `target` or `broadcast`; compare the bundle to the applicable directory above.

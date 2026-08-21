@@ -122,7 +122,7 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 		return nil, nil
 	}
 	if opts.Registry == nil {
-		opts.Registry = DefaultPackRegistry()
+		return nil, fmt.Errorf("provider connector pack registry is required")
 	}
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))

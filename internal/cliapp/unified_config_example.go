@@ -69,8 +69,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget.", unifiedConfigExampleTierProjectSafe),
 
 		e("workspace.data_source", "./.swarm/data", "Project-contained workspace data source.", unifiedConfigExampleTierProjectContainedPath),
-		e("provider_triggers.packs.external_dirs", `["./provider-packs"]`, "Project-contained provider trigger pack directories.", unifiedConfigExampleTierProjectContainedPath),
-		e("channels.packs.external_dirs", `["./channel-packs"]`, "Project-contained channel pack directories.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.contracts_path", "./contracts", "Project-contained contract bundle root.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.platform_spec_path", "platform-spec.yaml", "Project-contained platform spec path override.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Project-contained agent config map file.", unifiedConfigExampleTierProjectContainedPath),
@@ -98,8 +96,7 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("llm.claude_cli.command", "claude", "Claude CLI executable path/name.", unifiedConfigExampleTierElevated),
 		e("llm.openai_compatible.base_url", "https://api.example.com/v1", "OpenAI-compatible endpoint base URL.", unifiedConfigExampleTierElevated),
 		e("llm.openai_responses.base_url", "https://api.openai.com/v1", "OpenAI Responses endpoint base URL.", unifiedConfigExampleTierElevated),
-		e("provider_triggers.packs.platform_dirs", `["packs/provider-triggers/telegram"]`, "Selected platform provider trigger pack directories; machine/operator config only.", unifiedConfigExampleTierElevated),
-		e("channels.packs.platform_dirs", `["packs/channels/telegram"]`, "Selected platform channel pack directories; machine/operator config only.", unifiedConfigExampleTierElevated),
+		e("platform.packs.platform_dirs", `["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"]`, "Complete replacement for the embedded platform pack inventory during platform development; machine/operator config only.", unifiedConfigExampleTierElevated),
 		dynamic("channels.bindings.hitl.pack", "provider.telegram.hitl_channel", "Channel pack selected for the HITL outbound binding.", unifiedConfigExampleTierElevated),
 		dynamic("channels.bindings.hitl.destination", `"-1001234567890"`, "Deployment-owned opaque destination for the HITL outbound binding.", unifiedConfigExampleTierElevated),
 		e("paths.swarm_dir", ".swarm", "Swarm state directory.", unifiedConfigExampleTierElevated),

@@ -15,14 +15,14 @@ import (
 
 // Config contains platform-generic runtime configuration.
 type Config struct {
-	Runtime          RuntimeConfig          `yaml:"runtime"`
-	Database         DatabaseConfig         `yaml:"database"`
-	Store            StoreConfig            `yaml:"store"`
-	Workspace        WorkspaceConfig        `yaml:"workspace"`
-	LLM              LLMConfig              `yaml:"llm"`
-	ProviderTriggers ProviderTriggersConfig `yaml:"provider_triggers"`
-	Channels         ChannelsConfig         `yaml:"channels"`
-	Extensions       map[string]any         `yaml:",inline"`
+	Runtime    RuntimeConfig   `yaml:"runtime"`
+	Database   DatabaseConfig  `yaml:"database"`
+	Store      StoreConfig     `yaml:"store"`
+	Workspace  WorkspaceConfig `yaml:"workspace"`
+	LLM        LLMConfig       `yaml:"llm"`
+	Platform   PlatformConfig  `yaml:"platform"`
+	Channels   ChannelsConfig  `yaml:"channels"`
+	Extensions map[string]any  `yaml:",inline"`
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
 	extensionsReady bool             `yaml:"-"`
@@ -40,23 +40,16 @@ type RuntimeConfig struct {
 	DecisionCardInputDraftTTL    time.Duration            `yaml:"decision_card_input_draft_ttl"`
 }
 
-type ProviderTriggersConfig struct {
-	Packs ProviderTriggerPacksConfig `yaml:"packs"`
+type PlatformConfig struct {
+	Packs PlatformPacksConfig `yaml:"packs"`
 }
 
-type ProviderTriggerPacksConfig struct {
+type PlatformPacksConfig struct {
 	PlatformDirs []string `yaml:"platform_dirs"`
-	ExternalDirs []string `yaml:"external_dirs"`
 }
 
 type ChannelsConfig struct {
-	Packs    ChannelPacksConfig              `yaml:"packs"`
 	Bindings map[string]ChannelBindingConfig `yaml:"bindings"`
-}
-
-type ChannelPacksConfig struct {
-	PlatformDirs []string `yaml:"platform_dirs"`
-	ExternalDirs []string `yaml:"external_dirs"`
 }
 
 type ChannelBindingConfig struct {
@@ -276,7 +269,7 @@ func (c *Config) validate(backendOverride string) error {
 	if err := c.validateDatabasePasswordSource(); err != nil {
 		return err
 	}
-	if err := c.validateProviderTriggerPacks(); err != nil {
+	if err := c.validatePlatformPacks(); err != nil {
 		return err
 	}
 	if err := c.validateChannels(); err != nil {
@@ -383,25 +376,22 @@ func (c *Config) validateDatabasePasswordSource() error {
 	return ValidateDatabasePasswordDeclaration(c.Database)
 }
 
-func (c *Config) validateProviderTriggerPacks() error {
+func (c *Config) validatePlatformPacks() error {
 	if c == nil {
 		return nil
 	}
-	if err := validateProviderTriggerPackDirs("platform_dirs", c.ProviderTriggers.Packs.PlatformDirs); err != nil {
-		return err
-	}
-	return validateProviderTriggerPackDirs("external_dirs", c.ProviderTriggers.Packs.ExternalDirs)
+	return validatePlatformPackDirs(c.Platform.Packs.PlatformDirs)
 }
 
-func validateProviderTriggerPackDirs(key string, dirs []string) error {
+func validatePlatformPackDirs(dirs []string) error {
 	seen := map[string]struct{}{}
 	for i, dir := range dirs {
 		dir = strings.TrimSpace(dir)
 		if dir == "" {
-			return fmt.Errorf("provider_triggers.packs.%s[%d] must be non-empty", key, i)
+			return fmt.Errorf("platform.packs.platform_dirs[%d] must be non-empty", i)
 		}
 		if _, exists := seen[dir]; exists {
-			return fmt.Errorf("provider_triggers.packs.%s contains duplicate %q", key, dir)
+			return fmt.Errorf("platform.packs.platform_dirs contains duplicate %q", dir)
 		}
 		seen[dir] = struct{}{}
 	}
@@ -411,12 +401,6 @@ func validateProviderTriggerPackDirs(key string, dirs []string) error {
 func (c *Config) validateChannels() error {
 	if c == nil {
 		return nil
-	}
-	if err := validateChannelPackDirs("platform_dirs", c.Channels.Packs.PlatformDirs); err != nil {
-		return err
-	}
-	if err := validateChannelPackDirs("external_dirs", c.Channels.Packs.ExternalDirs); err != nil {
-		return err
 	}
 	for rawID, binding := range c.Channels.Bindings {
 		id := strings.TrimSpace(rawID)
@@ -442,21 +426,6 @@ func (c *Config) validateChannels() error {
 		if raw := binding.Register; raw != strings.TrimSpace(raw) {
 			return fmt.Errorf("channels.bindings.%s.register must not contain surrounding whitespace", id)
 		}
-	}
-	return nil
-}
-
-func validateChannelPackDirs(key string, dirs []string) error {
-	seen := map[string]struct{}{}
-	for index, raw := range dirs {
-		dir := strings.TrimSpace(raw)
-		if dir == "" {
-			return fmt.Errorf("channels.packs.%s[%d] must be non-empty", key, index)
-		}
-		if _, exists := seen[dir]; exists {
-			return fmt.Errorf("channels.packs.%s contains duplicate %q", key, dir)
-		}
-		seen[dir] = struct{}{}
 	}
 	return nil
 }

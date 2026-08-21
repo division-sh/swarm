@@ -13,6 +13,7 @@ import (
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -28,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
@@ -44,11 +46,11 @@ type runtimeProjectSupervisor struct {
 	credentials          runtimecredentials.Store
 	providerCredentials  runtimecredentials.Store
 	providerTriggers     *providertriggers.CatalogSnapshot
+	platformPackBase     *packartifact.PlatformPackInventory
 	processWorkOwner     *worklifetime.Process
 	processCapability    runtimestartupownership.ProcessCapability
 	runtimeGeneration    uint64
-	loadProviderCatalog  func() (*providertriggers.CatalogSnapshot, error)
-	loadChannelPacks     func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
+	loadBundlePacks      func(context.Context, *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error)
 	onRuntimePublished   func(context.Context) error
 	beforeStartupHandoff func(context.Context) (func(), error)
 	channelPlans         []packs.SatisfactionPlan
@@ -105,13 +107,13 @@ func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.Run
 	s.currentBundleIdentity = identity
 }
 
-func (s *runtimeProjectSupervisor) SetChannelPackLoader(loader func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)) {
+func (s *runtimeProjectSupervisor) SetBundlePackRuntimeLoader(loader func(context.Context, *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error)) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.loadChannelPacks = loader
+	s.loadBundlePacks = loader
 }
 
 func (s *runtimeProjectSupervisor) SetRuntimePublishedHook(hook func(context.Context) error) {
@@ -152,6 +154,7 @@ func newRuntimeProjectSupervisor(
 	credentials runtimecredentials.Store,
 	providerCredentials runtimecredentials.Store,
 	providerTriggers *providertriggers.CatalogSnapshot,
+	platformPackBase *packartifact.PlatformPackInventory,
 	initialRoot string,
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
@@ -174,6 +177,7 @@ func newRuntimeProjectSupervisor(
 		credentials:         credentials,
 		providerCredentials: providerCredentials,
 		providerTriggers:    providerTriggers,
+		platformPackBase:    platformPackBase,
 		processWorkOwner: func() *worklifetime.Process {
 			if initialRT == nil {
 				return nil
@@ -196,7 +200,7 @@ func newRuntimeProjectSupervisor(
 			return rt.ShutdownWithOptions(opts)
 		},
 		loadWorkflow: func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
-			return cliapp.NewSwarmWorkflowModule(RepoRoot, contractsRoot, platformSpecPath)
+			return cliapp.NewSwarmWorkflowModuleWithPackBase(RepoRoot, contractsRoot, platformSpecPath, platformPackBase)
 		},
 		validateSource: newBuilderProjectSourceValidator(cfg),
 		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
@@ -404,27 +408,19 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if module.SemanticSource() == nil {
 		return builderpkg.ProjectStatus{}, errors.New("loaded project semantic source is required")
 	}
-	authoredSource := semanticview.Wrap(bundle)
-	candidateCatalog := s.providerTriggers
-	if s.loadProviderCatalog != nil {
-		candidateCatalog, err = s.loadProviderCatalog()
-		if err != nil {
-			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate provider-trigger catalog: %w", err)
-		}
+	if s.loadBundlePacks == nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("bundle-specific pack runtime loader is required")
 	}
+	candidatePacks, err := s.loadBundlePacks(ctx, bundle)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate bundle pack runtime: %w", err)
+	}
+	candidateCatalog := candidatePacks.ProviderTriggers.Catalog
 	if candidateCatalog == nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("candidate provider-trigger catalog is required")
 	}
-	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
-	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
-	if s.loadChannelPacks != nil {
-		channelLoad, loadErr := s.loadChannelPacks(ctx, authoredSource, candidateCatalog)
-		if loadErr != nil {
-			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate channel packs: %w", loadErr)
-		}
-		candidateChannelPlans = channelLoad.Plans
-		candidateChannelBindings = channelLoad.Bindings
-	}
+	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), candidatePacks.Channels.Plans...)
+	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), candidatePacks.Channels.Bindings...)
 	bundleSourcePlan, err := planServeBundleSource(s.stores, bundle, s.dev)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("plan project bundle source: %w", err)
@@ -441,9 +437,17 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err := s.validateSource(ctx, source, candidateCatalog); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
-	admissionCandidate, err := s.compileProcessAdmissionCandidate(ctx, candidateCatalog)
+	installedTriggerSubjects, err := candidateCatalog.InstalledCapabilitySubjects()
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
+	}
+	if bundle.PackInventory == nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("candidate bundle effective pack inventory is required")
+	}
+	packCandidate := bundlePackCandidate{
+		catalog: candidateCatalog, generation: candidateCatalog.Generation(),
+		installedSubjects: installedTriggerSubjects, inventoryDigest: bundle.PackInventory.Digest(),
+		channelPlans: candidateChannelPlans, channelBindings: candidateChannelBindings,
 	}
 	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err
@@ -534,10 +538,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("retain replacement runtime source: %w", err)
 	}
-	admissionCandidate.catalog = candidateCatalog
-	admissionCandidate.channelPlans = append([]packs.SatisfactionPlan(nil), candidateChannelPlans...)
-	admissionCandidate.channelBindings = append([]packs.OutboundBindingPlan(nil), candidateChannelBindings...)
-	status, err := s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, newRT.WorkOccurrence(), &admissionCandidate)
+	status, err := s.replaceCurrentRuntimeWithSourceAndPacks(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, newRT.WorkOccurrence(), &packCandidate)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -549,12 +550,13 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	return status, nil
 }
 
-type processAdmissionCandidate struct {
-	catalog          *providertriggers.CatalogSnapshot
-	state            runtime.ProcessAdmissionState
-	survivingTargets map[string][]runtime.StandingTarget
-	channelPlans     []packs.SatisfactionPlan
-	channelBindings  []packs.OutboundBindingPlan
+type bundlePackCandidate struct {
+	catalog           *providertriggers.CatalogSnapshot
+	generation        triggergeneration.Generation
+	installedSubjects []packs.Subject
+	inventoryDigest   string
+	channelPlans      []packs.SatisfactionPlan
+	channelBindings   []packs.OutboundBindingPlan
 }
 
 type runtimeReplacementPublication interface {
@@ -583,7 +585,7 @@ type pendingRuntimeReplacement struct {
 	fact                   runtimecorrelation.BundleSourceFact
 	identity               runtimecontracts.BundleIdentity
 	runtime                *runtime.Runtime
-	admission              *processAdmissionCandidate
+	packCandidate          *bundlePackCandidate
 	freeze                 *startupHandoffFreeze
 	retainCurrentProject   bool
 }
@@ -681,16 +683,12 @@ func (f *startupHandoffFreeze) Release() {
 	})
 }
 
-func cloneProcessAdmissionCandidate(candidate *processAdmissionCandidate) *processAdmissionCandidate {
+func cloneBundlePackCandidate(candidate *bundlePackCandidate) *bundlePackCandidate {
 	if candidate == nil {
 		return nil
 	}
 	cloned := *candidate
-	cloned.state.InstalledSubjects = packs.CloneSubjects(candidate.state.InstalledSubjects)
-	cloned.survivingTargets = make(map[string][]runtime.StandingTarget, len(candidate.survivingTargets))
-	for bundleHash, targets := range candidate.survivingTargets {
-		cloned.survivingTargets[bundleHash] = append([]runtime.StandingTarget(nil), targets...)
-	}
+	cloned.installedSubjects = packs.CloneSubjects(candidate.installedSubjects)
 	cloned.channelPlans = append([]packs.SatisfactionPlan(nil), candidate.channelPlans...)
 	cloned.channelBindings = append([]packs.OutboundBindingPlan(nil), candidate.channelBindings...)
 	return &cloned
@@ -1022,10 +1020,10 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 			s.currentRT = pending.runtime
 			s.currentBundleSourceFact = pending.fact
 			s.currentBundleIdentity = pending.identity
-			if pending.admission != nil {
-				s.providerTriggers = pending.admission.catalog
-				s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
-				s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+			if pending.packCandidate != nil {
+				s.providerTriggers = pending.packCandidate.catalog
+				s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.packCandidate.channelPlans...)
+				s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.packCandidate.channelBindings...)
 			}
 		}
 		pending.reconcilePublicIngress = s.onRuntimePublished
@@ -1200,38 +1198,6 @@ func (s *runtimeProjectSupervisor) completePendingReplacementRollback(ctx contex
 	}
 }
 
-func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.Context, catalog *providertriggers.CatalogSnapshot) (processAdmissionCandidate, error) {
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		return processAdmissionCandidate{}, err
-	}
-	candidate := processAdmissionCandidate{
-		state:            runtime.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed},
-		survivingTargets: map[string][]runtime.StandingTarget{},
-	}
-	s.mu.RLock()
-	manager := s.runtimeContexts
-	currentHash := s.currentBundleSourceFact.BundleHash()
-	s.mu.RUnlock()
-	if manager == nil {
-		return candidate, nil
-	}
-	for _, loaded := range manager.LoadedContexts() {
-		if loaded.BundleHash() == currentHash {
-			continue
-		}
-		if err := s.validateSource(ctx, loaded.Source, catalog); err != nil {
-			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog rejected loaded runtime context %s: %w", loaded.BundleHash(), err)
-		}
-		targets, err := runtime.RecompileStandingTargetAdmissions(loaded.Source, catalog, loaded.StandingTargets)
-		if err != nil {
-			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog cannot recompile loaded runtime context %s: %w", loaded.BundleHash(), err)
-		}
-		candidate.survivingTargets[loaded.BundleHash()] = targets
-	}
-	return candidate, nil
-}
-
 func (s *runtimeProjectSupervisor) sourceReplacementDisabled() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1264,10 +1230,10 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 	newRT *runtime.Runtime,
 	workOwner *worklifetime.RuntimeOccurrence,
 ) (builderpkg.ProjectStatus, error) {
-	return s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, fact, identity, newRT, workOwner, nil)
+	return s.replaceCurrentRuntimeWithSourceAndPacks(ctx, resolvedRoot, source, bundle, fact, identity, newRT, workOwner, nil)
 }
 
-func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
+func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndPacks(
 	ctx context.Context,
 	resolvedRoot string,
 	source semanticview.Source,
@@ -1276,7 +1242,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	identity runtimecontracts.BundleIdentity,
 	newRT *runtime.Runtime,
 	workOwner *worklifetime.RuntimeOccurrence,
-	admissionCandidate *processAdmissionCandidate,
+	packCandidate *bundlePackCandidate,
 ) (builderpkg.ProjectStatus, error) {
 	if err := s.completePendingReplacementRollback(ctx); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement rollback before replacement: %w", err)
@@ -1313,17 +1279,17 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			BundleSourceFact: fact, BundleIdentity: identity, Source: source,
 			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, WorkOwner: workOwner, StandingTargets: plannedTargets,
 		}
+		if packCandidate != nil {
+			contextDef.ProviderTriggerGeneration = packCandidate.generation
+			contextDef.InstalledTriggerSubjects = packCandidate.installedSubjects
+			contextDef.PackInventoryDigest = packCandidate.inventoryDigest
+		}
 		candidatePlan, err := replacementSourceSetPlan(manager, oldHash, contextDef)
 		if err != nil {
 			return builderpkg.ProjectStatus{}, fmt.Errorf("compile replacement source set: %w", err)
 		}
 		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
 			return builderpkg.ProjectStatus{}, err
-		}
-		if admissionCandidate != nil {
-			if err := manager.ValidateProcessAdmissionReplacement(oldHash, contextDef, admissionCandidate.survivingTargets, admissionCandidate.state); err != nil {
-				return builderpkg.ProjectStatus{}, err
-			}
 		}
 		oldContext, ok := manager.LookupBundleHash(oldHash)
 		if !ok || oldContext == nil {
@@ -1445,11 +1411,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			return s.CurrentProject(), restorePredecessor(err)
 		}
 		contextDef.StandingTargets = targets
-		if admissionCandidate == nil {
-			publication, err = manager.PrepareBundleHashReplacementPublication(oldHash, contextDef)
-		} else {
-			publication, err = manager.PrepareBundleHashReplacementPublicationWithAdmission(oldHash, contextDef, admissionCandidate.survivingTargets, admissionCandidate.state)
-		}
+		publication, err = manager.PrepareBundleHashReplacementPublication(oldHash, contextDef)
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			return s.CurrentProject(), restorePredecessor(err)
@@ -1466,7 +1428,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		pending := &pendingRuntimeReplacement{
 			publication: publication,
 			root:        resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
-			admission: cloneProcessAdmissionCandidate(admissionCandidate), freeze: freeze,
+			packCandidate: cloneBundlePackCandidate(packCandidate), freeze: freeze,
 		}
 		s.mu.Lock()
 		if s.pendingReplacement != nil {
@@ -1525,9 +1487,9 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		}
 		return builderpkg.ProjectStatus{}, err
 	}
-	if admissionCandidate != nil {
+	if packCandidate != nil {
 		s.mu.Lock()
-		s.providerTriggers = admissionCandidate.catalog
+		s.providerTriggers = packCandidate.catalog
 		s.mu.Unlock()
 	}
 	return s.attachCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT), nil

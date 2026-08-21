@@ -212,13 +212,17 @@ flows:
           admission:
             pack: {id: provider.telegram}
         - provider: intercom
+          signing_secret: webhook_signing.intercom
           admission:
             pack: {id: provider.intercom}
-            acknowledge: unsigned_webhook
         - provider: acme_public
           admission:
-            pack: {id: provider.acme_public}
+            kind: raw
             acknowledge: unsigned_webhook
+            authentication: {kind: none}
+            event: inbound.acme_public
+            delivery_id: {source: body_sha256}
+            payload: json
         - provider: partner_auth
           signing_secret: webhook_signing.partner
           admission:
@@ -273,7 +277,7 @@ pins:
 
 func inboundAdmissionEvents() string {
 	var out strings.Builder
-	for _, event := range []string{"inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
+	for _, event := range []string{"inbound.acme_public", "inbound.partner_auth", "inbound.partner_open", "inbound.partner_ack"} {
 		fmt.Fprintf(&out, "%s:\n  entity_id: text\n  provider: text\n  event_type: text\n  provider_event_type: text\n  provider_event_id: text\n  provider_delivery_id: text\n  headers: json\n  received_at: text\n", event)
 	}
 	return out.String()

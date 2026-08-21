@@ -4,9 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -37,23 +34,7 @@ func (s boundedProviderCredentialStore) Snapshot(ctx context.Context, key string
 
 func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
 	t.Helper()
-	root := filepath.Join("..", "..", "packs", "provider-triggers")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("read provider trigger pack root: %v", err)
-	}
-	dirs := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirs = append(dirs, filepath.Join(root, entry.Name()))
-		}
-	}
-	sort.Strings(dirs)
-	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", dirs, nil)
-	if err != nil {
-		t.Fatalf("load provider trigger registry: %v", err)
-	}
-	return registry
+	return embeddedTriggerCatalog(t)
 }
 
 func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runtimepkg.RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...runtimepkg.InboundPersistence) *runtimepkg.InboundGateway {

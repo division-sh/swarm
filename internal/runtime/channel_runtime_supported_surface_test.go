@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -17,8 +18,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packruntime"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -38,12 +40,13 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
-func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testing.T) {
+func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testing.T) {
 	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, selected := range []string{"postgres", "sqlite"} {
 		t.Run(selected, func(t *testing.T) {
@@ -393,10 +396,6 @@ func configuredTelegramChannelBinding(t *testing.T, serverURL string) packs.Outb
 func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL string, tightenTextLimit bool) packs.OutboundBindingPlan {
 	t.Helper()
 	repo := filepath.Clean(filepath.Join("..", ".."))
-	version, err := platform.PlatformVersion()
-	if err != nil {
-		t.Fatalf("PlatformVersion: %v", err)
-	}
 	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
@@ -409,19 +408,26 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 	if err != nil {
 		t.Fatalf("NewInterfaceRegistry: %v", err)
 	}
-	triggers, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(version, []string{filepath.Join(repo, "packs", "provider-triggers", "telegram")}, nil)
+	inventory := projectImportedTelegramChannelInventory(t, serverURL)
+	triggers, _, err := providertriggers.NewCatalogSnapshotFromInventory(inventory, packfixture.PlatformVersion)
 	if err != nil {
-		t.Fatalf("load Telegram trigger: %v", err)
+		t.Fatalf("load project trigger catalog: %v", err)
 	}
-	channels, err := packs.LoadChannelPackDirs(version, "platform", filepath.Join(repo, "packs", "channels", "telegram"))
+	channels, err := packruntime.LoadChannelPacks(inventory, packfixture.PlatformVersion)
 	if err != nil {
-		t.Fatalf("load Telegram channel: %v", err)
+		t.Fatalf("load project channel packs: %v", err)
 	}
-	connectors := providerconnectors.DefaultPackRegistry().PackDescriptors()
+	connectorRegistry, err := providerconnectors.NewPackRegistryFromInventory(inventory, packfixture.PlatformVersion)
+	if err != nil {
+		t.Fatalf("load project connector registry: %v", err)
+	}
+	connectors := connectorRegistry.PackDescriptors()
+	var telegramConnectorIdentity packs.PackIdentity
 	for descriptorIndex := range connectors {
 		if connectors[descriptorIndex].Provider != "telegram" {
 			continue
 		}
+		telegramConnectorIdentity = connectors[descriptorIndex].Identity
 		tool, ok := connectors[descriptorIndex].Tools["telegram.send_interactive"]
 		if !ok {
 			t.Fatal("Telegram connector descriptor has no send_interactive tool")
@@ -430,10 +436,9 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 		if !ok {
 			t.Fatal("Telegram connector descriptor has no HTTP execution contract")
 		}
-		httpSpec.URL = strings.TrimRight(serverURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
-		tool, err = tool.WithHTTP(httpSpec)
-		if err != nil {
-			t.Fatalf("replace Telegram HTTP endpoint: %v", err)
+		wantURL := strings.TrimRight(serverURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
+		if httpSpec.URL != wantURL {
+			t.Fatalf("project Telegram HTTP endpoint = %q, want %q", httpSpec.URL, wantURL)
 		}
 		if tightenTextLimit {
 			input := tool.InputSchema()
@@ -464,11 +469,86 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("CompileChannelInventory = %#v, %v", plans, err)
 	}
+	triggerEntry, _ := inventory.Lookup("provider.telegram")
+	connectorEntry, _ := inventory.Lookup("provider.telegram.connector")
+	channelEntry, _ := inventory.Lookup("provider.telegram.hitl_channel")
+	if telegramConnectorIdentity.ID() != connectorEntry.ID() || telegramConnectorIdentity.ManifestHash() != connectorEntry.ManifestHash() || telegramConnectorIdentity.Source().Provenance() != packartifact.ProvenanceProject {
+		t.Fatalf("connector descriptor identity = %#v, want project entry %#v", telegramConnectorIdentity, connectorEntry)
+	}
+	channelIdentity := plans[0].ChannelIdentity()
+	if channelIdentity.ID() != channelEntry.ID() || channelIdentity.ManifestHash() != channelEntry.ManifestHash() || channelIdentity.Source().Provenance() != packartifact.ProvenanceProject {
+		t.Fatalf("channel plan identity = %#v, want project entry %#v", channelIdentity, channelEntry)
+	}
+	structuralSubject, err := plans[0].CapabilitySubject()
+	if err != nil {
+		t.Fatalf("channel plan capability subject: %v", err)
+	}
+	if structuralSubject.Provenance != packartifact.ProvenanceProject || len(structuralSubject.Evidence) != 1 ||
+		structuralSubject.Evidence[0].Fields["channel_hash"] != channelEntry.ManifestHash() ||
+		structuralSubject.Evidence[0].Fields["trigger_hash"] != triggerEntry.ManifestHash() ||
+		structuralSubject.Evidence[0].Fields["connector_hash"] != connectorEntry.ManifestHash() {
+		t.Fatalf("channel capability subject = %#v", structuralSubject)
+	}
 	binding, err := packs.NewOutboundBindingPlan("ops", plans[0], "42", nil)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan: %v", err)
 	}
+	bindingSubject, err := binding.CapabilitySubject()
+	if err != nil {
+		t.Fatalf("channel binding capability subject: %v", err)
+	}
+	if bindingSubject.Provenance != packartifact.ProvenanceProject || len(bindingSubject.Evidence) != 1 ||
+		bindingSubject.Evidence[0].Fields["channel_hash"] != channelEntry.ManifestHash() ||
+		bindingSubject.Evidence[0].Fields["trigger_hash"] != triggerEntry.ManifestHash() ||
+		bindingSubject.Evidence[0].Fields["connector_hash"] != connectorEntry.ManifestHash() {
+		t.Fatalf("channel binding capability subject = %#v", bindingSubject)
+	}
 	return binding
+}
+
+func projectImportedTelegramChannelInventory(t *testing.T, serverURL string) *packartifact.EffectivePackInventory {
+	t.Helper()
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: imported-channel-proof\nversion: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := packfixture.EmbeddedBase(t)
+	for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
+		if changed, err := packartifact.ImportEmbeddedPack(project, id, base); err != nil || !changed {
+			t.Fatalf("import %s changed=%t: %v", id, changed, err)
+		}
+	}
+	connectorPath := filepath.Join(project, "packs", "provider.telegram.connector", packartifact.ConnectorManifestFileName)
+	body, err := os.ReadFile(connectorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantURL := strings.TrimRight(serverURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
+	edited := strings.ReplaceAll(string(body), "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage", wantURL)
+	if edited == string(body) {
+		t.Fatal("project connector endpoint edit found no canonical URL")
+	}
+	if err := os.WriteFile(connectorPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPacks, err := packartifact.LoadProjectPackSet(project)
+	if err != nil {
+		t.Fatalf("load imported project packs: %v", err)
+	}
+	inventory, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
+	if err != nil {
+		t.Fatalf("build imported effective inventory: %v", err)
+	}
+	for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
+		entry, ok := inventory.Lookup(id)
+		if !ok || entry.Source() != packartifact.ProvenanceProject || !entry.ShadowsBase() || !entry.Origin().Valid() {
+			t.Fatalf("effective imported pack %s = %#v, present=%t", id, entry, ok)
+		}
+		if id == "provider.telegram.connector" && !entry.Modified() {
+			t.Fatalf("edited connector %s is not marked modified", id)
+		}
+	}
+	return inventory
 }
 
 func channelRuntimeCredentialStore(t *testing.T, token string) runtimecredentials.Store {

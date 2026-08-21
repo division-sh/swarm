@@ -80,6 +80,7 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -649,7 +650,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
 	runningPlatformSpecPath := runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot())
-	if _, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), storeBundle{}, projection.BundleHash, runningPlatformSpecPath); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
+	if _, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), storeBundle{}, projection.BundleHash, runningPlatformSpecPath, packfixture.EmbeddedBase(t)); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
 	}
 
@@ -657,7 +658,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if stores.InboundStore == nil || stores.runtimeDeps().InboundStore == nil {
 		t.Fatal("selected Postgres store bundle missing InboundStore for served webhook ingress")
 	}
-	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), stores, projection.BundleHash, runningPlatformSpecPath)
+	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), stores, projection.BundleHash, runningPlatformSpecPath, packfixture.EmbeddedBase(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
 	}
@@ -9187,15 +9188,23 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("resolve workspace backend for preflight proof: %v", err)
 	}
-	providerPacks, err := cliapp.LoadConfiguredProviderTriggerPacks(cliapp.RepoRoot(), cfgResult)
+	platformPackBase, err := cliapp.LoadConfiguredPlatformPackBase(cliapp.RepoRoot(), cfgResult)
 	if err != nil {
-		t.Fatalf("load provider packs for preflight proof: %v", err)
+		t.Fatalf("load platform pack base for preflight proof: %v", err)
+	}
+	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(cliapp.RepoRoot(), resolvedPaths.ContractsPath, resolvedPaths.PlatformSpecPath, platformPackBase)
+	if err != nil {
+		t.Fatalf("load workflow bundle for preflight proof: %v", err)
 	}
 	providerCredentials, err := cliapp.BuildProviderCredentialStore()
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, providerPacks.Loaded, providerPacks.Catalog, providerCredentials, cliapp.ChannelPackLoad{})
+	packRuntime, err := cliapp.LoadBundlePackRuntime(context.Background(), cfgResult, bundle, providerCredentials, nil)
+	if err != nil {
+		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
+	}
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -9207,8 +9216,8 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if report.HasBlockers() {
 		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
 	}
-	if len(report.CapabilitySubjects) != 18 {
-		t.Fatalf("%s capability subjects = %#v, want eight triggers plus ten connector actions", wantMode, report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 19 {
+		t.Fatalf("%s capability subjects = %#v, want eight triggers, ten connector actions, and one channel", wantMode, report.CapabilitySubjects)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -77,6 +78,7 @@ func (m selectedContractWorkflowModule) ActionRegistry() runtimepipeline.ActionR
 type ContractBundleSourceLoader struct {
 	RepoRoot         string
 	PlatformSpecPath string
+	PlatformPackBase *packartifact.PlatformPackInventory
 }
 
 type BundleCatalogSelectedContractSourceStore interface {
@@ -87,6 +89,7 @@ type BundleCatalogSelectedContractSourceStore interface {
 type BundleCatalogSelectedContractSourceLoader struct {
 	RepoRoot         string
 	PlatformSpecPath string
+	PlatformPackBase *packartifact.PlatformPackInventory
 	Store            BundleCatalogSelectedContractSourceStore
 }
 
@@ -108,7 +111,7 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if platformSpecPath == "" {
 		platformSpecPath = runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, strings.TrimSpace(selection.ContractsRoot), platformSpecPath)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, strings.TrimSpace(selection.ContractsRoot), platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: l.PlatformPackBase})
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
@@ -226,6 +229,7 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		ContentYAML:             record.ContentYAML,
 		DataBlob:                record.DataBlob,
 		RunningPlatformSpecPath: strings.TrimSpace(l.PlatformSpecPath),
+		PlatformPackBase:        l.PlatformPackBase,
 	})
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)

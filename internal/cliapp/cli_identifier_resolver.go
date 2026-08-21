@@ -325,6 +325,8 @@ func cliIdentifierFamilyLabel(family cliIdentifierFamily) string {
 		return "entity ID"
 	case cliIdentifierFamilyTurn:
 		return "turn ID"
+	case cliIdentifierFamilyPack:
+		return "pack ID"
 	default:
 		return string(family) + " ID"
 	}
@@ -340,6 +342,8 @@ func cliIdentifierDiscoveryCommand(family cliIdentifierFamily) string {
 		return "`swarm entity list --run-id <full-run-id>`"
 	case cliIdentifierFamilyTurn:
 		return "`swarm conversation view <full-session-id>`"
+	case cliIdentifierFamilyPack:
+		return "`swarm packs list`"
 	default:
 		return "the corresponding list command"
 	}

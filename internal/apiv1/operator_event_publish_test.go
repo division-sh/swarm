@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -21,7 +20,6 @@ import (
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -37,12 +35,12 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -1376,14 +1374,7 @@ func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscop
 			}}},
 		},
 	}}
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(
-		"0.7.0",
-		[]string{filepath.Join(canonicalrouting.RepoRoot(t), "packs", "provider-triggers", "telegram")},
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("load Telegram provider-trigger catalog: %v", err)
-	}
+	catalog := packfixture.TriggerCatalog(t)
 	importedSource, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(importedBundle), catalog)
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)

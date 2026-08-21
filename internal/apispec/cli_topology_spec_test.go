@@ -369,6 +369,7 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 		"context":          {candidateSource: "local_context_registry", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
 		"subscriber":       {candidateSource: "polymorphic_subscriber_identity", scopeMode: "polymorphic_full_only", normalizationMode: "trim_case_sensitive"},
 		"standing_service": {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"pack":             {candidateSource: "local_effective_pack_inventory", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
 	}
 	familyCount := 0
 	forEachMappingEntry(t, families, func(name string, family *yaml.Node) {

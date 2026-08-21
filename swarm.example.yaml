@@ -51,18 +51,12 @@
 
 # Project-contained paths: relative paths under the project when used in ./swarm.yaml
 # Project config may use these only as relative paths that stay inside the project root.
-# channels:
-#   packs:
-#     external_dirs: ["./channel-packs"] # Project-contained channel pack directories.
 # paths:
 #   agent_config_map_file: ./agent-config-map.yaml # Project-contained agent config map file.
 #   contracts_path: ./contracts # Project-contained contract bundle root.
 #   platform_spec_path: platform-spec.yaml # Project-contained platform spec path override.
 #   tooling_lock_file: ./tooling.lock # Project-contained tooling lock file.
 #   verification_gates_file: ./verification-gates.yaml # Project-contained verification gates file.
-# provider_triggers:
-#   packs:
-#     external_dirs: ["./provider-packs"] # Project-contained provider trigger pack directories.
 # workspace:
 #   data_source: ./.swarm/data # Project-contained workspace data source.
 
@@ -81,8 +75,6 @@
 #     hitl:
 #       destination: "-1001234567890" # Deployment-owned opaque destination for the HITL outbound binding.
 #       pack: provider.telegram.hitl_channel # Channel pack selected for the HITL outbound binding.
-#   packs:
-#     platform_dirs: ["packs/channels/telegram"] # Selected platform channel pack directories; machine/operator config only.
 # database:
 #   host: 127.0.0.1 # Postgres host for postgres store deployments.
 #   name: swarm # Postgres database name.
@@ -101,9 +93,9 @@
 #   artifact_root: .swarm/artifacts # Runtime artifact root.
 #   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
 #   swarm_dir: .swarm # Swarm state directory.
-# provider_triggers:
+# platform:
 #   packs:
-#     platform_dirs: ["packs/provider-triggers/telegram"] # Selected platform provider trigger pack directories; machine/operator config only.
+#     platform_dirs: ["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"] # Complete replacement for the embedded platform pack inventory during platform development; machine/operator config only.
 # store:
 #   backend: sqlite # Runtime store backend.
 #   sqlite:

@@ -123,7 +123,7 @@ func TestSourceWithProviderTriggerEventsRejectsInvalidSchemaOnlyDeclarations(t *
 			name:    "unknown provider",
 			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegramm", Event: "inbound.telegram.text_message"}},
 			catalog: true,
-			want:    `references unknown provider "telegramm"; available providers: telegram`,
+			want:    `references unknown provider "telegramm"; available providers: github, intercom, shopify, slack, stripe, telegram, twilio, typeform`,
 		},
 		{
 			name:    "unknown event",

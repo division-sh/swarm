@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -16,7 +17,11 @@ type swarmWorkflowModule struct {
 }
 
 func NewSwarmWorkflowModule(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot, contractsRoot, platformSpecPath)
+	return NewSwarmWorkflowModuleWithPackBase(RepoRoot, contractsRoot, platformSpecPath, nil)
+}
+
+func NewSwarmWorkflowModuleWithPackBase(RepoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, contractsRoot, platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -25,6 +30,14 @@ func NewSwarmWorkflowModule(RepoRoot, contractsRoot, platformSpecPath string) (r
 		return nil, nil, err
 	}
 	return module, bundle, nil
+}
+
+func NewSwarmWorkflowModuleWithRuntimeConfig(repoRoot, contractsRoot, platformSpecPath string, cfgResult RuntimeConfigLoadResult) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	base, err := LoadConfiguredPlatformPackBase(repoRoot, cfgResult)
+	if err != nil {
+		return nil, nil, err
+	}
+	return NewSwarmWorkflowModuleWithPackBase(repoRoot, contractsRoot, platformSpecPath, base)
 }
 
 func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
