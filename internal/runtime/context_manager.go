@@ -103,10 +103,8 @@ type replacementPublication struct {
 	predecessorSurvivors           map[string]*BundleContext
 	admissionGeneration            triggergeneration.Generation
 	installedSubjects              []packs.Subject
-	capabilitySubjects             []packs.Subject
 	predecessorAdmissionGeneration triggergeneration.Generation
 	predecessorInstalledSubjects   []packs.Subject
-	predecessorCapabilitySubjects  []packs.Subject
 }
 
 // PreparedRuntimeContextReplacement is a fully validated, executable
@@ -231,13 +229,21 @@ func (p *PreparedRuntimeContextReplacement) Publish() error {
 			return fmt.Errorf("commit replacement standing schedule set: %w", err)
 		}
 	}
-	m.applyReplacementPublicationLocked(p.publication)
+	entry, err = m.applyReplacementPublicationLocked(p.publication)
+	if err != nil {
+		m.mu.Unlock()
+		if scheduleTransition != nil {
+			_ = scheduleTransition.Abort()
+		}
+		return err
+	}
 	if scheduleTransition != nil {
 		if err := scheduleTransition.Activate(); err != nil {
-			entry.state = RuntimeContextStateUnloaded
-			entry.cause = RuntimeContextCauseUnavailable
+			visibilityErr := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+				entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseUnavailable,
+			})
 			m.mu.Unlock()
-			return fmt.Errorf("activate replacement standing schedule set: %w", err)
+			return errors.Join(fmt.Errorf("activate replacement standing schedule set: %w", err), visibilityErr)
 		}
 	}
 	p.published = true
@@ -427,6 +433,12 @@ type RuntimeContextManager struct {
 	suppressedStandingServices map[string]struct{}
 }
 
+type runtimeContextVisibilityUpdate struct {
+	entry *runtimeContextEntry
+	state RuntimeContextState
+	cause string
+}
+
 type ProcessAdmissionState struct {
 	Generation        triggergeneration.Generation
 	InstalledSubjects []packs.Subject
@@ -558,11 +570,14 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 		runtime:   runtimeOwner,
 		workOwner: workOwner,
 		standing:  standing,
-		state:     RuntimeContextStateLoaded,
+		state:     RuntimeContextStateUnloaded,
+		cause:     RuntimeContextCauseNotLoaded,
 	}
 	m.order = append(m.order, contextDef.BundleHash())
 	sort.Strings(m.order)
-	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
+	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+		entry: m.contexts[contextDef.BundleHash()], state: RuntimeContextStateLoaded,
+	}); err != nil {
 		delete(m.contexts, contextDef.BundleHash())
 		for i, bundleHash := range m.order {
 			if bundleHash == contextDef.BundleHash() {
@@ -774,6 +789,39 @@ func (m *RuntimeContextManager) setBaseCapabilitySubjectsLocked(subjects []packs
 	m.capabilityRevision++
 }
 
+func (m *RuntimeContextManager) publishRuntimeContextVisibilityLocked(updates ...runtimeContextVisibilityUpdate) error {
+	type priorVisibility struct {
+		entry *runtimeContextEntry
+		state RuntimeContextState
+		cause string
+	}
+	previous := make([]priorVisibility, 0, len(updates))
+	seen := make(map[*runtimeContextEntry]struct{}, len(updates))
+	for _, update := range updates {
+		if update.entry == nil {
+			return errors.New("runtime context visibility update requires an entry")
+		}
+		if _, duplicate := seen[update.entry]; duplicate {
+			return errors.New("runtime context visibility update contains a duplicate entry")
+		}
+		seen[update.entry] = struct{}{}
+	}
+	for _, update := range updates {
+		previous = append(previous, priorVisibility{entry: update.entry, state: update.entry.state, cause: update.entry.cause})
+		update.entry.state = update.state
+		update.entry.cause = strings.TrimSpace(update.cause)
+	}
+	if err := m.refreshCapabilitySubjectsLocked(); err != nil {
+		for _, prior := range previous {
+			prior.entry.state = prior.state
+			prior.entry.cause = prior.cause
+		}
+		restoreErr := m.refreshCapabilitySubjectsLocked()
+		return errors.Join(fmt.Errorf("publish runtime context visibility: %w", err), restoreErr)
+	}
+	return nil
+}
+
 func (m *RuntimeContextManager) AdmissionState() ProcessAdmissionState {
 	if m == nil {
 		return ProcessAdmissionState{}
@@ -819,6 +867,7 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 	}
 	m.mu.RUnlock()
 
+	projection := owner.BeginSecretBindingProjection()
 	evaluated := make([]packs.Subject, 0, len(base))
 	for _, subject := range base {
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
@@ -829,7 +878,7 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		if !ok {
 			return nil, fmt.Errorf("effective provider trigger subject %q has no current standing target", subject.ID)
 		}
-		current, err := EvaluateStandingIngressCapabilitySubject(ctx, target, subject, owner)
+		current, err := evaluateStandingIngressCapabilitySubject(ctx, target, subject, projection)
 		if err != nil {
 			return nil, err
 		}
@@ -837,6 +886,9 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 	}
 	normalized, err := packs.NormalizeSubjects(evaluated)
 	if err != nil {
+		return nil, err
+	}
+	if err := projection.ValidateCurrent(ctx); err != nil {
 		return nil, err
 	}
 	m.mu.RLock()
@@ -1728,8 +1780,18 @@ func (m *RuntimeContextManager) beginBundleHashReplacement(ctx context.Context, 
 			return BundleContext{}, fmt.Errorf("fence predecessor runtime occurrence: %w", err)
 		}
 	}
-	entry.state = RuntimeContextStateUnloaded
-	entry.cause = RuntimeContextCauseReplacing
+	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+		entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseReplacing,
+	}); err != nil {
+		if entry.workOwner != nil {
+			_ = entry.workOwner.Reopen()
+		}
+		for _, prior := range standing {
+			_ = prior.occurrence.Reopen()
+		}
+		m.mu.Unlock()
+		return BundleContext{}, err
+	}
 	m.mu.Unlock()
 	retainParked := func(parked map[string]*runtimepipeline.ParkedOccurrence) {
 		m.mu.Lock()
@@ -1836,8 +1898,7 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 	if err := validateRestoredAdmissionAuthority(*entry.context, contextDef); err != nil {
 		return nil, err
 	}
-	subjects, err := m.replacementCapabilitySubjectsLocked(existingHash, contextDef)
-	if err != nil {
+	if _, err := m.replacementCapabilitySubjectsLocked(existingHash, contextDef); err != nil {
 		return nil, err
 	}
 	publication, err := m.prepareReplacementPublicationLocked(existingHash, contextDef, entry)
@@ -1847,7 +1908,6 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 	if m.admissionGeneration.Valid() {
 		publication.admissionGeneration = m.admissionGeneration
 		publication.installedSubjects = packs.CloneSubjects(m.installedTriggerSubjects)
-		publication.capabilitySubjects = subjects
 	}
 	return &PreparedRuntimeContextReplacement{manager: m, publication: publication}, nil
 }
@@ -1892,7 +1952,6 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 		parkedStanding:                 copyParkedStandingOccurrences(entry.parkedStanding),
 		predecessorAdmissionGeneration: m.admissionGeneration,
 		predecessorInstalledSubjects:   packs.CloneSubjects(m.installedTriggerSubjects),
-		predecessorCapabilitySubjects:  packs.CloneSubjects(m.capabilitySubjects),
 	}, nil
 }
 
@@ -1925,8 +1984,6 @@ func (m *RuntimeContextManager) restoreWithdrawnReplacementPredecessor(publicati
 	publication.entry.workOwner = publication.predecessorWorkOwner
 	publication.entry.standing = nil
 	publication.entry.parkedStanding = parked
-	publication.entry.state = RuntimeContextStateUnloaded
-	publication.entry.cause = RuntimeContextCauseReplacing
 	for bundleHash, contextDef := range publication.predecessorSurvivors {
 		if surviving := m.contexts[bundleHash]; surviving != nil && surviving.context != nil {
 			copied := *contextDef
@@ -1935,11 +1992,12 @@ func (m *RuntimeContextManager) restoreWithdrawnReplacementPredecessor(publicati
 	}
 	m.admissionGeneration = publication.predecessorAdmissionGeneration
 	m.installedTriggerSubjects = packs.CloneSubjects(publication.predecessorInstalledSubjects)
-	m.setBaseCapabilitySubjectsLocked(publication.predecessorCapabilitySubjects)
-	return nil
+	return m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+		entry: publication.entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseReplacing,
+	})
 }
 
-func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *replacementPublication) {
+func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *replacementPublication) (*runtimeContextEntry, error) {
 	entry := publication.entry
 	if publication.existingHash != publication.bundleHash {
 		delete(m.contexts, publication.existingHash)
@@ -1949,7 +2007,7 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 				break
 			}
 		}
-		entry = &runtimeContextEntry{}
+		entry = &runtimeContextEntry{state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseReplacing}
 		m.contexts[publication.bundleHash] = entry
 		m.order = append(m.order, publication.bundleHash)
 		sort.Strings(m.order)
@@ -1965,16 +2023,19 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	entry.workOwner = publication.workOwner
 	entry.standing = publication.standing
 	entry.parkedStanding = nil
-	entry.state = RuntimeContextStateLoaded
-	entry.cause = ""
 	if entry.runtime != nil && entry.runtime.Bus != nil {
 		entry.runtime.Bus.SetStandingRunWorkOwner(m)
 	}
 	if publication.admissionGeneration.Valid() {
 		m.admissionGeneration = publication.admissionGeneration
 		m.installedTriggerSubjects = publication.installedSubjects
-		m.setBaseCapabilitySubjectsLocked(publication.capabilitySubjects)
 	}
+	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+		entry: entry, state: RuntimeContextStateLoaded,
+	}); err != nil {
+		return entry, err
+	}
+	return entry, nil
 }
 
 func copyParkedStandingOccurrences(in map[string]*runtimepipeline.ParkedOccurrence) map[string]*runtimepipeline.ParkedOccurrence {
@@ -2084,7 +2145,7 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublicationWithAdmis
 	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
 		return nil, fmt.Errorf("runtime context %s is not unavailable for replacement", existingHash)
 	}
-	installed, subjects, err := m.validateProcessAdmissionCandidateLocked(existingHash, contextDef, survivingTargets, state)
+	installed, _, err := m.validateProcessAdmissionCandidateLocked(existingHash, contextDef, survivingTargets, state)
 	if err != nil {
 		return nil, err
 	}
@@ -2105,7 +2166,6 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublicationWithAdmis
 	}
 	publication.admissionGeneration = state.Generation
 	publication.installedSubjects = installed
-	publication.capabilitySubjects = subjects
 	return &PreparedRuntimeContextReplacement{manager: m, publication: publication}, nil
 }
 
@@ -2418,13 +2478,21 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		m.mu.Unlock()
 		return nil, nil
 	}
+	visibilityUpdates := make([]runtimeContextVisibilityUpdate, 0, len(transition.entries))
 	for i := range transition.entries {
 		item := &transition.entries[i]
 		if !item.fresh {
 			continue
 		}
-		item.entry.state = RuntimeContextStateUnloaded
-		item.entry.cause = RuntimeContextCauseSourceSetTransition
+		visibilityUpdates = append(visibilityUpdates, runtimeContextVisibilityUpdate{
+			entry: item.entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseSourceSetTransition,
+		})
+	}
+	if len(visibilityUpdates) > 0 {
+		if err := m.publishRuntimeContextVisibilityLocked(visibilityUpdates...); err != nil {
+			m.mu.Unlock()
+			return nil, err
+		}
 	}
 	m.mu.Unlock()
 	for i := range transition.entries {
@@ -2451,14 +2519,17 @@ func (p *PreparedRuntimeSourceSetTransition) abortFresh() error {
 	}
 	p.manager.mu.Lock()
 	defer p.manager.mu.Unlock()
+	updates := make([]runtimeContextVisibilityUpdate, 0, len(p.entries))
 	for _, item := range p.entries {
 		if !item.fresh || item.entry.state != RuntimeContextStateUnloaded || item.entry.cause != RuntimeContextCauseSourceSetTransition {
 			continue
 		}
-		item.entry.state = RuntimeContextStateLoaded
-		item.entry.cause = ""
+		updates = append(updates, runtimeContextVisibilityUpdate{entry: item.entry, state: RuntimeContextStateLoaded})
 	}
-	return nil
+	if len(updates) == 0 {
+		return nil
+	}
+	return p.manager.publishRuntimeContextVisibilityLocked(updates...)
 }
 
 func (p *PreparedRuntimeSourceSetTransition) release() {
@@ -2526,6 +2597,13 @@ func (p *PreparedRuntimeSourceSetTransition) Commit(
 			return fmt.Errorf("refresh surviving runtime context %s: %w", item.bundleHash, err)
 		}
 	}
+	return p.publishCommittedVisibility()
+}
+
+func (p *PreparedRuntimeSourceSetTransition) publishCommittedVisibility() error {
+	if p == nil || p.manager == nil {
+		return nil
+	}
 	p.manager.mu.Lock()
 	defer p.manager.mu.Unlock()
 	for _, item := range p.entries {
@@ -2533,11 +2611,11 @@ func (p *PreparedRuntimeSourceSetTransition) Commit(
 			return fmt.Errorf("surviving runtime context %s changed during source-set transition", item.bundleHash)
 		}
 	}
+	updates := make([]runtimeContextVisibilityUpdate, 0, len(p.entries))
 	for _, item := range p.entries {
-		item.entry.state = RuntimeContextStateLoaded
-		item.entry.cause = ""
+		updates = append(updates, runtimeContextVisibilityUpdate{entry: item.entry, state: RuntimeContextStateLoaded})
 	}
-	return nil
+	return p.manager.publishRuntimeContextVisibilityLocked(updates...)
 }
 
 func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*RuntimeContextUse, RuntimeContextLookup, runbundle.Availability, error) {
@@ -2656,8 +2734,15 @@ func (m *RuntimeContextManager) DeactivateBundleHashWithOptions(bundleHash, caus
 			result.Cause = strings.TrimSpace(entry.cause)
 		}
 	} else {
-		entry.state = RuntimeContextStateUnloaded
-		entry.cause = result.Cause
+		if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+			entry: entry, state: RuntimeContextStateUnloaded, cause: result.Cause,
+		}); err != nil {
+			result.State = RuntimeContextStateLoaded
+			result.Cause = strings.TrimSpace(entry.cause)
+			result.ShutdownErr = err
+			m.mu.Unlock()
+			return result
+		}
 		result.Changed = true
 		if entry.context != nil {
 			runtimeToShutdown = entry.runtime

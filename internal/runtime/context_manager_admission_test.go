@@ -129,6 +129,164 @@ func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t
 	}
 }
 
+func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnload(t *testing.T) {
+	ctx := context.Background()
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking, owner := runtimeAdmissionBlockingCredentialOwner(t, "secret")
+	errCh := make(chan error, 1)
+	go func() {
+		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
+		errCh <- projectionErr
+	}()
+	<-blocking.entered
+	result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	if !result.Changed || result.ShutdownErr != nil {
+		t.Fatalf("deactivation = %#v, want successful visibility withdrawal", result)
+	}
+	close(blocking.release)
+	assertRuntimeAdmissionProjectionStale(t, <-errCh)
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
+	subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, subjects, 0)
+}
+
+func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossReplacementWithdrawalAndRestore(t *testing.T) {
+	ctx := context.Background()
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking, owner := runtimeAdmissionBlockingCredentialOwner(t, "secret")
+	errCh := make(chan error, 1)
+	go func() {
+		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
+		errCh <- projectionErr
+	}()
+	<-blocking.entered
+	candidate := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	if _, err := manager.BeginBundleHashReplacement(ctx, runtimeContextTestHashA, candidate); err != nil {
+		t.Fatal(err)
+	}
+	close(blocking.release)
+	assertRuntimeAdmissionProjectionStale(t, <-errCh)
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
+
+	restored := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	if err := manager.PublishRestoredBundleHashReplacement(runtimeContextTestHashA, restored); err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 1)
+	subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, subjects, 1)
+}
+
+func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenceAndAbort(t *testing.T) {
+	ctx := context.Background()
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking, owner := runtimeAdmissionBlockingCredentialOwner(t, "secret")
+	errCh := make(chan error, 1)
+	go func() {
+		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
+		errCh <- projectionErr
+	}()
+	<-blocking.entered
+	manager.mu.Lock()
+	entry := manager.contexts[runtimeContextTestHashA]
+	err = manager.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+		entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseSourceSetTransition,
+	})
+	manager.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(blocking.release)
+	assertRuntimeAdmissionProjectionStale(t, <-errCh)
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
+
+	transition := &PreparedRuntimeSourceSetTransition{
+		manager: manager,
+		entries: []runtimeSourceSetTransitionEntry{{bundleHash: runtimeContextTestHashA, entry: entry, fresh: true}},
+	}
+	if err := transition.abortFresh(); err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 1)
+
+	manager.mu.Lock()
+	err = manager.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+		entry: entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseSourceSetTransition,
+	})
+	manager.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
+	if err := transition.publishCommittedVisibility(); err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 1)
+	subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, subjects, 1)
+}
+
+func runtimeAdmissionBlockingCredentialOwner(t *testing.T, value string) (*blockingCredentialSnapshotStore, *runtimecredentials.SnapshotOwner) {
+	t.Helper()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(context.Background(), "webhook_signing.acme", value); err != nil {
+		t.Fatal(err)
+	}
+	blocking := &blockingCredentialSnapshotStore{Store: store, entered: make(chan struct{}), release: make(chan struct{})}
+	owner, err := runtimecredentials.NewSnapshotOwner(blocking)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return blocking, owner
+}
+
+func assertRuntimeAdmissionProjectionStale(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "became stale") {
+		t.Fatalf("credential projection error = %v, want stale", err)
+	}
+}
+
+func assertRuntimeAdmissionEffectiveSubjectCount(t *testing.T, subjects []packs.Subject, want int) {
+	t.Helper()
+	got := 0
+	for _, subject := range subjects {
+		if subject.Kind == packs.SubjectProviderTrigger && subject.Applicability == "effective" {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("effective provider trigger subjects = %d, want %d: %#v", got, want, subjects)
+	}
+}
+
 func TestValidateRuntimeContextSetWithAdmissionDoesNotActivateStandingOccurrences(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
@@ -323,7 +481,18 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 			if !survivorLookup.Loaded() || !survivorLookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
 				t.Fatalf("restored survivor admission = %#v, want old generation", survivorLookup)
 			}
-			assertRuntimeAdmissionSubjectGeneration(t, manager.BaseCapabilitySubjects(), oldCatalog.Generation(), 2)
+			subjects := manager.BaseCapabilitySubjects()
+			assertRuntimeAdmissionSubjectGeneration(t, subjects, oldCatalog.Generation(), 1)
+			survivorSubject, err := survivor.StandingTargets[0].CapabilitySubject()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, subject := range subjects {
+				if subject.ID == survivorSubject.ID {
+					return
+				}
+			}
+			t.Fatalf("restored capability subjects = %#v, want republished survivor %q only", subjects, survivorSubject.ID)
 		})
 	}
 }
@@ -553,6 +722,7 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	if lookup.Loaded() || lookup.Cause != RuntimeContextCauseReplacing {
 		t.Fatalf("failed aggregate publication lookup = %#v, want unavailable replacement", lookup)
 	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), 0)
 	failedCandidate.Runtime.Scheduler.Stop()
 	if err := failedCandidate.Runtime.Scheduler.Wait(context.Background()); err != nil {
 		t.Fatalf("wait failed candidate scheduler: %v", err)
@@ -571,6 +741,7 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	if err := retryPublication.Publish(); err != nil {
 		t.Fatalf("publish fresh-candidate retry: %v", err)
 	}
+	assertRuntimeAdmissionEffectiveSubjectCount(t, manager.BaseCapabilitySubjects(), len(retryCandidate.StandingTargets))
 	for _, target := range retryCandidate.StandingTargets {
 		owner := retryPublication.publication.standing[target.ServiceID]
 		parked, err := retryCandidate.Runtime.Scheduler.ParkOccurrence(context.Background(), owner)
