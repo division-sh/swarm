@@ -34,9 +34,9 @@ type standingSignalCoordinatorDispatcher struct {
 	dispatched atomic.Int32
 }
 
-func (d *standingSignalCoordinatorDispatcher) DispatchDeliveryContinuation(context.Context, events.Event, events.DeliveryRoute) error {
+func (d *standingSignalCoordinatorDispatcher) DispatchDeliveryContinuation(context.Context, events.Event, events.DeliveryRoute) runtimedeliverycontinuation.DispatchResult {
 	d.dispatched.Add(1)
-	return nil
+	return runtimedeliverycontinuation.Transferred()
 }
 
 func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupScanParity(t *testing.T) {

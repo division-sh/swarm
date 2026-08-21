@@ -14,6 +14,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -605,9 +606,37 @@ func (eb *EventBus) deliverRoutePlanWithRoutes(ctx context.Context, evt events.E
 	return eb.deliverLiveRecipientsWithRoutes(ctx, evt, routePlan.LiveRecipients, routePlan.liveDispatchDeliveryRoutes())
 }
 
+type liveDeliveryDispatch struct {
+	expected  []deliveryRouteTargetKey
+	delivered []deliveryRouteTargetKey
+	missing   []deliveryRouteTargetKey
+	timedOut  []deliveryRouteTargetKey
+	cause     error
+}
+
+func (d liveDeliveryDispatch) complete() bool {
+	return d.cause == nil && len(d.missing) == 0 && len(d.timedOut) == 0
+}
+
 func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt events.Event, liveRecipients []RoutePlanLiveRecipient, deliveryRoutes []events.DeliveryRoute) error {
-	if err := events.ValidateDeliveryRoutes(deliveryRoutes); err != nil {
+	dispatch, err := eb.dispatchLiveRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes)
+	if err != nil || dispatch.complete() {
 		return err
+	}
+	return eb.logAuthoritativeDeliveryIncomplete(
+		ctx,
+		evt,
+		dispatch.expected,
+		dispatch.delivered,
+		dispatch.missing,
+		dispatch.timedOut,
+		dispatch.cause,
+	)
+}
+
+func (eb *EventBus) dispatchLiveRecipientsWithRoutes(ctx context.Context, evt events.Event, liveRecipients []RoutePlanLiveRecipient, deliveryRoutes []events.DeliveryRoute) (liveDeliveryDispatch, error) {
+	if err := events.ValidateDeliveryRoutes(deliveryRoutes); err != nil {
+		return liveDeliveryDispatch{}, err
 	}
 	liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)
 	recipientIDs := make([]string, 0, len(liveRecipients))
@@ -615,9 +644,18 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 		recipientIDs = append(recipientIDs, recipient.subscriberID())
 	}
 	expected := authoritativeDeliveryTargetKeys(liveRecipients, deliveryRoutes)
+	for _, recipient := range liveRecipients {
+		if !recipient.isInternal() {
+			continue
+		}
+		if node, err := runtimeidentity.ParseExecutableNodeKey(recipient.subscriberID()); err == nil {
+			expected = append(expected, deliveryRouteTargetKey{recipient: events.MustNodeDeliveryRecipient(node)})
+		}
+	}
+	expected = uniqueDeliveryTargetKeys(expected)
 	dispatchRecipients := uniqueStrings(append(append([]string(nil), recipientIDs...), deliveryTargetKeySubscriberIDs(expected)...))
 	if len(dispatchRecipients) == 0 {
-		return nil
+		return liveDeliveryDispatch{}, nil
 	}
 	expectedSet := make(map[deliveryRouteTargetKey]struct{}, len(expected))
 	for _, recipient := range expected {
@@ -661,29 +699,29 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 		for _, route := range routes {
 			deliverEvent, err := projectEventForDeliveryRoute(evt, route)
 			if err != nil {
-				return err
+				return liveDeliveryDispatch{}, err
 			}
 			var continuation worklifetime.DeliveryContinuation
 			if !route.Recipient.Empty() {
 				deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
-					return err
+					return liveDeliveryDispatch{}, err
 				}
 				owner := eb.DeliveryContinuationOwner()
 				if owner == nil {
 					if !eb.ephemeral {
-						return errors.New("exact delivery continuation owner is required")
+						return liveDeliveryDispatch{}, errors.New("exact delivery continuation owner is required")
 					}
 				} else {
 					continuation, err = owner.Acquire(deliveryID)
 					if err != nil {
-						return err
+						return liveDeliveryDispatch{}, err
 					}
 				}
 			}
 			sendResult, sendErr := recipient.send(ctx, deliverEvent.Event(), route, continuation)
 			if sendErr != nil {
-				return fmt.Errorf("settle delivery carrier for %s: %w", recipient.subscriberID(), sendErr)
+				return liveDeliveryDispatch{}, fmt.Errorf("settle delivery carrier for %s: %w", recipient.subscriberID(), sendErr)
 			}
 			switch sendResult {
 			case agentRouteSendDelivered:
@@ -700,7 +738,10 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 						remaining = append(remaining, recipient)
 					}
 				}
-				return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, uniqueDeliveryTargetKeys(missing), remaining, ctx.Err())
+				return liveDeliveryDispatch{
+					expected: expected, delivered: delivered,
+					missing: uniqueDeliveryTargetKeys(missing), timedOut: remaining, cause: ctx.Err(),
+				}, nil
 			case agentRouteSendTimedOut:
 				if _, required := expectedSet[targetKey]; required {
 					timedOut = append(timedOut, targetKey)
@@ -714,38 +755,40 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 	}
 	missing = uniqueDeliveryTargetKeys(missing)
 	timedOut = uniqueDeliveryTargetKeys(timedOut)
-	if len(missing) > 0 || len(timedOut) > 0 {
-		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
-	}
-	return nil
+	return liveDeliveryDispatch{
+		expected: expected, delivered: delivered, missing: missing, timedOut: timedOut,
+	}, nil
 }
 
 // DispatchDeliveryContinuation re-enters one exact persisted route. It is used
 // only by the normal generation coordinator after a selected-store scan.
-func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events.Event, route events.DeliveryRoute) (err error) {
+func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events.Event, route events.DeliveryRoute) (result runtimedeliverycontinuation.DispatchResult) {
 	if eb == nil {
-		return errors.New("event bus is required")
+		return runtimedeliverycontinuation.Fatal(errors.New("event bus is required"))
 	}
 	if _, err := route.Identity(); err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
+	var err error
 	ctx, err = eb.admitBundleSourceFact(ctx)
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	var standingLease *worklifetime.Lease
 	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	if standingLease != nil {
 		defer func() {
-			err = errors.Join(err, standingLease.Done())
+			if closeErr := standingLease.Done(); closeErr != nil {
+				result = runtimedeliverycontinuation.Fatal(errors.Join(result.Failure(), closeErr))
+			}
 		}()
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
 	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
@@ -753,31 +796,38 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}
 	ctx, err = eb.withAuthorActivityEventDescriptor(ctx, evt)
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	projection, err := eb.receiverProjection(ctx, route.Context)
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
 	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
 	if err != nil {
-		return err
+		return runtimedeliverycontinuation.Fatal(err)
 	}
-	defer func() { err = errors.Join(err, closeReceiver()) }()
+	defer func() {
+		if closeErr := closeReceiver(); closeErr != nil {
+			result = runtimedeliverycontinuation.Fatal(errors.Join(result.Failure(), closeErr))
+		}
+	}()
 	ctx = receiverCtx.Context
 	if route.Recipient.IsNode() {
 		interception, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
 		if err != nil {
-			return err
+			return runtimedeliverycontinuation.Fatal(err)
 		}
 		if len(interception.Deferred) > 0 {
-			return errors.New("delivery continuation cannot create uncommitted deferred publications")
+			return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation cannot create uncommitted deferred publications"))
 		}
 		if _, retry := interception.Outcome.RetryRelease(); retry {
-			return errors.New("delivery continuation route requested event-level retry release")
+			return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation route requested event-level retry release"))
 		}
-		if _, settled := interception.Outcome.Disposition(); settled || !interception.EventPassthrough || !interception.NodePassthrough {
-			return nil
+		if _, settled := interception.Outcome.Disposition(); settled {
+			return runtimedeliverycontinuation.TerminallySettled()
+		}
+		if !interception.EventPassthrough || !interception.NodePassthrough {
+			return runtimedeliverycontinuation.Transferred()
 		}
 	}
 	recipient := RoutePlanLiveRecipient{
@@ -786,7 +836,29 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 		PersistAsDelivery: true,
 		liveAuthority:     liveRecipientAuthorityIdentity,
 	}
-	return eb.deliverLiveRecipientsWithRoutes(ctx, evt, []RoutePlanLiveRecipient{recipient}, []events.DeliveryRoute{route})
+	if route.Recipient.IsNode() {
+		recipient = RoutePlanLiveRecipient{InternalID: route.Recipient.ID()}
+	}
+	dispatch, err := eb.dispatchLiveRecipientsWithRoutes(ctx, evt, []RoutePlanLiveRecipient{recipient}, []events.DeliveryRoute{route})
+	if err != nil {
+		return runtimedeliverycontinuation.Fatal(err)
+	}
+	if dispatch.complete() {
+		return runtimedeliverycontinuation.Transferred()
+	}
+	failure := eb.logAuthoritativeDeliveryIncomplete(
+		ctx, evt, dispatch.expected, dispatch.delivered, dispatch.missing, dispatch.timedOut, dispatch.cause,
+	)
+	if dispatch.cause != nil {
+		return runtimedeliverycontinuation.Fatal(failure)
+	}
+	if len(dispatch.timedOut) > 0 {
+		return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeCarrierReturn)
+	}
+	if route.Recipient.IsAgent() {
+		return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle)
+	}
+	return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeInternalSubscriptionLifecycle)
 }
 
 func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.DeliveryRoute {
