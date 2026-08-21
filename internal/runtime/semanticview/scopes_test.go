@@ -158,7 +158,7 @@ flow-agent:
 	}
 }
 
-func TestResolveAgentMemoryProof_PackageBackedAgentCarriesFlowPath(t *testing.T) {
+func TestResolveAgentMemoryProof_PackageBackedFlowProjectionUsesCanonicalFlowSource(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -214,11 +214,14 @@ backend:
 	source := Wrap(bundle)
 
 	proof := ResolveAgentMemoryProof(source, AgentMemoryLocator{
-		AgentID:         "backend",
-		ProjectScopeKey: "flows/support",
+		AgentID: "backend",
+		FlowID:  "support",
 	})
 	if proof.OwningFlowID != "support" {
-		t.Fatalf("OwningFlowID = %q, want support", proof.OwningFlowID)
+		t.Fatalf("OwningFlowID = %q, want support; declarations = %#v", proof.OwningFlowID, AgentDeclarations(source))
+	}
+	if proof.ProjectScopeKey != "." || proof.ContractSource.Layer != "flow" || proof.ContractSource.FlowID != "support" {
+		t.Fatalf("memory proof source = %#v, want root-package flow-owned source", proof)
 	}
 	if proof.FlowPath != "support" {
 		t.Fatalf("FlowPath = %q, want support", proof.FlowPath)

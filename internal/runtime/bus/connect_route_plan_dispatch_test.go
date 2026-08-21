@@ -765,10 +765,18 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	bundle.Agents = consumer.agents
 	bundle.FlowTree.Root.Nodes = consumer.nodes
 	bundle.FlowTree.Root.Agents = consumer.agents
+	for index := range bundle.FlowTree.Root.Children {
+		if bundle.FlowTree.Root.Children[index].Paths.ID == "consumer" {
+			bundle.FlowTree.Root.Children[index].Agents = nil
+		}
+	}
 	for logicalID := range consumer.agents {
-		bundle.URIRegistry.Agents["root/"+logicalID] = runtimecontracts.ContractURIRef{
+		delete(bundle.URIRegistry.Agents, "consumer/"+logicalID)
+		ref := runtimecontracts.ContractURIRef{
 			Kind: "agent", LocalID: logicalID, Full: "test://root/" + logicalID,
 		}
+		bundle.URIRegistry.Agents[logicalID] = ref
+		bundle.URIRegistry.ByURI[ref.Full] = ref
 	}
 	bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
 	for _, node := range consumer.nodes {
@@ -4862,6 +4870,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 	flowOutputPins := make(map[string][]runtimecontracts.FlowOutputEventPin, len(flows))
 	nodeHandlers := map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
 	agentRefs := map[string]runtimecontracts.ContractURIRef{}
+	agentRefsByURI := map[string]runtimecontracts.ContractURIRef{}
 	workflowName := ""
 	rootEntities := runtimecontracts.EntityContractsDocument{}
 	for _, flow := range flows {
@@ -4903,13 +4912,15 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 			}
 		}
 		for logicalID := range flow.agents {
-			agentRefs[flow.id+"/"+logicalID] = runtimecontracts.ContractURIRef{
+			ref := runtimecontracts.ContractURIRef{
 				Kind:    "agent",
 				FlowID:  flow.id,
 				LocalID: logicalID,
 				Path:    flowPath,
 				Full:    "test://" + flow.id + "/" + logicalID,
 			}
+			agentRefs[flow.id+"/"+logicalID] = ref
+			agentRefsByURI[ref.Full] = ref
 		}
 		if len(flow.entityFields) > 0 && workflowName == "" {
 			workflowName = flow.id
@@ -4921,6 +4932,7 @@ func connectRoutePlanTestBundle(flows []connectRoutePlanTestFlow, connects []run
 		RootEntities: rootEntities,
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: agentRefs,
+			ByURI:  agentRefsByURI,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,

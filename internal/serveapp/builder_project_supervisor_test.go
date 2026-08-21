@@ -2598,8 +2598,9 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailure
 func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
 	bundle := testBuilderSupervisorBundle(t)
+	intent := serveTestAgentConfig(runtimeactors.AgentConfig{ID: "worker"}).Intent
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-		"worker": {ID: "worker"},
+		"worker": {ID: "worker", ResolvedIntent: intent},
 	}
 	source := semanticviewtest.WrapRootAgents(bundle)
 	module := stubWorkflowModule{source: source}

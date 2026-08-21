@@ -167,7 +167,7 @@ func TestPackageBackedAgentConsumersUseOwningFlowInsteadOfStorageScopeKind(t *te
 	source, _ := loadFlowDataToolSource(t)
 	actor := flowDataActor()
 	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
-	if !ok || declaration.ScopeKind != "project" || declaration.OwnerFlowID != "support" {
+	if !ok || declaration.ScopeKind != "flow" || declaration.OwnerFlowID != "support" || declaration.Source.Layer != "flow" {
 		t.Fatalf("package-backed declaration = %#v ok %v", declaration, ok)
 	}
 	filenames := flowdata.AllowedFilenames(source, actor)

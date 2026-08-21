@@ -22,7 +22,7 @@ import (
 
 func toolTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Identity {
 	t.Helper()
-	return agentidentitytest.RootRuntime(t, agentID, "runtime-tools-test")
+	return agentidentitytest.RootDeclared(t, agentID, "swarm-test://root/agents/"+strings.TrimSpace(agentID))
 }
 
 func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agentidentity.Identity {
@@ -32,7 +32,7 @@ func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agent
 	if flowID == "" && flowPath == "" {
 		return toolTestRootAgentIdentity(t, agentID)
 	}
-	return agentidentitytest.Runtime(t, agentID, "runtime-tools-test", flowID, "test-instance", flowPath)
+	return agentidentitytest.Declared(t, agentID, "swarm-test://"+flowID+"/"+strings.TrimSpace(agentID), flowID, "test-instance", flowPath)
 }
 
 type managerStub struct {
@@ -138,12 +138,13 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 		Agents: agents,
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: reviewFlow,
 			ByID: map[string]*runtimecontracts.FlowContractView{"review": reviewFlow},
 		},
-	})
+	}
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "control", "review")
 	provider := runtimeauthority.NewSourceProvider(source)
 
 	bus := &publishDirectBusStub{}
@@ -163,7 +164,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "control",
-		Identity:      agentidentitytest.Runtime(t, "control", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+		Identity:      toolTestAgentIdentity(t, "control", "review", "review/inst-1"),
 		Role:          "control",
 		Permissions:   []string{"message_flow"},
 		EntityID:      "entity-a",
@@ -187,11 +188,15 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	if bus.event.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("agent_message event execution mode = %q, want mock", bus.event.ExecutionMode())
 	}
+	wantSourceRoute := events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1", EntityID: "entity-a"}
+	if got := bus.event.RoutingSource().Route().Normalized(); got != wantSourceRoute {
+		t.Fatalf("agent_message routing source = %#v, want %#v", got, wantSourceRoute)
+	}
 }
 
 func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	scheduler := &captureScheduleScheduler{}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "")
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 	actor := models.AgentConfig{
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
@@ -221,6 +226,65 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	}
 }
 
+func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
+	const (
+		flowID       = "telegram-chat"
+		flowPath     = "telegram-ingress/telegram-chat"
+		instancePath = flowPath + "/chat-1"
+		agentID      = "scheduler-agent"
+	)
+	flow := runtimecontracts.FlowContractView{
+		Path: flowPath,
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: flowID, Flow: flowID, PackageKey: "bot", AgentsFile: "/contracts/bot/flows/telegram-chat/agents.yaml",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			agentID: runtimecontracts.EffectiveAgentRegistryEntry(agentID, runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}),
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
+		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
+	}}
+	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
+	declarations := semanticview.AgentDeclarations(source)
+	if len(declarations) != 1 {
+		t.Fatalf("agent declarations = %#v, want one", declarations)
+	}
+	plan, err := semanticview.ScopedAgentNamePlan(source, declarations[0])
+	if err != nil {
+		t.Fatalf("agent declaration name: %v", err)
+	}
+	actor := models.AgentConfig{
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ID:            agentID,
+		Identity:      agentidentitytest.Declared(t, agentID, plan.OwnerURI, flowPath, "chat-1", instancePath),
+		FlowID:        flowID,
+		FlowPath:      instancePath,
+		EntityID:      "entity-chat",
+	}
+	scheduler := &captureScheduleScheduler{}
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002164"), runtimeeffects.ExecutionModeLive)
+	if _, err := exec.execSchedule(ctx, actor, map[string]any{
+		"schedule_key": "imported-proof",
+		"event_type":   flowPath + "/telegram.followup.requested",
+		"mode":         "absolute",
+		"at":           time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		"payload":      map[string]any{"chat_id": "42"},
+	}); err != nil {
+		t.Fatalf("execSchedule(imported template agent): %v", err)
+	}
+	wantRoute := events.RouteIdentity{FlowID: flowID, FlowInstance: instancePath, EntityID: actor.EntityID}
+	if got := scheduler.command.RoutingSource.Route().Normalized(); got != wantRoute {
+		t.Fatalf("schedule routing source = %#v, want %#v", got, wantRoute)
+	}
+	if scheduler.command.FlowInstance != instancePath {
+		t.Fatalf("schedule flow instance = %q, want %q", scheduler.command.FlowInstance, instancePath)
+	}
+}
+
 func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 	actor := models.AgentConfig{
 		ID:       "root-agent",
@@ -232,7 +296,7 @@ func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
 		t.Helper()
 		scheduler := &captureScheduleScheduler{}
 		return NewExecutorWithOptions(nil, ExecutorOptions{
-			WorkflowSource:   semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+			WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", ""),
 			GenericSchedules: scheduler,
 		}), scheduler
 	}
@@ -311,7 +375,7 @@ func TestExecSchedulePreservesExactCausalMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			scheduler := &captureScheduleScheduler{}
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+			source := toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", "")
 			exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 			actor := models.AgentConfig{
 				ExecutionMode: runtimeeffects.ExecutionModeLive,
@@ -349,7 +413,7 @@ func TestExecSchedulePreservesExactCausalMode(t *testing.T) {
 func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
 	scheduler := &captureScheduleScheduler{}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
-		WorkflowSource:   semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		WorkflowSource:   toolTestSourceWithDeclaredAgent(t, &runtimecontracts.WorkflowContractBundle{}, "root-agent", ""),
 		GenericSchedules: scheduler,
 	})
 	actor := models.AgentConfig{
@@ -415,12 +479,13 @@ func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
 		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
 		Path:  "review", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate}, Agents: agents,
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: reviewFlow,
 			ByID: map[string]*runtimecontracts.FlowContractView{"review": reviewFlow},
 		},
-	})
+	}
+	source := toolTestSourceWithDeclaredAgent(t, bundle, "manager", "review")
 	workerA := models.AgentConfig{
 		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
 		Role: "worker", EntityID: "entity-a", FlowPath: "review/inst-a",
@@ -440,7 +505,7 @@ func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "manager",
-		Identity:      agentidentitytest.Runtime(t, "manager", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
+		Identity:      toolTestAgentIdentity(t, "manager", "review", "review/inst-b"),
 		Role:          "manager",
 		Permissions:   []string{"message_flow"},
 		EntityID:      "entity-manager",

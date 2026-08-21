@@ -100,7 +100,7 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_operation_plan_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
 	}
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
-	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, entityID)
+	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, entityID)
 	if err != nil {
 		return nil, fmt.Errorf("admit channel activity producer source: %w", err)
 	}

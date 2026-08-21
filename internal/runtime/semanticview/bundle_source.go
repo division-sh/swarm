@@ -1,7 +1,6 @@
 package semanticview
 
 import (
-	"path/filepath"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -206,55 +205,7 @@ func owningFlowIDForProjectView(bundle *runtimecontracts.WorkflowContractBundle,
 	if bundle == nil {
 		return ""
 	}
-	return owningFlowIDForPackage(bundle, strings.TrimSpace(view.Paths.Key))
-}
-
-func owningFlowIDForPackage(bundle *runtimecontracts.WorkflowContractBundle, packageKey string) string {
-	packageKey = strings.TrimSpace(packageKey)
-	if bundle == nil || packageKey == "" {
-		return ""
-	}
-	pkg, ok := bundlePackageByKey(bundle, packageKey)
-	if !ok || strings.TrimSpace(pkg.ParentKey) == "" {
-		return ""
-	}
-	parent, ok := bundlePackageByKey(bundle, pkg.ParentKey)
-	if !ok {
-		return ""
-	}
-	if flowID := packageParentFlowID(parent, pkg); flowID != "" {
-		return flowID
-	}
-	return owningFlowIDForPackage(bundle, parent.Key)
-}
-
-func bundlePackageByKey(bundle *runtimecontracts.WorkflowContractBundle, packageKey string) (runtimecontracts.LoadedProjectPackage, bool) {
-	for _, pkg := range bundle.PackageTree {
-		if strings.TrimSpace(pkg.Key) == packageKey {
-			return pkg, true
-		}
-	}
-	return runtimecontracts.LoadedProjectPackage{}, false
-}
-
-func packageParentFlowID(parent, child runtimecontracts.LoadedProjectPackage) string {
-	childDir := filepath.Clean(strings.TrimSpace(child.Paths.Dir))
-	if childDir != "" && childDir != "." {
-		for _, flow := range parent.Paths.Flows {
-			flowID := strings.TrimSpace(flow.ID)
-			flowDir := filepath.Clean(strings.TrimSpace(flow.Dir))
-			if flowID == "" || flowDir == "" || flowDir == "." {
-				continue
-			}
-			if childDir == flowDir || strings.HasPrefix(childDir, flowDir+string(filepath.Separator)) {
-				return flowID
-			}
-		}
-	}
-	if len(parent.Paths.Flows) == 1 {
-		return strings.TrimSpace(parent.Paths.Flows[0].ID)
-	}
-	return ""
+	return bundle.PackageOwningFlowID(view.Paths.Key)
 }
 
 func (s bundleSource) FlowScopes() []FlowScope {

@@ -1126,6 +1126,7 @@ type ManagedCredentialRef struct {
 type ProjectPackagePaths struct {
 	Key               string
 	ParentKey         string
+	OwningFlowID      string
 	Depth             int
 	Dir               string
 	PackageFile       string

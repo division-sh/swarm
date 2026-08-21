@@ -135,12 +135,15 @@ func TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact(t *testing.T) {
 
 func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testing.T) {
 	artifact := capturedMockAlternative()
+	staticOwner := "test://static-support/static-worker"
+	templateOwner := "test://template-support/worker"
 	staticFlow := runtimecontracts.FlowContractView{
 		Path:  "static-support",
 		Paths: runtimecontracts.FlowContractPaths{ID: "static-support", Flow: "static-support"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"static-worker": managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{ID: "static-worker"}),
 		},
+		AgentURIs: map[string]string{"static-worker": staticOwner},
 	}
 	templateFlow := runtimecontracts.FlowContractView{
 		Path:  "template-support",
@@ -148,6 +151,7 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "template-worker"}),
 		},
+		AgentURIs: map[string]string{"worker": templateOwner},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{staticFlow, templateFlow}}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -162,11 +166,21 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"static-support/static-worker": {
 					Kind: "agent", FlowID: "static-support", LocalID: "static-worker",
-					Full: "test://static-support/static-worker",
+					Full: staticOwner,
 				},
 				"template-support/worker": {
 					Kind: "agent", FlowID: "template-support", LocalID: "worker",
-					Full: "test://template-support/worker",
+					Full: templateOwner,
+				},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				staticOwner: {
+					Kind: "agent", FlowID: "static-support", LocalID: "static-worker",
+					Full: staticOwner,
+				},
+				templateOwner: {
+					Kind: "agent", FlowID: "template-support", LocalID: "worker",
+					Full: templateOwner,
 				},
 			},
 		},

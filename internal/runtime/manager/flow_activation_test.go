@@ -39,7 +39,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
@@ -1218,11 +1217,16 @@ func registerTestFlowAgentOwner(bundle *runtimecontracts.WorkflowContractBundle,
 	if bundle.URIRegistry.Agents == nil {
 		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{}
 	}
-	bundle.URIRegistry.Agents[flowID+"/"+logicalID] = testFlowAgentURIRef(flowID, logicalID)
+	if bundle.URIRegistry.ByURI == nil {
+		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{}
+	}
+	ref := testFlowAgentURIRef(flowID, logicalID)
+	bundle.URIRegistry.Agents[flowID+"/"+logicalID] = ref
+	bundle.URIRegistry.ByURI[ref.Full] = ref
 }
 
 func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
-	reviewFlow := &runtimecontracts.FlowContractView{
+	reviewFlow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.started": {
@@ -1241,18 +1245,20 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 	}
+	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{reviewFlow}}
 	return &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"review/reviewer": testFlowAgentURIRef("review", "reviewer"),
 			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				testFlowAgentURIRef("review", "reviewer").Full: testFlowAgentURIRef("review", "reviewer"),
+			},
 		},
 		FlowTree: runtimecontracts.FlowTree{
-			Root: &runtimecontracts.FlowContractView{
-				Children: []runtimecontracts.FlowContractView{*reviewFlow},
-			},
+			Root: root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"review": reviewFlow,
+				"review": &root.Children[0],
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
@@ -1311,6 +1317,7 @@ func testFlowBundleWithAutoEmitEntry(autoEmit string, entry runtimecontracts.Eve
 }
 
 func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
+	workerRef := testFlowAgentURIRef("grandchild", "worker")
 	grandchild := &runtimecontracts.FlowContractView{
 		Path:  "child/grandchild",
 		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
@@ -1323,6 +1330,7 @@ func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
 				Subscriptions:  []string{"micro.started"},
 			},
 		},
+		AgentURIs: map[string]string{"worker": workerRef.Full},
 	}
 	child := &runtimecontracts.FlowContractView{
 		Path:     "child",
@@ -1332,8 +1340,9 @@ func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
-				"grandchild/worker": testFlowAgentURIRef("grandchild", "worker"),
+				"grandchild/worker": workerRef,
 			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{workerRef.Full: workerRef},
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
@@ -1357,6 +1366,7 @@ func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
+	analyzerRef := testFlowAgentURIRef("analyzer-flow", "analyzer")
 	analysisFlow := &runtimecontracts.FlowContractView{
 		Path:  "analyzer-flow",
 		Paths: runtimecontracts.FlowContractPaths{ID: "analyzer-flow"},
@@ -1369,12 +1379,14 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 				EmitEvents:     []string{"analysis.done"},
 			},
 		},
+		AgentURIs: map[string]string{"analyzer": analyzerRef.Full},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
-				"analyzer-flow/analyzer": testFlowAgentURIRef("analyzer-flow", "analyzer"),
+				"analyzer-flow/analyzer": analyzerRef,
 			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{analyzerRef.Full: analyzerRef},
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
@@ -3869,28 +3881,33 @@ func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *test
 	}
 }
 
-func TestStaticAgentMaterializationKeepsDistinctProjectAndFlowDeclarationsWithSharedLocalID(t *testing.T) {
+func TestStaticAgentMaterializationKeepsDistinctSameIDPhysicalDeclarations(t *testing.T) {
 	projectOwner := "test://agent-name/packages/support-extension/worker"
 	flowOwner := "test://agent-name/flows/support/worker"
-	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
-		projectOwner: {Kind: "agent", LocalID: "worker", Full: projectOwner},
-		flowOwner:    {Kind: "agent", FlowID: "support", LocalID: "worker", Full: flowOwner},
-	}}})
 	projectEntry := managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "project-worker", Role: "project-worker"})
 	flowEntry := managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "flow-worker", Role: "flow-worker"})
-	source := managerScopedAgentSource{
-		Source: base,
-		projects: []semanticview.ProjectScope{{
-			Key: "packages/support-extension", OwningFlowID: "support",
-			Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": projectEntry},
-			AgentURIs: map[string]string{"worker": projectOwner},
+	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{
+		{
+			Paths: runtimecontracts.FlowContractPaths{ID: "support-extension", PackageKey: "packages/support-extension", AgentsFile: "packages/support-extension/agents.yaml"},
+			Path:  "support-extension", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": projectEntry}, AgentURIs: map[string]string{"worker": projectOwner},
+		},
+		{
+			Paths: runtimecontracts.FlowContractPaths{ID: "support", PackageKey: "flows/support", AgentsFile: "flows/support/agents.yaml"},
+			Path:  "support", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": flowEntry}, AgentURIs: map[string]string{"worker": flowOwner},
+		},
+	}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{
+			"support-extension": &root.Children[0], "support": &root.Children[1],
 		}},
-		flows: []semanticview.FlowScope{{
-			ID: "support", Path: "support", PackageKey: "flows/support", Mode: "static",
-			Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": flowEntry},
-			AgentURIs: map[string]string{"worker": flowOwner},
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+			projectOwner: {Kind: "agent", FlowID: "support-extension", LocalID: "worker", Full: projectOwner},
+			flowOwner:    {Kind: "agent", FlowID: "support", LocalID: "worker", Full: flowOwner},
 		}},
 	}
+	source := semanticview.Wrap(bundle)
 
 	records, err := StaticAgentMaterializationRecords(source)
 	if err != nil {
@@ -3903,36 +3920,6 @@ func TestStaticAgentMaterializationKeepsDistinctProjectAndFlowDeclarationsWithSh
 	if len(got) != 2 || got["project-worker"] != projectOwner || got["flow-worker"] != flowOwner {
 		t.Fatalf("materialized owners = %#v, want both exact declarations", got)
 	}
-}
-
-type managerScopedAgentSource struct {
-	semanticview.Source
-	projects []semanticview.ProjectScope
-	flows    []semanticview.FlowScope
-}
-
-func (s managerScopedAgentSource) ProjectScopes() []semanticview.ProjectScope {
-	return append([]semanticview.ProjectScope(nil), s.projects...)
-}
-
-func (s managerScopedAgentSource) FlowScopes() []semanticview.FlowScope {
-	return append([]semanticview.FlowScope(nil), s.flows...)
-}
-
-func (s managerScopedAgentSource) FlowScopeByID(flowID string) (semanticview.FlowScope, bool) {
-	for _, scope := range s.flows {
-		if strings.TrimSpace(scope.ID) == strings.TrimSpace(flowID) {
-			return scope, true
-		}
-	}
-	return semanticview.FlowScope{}, false
-}
-
-func (s managerScopedAgentSource) FlowPath(flowID string) string {
-	if scope, ok := s.FlowScopeByID(flowID); ok {
-		return scope.Path
-	}
-	return ""
 }
 
 func TestStaticFlowRequiredAgentMaterializationInfersFromOmittedRequiredAgents(t *testing.T) {
@@ -3958,91 +3945,49 @@ func TestStaticFlowRequiredAgentMaterializationInfersFromOmittedRequiredAgents(t
 }
 
 func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing.T) {
-	records, err := staticRequiredAgentsForScope(nil, "analysis", "analysis", map[string]runtimecontracts.AgentRegistryEntry{
-		"worker-alias": {
-			ID:            "worker",
-			Role:          "worker",
-			Subscriptions: []string{"analysis.requested"},
-			EmitEvents:    []string{"analysis.done"},
-		},
-	}, nil, []runtimecontracts.FlowRequiredAgent{{
+	bundle := testStaticFlowBundle()
+	flow := bundle.FlowTree.ByID["analyzer-flow"]
+	entry := flow.Agents["analyzer"]
+	delete(flow.Agents, "analyzer")
+	delete(flow.AgentURIs, "analyzer")
+	flow.Agents["worker-alias"] = entry
+	ref := testFlowAgentURIRef("analyzer-flow", "worker-alias")
+	flow.AgentURIs["worker-alias"] = ref.Full
+	bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{"analyzer-flow/worker-alias": ref}
+	bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{ref.Full: ref}
+	schema := bundle.FlowSchemas["analyzer-flow"]
+	schema.RequiredAgents = []runtimecontracts.FlowRequiredAgent{{
 		Role:         "worker",
 		SubscribesTo: []string{"analysis.requested"},
 		Emits:        []string{"analysis.done"},
-	}})
+	}}
+	bundle.FlowSchemas["analyzer-flow"] = schema
+
+	records, err := StaticFlowRequiredAgentMaterializationRecords(semanticview.Wrap(bundle))
 
 	if err == nil || !strings.Contains(err.Error(), `required agent "worker"`) {
 		t.Fatalf("expected required-agent map-key error, records=%#v err=%v", records, err)
 	}
 }
 
-func TestStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: map[string]runtimecontracts.ContractURIRef{
-				"test-agent": {
-					Kind: "agent", LocalID: "test-agent", Full: "test://root/test-agent",
-				},
-				"ops-flow/operator": {
-					Kind: "agent", FlowID: "ops-flow", LocalID: "operator", Full: "test://ops-flow/operator",
-				},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Version: "v-test",
-			FlowPrefix: map[string]string{
-				"ops-flow": "ops-flow",
-			},
-		},
-	}
-	rootAgents := map[string]runtimecontracts.AgentRegistryEntry{
-		"test-agent": managerTestAgentEntry("test-agent", runtimecontracts.AgentRegistryEntry{
-			ID:            "test-agent",
-			Type:          "generic",
-			Role:          "test-agent",
-			Subscriptions: []string{"task.assigned"},
-			EmitEvents:    []string{"task.completed"},
-		}),
-	}
-	bundle.Agents = rootAgents
-	flowAgents := map[string]runtimecontracts.AgentRegistryEntry{
-		"operator": managerTestAgentEntry("operator", runtimecontracts.AgentRegistryEntry{
-			ID:            "operator",
-			Type:          "generic",
-			Role:          "operator",
-			Subscriptions: []string{"work.requested"},
-			EmitEvents:    []string{"work.completed"},
-		}),
-	}
-	flow := &runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "ops-flow"},
-		Path:   "ops-flow",
-		Agents: flowAgents,
-	}
-	bundle.FlowTree = runtimecontracts.FlowTree{
-		Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{*flow}},
-		ByID: map[string]*runtimecontracts.FlowContractView{"ops-flow": flow},
-	}
-	source := semanticviewtest.WrapRootAgents(bundle)
-	rootPlan := managerTestAgentNamePlan(t, source, "", "test-agent")
-	rootRecords, err := staticAgentsForScope(source, "", "", rootAgents, map[string]semanticview.AgentNamePlan{"test-agent": rootPlan})
+func TestStaticAgentMaterializationRecordsRegistersRootAndFlowSubscriptions(t *testing.T) {
+	source := loadRootAndFlowStaticAgentSource(t)
+	records, err := StaticAgentMaterializationRecords(source)
 	if err != nil {
-		t.Fatalf("staticAgentsForScope(root): %v", err)
+		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
 	}
-	flowPlan := managerTestFlowAgentNamePlan(t, source, "ops-flow", "operator")
-	flowRecords, err := staticAgentsForScope(source, "ops-flow", "ops-flow", flowAgents, map[string]semanticview.AgentNamePlan{"operator": flowPlan})
-	if err != nil {
-		t.Fatalf("staticAgentsForScope(flow): %v", err)
+	if len(records) != 2 {
+		t.Fatalf("materialized records = %#v, want root and flow declarations exactly once", records)
 	}
-	if len(rootRecords) != 1 || len(flowRecords) != 1 {
-		t.Fatalf("materialized records root=%#v flow=%#v", rootRecords, flowRecords)
+	configs := map[string]models.AgentConfig{}
+	for _, record := range records {
+		configs[record.Config.ID] = record.Config
 	}
-	rootCfg := rootRecords[0].Config
+	rootCfg := configs["test-agent"]
 	if len(rootCfg.Subscriptions) != 1 || rootCfg.Subscriptions[0] != "task.assigned" {
 		t.Fatalf("root subscriptions = %#v, want [task.assigned]", rootCfg.Subscriptions)
 	}
-
-	flowCfg := flowRecords[0].Config
+	flowCfg := configs["operator"]
 	if len(flowCfg.Subscriptions) != 1 || flowCfg.Subscriptions[0] != "ops-flow/work.requested" {
 		t.Fatalf("flow subscriptions = %#v, want [ops-flow/work.requested]", flowCfg.Subscriptions)
 	}
@@ -4100,6 +4045,58 @@ func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
 	}
 }
 
+func loadRootAndFlowStaticAgentSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := t.TempDir()
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: root-and-flow-static-agents
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: ops-flow
+    flow: ops-flow
+    mode: static
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-and-flow-static-agents\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned: {}\ntask.completed: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+test-agent:
+  type: generic
+  role: test-agent
+  intent: {inline: "Handle root work."}
+  model: regular
+  memory: true
+  subscriptions: [task.assigned]
+  emit_events: [task.completed]
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "package.yaml"), `
+name: ops-flow
+version: "1.0.0"
+flows: []
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "schema.yaml"), "name: ops-flow\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "policy.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "events.yaml"), "work.requested: {}\nwork.completed: {}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "agents.yaml"), `
+operator:
+  type: generic
+  role: operator
+  intent: {inline: "Handle operations work."}
+  model: regular
+  memory: true
+  subscriptions: [work.requested]
+  emit_events: [work.completed]
+`)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func loadPackageBackedStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -4109,10 +4106,8 @@ func loadPackageBackedStaticAgentSource(t *testing.T) semanticview.Source {
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: support
-    flow: support
-    mode: static
+packages:
+  - path: parent
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
@@ -4126,24 +4121,39 @@ item:
 item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "parent", "package.yaml"), `
+name: parent
+version: "1.0.0"
+packages:
+  - path: child
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "parent", "child", "package.yaml"), `
+name: child
+version: "1.0.0"
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), `
 name: support
 version: "1.0.0"
 flows: []
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `
 name: support
 initial_state: waiting
 states:
   - waiting
   - done
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "policy.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), `
 support/item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 backend:
   type: generic
   role: backend

@@ -66,7 +66,7 @@ flows:
 		t.Fatalf("declarations = %#v, want one canonical flow declaration", declarations)
 	}
 	declaration := declarations[0]
-	if declaration.ScopeKind != "project" || declaration.ScopeID != "flows/support" || declaration.OwnerFlowID != "support" || declaration.LocalID != "flow-agent" {
+	if declaration.ScopeKind != "flow" || declaration.ScopeID != "support" || declaration.OwnerFlowID != "support" || declaration.LocalID != "flow-agent" {
 		t.Fatalf("declaration = %#v, want canonical package-backed support agent", declaration)
 	}
 	owner, ok := ScopedAgentDeclarationOwner(source, declaration)
