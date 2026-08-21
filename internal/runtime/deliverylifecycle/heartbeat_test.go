@@ -119,6 +119,49 @@ func TestClaimHeartbeatFailsClosedWhenFinalRenewalIsRejected(t *testing.T) {
 	}
 }
 
+func TestClaimHeartbeatRenewalHandoffPausesAndResumesGenerationOwner(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	store := &heartbeatTestStore{renewed: make(chan int, 8)}
+	heartbeat, err := startClaimHeartbeat(context.Background(), owner, store, heartbeatTestClaim(), 2*time.Millisecond)
+	if err != nil {
+		t.Fatalf("start heartbeat: %v", err)
+	}
+	if contextual, ok := ClaimHeartbeatFromContext(heartbeat.Context()); !ok || contextual != heartbeat {
+		t.Fatal("heartbeat context did not retain the exact renewal owner")
+	}
+	handoff, err := heartbeat.BeginRenewalHandoff()
+	if err != nil {
+		t.Fatalf("begin renewal handoff: %v", err)
+	}
+	drained := false
+	for !drained {
+		select {
+		case <-store.renewed:
+		default:
+			drained = true
+		}
+	}
+	baseline := store.renewalCount()
+	select {
+	case renewal := <-store.renewed:
+		if renewal > baseline {
+			t.Fatalf("generation heartbeat renewed during handoff: renewal=%d baseline=%d", renewal, baseline)
+		}
+	case <-time.After(20 * time.Millisecond):
+	}
+	handoff.Finish()
+	for store.renewalCount() == baseline {
+		select {
+		case <-store.renewed:
+		case <-time.After(time.Second):
+			t.Fatal("generation heartbeat did not resume after handoff")
+		}
+	}
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatalf("stop heartbeat: %v", err)
+	}
+}
+
 func newHeartbeatTestOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	process := worklifetime.NewProcess()

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -35,11 +36,16 @@ const (
 )
 
 type completionAttemptHeartbeat struct {
-	cancel  context.CancelCauseFunc
-	done    chan struct{}
-	mu      sync.Mutex
-	err     error
-	stopped bool
+	ctx          context.Context
+	cancel       context.CancelCauseFunc
+	done         chan struct{}
+	handle       *runtimeeffects.Handle
+	lease        time.Duration
+	claimHandoff *runtimedelivery.ClaimRenewalHandoff
+	renewMu      sync.Mutex
+	mu           sync.Mutex
+	err          error
+	stopped      bool
 }
 
 type completionAttemptHeartbeatContextKey struct{}
@@ -79,12 +85,26 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 	if occurrenceOwned && !normalProviderAttempt {
 		heartbeatParent = worklifetime.WithOccurrence(heartbeatParent, owner)
 	}
+	var claimHandoff *runtimedelivery.ClaimRenewalHandoff
+	if normalProviderAttempt {
+		if claimHeartbeat, ok := runtimedelivery.ClaimHeartbeatFromContext(ctx); ok {
+			claimHandoff, err = claimHeartbeat.BeginRenewalHandoff()
+			if err != nil {
+				_ = workLease.Done()
+				return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_renewal_handoff_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": handle.Attempt().AttemptID}, err)
+			}
+		}
+	}
 	if err := handle.Heartbeat(heartbeatParent, lease); err != nil {
+		claimHandoff.Finish()
 		_ = workLease.Done()
 		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, err)
 	}
 	heartbeatCtx, cancel := context.WithCancelCause(heartbeatParent)
-	heartbeat := &completionAttemptHeartbeat{cancel: cancel, done: make(chan struct{})}
+	heartbeat := &completionAttemptHeartbeat{
+		ctx: heartbeatCtx, cancel: cancel, done: make(chan struct{}), handle: handle, lease: lease,
+		claimHandoff: claimHandoff,
+	}
 	go func() {
 		defer close(heartbeat.done)
 		defer func() { _ = workLease.Done() }()
@@ -95,7 +115,7 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 			case <-heartbeatCtx.Done():
 				return
 			case <-ticker.C:
-				if err := handle.Heartbeat(heartbeatCtx, lease); err != nil {
+				if err := heartbeat.renew(); err != nil {
 					if heartbeatCtx.Err() != nil {
 						return
 					}
@@ -127,15 +147,32 @@ func (h *completionAttemptHeartbeat) Stop() error {
 		return nil
 	}
 	h.mu.Lock()
-	if !h.stopped {
+	doStop := !h.stopped
+	if doStop {
 		h.stopped = true
-		h.cancel(nil)
 	}
 	h.mu.Unlock()
+	if doStop {
+		renewErr := h.renew()
+		h.mu.Lock()
+		h.err = errors.Join(h.err, renewErr)
+		h.mu.Unlock()
+		h.cancel(nil)
+	}
 	<-h.done
+	h.claimHandoff.Finish()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.err
+}
+
+func (h *completionAttemptHeartbeat) renew() error {
+	if h == nil || h.handle == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	h.renewMu.Lock()
+	defer h.renewMu.Unlock()
+	return h.handle.Heartbeat(h.ctx, h.lease)
 }
 
 func finishCompletionAttemptHeartbeat(heartbeat *completionAttemptHeartbeat, prior error) error {
