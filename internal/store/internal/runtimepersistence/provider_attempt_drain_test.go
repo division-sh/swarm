@@ -588,6 +588,35 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 	})
 }
 
+func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := providerDrainContext(t, fixture, "pre-topology-recovery")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "pre-topology-recovery")
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
+		requireAgentCoarseStatus(t, fixture, "terminated")
+
+		now := time.Now().UTC()
+		summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+		if err != nil {
+			t.Fatalf("recover terminal drain before topology readback: %v", err)
+		}
+		if summary.OutcomeUncertain != 1 || summary.PrelaunchTerminal != 0 {
+			t.Fatalf("pre-topology recovery summary=%+v, want one uncertain", summary)
+		}
+		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
+		requireAgentCoarseStatus(t, fixture, "terminated")
+
+		again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+		if err != nil || again != (runtimeeffects.RecoverySummary{}) {
+			t.Fatalf("idempotent pre-topology recovery summary=%+v err=%v", again, err)
+		}
+	})
+}
+
 func TestProviderAttemptDrainRecoveryRejectsNewerOriginClaimParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		ctx := providerDrainContext(t, fixture, "recovery-newer-origin")
@@ -850,6 +879,23 @@ func requireAgentLifecycleState(t *testing.T, fixture completionSettlementFixtur
 	state, found, err := reader.LoadAgentLifecycleState(testAuthorActivityContext(), fixture.authority.Normal.Identity)
 	if err != nil || !found || state.Phase != wantPhase || state.Generation != wantGeneration {
 		t.Fatalf("lifecycle state=%+v found=%v err=%v, want %s generation %d", state, found, err, wantPhase, wantGeneration)
+	}
+}
+
+func requireAgentCoarseStatus(t *testing.T, fixture completionSettlementFixture, want string) {
+	t.Helper()
+	fields, err := fixture.authority.Normal.Identity.StorageFields()
+	if err != nil {
+		t.Fatalf("provider-drain identity storage fields: %v", err)
+	}
+	query := `SELECT status FROM agents WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=? AND flow_instance_id=? AND flow_instance=?`
+	args := []any{fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}
+	if !fixture.sqlite {
+		query = `SELECT status FROM agents WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3 AND agent_route_presence=$4 AND flow_scope_key=$5 AND flow_instance_id=$6 AND flow_instance=$7`
+	}
+	var status string
+	if err := fixture.db.QueryRow(query, args...).Scan(&status); err != nil || status != want {
+		t.Fatalf("agent coarse status=%q err=%v, want %q", status, err, want)
 	}
 }
 

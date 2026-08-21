@@ -64,6 +64,8 @@ type AgentManager struct {
 	staticTopology                  runtimeagenttopology.Admission
 	staticSourceSet                 runtimeagenttopology.SourceSetPlan
 	startupAgentsHydrated           bool
+	startupEffectsMu                sync.Mutex
+	startupEffectsReconciled        bool
 
 	runMu              sync.Mutex
 	authBreakerTripped bool
@@ -108,6 +110,9 @@ func (am *AgentManager) InstallStartupTopology(store AgentLifecyclePersistence, 
 	if err := am.lifecycle.installPersistence(store); err != nil {
 		return err
 	}
+	am.startupEffectsMu.Lock()
+	am.startupEffectsReconciled = false
+	am.startupEffectsMu.Unlock()
 	am.mu.Lock()
 	am.staticTopology = admission
 	am.staticSourceSet = plan

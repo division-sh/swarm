@@ -17,6 +17,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -24,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	semanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type recoveryTestBus struct {
@@ -151,12 +153,18 @@ type recoveryTestStore struct {
 
 type startupRecoveryOrderStore struct {
 	recoveryTestStore
-	order *[]string
+	order      *[]string
+	effectsErr error
 }
 
 func (s *startupRecoveryOrderStore) ReconcileExternalEffectAttempts(context.Context, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error) {
 	*s.order = append(*s.order, "effects")
-	return runtimeeffects.RecoverySummary{}, nil
+	return runtimeeffects.RecoverySummary{}, s.effectsErr
+}
+
+func (s *startupRecoveryOrderStore) LoadAgents(ctx context.Context) ([]PersistedAgent, error) {
+	*s.order = append(*s.order, "agents")
+	return s.recoveryTestStore.LoadAgents(ctx)
 }
 
 type startupRecoveryOrderBus struct {
@@ -223,27 +231,55 @@ func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *re
 	am.mu.Unlock()
 }
 
-func TestStartupRecoversProviderDrainsBeforeDeliveryReplay(t *testing.T) {
+func TestStartupRecoversProviderDrainsBeforeStaticReintroductionAndDeliveryReplay(t *testing.T) {
 	order := make([]string, 0, 2)
 	store := &startupRecoveryOrderStore{order: &order}
 	bus := &startupRecoveryOrderBus{recoveryTestBus: &recoveryTestBus{}, order: &order}
 	am := newTestAgentManager(t, bus, nil, store)
-	am.mu.Lock()
-	am.startupAgentsHydrated = true
-	am.mu.Unlock()
 
 	ctx := testAuthorActivityContext(context.Background())
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash, BundleSource: "ephemeral"}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := am.InstallStartupTopology(store, admission, plan); err != nil {
+		t.Fatalf("install startup topology: %v", err)
+	}
+	am.mu.Lock()
+	am.startupAgentsHydrated = false
+	am.mu.Unlock()
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	recoveryErr := errors.New("effect recovery unavailable")
+	store.effectsErr = recoveryErr
+	if err := am.ReconcileStaticTopologyForStartup(ctx, source); !errors.Is(err, recoveryErr) {
+		t.Fatalf("reconcile static topology recovery error=%v, want %v", err, recoveryErr)
+	}
+	if len(order) != 1 || order[0] != "effects" {
+		t.Fatalf("failed startup recovery admitted agent readback: %v", order)
+	}
+	store.effectsErr = nil
+	if err := am.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
+		t.Fatalf("reconcile static topology: %v", err)
+	}
+	if len(order) != 4 || order[1] != "effects" || order[2] != "agents" || order[3] != "agents" {
+		t.Fatalf("startup order after static reconciliation=%v, want retried effects before both agent readbacks", order)
+	}
 	if _, err := am.HydrateForStartup(ctx); err != nil {
 		t.Fatalf("hydrate startup effects: %v", err)
 	}
-	if len(order) != 1 || order[0] != "effects" {
-		t.Fatalf("startup order after hydration=%v, want effects only", order)
+	if len(order) != 4 {
+		t.Fatalf("startup effect recovery repeated during hydration: %v", order)
 	}
 	if _, err := am.RecoverAfterStartupAdmission(managedExecutionTestContext(t, ctx)); err != nil {
 		t.Fatalf("recover startup deliveries: %v", err)
 	}
-	if len(order) != 2 || order[0] != "effects" || order[1] != "delivery" {
-		t.Fatalf("startup recovery order=%v, want effects before delivery", order)
+	if len(order) != 5 || order[4] != "delivery" {
+		t.Fatalf("startup recovery order=%v, want effects before agents and delivery", order)
 	}
 }
 
