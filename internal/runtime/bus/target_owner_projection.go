@@ -16,13 +16,15 @@ import (
 )
 
 type selectedRunTargetOwnerProjection struct {
-	agents           map[agentidentity.Identity]ActiveAgentDescriptor
-	agentsAvailable  bool
-	descriptors      []ActiveTargetDescriptor
-	targetsAvailable bool
-	currentTarget    events.DeliveryTargetOwnership
-	source           semanticview.Source
-	required         bool
+	context           context.Context
+	agents            map[agentidentity.Identity]ActiveAgentDescriptor
+	agentsAvailable   bool
+	descriptors       []ActiveTargetDescriptor
+	targetsAvailable  bool
+	currentTarget     events.DeliveryTargetOwnership
+	workflowInstances runtimepipeline.WorkflowInstancePersistenceReader
+	source            semanticview.Source
+	required          bool
 }
 
 func (p selectedRunTargetOwnerProjection) resolveRoutePlan(plan RoutePlan) (RoutePlan, error) {
@@ -147,8 +149,9 @@ func (p selectedRunTargetOwnerProjection) resolveNodeTargetOwners(plan *RoutePla
 				return selectedRunTargetOwnerProjection{}, fmt.Errorf("resolve delivery target handler for %s: route intent has no exact admitted handler", intent.Recipient.ID())
 			}
 			owner, err := runtimepipeline.ClassifyDeliveryTargetOwnership(runtimepipeline.DeliveryTargetOwnershipRequest{
-				Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
-				Handler: handler, Candidates: selectedRun.targetOwnerCandidates(), StructuralOwnerProof: intent.StructuralOwnerProof,
+				Context: p.context, Source: p.source, Event: plan.Event, Recipient: intent.Recipient, Blueprint: intent.TargetBlueprint,
+				Handler: handler, Candidates: selectedRun.targetOwnerCandidates(), WorkflowInstances: p.workflowInstances,
+				StructuralOwnerProof: intent.StructuralOwnerProof,
 			})
 			if err != nil {
 				return selectedRunTargetOwnerProjection{}, fmt.Errorf("resolve delivery target for %s: %w", intent.Recipient.ID(), err)
@@ -354,8 +357,10 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 		}
 	}
 	projection := selectedRunTargetOwnerProjection{
-		agents: agents, agentsAvailable: agentsAvailable,
-		descriptors: descriptors, targetsAvailable: targetsAvailable, source: p.semanticSource, required: p.requireTargetOwners,
+		context: ctx,
+		agents:  agents, agentsAvailable: agentsAvailable,
+		descriptors: descriptors, targetsAvailable: targetsAvailable, workflowInstances: p.workflowInstances,
+		source: p.semanticSource, required: p.requireTargetOwners,
 	}
 	if route, ok := runtimedelivery.RouteFromContext(ctx); ok {
 		projection.currentTarget = route.Target
@@ -371,8 +376,8 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 func (p selectedRunTargetOwnerProjection) validate() error {
 	for _, descriptor := range p.descriptors {
 		descriptor = descriptor.Normalized()
-		if descriptor.EntityID == "" {
-			return fmt.Errorf("selected-run target owner %q for flow instance %q is missing exact entity identity", descriptor.ID, descriptor.FlowInstance)
+		if descriptor.FlowInstance == "" || descriptor.EntityID == "" {
+			return fmt.Errorf("selected-run target owner %q is missing exact entity identity or flow-instance identity: flow_instance=%q entity_id=%q", descriptor.ID, descriptor.FlowInstance, descriptor.EntityID)
 		}
 	}
 	return nil

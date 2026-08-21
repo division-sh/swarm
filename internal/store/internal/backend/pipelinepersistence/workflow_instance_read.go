@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -41,6 +42,31 @@ func (s *PipelinePostgresOwner) LoadWorkflowInstance(ctx context.Context, route 
 	}
 	item, err := runtimepipeline.DecodeWorkflowInstancePersistenceRecord(record)
 	return item, err == nil, err
+}
+
+func (s *PipelinePostgresOwner) LoadWorkflowEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	if s == nil || s.backend == nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("postgres workflow entity state reader is required")
+	}
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state lookup requires exact route and entity identity")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
+	}
+	record, err := scanPostgresWorkflowEntityState(s.backend.QueryRowContext(ctx, postgresWorkflowEntityStateSelect+`
+		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid AND es.flow_instance = $3
+	`, runID, entityID.String(), route.InstancePath))
+	if err == sql.ErrNoRows {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
+	}
+	if err != nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {
@@ -139,6 +165,25 @@ const postgresWorkflowInstanceSelect = `
 	JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 `
 
+const postgresWorkflowEntityStateSelect = `
+	SELECT
+		es.entity_id::text,
+		es.flow_instance,
+		es.entity_type,
+		es.slug,
+		es.name,
+		es.current_state,
+		es.revision,
+		es.entered_state_at,
+		es.gates,
+		es.fields,
+		es.bookkeeping,
+		es.accumulator,
+		es.created_at,
+		es.updated_at
+	FROM entity_state es
+`
+
 type workflowInstanceScanner interface {
 	Scan(...any) error
 }
@@ -172,6 +217,32 @@ func scanPostgresWorkflowInstance(row workflowInstanceScanner) (runtimepipeline.
 	}
 	if terminatedAt.Valid {
 		record.TerminatedAt = terminatedAt.Time.UTC()
+	}
+	record.Slug = slug.String
+	record.Name = name.String
+	return record, nil
+}
+
+func scanPostgresWorkflowEntityState(row workflowInstanceScanner) (runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	var record runtimepipeline.WorkflowEntityStatePersistenceRecord
+	var slug, name sql.NullString
+	if err := row.Scan(
+		&record.EntityID,
+		&record.FlowInstance,
+		&record.EntityType,
+		&slug,
+		&name,
+		&record.CurrentState,
+		&record.Revision,
+		&record.EnteredStageAt,
+		&record.Gates,
+		&record.Fields,
+		&record.Bookkeeping,
+		&record.Accumulator,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, err
 	}
 	record.Slug = slug.String
 	record.Name = name.String
@@ -223,6 +294,31 @@ func (s *PipelineSQLiteOwner) LoadWorkflowInstance(ctx context.Context, route ru
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}
 	return items[0], true, nil
+}
+
+func (s *PipelineSQLiteOwner) LoadWorkflowEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
+	if s == nil || s.backend == nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("sqlite workflow entity state reader is required")
+	}
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state lookup requires exact route and entity identity")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
+	}
+	record, err := scanSQLiteWorkflowEntityState(s.backend.QueryRowContext(ctx, sqliteWorkflowEntityStateSelect+`
+		WHERE es.run_id = ? AND es.entity_id = ? AND es.flow_instance = ?
+	`, runID, entityID.String(), route.InstancePath))
+	if err == sql.ErrNoRows {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
+	}
+	if err != nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {
@@ -319,6 +415,78 @@ const sqliteWorkflowInstanceSelect = `
 	JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 `
 
+const sqliteWorkflowEntityStateSelect = `
+	SELECT
+		es.entity_id,
+		es.flow_instance,
+		es.entity_type,
+		es.slug,
+		es.name,
+		es.current_state,
+		es.revision,
+		es.entered_state_at,
+		es.gates,
+		es.fields,
+		es.bookkeeping,
+		es.accumulator,
+		es.created_at,
+		es.updated_at
+	FROM entity_state es
+`
+
+func scanSQLiteWorkflowEntityState(row workflowInstanceScanner) (runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+	var record runtimepipeline.WorkflowEntityStatePersistenceRecord
+	var slug, name sql.NullString
+	var enteredAt, gates, fields, bookkeeping, accumulator, createdAt, updatedAt any
+	if err := row.Scan(
+		&record.EntityID,
+		&record.FlowInstance,
+		&record.EntityType,
+		&slug,
+		&name,
+		&record.CurrentState,
+		&record.Revision,
+		&enteredAt,
+		&gates,
+		&fields,
+		&bookkeeping,
+		&accumulator,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, err
+	}
+	record.Slug = slug.String
+	record.Name = name.String
+	for _, item := range []struct {
+		raw    any
+		target *json.RawMessage
+	}{{gates, &record.Gates}, {fields, &record.Fields}, {bookkeeping, &record.Bookkeeping}, {accumulator, &record.Accumulator}} {
+		switch value := item.raw.(type) {
+		case string:
+			*item.target = json.RawMessage(value)
+		case []byte:
+			*item.target = append(json.RawMessage(nil), value...)
+		default:
+			return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, fmt.Errorf("unsupported sqlite workflow entity JSON value %T", item.raw)
+		}
+	}
+	for _, item := range []struct {
+		raw    any
+		target *time.Time
+	}{{enteredAt, &record.EnteredStageAt}, {createdAt, &record.CreatedAt}, {updatedAt, &record.UpdatedAt}} {
+		value, ok, err := sqliteTimeValue(item.raw)
+		if err != nil || !ok {
+			if err == nil {
+				err = fmt.Errorf("sqlite workflow entity timestamp is required")
+			}
+			return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, err
+		}
+		*item.target = value
+	}
+	return record, nil
+}
+
 func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInstance, error) {
 	items := make([]runtimepipeline.WorkflowInstance, 0, 32)
 	for rows.Next() {
@@ -399,3 +567,5 @@ func scanSQLiteWorkflowInstances(rows *sql.Rows) ([]runtimepipeline.WorkflowInst
 
 var _ runtimepipeline.WorkflowInstancePersistenceReader = (*PipelinePostgresOwner)(nil)
 var _ runtimepipeline.WorkflowInstancePersistenceReader = (*PipelineSQLiteOwner)(nil)
+var _ runtimepipeline.WorkflowEntityStatePersistenceReader = (*PipelinePostgresOwner)(nil)
+var _ runtimepipeline.WorkflowEntityStatePersistenceReader = (*PipelineSQLiteOwner)(nil)

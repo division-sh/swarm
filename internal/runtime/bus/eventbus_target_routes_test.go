@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -33,21 +36,22 @@ import (
 )
 
 type targetRouteMemoryStore struct {
-	mu           sync.Mutex
-	events       map[string]events.Event
-	settlements  map[string]events.RouteSettlement
-	routes       map[string][]events.DeliveryRoute
-	scopes       map[string]runtimepipelineobligation.CommittedScope
-	missing      []events.PersistedReplayEvent
-	receipts     map[string]string
-	receiptErrs  map[string]*runtimefailures.Envelope
-	claimIssuer  *runtimepipelineobligation.ClaimIssuer
-	scanIssuer   *runtimepipelineobligation.ScanIssuer
-	claims       map[string]runtimepipelineobligation.Claim
-	scans        map[string]runtimepipelineobligation.ScanRequest
-	active       map[string]bool
-	flowRoutes   []FlowInstanceRouteRecord
-	targetOwners []ActiveTargetDescriptor
+	mu                sync.Mutex
+	events            map[string]events.Event
+	settlements       map[string]events.RouteSettlement
+	routes            map[string][]events.DeliveryRoute
+	scopes            map[string]runtimepipelineobligation.CommittedScope
+	missing           []events.PersistedReplayEvent
+	receipts          map[string]string
+	receiptErrs       map[string]*runtimefailures.Envelope
+	claimIssuer       *runtimepipelineobligation.ClaimIssuer
+	scanIssuer        *runtimepipelineobligation.ScanIssuer
+	claims            map[string]runtimepipelineobligation.Claim
+	scans             map[string]runtimepipelineobligation.ScanRequest
+	active            map[string]bool
+	flowRoutes        []FlowInstanceRouteRecord
+	targetOwners      []ActiveTargetDescriptor
+	workflowInstances []runtimepipeline.WorkflowInstance
 }
 
 func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context) ([]ActiveTargetDescriptor, error) {
@@ -71,6 +75,56 @@ func (s *targetRouteMemoryStore) setTargetOwnerRoutes(routes ...events.RouteIden
 		})
 	}
 	s.setTargetOwners(owners...)
+}
+
+func (s *targetRouteMemoryStore) LoadWorkflowInstance(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, instance := range s.workflowInstances {
+		if strings.Trim(strings.TrimSpace(instance.StorageRef), "/") == route.InstancePath {
+			return instance, true, nil
+		}
+	}
+	return runtimepipeline.WorkflowInstance{}, false, nil
+}
+
+func (s *targetRouteMemoryStore) ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]runtimepipeline.WorkflowInstance(nil), s.workflowInstances...), nil
+}
+
+func (s *targetRouteMemoryStore) SelectActiveWorkflowInstances(_ context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	excluded := map[string]struct{}{}
+	for _, state := range excludedStates {
+		excluded[strings.ToLower(strings.TrimSpace(state))] = struct{}{}
+	}
+	out := []runtimepipeline.WorkflowInstance{}
+	for _, instance := range s.workflowInstances {
+		path := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
+		if path != scopeKey && !strings.HasPrefix(path, strings.Trim(scopeKey, "/")+"/") {
+			continue
+		}
+		if instance.Status == "terminated" || !instance.TerminatedAt.IsZero() {
+			continue
+		}
+		if _, skip := excluded[strings.ToLower(strings.TrimSpace(instance.CurrentState))]; skip {
+			continue
+		}
+		matched := true
+		for _, selector := range selectors {
+			if got, ok := instance.Fields[selector.Field]; !ok || fmt.Sprint(got) != fmt.Sprint(selector.Value) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			out = append(out, instance)
+		}
+	}
+	return out, nil
 }
 
 func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTargetDescriptor {
@@ -691,7 +745,7 @@ func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersiste
 	}
 }
 
-func TestEventBusRejectsSelectedEntityForEntitylessHandlerBeforePersistence(t *testing.T) {
+func TestEventBusPreservesSelectedEntityForEntityOptionalHandler(t *testing.T) {
 	const eventType = "task.started"
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(events.RouteIdentity{
@@ -717,12 +771,285 @@ func TestEventBusRejectsSelectedEntityForEntitylessHandlerBeforePersistence(t *t
 	evt := eventtest.RunCreatingRootIngress(
 		eventID, "review/inst-1/"+eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "entityless-safe handler has selected entity ownership evidence") {
-		t.Fatalf("Publish error = %v, want selected/entityless contradiction", err)
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
-	if _, persisted := store.events[eventID]; persisted || len(store.routes[eventID]) != 0 {
-		t.Fatalf("failed publish persisted event/routes: event=%t routes=%#v", persisted, store.routes[eventID])
+	want := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")),
+		Target: events.MustExistingEntityTarget(events.RouteIdentity{
+			FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("selected-entityless-owner"),
+		}),
 	}
+	if _, persisted := store.events[eventID]; !persisted || !deliveryRoutesContain(store.routes[eventID], want) {
+		t.Fatalf("published event/routes = event=%t routes=%#v, want %#v", persisted, store.routes[eventID], want)
+	}
+}
+
+func TestEventBusSelectedTargetEvidenceFailsClosedOrPreservesExactOwner(t *testing.T) {
+	const eventType = "task.started"
+	exact := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("selected-exact-owner"),
+	}
+	siblingOne := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/sibling-1", EntityID: eventtest.UUID("selected-sibling-one"),
+	}
+	siblingTwo := events.RouteIdentity{
+		FlowID: "review", FlowInstance: "review/sibling-2", EntityID: eventtest.UUID("selected-sibling-two"),
+	}
+	tests := []struct {
+		name      string
+		owners    []ActiveTargetDescriptor
+		wantError string
+		want      events.DeliveryTargetOwnership
+	}{
+		{
+			name:      "malformed selected owner",
+			owners:    []ActiveTargetDescriptor{{ID: "malformed", EntityID: eventtest.UUID("malformed-selected-owner")}},
+			wantError: "missing exact entity identity",
+		},
+		{
+			name:      "one same-flow sibling cannot replace exact owner",
+			owners:    targetOwnerDescriptors(siblingOne),
+			wantError: "target owner is missing",
+		},
+		{
+			name:      "multiple same-flow siblings cannot replace exact owner",
+			owners:    targetOwnerDescriptors(siblingOne, siblingTwo),
+			wantError: "target owner is missing",
+		},
+		{
+			name:   "exact owner wins without promoting hostile siblings",
+			owners: targetOwnerDescriptors(siblingOne, exact, siblingTwo),
+			want:   events.MustExistingEntityTarget(exact),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTargetRouteMemoryStore()
+			store.setTargetOwners(test.owners...)
+			node := testFlowNode(t, "review", "target-node")
+			source := semanticview.Wrap(materializedTargetBundleWithHandler(
+				"review", "target-node", eventType, existingOwnerHandlerFixture(),
+			))
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source,
+				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+					return []DeliveryRouteBlueprint{{
+						Recipient: events.MustNodeDeliveryRecipient(node),
+						Target:    events.RouteIdentity{FlowID: "review", FlowInstance: exact.FlowInstance},
+						Handler:   runtimepipeline.MustDeliveryTargetHandler(node).ForEvent(eventType),
+					}}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(
+				eventID, "review/inst-1/"+eventType, "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			err = eb.Publish(context.Background(), evt)
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("Publish error = %v, want %q", err, test.wantError)
+				}
+				if _, persisted := store.events[eventID]; persisted || len(store.routes[eventID]) != 0 {
+					t.Fatalf("hostile ownership mutated event/routes: event=%t routes=%#v", persisted, store.routes[eventID])
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes := store.routes[eventID]
+			if len(routes) != 1 || routes[0].Target != test.want {
+				t.Fatalf("persisted routes = %#v, want exact target %#v", routes, test.want)
+			}
+		})
+	}
+}
+
+func targetOwnerDescriptors(routes ...events.RouteIdentity) []ActiveTargetDescriptor {
+	owners := make([]ActiveTargetDescriptor, 0, len(routes))
+	for index, route := range routes {
+		route = route.Normalized()
+		owners = append(owners, ActiveTargetDescriptor{
+			ID: fmt.Sprintf("target-owner-%d", index), FlowInstance: route.FlowInstance, EntityID: route.EntityID,
+		})
+	}
+	return owners
+}
+
+func TestEventBusDeclaredKeyAcquisitionSettlesBeforePersistence(t *testing.T) {
+	const eventType = "work.keyed"
+	selector := &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+		Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id"),
+	}}}
+	newSource := func() semanticview.Source {
+		bundle := materializedTargetBundleWithHandler("review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{SelectEntity: selector})
+		bundle.FlowTree.ByID["review"].Schema.Mode = runtimecontracts.FlowModeSingleton
+		bundle.FlowSchemas["review"] = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeSingleton, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		return semanticview.Wrap(bundle)
+	}
+	matching := runtimepipeline.WorkflowInstance{
+		EntityID: eventtest.UUID("keyed-selected-owner"), WorkflowName: "review", InstanceID: "one", StorageRef: "review/one",
+		Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+	}
+	tests := []struct {
+		name      string
+		instances []runtimepipeline.WorkflowInstance
+		wantError string
+	}{
+		{name: "one match", instances: []runtimepipeline.WorkflowInstance{matching}},
+		{name: "zero matches", wantError: "select_entity_no_match"},
+		{name: "multiple matches", instances: []runtimepipeline.WorkflowInstance{
+			matching,
+			{EntityID: eventtest.UUID("keyed-selected-owner-two"), WorkflowName: "review", InstanceID: "two", StorageRef: "review/two", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"}},
+		}, wantError: "select_entity_ambiguous"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTargetRouteMemoryStore()
+			store.workflowInstances = append([]runtimepipeline.WorkflowInstance(nil), test.instances...)
+			node := testFlowNode(t, "review", "target-node")
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: newSource(),
+				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+					return []DeliveryRouteBlueprint{{
+						Recipient: events.MustNodeDeliveryRecipient(node),
+						Target:    events.RouteIdentity{FlowID: "review", FlowInstance: "review/hostile-preselection"},
+						Handler:   runtimepipeline.MustDeliveryTargetHandler(node).ForEvent(eventType),
+					}}, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			eventID := uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{"account_id":"account-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			err = eb.Publish(context.Background(), evt)
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("Publish error = %v, want %q", err, test.wantError)
+				}
+				if _, persisted := store.events[eventID]; persisted || len(store.routes[eventID]) != 0 {
+					t.Fatalf("hostile acquisition mutated event/routes: event=%t routes=%#v", persisted, store.routes[eventID])
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: matching.EntityID})
+			if routes := store.routes[eventID]; len(routes) != 1 || routes[0].Target != want {
+				t.Fatalf("persisted routes = %#v, want exact key-selected owner %#v", routes, want)
+			}
+		})
+	}
+}
+
+func TestEventBusSelectOrCreateTargetIsImmutableAfterPrepublicationLinearization(t *testing.T) {
+	const eventType = "work.keyed"
+	selector := &runtimecontracts.SelectOrCreateEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+		Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id"),
+	}}}
+	newSource := func() semanticview.Source {
+		bundle := materializedTargetBundleWithHandler("review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{SelectOrCreateEntity: selector})
+		bundle.FlowTree.ByID["review"].Schema.Mode = runtimecontracts.FlowModeSingleton
+		bundle.FlowSchemas["review"] = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeSingleton, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		return semanticview.Wrap(bundle)
+	}
+	newBus := func(t *testing.T, store *targetRouteMemoryStore) *EventBus {
+		t.Helper()
+		node := testFlowNode(t, "review", "target-node")
+		eb, err := newScopedTestEventBus(store, EventBusOptions{
+			ContractBundle: newSource(),
+			RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
+				return []DeliveryRouteBlueprint{{
+					Recipient: events.MustNodeDeliveryRecipient(node),
+					Handler:   runtimepipeline.MustDeliveryTargetHandler(node).ForEvent(eventType),
+				}}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return eb
+	}
+	newEvent := func(eventID string) events.Event {
+		return eventtest.RunCreatingRootIngress(eventID, eventType, "", "", []byte(`{"account_id":"account-1"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	}
+	instanceForRoute := func(route events.RouteIdentity, accountID string) runtimepipeline.WorkflowInstance {
+		return runtimepipeline.WorkflowInstance{
+			EntityID: route.EntityID, WorkflowName: "review", InstanceID: path.Base(route.FlowInstance), StorageRef: route.FlowInstance,
+			Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": accountID},
+		}
+	}
+
+	t.Run("exact same-key appearance and later sibling never reroute duplicate", func(t *testing.T) {
+		store := newTargetRouteMemoryStore()
+		eb := newBus(t, store)
+		evt := newEvent(uuid.NewString())
+		plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.MaterializingEntity() {
+			t.Fatalf("zero-match plan = %#v, want one materializing target", plan.DeliveryRoutes)
+		}
+		target := plan.DeliveryRoutes[0].Target.Route()
+		store.workflowInstances = []runtimepipeline.WorkflowInstance{instanceForRoute(target, "account-1")}
+		if err := eb.Publish(context.Background(), evt); err != nil {
+			t.Fatalf("publish after exact same-key appearance: %v", err)
+		}
+		persisted := append([]events.DeliveryRoute(nil), store.routes[evt.ID()]...)
+		if len(persisted) != 1 || !persisted[0].Target.ExistingEntity() || persisted[0].Target.Route() != target {
+			t.Fatalf("persisted target = %#v, want exact appearing owner %#v", persisted, target)
+		}
+		store.workflowInstances = append(store.workflowInstances, runtimepipeline.WorkflowInstance{
+			EntityID: eventtest.UUID("later-duplicate-match"), WorkflowName: "review", InstanceID: "later", StorageRef: "review/later",
+			Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+		})
+		if err := eb.Publish(context.Background(), evt); err != nil {
+			t.Fatalf("exact duplicate replanned after later match: %v", err)
+		}
+		if got := store.routes[evt.ID()]; !reflect.DeepEqual(got, persisted) {
+			t.Fatalf("exact duplicate changed committed target: got=%#v want=%#v", got, persisted)
+		}
+	})
+
+	t.Run("conflicting exact appearance fails before persistence", func(t *testing.T) {
+		store := newTargetRouteMemoryStore()
+		eb := newBus(t, store)
+		evt := newEvent(uuid.NewString())
+		plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+		if err != nil || len(plan.DeliveryRoutes) != 1 {
+			t.Fatalf("plan deterministic target: routes=%#v err=%v", plan.DeliveryRoutes, err)
+		}
+		store.workflowInstances = []runtimepipeline.WorkflowInstance{instanceForRoute(plan.DeliveryRoutes[0].Target.Route(), "conflict")}
+		if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_conflict") {
+			t.Fatalf("conflicting exact appearance error = %v", err)
+		}
+		if _, ok := store.events[evt.ID()]; ok || len(store.routes[evt.ID()]) != 0 {
+			t.Fatalf("conflicting appearance mutated event/routes: event=%t routes=%#v", ok, store.routes[evt.ID()])
+		}
+	})
+
+	t.Run("multiple current matches fail before persistence", func(t *testing.T) {
+		store := newTargetRouteMemoryStore()
+		store.workflowInstances = []runtimepipeline.WorkflowInstance{
+			{EntityID: eventtest.UUID("soc-match-one"), WorkflowName: "review", InstanceID: "one", StorageRef: "review/one", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"}},
+			{EntityID: eventtest.UUID("soc-match-two"), WorkflowName: "review", InstanceID: "two", StorageRef: "review/two", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"}},
+		}
+		eb := newBus(t, store)
+		evt := newEvent(uuid.NewString())
+		if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "select_or_create_entity_ambiguous") {
+			t.Fatalf("ambiguous current matches error = %v", err)
+		}
+		if _, ok := store.events[evt.ID()]; ok || len(store.routes[evt.ID()]) != 0 {
+			t.Fatalf("ambiguous acquisition mutated event/routes: event=%t routes=%#v", ok, store.routes[evt.ID()])
+		}
+	})
 }
 
 func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *testing.T) {

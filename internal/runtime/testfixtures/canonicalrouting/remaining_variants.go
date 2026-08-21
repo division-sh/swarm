@@ -608,8 +608,6 @@ pins:
   subscribes_to: [telegram.reply_requested]
   event_handlers:
     telegram.reply_requested:
-      guard:
-        check: has(entity.conversation_reference)
       activity:
         id: telegram_send_message
         tool: telegram.send_message

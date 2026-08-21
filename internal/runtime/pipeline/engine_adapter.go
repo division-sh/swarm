@@ -96,10 +96,25 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		if o.store.engineMutations == nil {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("selected workflow engine mutation owner is required")
 		}
-		if target, ok := stampedDeliveryTargetOwnership(ctx); ok && target.EntitylessReceiver() {
-			return o.commitEntitylessEngineMutation(ctx, mutation, target)
+		application, hasApplication := deliveryTargetApplicationFromContext(ctx)
+		if hasApplication {
+			if err := application.Validate(); err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+			if mutation.Address.Route != application.Route() || mutation.Address.EntityID.String() != application.EntityID() {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine mutation address disagrees with admitted delivery target application")
+			}
+			if application.Owner().EntitylessReceiver() {
+				return o.commitEntitylessEngineMutation(ctx, mutation, application.Owner())
+			}
+		} else if _, stamped := stampedDeliveryTargetOwnership(ctx); stamped {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("stamped engine mutation requires delivery target application")
 		}
-		preparedState, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State)
+		var targetApplications []DeliveryTargetApplication
+		if hasApplication {
+			targetApplications = append(targetApplications, application)
+		}
+		preparedState, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State, targetApplications...)
 		if err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
 		}
@@ -410,6 +425,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	ctx context.Context,
 	address runtimeengine.StateAddress,
 	mutation runtimeengine.StateMutation,
+	targetApplications ...DeliveryTargetApplication,
 ) (preparedWorkflowEngineState, error) {
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires selected workflow persistence")
@@ -428,6 +444,19 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	current, found, err := r.coordinator.workflowStore.Load(ctx, address.Route)
 	if err != nil {
 		return preparedWorkflowEngineState{}, err
+	}
+	if !found && len(targetApplications) > 0 {
+		if len(targetApplications) != 1 {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation accepts at most one delivery target application")
+		}
+		application := targetApplications[0]
+		if persisted, ok := application.persistedInstance(); ok {
+			if address.Route != application.Route() || entityID.String() != application.EntityID() {
+				return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation state disagrees with admitted delivery target application")
+			}
+			current = persisted
+			found = true
+		}
 	}
 	create := !found
 	expectedState := ""
@@ -513,6 +542,18 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
 	flowID := strings.TrimSpace(address.FlowID.String())
+	if application, ok := deliveryTargetApplicationFromContext(ctx); ok {
+		if err := application.Validate(); err != nil {
+			return runtimeengine.StateSnapshot{}, false, err
+		}
+		if application.Owner().EntitylessReceiver() {
+			return runtimeengine.StateSnapshot{}, false, nil
+		}
+		if address.Route != application.Route() || entityID.String() != application.EntityID() {
+			return runtimeengine.StateSnapshot{}, false, fmt.Errorf("engine state lookup disagrees with admitted delivery target application")
+		}
+		return application.persistedSnapshot()
+	}
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
 		if !address.Route.Valid() {
 			return runtimeengine.StateSnapshot{}, false, fmt.Errorf("engine state lookup requires an exact workflow instance route")

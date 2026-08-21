@@ -242,9 +242,10 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "child")
+	childEntityID := FlowInstanceEntityID("child")
+	triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, childEntityID), "child")
 	triggerEnvelope = events.EnvelopeForTargetRoute(triggerEnvelope, events.RouteIdentity{
-		FlowID: "child", FlowInstance: "child", EntityID: entityID,
+		FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
 	})
 	trigger := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -261,7 +262,12 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	childWorker := pipelineSourceNode(t, pc.SemanticSource(), "child", "child-worker")
-	triggerRoute := seedPipelineNodeDeliveryAuthority(t, db, trigger, childWorker)
+	triggerRoute := seedPipelineNodeDeliveryRouteAuthority(t, db, trigger, events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(childWorker),
+		Target: events.MustMaterializingEntityTarget(events.RouteIdentity{
+			FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
+		}),
+	})
 
 	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), childWorker, trigger); err != nil || !handled {
 		t.Fatalf("child-worker should handle work.requested through the input-pin alias: handled=%v err=%v", handled, err)

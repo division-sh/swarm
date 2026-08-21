@@ -281,6 +281,9 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 		flowID = pc.SemanticSource().WorkflowName()
 	}
 	flowInstance := actionResultFlowPath(pc.SemanticSource(), flowID)
+	if flowID == strings.TrimSpace(pc.SemanticSource().WorkflowName()) && strings.TrimSpace(evt.RunID()) != "" {
+		flowInstance = strings.Trim(strings.TrimSpace(evt.RunID()), "/")
+	}
 	if concrete := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); actionResultFlowInstanceBelongsToFlow(pc.SemanticSource(), flowID, concrete) {
 		flowInstance = concrete
 	}

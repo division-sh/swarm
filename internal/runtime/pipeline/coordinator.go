@@ -287,27 +287,28 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 	var workflowStore *workflowInstanceStore
 	if storeTemplate != nil {
 		workflowStore = &workflowInstanceStore{
-			entityQuery:      storeTemplate.entityQuery,
-			routeRecovery:    storeTemplate.routeRecovery,
-			activityResults:  storeTemplate.activityResults,
-			activityJournal:  storeTemplate.activityJournal,
-			gateRoutes:       storeTemplate.gateRoutes,
-			timerObligations: storeTemplate.timerObligations,
-			engineMutations:  storeTemplate.engineMutations,
-			cardMutations:    storeTemplate.cardMutations,
-			timerOccurrences: storeTemplate.timerOccurrences,
-			timerActivations: storeTemplate.timerActivations,
-			readiness:        storeTemplate.readiness,
-			standingServices: storeTemplate.standingServices,
-			decisionRoutes:   storeTemplate.decisionRoutes,
-			instanceReader:   storeTemplate.instanceReader,
-			initialCommits:   storeTemplate.initialCommits,
-			deliveryStore:    opts.DeliveryStore,
-			pipelineStore:    opts.PipelineObligations,
-			decisionCards:    opts.DecisionCards,
-			lifecycleOwner:   pipelineWorkflowLifecycleOwner{coordinator: coordinator},
-			runLifecycle:     opts.RunLifecycle,
-			deliverySignals:  make(map[runtimedelivery.ExecutionAuthority]func()),
+			entityQuery:       storeTemplate.entityQuery,
+			routeRecovery:     storeTemplate.routeRecovery,
+			activityResults:   storeTemplate.activityResults,
+			activityJournal:   storeTemplate.activityJournal,
+			gateRoutes:        storeTemplate.gateRoutes,
+			timerObligations:  storeTemplate.timerObligations,
+			engineMutations:   storeTemplate.engineMutations,
+			cardMutations:     storeTemplate.cardMutations,
+			timerOccurrences:  storeTemplate.timerOccurrences,
+			timerActivations:  storeTemplate.timerActivations,
+			readiness:         storeTemplate.readiness,
+			standingServices:  storeTemplate.standingServices,
+			decisionRoutes:    storeTemplate.decisionRoutes,
+			instanceReader:    storeTemplate.instanceReader,
+			entityStateReader: storeTemplate.entityStateReader,
+			initialCommits:    storeTemplate.initialCommits,
+			deliveryStore:     opts.DeliveryStore,
+			pipelineStore:     opts.PipelineObligations,
+			decisionCards:     opts.DecisionCards,
+			lifecycleOwner:    pipelineWorkflowLifecycleOwner{coordinator: coordinator},
+			runLifecycle:      opts.RunLifecycle,
+			deliverySignals:   make(map[runtimedelivery.ExecutionAuthority]func()),
 		}
 	}
 	coordinator.workflowStore = workflowStore
@@ -657,25 +658,16 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		}
 		executionCtx := heartbeat.Context()
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
-		targetOwner := route.Target.Route()
-		instancePath := targetOwner.FlowInstance
-		stateRoute, err := workflowInstanceRouteForExecution(source, nodeFlowID, instancePath)
+		application, err := pc.prepareDeliveryTargetApplication(executionCtx, node.Key(), handlerFact, handler, evt, route.Target)
 		if err != nil {
 			_ = heartbeat.Stop()
 			return false, err
 		}
-		currentState := WorkflowState{Metadata: map[string]any{}}
-		if !route.Target.EntitylessReceiver() {
-			currentState, err = pc.currentWorkflowState(executionCtx, stateRoute, identity.NormalizeEntityID(targetOwner.EntityID))
-			if err != nil {
-				_ = heartbeat.Stop()
-				return false, err
-			}
-		}
+		executionCtx = withDeliveryTargetApplication(executionCtx, application)
 		result, err := pc.executeNodeContractHandler(executionCtx, node, handler, workflowTriggerContext{
-			Event:           evt,
+			Event:           application.Event(),
 			HandlerEventKey: handlerEventKey,
-			State:           currentState,
+			State:           application.State(),
 		}, false, emissions != nil)
 		if err == nil {
 			for _, emitted := range result.Emissions {

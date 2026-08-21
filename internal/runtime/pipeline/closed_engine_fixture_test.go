@@ -757,10 +757,21 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 		return fmt.Errorf("update pipeline test workflow flow instance with %d arguments: %w", len(flowArgs), err)
 	}
 	rows, err = result.RowsAffected()
-	if err != nil || rows != 1 {
-		if err != nil {
-			return err
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		insert := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		args := []any{record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt}
+		if store.testDialect() == workflowStoreDialectPostgres {
+			insert = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)`
 		}
+		if _, err := tx.ExecContext(ctx, insert, args...); err != nil {
+			return fmt.Errorf("materialize pipeline test workflow flow instance companion: %w", err)
+		}
+		rows = 1
+	}
+	if rows != 1 {
 		return fmt.Errorf("pipeline test workflow flow instance is missing")
 	}
 	if err := commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before); err != nil {

@@ -5,11 +5,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -365,6 +367,13 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 			nodeID = strings.TrimSpace(nodeID)
 			for eventType, handler := range node.EventHandlers {
 				eventType = strings.TrimSpace(eventType)
+				if _, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, validationScope.semanticFlowID, events.EventType(eventType), handler); err != nil {
+					findings = append(findings, Finding{
+						CheckID: "select_entity_validation", Severity: "error",
+						Message:  fmt.Sprintf("flow %s handler %s on node %s has invalid receiver target compatibility: %v", validationScope.displayFlowID, eventType, nodeID, err),
+						Location: validationScope.displayFlowID,
+					})
+				}
 				hasSelectEntity := handler.SelectEntity != nil && !handler.SelectEntity.Empty()
 				hasSelectOrCreateEntity := handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()
 				if !hasSelectEntity && !hasSelectOrCreateEntity {
@@ -600,6 +609,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if _, ok := validationScope.inputs[eventType]; !ok {
 					continue
 				}
+				policy, policyErr := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, validationScope.semanticFlowID, events.EventType(eventType), handler)
 				if validationScope.retiredStatic {
 					if handler.CreateEntity {
 						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
@@ -638,13 +648,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if standingActivatedFlow(c.source, validationScope.semanticFlowID) {
 					continue
 				}
-				if handler.CreateEntity {
-					continue
-				}
-				if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
-					continue
-				}
-				if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
+				if policyErr == nil && policy.Acquisition != runtimepipeline.DeliveryTargetAcquisitionNone {
 					continue
 				}
 				if flowInputHandlerUsesResolutionMode(c.source, validationScope.semanticFlowID, eventType, runtimecontracts.FlowInputResolutionModeFanIn) {

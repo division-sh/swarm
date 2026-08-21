@@ -1442,6 +1442,12 @@ opco.ceo_ready:
 		module:         staticSemanticWorkflowModule{source: source},
 	}
 	configurePipelineTestDeliveryOwner(t, pc)
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111",
+		WorkflowName: "operating", WorkflowVersion: "1.0.0", CurrentState: "initializing", Fields: map[string]any{},
+	})); err != nil {
+		t.Fatalf("seed exact selected template owner: %v", err)
+	}
 	route := seedPipelineNodeDeliveryAuthority(t, db, evt, pipelineNode(t, "operating", "lifecycle-orchestrator"))
 	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), node, evt)
 	if err != nil {
