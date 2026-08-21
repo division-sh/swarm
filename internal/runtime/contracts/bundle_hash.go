@@ -42,6 +42,7 @@ type bundleHashEntry struct {
 	Path          string
 	Policy        bundleHashContentPolicy
 	ExpectedExact []byte
+	ExactOwner    string
 }
 
 type canonicalJSONNumber float64
@@ -242,6 +243,7 @@ func (b *bundleHashEntryBuilder) addExactIntentFile(path string, expected []byte
 			}
 			b.entries[i].Policy = bundleHashIntent
 			b.entries[i].ExpectedExact = append([]byte(nil), expected...)
+			b.entries[i].ExactOwner = mergeBundleHashExactOwners(b.entries[i].ExactOwner, "exact agent intent resolution")
 			return nil
 		}
 		return fmt.Errorf("declared intent %s has no canonical input record", label)
@@ -250,6 +252,7 @@ func (b *bundleHashEntryBuilder) addExactIntentFile(path string, expected []byte
 		return err
 	}
 	b.entries[len(b.entries)-1].ExpectedExact = append([]byte(nil), expected...)
+	b.entries[len(b.entries)-1].ExactOwner = "exact agent intent resolution"
 	return nil
 }
 
@@ -290,16 +293,91 @@ func (b *bundleHashEntryBuilder) addAgentMockModuleFiles(bundle *WorkflowContrac
 		if !agent.Mock.Configured() {
 			continue
 		}
-		sourcePath := strings.TrimSpace(agent.Mock.SourcePath)
+		sourcePath := agent.Mock.SourcePath
 		if sourcePath == "" {
 			return fmt.Errorf("agent %s mock module is configured but has no source path", agentID)
 		}
+		canonicalSourcePath, pathErr := validateAgentMockModulePath(sourcePath)
+		if pathErr != nil {
+			return fmt.Errorf("agent %s mock module source path %q is not a canonical contracts-root-relative path: %w", agentID, sourcePath, pathErr)
+		}
+		if canonicalSourcePath != sourcePath {
+			return fmt.Errorf("agent %s mock module source path %q is not canonical; want %q", agentID, sourcePath, canonicalSourcePath)
+		}
+		if err := validateBundleHashLabel("bundle/" + sourcePath); err != nil {
+			return fmt.Errorf("agent %s mock module source path %q is not canonical: %w", agentID, sourcePath, err)
+		}
+		if clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(sourcePath))); clean != sourcePath {
+			return fmt.Errorf("agent %s mock module source path %q is not canonical; want %q", agentID, sourcePath, clean)
+		}
+		if len(agent.Mock.Source) == 0 {
+			return fmt.Errorf("agent %s mock module %s has no compiled source bytes", agentID, sourcePath)
+		}
+		sum := sha256.Sum256(agent.Mock.Source)
+		compiledDigest := "sha256:" + hex.EncodeToString(sum[:])
+		if strings.TrimSpace(agent.Mock.Digest) != compiledDigest {
+			return fmt.Errorf("agent %s mock module %s compiled digest %q does not match compiled source bytes %s", agentID, sourcePath, strings.TrimSpace(agent.Mock.Digest), compiledDigest)
+		}
 		path := filepath.Join(b.contractsRoot, filepath.FromSlash(sourcePath))
-		if err := b.addOptionalBundleFile(path, bundleHashRaw); err != nil {
+		canonicalRel, err := contractsRootRelativePath(b.contractsRoot, path)
+		if err != nil {
+			return fmt.Errorf("agent %s mock module: %w", agentID, err)
+		}
+		if canonicalRel != sourcePath {
+			return fmt.Errorf("agent %s mock module source path %q resolves as non-canonical %q", agentID, sourcePath, canonicalRel)
+		}
+		if err := b.addExactAgentMockModuleFile(path, agent.Mock.Source); err != nil {
 			return fmt.Errorf("agent %s mock module: %w", agentID, err)
 		}
 	}
 	return nil
+}
+
+func (b *bundleHashEntryBuilder) addExactAgentMockModuleFile(path string, expected []byte) error {
+	abs, err := canonicalRegularFile(path, "agent mock module input")
+	if err != nil {
+		return err
+	}
+	label, err := bundleHashBundleLabel(b.contractsRoot, abs)
+	if err != nil {
+		return err
+	}
+	if _, exists := b.seenPaths[abs]; exists {
+		for i := range b.entries {
+			if b.entries[i].Path != abs {
+				continue
+			}
+			if b.entries[i].Policy != bundleHashRaw {
+				return fmt.Errorf("compiled mock module %s overlaps canonical input %s with non-raw policy", label, b.entries[i].Label)
+			}
+			if b.entries[i].ExpectedExact != nil && !bytes.Equal(b.entries[i].ExpectedExact, expected) {
+				return fmt.Errorf("compiled mock module %s has conflicting exact content owners", label)
+			}
+			b.entries[i].ExpectedExact = append([]byte(nil), expected...)
+			b.entries[i].ExactOwner = mergeBundleHashExactOwners(b.entries[i].ExactOwner, "exact agent mock module compilation")
+			return nil
+		}
+		return fmt.Errorf("compiled mock module %s has no canonical input record", label)
+	}
+	if err := b.addEntry(abs, label, bundleHashRaw); err != nil {
+		return err
+	}
+	b.entries[len(b.entries)-1].ExpectedExact = append([]byte(nil), expected...)
+	b.entries[len(b.entries)-1].ExactOwner = "exact agent mock module compilation"
+	return nil
+}
+
+func mergeBundleHashExactOwners(existing, owner string) string {
+	existing = strings.TrimSpace(existing)
+	owner = strings.TrimSpace(owner)
+	switch {
+	case existing == "":
+		return owner
+	case owner == "" || existing == owner:
+		return existing
+	default:
+		return existing + " and " + owner
+	}
 }
 
 func (b *bundleHashEntryBuilder) addRequiredPlatformSpec(path string) error {
@@ -541,7 +619,11 @@ func canonicalBundleHashEntryContent(entry bundleHashEntry) ([]byte, error) {
 		return nil, err
 	}
 	if entry.ExpectedExact != nil && !bytes.Equal(content, entry.ExpectedExact) {
-		return nil, fmt.Errorf("canonical input changed after exact agent intent resolution")
+		owner := strings.TrimSpace(entry.ExactOwner)
+		if owner == "" {
+			owner = "exact artifact compilation"
+		}
+		return nil, fmt.Errorf("canonical input changed after %s", owner)
 	}
 	return content, nil
 }

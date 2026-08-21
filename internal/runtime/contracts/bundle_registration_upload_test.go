@@ -178,6 +178,74 @@ func TestBuildBundleRegistrationDirectoryUploadCarriesDeclaredMockModules(t *tes
 	}
 }
 
+func TestImportedMockModuleRegistrationAndCatalogReloadUseCanonicalPaths(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root, _ := writeImportedAgentMockFixture(t, []string{"child"})
+	platform := DefaultPlatformSpecFile(repo)
+	upload, err := BuildBundleRegistrationDirectoryUpload(repo, root, platform)
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
+	}
+	if upload.DataBlob == nil {
+		t.Fatal("DataBlob = nil, want imported mock module entries")
+	}
+	var paths []string
+	for _, entry := range upload.DataBlob.Entries {
+		paths = append(paths, entry.Path)
+	}
+	wantPaths := []string{
+		"child/mocks/child-flow.py",
+		"child/mocks/child-project.py",
+		"mocks/root-flow.py",
+		"mocks/root-project.py",
+	}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Fatalf("imported mock data entries = %#v, want %#v", paths, wantPaths)
+	}
+	wantChildSource := validAgentMockSource("child-project")
+	if got := upload.DataBlob.Entries[1].DataBase64; got != base64.StdEncoding.EncodeToString([]byte(wantChildSource)) {
+		t.Fatalf("imported mock bytes = %q, want exact child source", got)
+	}
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, platform)
+	if err != nil {
+		t.Fatalf("load imported mock bundle: %v", err)
+	}
+	bundleHash, err := BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjectionWithOptions(bundle, BundleCatalogProjectionOptions{Source: "test"})
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	source, err := LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:              bundleHash,
+		ContentYAML:             projection.ContentYAML,
+		DataBlob:                projection.DataBlob,
+		RunningPlatformSpecPath: platform,
+	})
+	if err != nil {
+		t.Fatalf("LoadBundleCatalogRuntimeSource: %v", err)
+	}
+	defer source.Cleanup()
+	reloadedHash, err := BundleHash(source.Bundle)
+	if err != nil {
+		t.Fatalf("reloaded BundleHash: %v", err)
+	}
+	if reloadedHash != bundleHash {
+		t.Fatalf("reloaded hash = %s, want %s", reloadedHash, bundleHash)
+	}
+	child, ok := source.Bundle.ProjectViewByKey("child")
+	if !ok {
+		t.Fatal("reloaded imported project view missing")
+	}
+	assertAgentMockPerformance(t, child.Agents["project-agent"].Mock, "mocks/child-project.py", "child/mocks/child-project.py", wantChildSource)
+	if raw, err := os.ReadFile(filepath.Join(source.ContractsRoot, "child", "mocks", "child-project.py")); err != nil || string(raw) != wantChildSource {
+		t.Fatalf("reconstructed imported module bytes = %q, err=%v", raw, err)
+	}
+}
+
 func TestBuildBundleRegistrationDirectoryUploadCarriesPolicyModules(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writePolicyModuleContractsDir(t)

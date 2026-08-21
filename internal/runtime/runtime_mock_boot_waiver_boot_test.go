@@ -115,6 +115,11 @@ func fullyMockedBootAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryPackageBacked)
+	// This boot proof needs one declaration owner; package composition is
+	// covered by the contracts loader parity tests.
+	if err := os.Remove(filepath.Join(root, "flows", "support", "package.yaml")); err != nil {
+		t.Fatalf("remove overlapping nested package declaration: %v", err)
+	}
 	agentsPath := filepath.Join(root, "flows", "support", "agents.yaml")
 	agents, err := os.ReadFile(agentsPath)
 	if err != nil {

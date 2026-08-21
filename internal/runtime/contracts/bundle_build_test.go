@@ -389,6 +389,53 @@ func TestBuildBundleMaterializationMaterializesAgentMockModules(t *testing.T) {
 	}
 }
 
+func TestBuildBundleMaterializationUsesCanonicalImportedMockModulePaths(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root, _ := writeImportedAgentMockFixture(t, []string{"child"})
+	report, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: DefaultPlatformSpecFile(repo),
+		OutputRoot:       filepath.Join(t.TempDir(), "build"),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleMaterialization: %v", err)
+	}
+	wantSource := validAgentMockSource("child-project")
+	materialized, err := os.ReadFile(filepath.Join(report.OutputPath, "child", "mocks", "child-project.py"))
+	if err != nil {
+		t.Fatalf("materialized imported mock module missing: %v", err)
+	}
+	if string(materialized) != wantSource {
+		t.Fatalf("materialized imported mock module = %q, want %q", materialized, wantSource)
+	}
+	var manifest BundleBuildManifest
+	if err := json.Unmarshal([]byte(readBundleBuildFile(t, report.OutputPath, "build-manifest.json")), &manifest); err != nil {
+		t.Fatalf("decode build manifest: %v", err)
+	}
+	found := false
+	for _, input := range manifest.Inputs {
+		if input.Label == "bundle/child/mocks/child-project.py" {
+			found = true
+			if input.Policy != "raw_data" || input.SizeBytes != int64(len(wantSource)) {
+				t.Fatalf("imported mock build input = %#v", input)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("manifest inputs omit canonical imported mock label: %#v", manifest.Inputs)
+	}
+	reloaded, err := LoadWorkflowContractBundleWithOverrides(repo, report.OutputPath, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("reload materialized imported bundle: %v", err)
+	}
+	child, ok := reloaded.ProjectViewByKey("child")
+	if !ok {
+		t.Fatal("reloaded child project view missing")
+	}
+	assertAgentMockPerformance(t, child.Agents["project-agent"].Mock, "mocks/child-project.py", "child/mocks/child-project.py", wantSource)
+}
+
 func TestBuildBundleMaterializationChangesHashWhenMockBytesChange(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writeMockedAgentContractsDir(t)
