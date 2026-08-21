@@ -1014,7 +1014,7 @@ func buildFlowAgentConfig(
 		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   rendered,
-		EmitEvents:      normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID),
+		EmitEvents:      normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/")),
 		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),
 		Permissions:     permissions,
 		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
@@ -1191,15 +1191,14 @@ func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entr
 	return runtimecontracts.AssembleAgentPrompt(bundle, flowID, entry, nil)
 }
 
-func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath, templateID, instanceID string) []string {
+func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath string) []string {
 	rendered := normalizedConfiguredEventList(events, vars)
 	if len(rendered) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(rendered))
-	instancePath := strings.Trim(strings.TrimSpace(templateID)+"/"+strings.TrimSpace(instanceID), "/")
 	for _, eventType := range rendered {
-		out = append(out, eventidentity.ExternalizeForFlow(instancePath, localEventList(localEvents), eventType))
+		out = append(out, eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), eventType))
 	}
 	return dedupeStrings(out)
 }

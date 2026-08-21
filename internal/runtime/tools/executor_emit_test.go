@@ -118,6 +118,9 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 	if got := bus.event.RoutingSource().Route().Normalized(); got != wantRoute {
 		t.Fatalf("routing source route = %#v, want declaration flow plus concrete runtime instance %#v", got, wantRoute)
 	}
+	if got := string(bus.event.Type()); got != instancePath+"/"+eventType {
+		t.Fatalf("emitted event type = %q, want declaration-owned concrete path %q", got, instancePath+"/"+eventType)
+	}
 }
 
 type emitPreflightCaptureBus struct {
