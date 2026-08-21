@@ -10,19 +10,16 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const (
-	scanPageSize          = 200
-	scanFailureRetryDelay = time.Second
-	dispatchRetryDelay    = time.Second
+	scanPageSize = 200
 )
 
 // Dispatcher re-enters the existing exact EventBus route. The selected store,
 // not the coordinator, still decides whether the delivery can be claimed.
 type Dispatcher interface {
-	DispatchDeliveryContinuation(context.Context, events.Event, events.DeliveryRoute) error
+	DispatchDeliveryContinuation(context.Context, events.Event, events.DeliveryRoute) DispatchResult
 }
 
 type ErrorReporter func(context.Context, error)
@@ -40,6 +37,10 @@ type entry struct {
 	state ownershipState
 }
 
+type synchronizationRequest struct {
+	result chan error
+}
+
 // Coordinator is the one normal-runtime-generation owner for executable
 // delivery continuations. It is a bounded selected-store projection, not a
 // durable queue or a second eligibility clock.
@@ -55,8 +56,10 @@ type Coordinator struct {
 	started bool
 	retired bool
 	wake    chan struct{}
+	sync    chan synchronizationRequest
 	done    chan struct{}
 	cancel  context.CancelFunc
+	failure error
 }
 
 func New(
@@ -83,7 +86,7 @@ func New(
 	}
 	return &Coordinator{
 		store: store, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
-		entries: make(map[string]entry), wake: make(chan struct{}, 1), done: make(chan struct{}),
+		entries: make(map[string]entry), wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
 	}, nil
 }
 
@@ -117,8 +120,10 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.cancel = cancel
 	c.mu.Unlock()
-	if _, _, err := c.scan(runCtx); err != nil {
+	next, wake, err := c.scan(runCtx)
+	if err != nil {
 		cancel()
+		c.recordFailure(err)
 		close(c.done)
 		return errors.Join(
 			fmt.Errorf("enumerate delivery continuations before readiness: %w", err),
@@ -128,10 +133,57 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	go func() {
 		defer close(c.done)
 		defer func() { _ = lease.Done() }()
-		c.run(runCtx)
+		c.run(runCtx, next, wake)
 	}()
 	c.Signal()
 	return nil
+}
+
+// Synchronize completes one scan requested after a startup-owned lifecycle
+// transition, such as publishing restored agent routes. It reports the exact
+// scan result and does not wait for or manufacture durable eligibility.
+func (c *Coordinator) Synchronize(ctx context.Context) error {
+	if c == nil {
+		return errors.New("delivery continuation coordinator is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.mu.Lock()
+	started := c.started
+	retired := c.retired
+	failure := c.failure
+	c.mu.Unlock()
+	if !started {
+		return errors.New("delivery continuation coordinator is not started")
+	}
+	if failure != nil {
+		return failure
+	}
+	if retired {
+		return errors.New("delivery continuation coordinator is retired")
+	}
+	request := synchronizationRequest{result: make(chan error, 1)}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		return c.stoppedError()
+	case c.sync <- request:
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.done:
+		select {
+		case err := <-request.result:
+			return err
+		default:
+			return c.stoppedError()
+		}
+	case err := <-request.result:
+		return err
+	}
 }
 
 func (c *Coordinator) Retire(ctx context.Context) error {
@@ -275,13 +327,18 @@ func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryContinuat
 	return &capability{coordinator: c, deliveryID: deliveryID}, nil
 }
 
-func (c *Coordinator) run(ctx context.Context) {
+func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) {
 	var timer *time.Timer
+	var err error
+	if wake {
+		timer = time.NewTimer(next)
+	}
 	for {
 		var timerC <-chan time.Time
 		if timer != nil {
 			timerC = timer.C
 		}
+		var synchronized chan error
 		select {
 		case <-ctx.Done():
 			if timer != nil {
@@ -290,26 +347,58 @@ func (c *Coordinator) run(ctx context.Context) {
 			return
 		case <-c.wake:
 		case <-timerC:
+		case request := <-c.sync:
+			synchronized = request.result
 		}
 		if timer != nil {
 			timer.Stop()
 			timer = nil
 		}
-		next, wake, err := c.scan(ctx)
+		next, wake, err = c.scan(ctx)
+		if synchronized != nil {
+			synchronized <- err
+			close(synchronized)
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
+			c.recordFailure(err)
 			if c.report != nil {
 				c.report(ctx, err)
 			}
-			timer = time.NewTimer(scanFailureRetryDelay)
-			continue
+			return
 		}
 		if wake {
 			timer = time.NewTimer(next)
 		}
 	}
+}
+
+func (c *Coordinator) recordFailure(err error) {
+	if c == nil || err == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.failure == nil {
+		c.failure = err
+	}
+	c.mu.Unlock()
+}
+
+func (c *Coordinator) stoppedError() error {
+	if c == nil {
+		return errors.New("delivery continuation coordinator is required")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.failure != nil {
+		return c.failure
+	}
+	if c.retired {
+		return errors.New("delivery continuation coordinator is retired")
+	}
+	return errors.New("delivery continuation coordinator stopped without a result")
 }
 
 func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
@@ -332,16 +421,24 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 				}
 				c.reclaimAttempt(item.DeliveryID)
 				if c.coordinatorOwns(item.DeliveryID) {
-					if err := c.dispatcher.DispatchDeliveryContinuation(ctx, item.Event, item.Snapshot.Route); err != nil {
+					result := c.dispatcher.DispatchDeliveryContinuation(ctx, item.Event, item.Snapshot.Route)
+					if err := result.Validate(); err != nil {
+						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", item.DeliveryID, err)
+					}
+					switch result.Disposition() {
+					case DispatchTransferred:
+					case DispatchTerminal:
+						c.releaseTerminal(item.DeliveryID)
+					case DispatchDeferred:
+						// The named owner signals this coordinator after its
+						// transition commits. A deferral never invents a timer.
+					case DispatchFatal:
 						if ctx.Err() != nil {
 							return 0, false, ctx.Err()
 						}
-						if !isTopologyBlocked(err) {
-							if c.report != nil {
-								c.report(ctx, fmt.Errorf("dispatch delivery continuation %s: %w", item.DeliveryID, err))
-							}
-							next, wake = earlierWake(next, wake, dispatchRetryDelay)
-						}
+						return 0, false, fmt.Errorf("dispatch delivery continuation %s: %w", item.DeliveryID, result.Failure())
+					default:
+						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", item.DeliveryID)
 					}
 				}
 			case runtimedelivery.ClaimDeferred:
@@ -377,13 +474,6 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 		next, wake = earlierWake(next, wake, reconcileNext)
 	}
 	return next, wake, nil
-}
-
-func isTopologyBlocked(err error) bool {
-	failure, ok := runtimefailures.As(err)
-	return ok &&
-		failure.Failure.Class == runtimefailures.ClassTargetUnreachable &&
-		failure.Failure.Detail.Code == "authoritative_delivery_incomplete"
 }
 
 func (c *Coordinator) observe(deliveryID string) error {

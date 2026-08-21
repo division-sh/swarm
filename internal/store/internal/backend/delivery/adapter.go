@@ -124,7 +124,54 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 	if err := authority.Validate(); err != nil {
 		return err
 	}
+	now, err := a.databaseNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	// Startup ownership has fenced the predecessor before activation. Its
+	// still-open attempt cannot remain a five-minute liveness claim against the
+	// successor generation, but reclaim must continue through the ordinary
+	// lease-fenced claim path. The selected-store timestamp preserves the exact
+	// attempt evidence while making that claim immediately reclaimable.
+	reclaimAt := now
 	bundleHash, bundleSource := authority.BundleSource().StorageValues()
+	expireQuery := `
+		UPDATE event_delivery_attempts AS attempt
+		SET lease_expires_at=$1
+		FROM event_deliveries AS delivery
+		WHERE attempt.delivery_id=delivery.delivery_id
+		  AND attempt.claim_version=delivery.current_attempt_version
+		  AND attempt.open_marker=TRUE
+		  AND delivery.current_attempt_open=TRUE
+		  AND delivery.status='in_progress'
+		  AND delivery.execution_authority_kind='normal_runtime'
+		  AND delivery.authority_bundle_hash=$2
+		  AND delivery.authority_bundle_source=$3
+		  AND (delivery.execution_authority_id<>$4 OR delivery.execution_authority_generation<>$5)
+		  AND attempt.lease_expires_at>$1`
+	expireArgs := []any{reclaimAt, bundleHash, bundleSource, authority.ExecutionID(), authority.Generation()}
+	if a.dialect == DialectSQLite {
+		expireQuery = `
+			UPDATE event_delivery_attempts
+			SET lease_expires_at=?
+			WHERE open_marker=TRUE
+			  AND lease_expires_at>?
+			  AND EXISTS (
+				SELECT 1 FROM event_deliveries AS delivery
+				WHERE delivery.delivery_id=event_delivery_attempts.delivery_id
+				  AND delivery.current_attempt_version=event_delivery_attempts.claim_version
+				  AND delivery.current_attempt_open=TRUE
+				  AND delivery.status='in_progress'
+				  AND delivery.execution_authority_kind='normal_runtime'
+				  AND delivery.authority_bundle_hash=?
+				  AND delivery.authority_bundle_source=?
+				  AND (delivery.execution_authority_id<>? OR delivery.execution_authority_generation<>?)
+			  )`
+		expireArgs = []any{reclaimAt, reclaimAt, bundleHash, bundleSource, authority.ExecutionID(), authority.Generation()}
+	}
+	if _, err := tx.ExecContext(ctx, expireQuery, expireArgs...); err != nil {
+		return fmt.Errorf("expire predecessor delivery attempts: %w", err)
+	}
 	query := `
 		UPDATE event_deliveries
 		SET execution_authority_id=$1,

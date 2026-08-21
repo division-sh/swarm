@@ -25,6 +25,9 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 		"swarm agent replay-backlog",
 		"retry_eligible",
 		"delivery_retry_eligible",
+		"scanFailureRetryDelay",
+		"dispatchRetryDelay",
+		"isTopologyBlocked",
 	}
 	scanConsumers := map[string]int{}
 	pipelineSettlementConsumers := map[string]int{}
