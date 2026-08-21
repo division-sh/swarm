@@ -88,6 +88,82 @@ func TestExecutableNodeSemanticScopeSeparatesDeclarationPackageFromOwningFlow(t 
 	}
 }
 
+func TestExecutableNodeEventDescendantsPreserveDeclarationPackageBoundaryInEitherOrder(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		name := "a_then_b"
+		if reverse {
+			name = "b_then_a"
+		}
+		t.Run(name, func(t *testing.T) {
+			node := SystemNodeContract{ID: "consumer"}
+			packageA := FlowContractView{
+				Paths: FlowContractPaths{PackageKey: "packages/a", NodesFile: "packages/a/nodes.yaml"},
+				Nodes: map[string]SystemNodeContract{"consumer": node},
+				Children: []FlowContractView{
+					{
+						Path:   "orders/a-local",
+						Paths:  FlowContractPaths{ID: "a-local", PackageKey: "packages/a"},
+						Events: map[string]EventCatalogEntry{"local.done": {}},
+					},
+					{
+						Path:   "orders/a-child",
+						Paths:  FlowContractPaths{ID: "a-child", PackageKey: "packages/a/child"},
+						Events: map[string]EventCatalogEntry{"a.done": {}},
+					},
+				},
+			}
+			packageB := FlowContractView{
+				Paths: FlowContractPaths{PackageKey: "packages/b"},
+				Children: []FlowContractView{{
+					Path:   "orders/b-child",
+					Paths:  FlowContractPaths{ID: "b-child", PackageKey: "packages/b"},
+					Events: map[string]EventCatalogEntry{"b.done": {}},
+				}},
+			}
+			packages := []FlowContractView{packageA, packageB}
+			if reverse {
+				packages[0], packages[1] = packages[1], packages[0]
+			}
+			flow := FlowContractView{
+				Path:     "orders",
+				Paths:    FlowContractPaths{ID: "orders", PackageKey: "flows/orders"},
+				Children: packages,
+			}
+			root := FlowContractView{Paths: FlowContractPaths{PackageKey: "."}, Children: []FlowContractView{flow}}
+			bundle := &WorkflowContractBundle{
+				FlowTree: FlowTree{Root: &root, ByID: map[string]*FlowContractView{"orders": &root.Children[0]}},
+				projectContracts: map[string]ProjectContractView{
+					"packages/a": {
+						Paths: ProjectPackagePaths{Key: "packages/a"},
+						Nodes: map[string]SystemNodeContract{"consumer": node},
+					},
+				},
+			}
+			ref := identitytest.ExecutableNode(t, "packages/a", "orders", "consumer")
+
+			for _, resolve := range []struct {
+				name string
+				fn   func(string) string
+			}{
+				{name: "reference", fn: func(value string) string { return bundle.ResolveExecutableNodeEventReference(ref, value) }},
+				{name: "pattern", fn: func(value string) string { return bundle.ResolveExecutableNodeEventPattern(ref, value) }},
+			} {
+				t.Run(resolve.name, func(t *testing.T) {
+					if got := resolve.fn("a-local/local.done"); got != "orders/a-local/local.done" {
+						t.Fatalf("exact-package descendant = %q, want orders/a-local/local.done", got)
+					}
+					if got := resolve.fn("a-child/a.done"); got != "orders/a-child/a.done" {
+						t.Fatalf("child-package descendant = %q, want orders/a-child/a.done", got)
+					}
+					if got := resolve.fn("b-child/b.done"); got != "b-child/b.done" {
+						t.Fatalf("sibling-package descendant = %q, want unchanged b-child/b.done", got)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestExecutableNodeSemanticScopeRejectsMissingOwningFlowBeforeLoadPublication(t *testing.T) {
 	source := ContractItemSource{PackageKey: "packages/a", FlowID: "orders", Layer: "project", File: "packages/a/nodes.yaml"}
 	key := contractScopeKey(source, "shared")
