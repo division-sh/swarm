@@ -188,8 +188,8 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 	}
 	visited := map[string]bool{}
 	var out []ProjectPackagePaths
-	var walk func(packageFile, parentKey string, depth int)
-	walk = func(packageFile, parentKey string, depth int) {
+	var walk func(packageFile, parentKey, owningFlowID string, depth int)
+	walk = func(packageFile, parentKey, owningFlowID string, depth int) {
 		packageFile = existingFile(packageFile)
 		if packageFile == "" || visited[packageFile] {
 			return
@@ -207,6 +207,7 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		pkg := ProjectPackagePaths{
 			Key:               key,
 			ParentKey:         parentKey,
+			OwningFlowID:      strings.TrimSpace(owningFlowID),
 			Depth:             depth,
 			Dir:               packageDir,
 			PackageFile:       packageFile,
@@ -250,15 +251,19 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		})
 		out = append(out, pkg)
 
-		var flowPackageFiles []string
+		type flowPackagePath struct {
+			file   string
+			flowID string
+		}
+		var flowPackages []flowPackagePath
 		for _, flow := range pkg.Flows {
-			if flowPackage := existingFile(filepath.Join(flow.Dir, "package.yaml")); flowPackage != "" {
-				flowPackageFiles = append(flowPackageFiles, flowPackage)
+			if packageFile := existingFile(filepath.Join(flow.Dir, "package.yaml")); packageFile != "" {
+				flowPackages = append(flowPackages, flowPackagePath{file: packageFile, flowID: strings.TrimSpace(flow.ID)})
 			}
 		}
-		sort.Strings(flowPackageFiles)
-		for _, flowPackage := range flowPackageFiles {
-			walk(flowPackage, pkg.Key, depth+1)
+		sort.Slice(flowPackages, func(i, j int) bool { return flowPackages[i].file < flowPackages[j].file })
+		for _, child := range flowPackages {
+			walk(child.file, pkg.Key, child.flowID, depth+1)
 		}
 
 		for _, child := range manifest.ChildPackages() {
@@ -268,13 +273,14 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			}
 			childPath := filepath.Join(packageDir, location)
 			if strings.HasSuffix(strings.ToLower(location), ".yaml") {
-				walk(childPath, pkg.Key, depth+1)
+				walk(childPath, pkg.Key, projectChildOwningFlowID(pkg, childPath), depth+1)
 				continue
 			}
-			walk(filepath.Join(childPath, "package.yaml"), pkg.Key, depth+1)
+			childPackageFile := filepath.Join(childPath, "package.yaml")
+			walk(childPackageFile, pkg.Key, projectChildOwningFlowID(pkg, childPackageFile), depth+1)
 		}
 	}
-	walk(rootFile, "", 0)
+	walk(rootFile, "", "", 0)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Depth == out[j].Depth {
 			return strings.Compare(out[i].Key, out[j].Key) < 0
@@ -282,6 +288,21 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		return out[i].Depth < out[j].Depth
 	})
 	return out
+}
+
+func projectChildOwningFlowID(parent ProjectPackagePaths, childPackageFile string) string {
+	childDir := filepath.Clean(filepath.Dir(childPackageFile))
+	for _, flow := range parent.Flows {
+		flowID := strings.TrimSpace(flow.ID)
+		flowDir := filepath.Clean(strings.TrimSpace(flow.Dir))
+		if flowID != "" && flowDir != "" && flowDir != "." && (childDir == flowDir || strings.HasPrefix(childDir, flowDir+string(filepath.Separator))) {
+			return flowID
+		}
+	}
+	if len(parent.Flows) == 1 {
+		return strings.TrimSpace(parent.Flows[0].ID)
+	}
+	return strings.TrimSpace(parent.OwningFlowID)
 }
 func validateDiscoveredPackageTree(pkgs []LoadedProjectPackage) error {
 	seenPackages := map[string]struct{}{}
@@ -338,13 +359,15 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	if len(in.EntityWrites) > 0 {
 		out.EntityWrites = make(map[string]AgentEntityWriteDecl, len(in.EntityWrites))
 		for key, value := range in.EntityWrites {
+			value.Create.Fields = append([]string(nil), value.Create.Fields...)
+			value.Save.Fields = append([]string(nil), value.Save.Fields...)
 			out.EntityWrites[key] = value
 		}
 	}
 	if len(in.NativeTools) > 0 {
 		out.NativeTools = make(map[string]any, len(in.NativeTools))
 		for key, value := range in.NativeTools {
-			out.NativeTools[key] = value
+			out.NativeTools[key] = cloneEventSchemaValue(value)
 		}
 	}
 	if len(in.Permissions) > 0 {
@@ -353,8 +376,17 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	if len(in.Subscriptions) > 0 {
 		out.Subscriptions = append([]string{}, in.Subscriptions...)
 	}
+	if len(in.SubscriptionsBootstrap) > 0 {
+		out.SubscriptionsBootstrap = append([]string{}, in.SubscriptionsBootstrap...)
+	}
+	if len(in.SubscribesTo) > 0 {
+		out.SubscribesTo = append([]string{}, in.SubscribesTo...)
+	}
 	if len(in.Tools) > 0 {
 		out.Tools = append([]string{}, in.Tools...)
+	}
+	if len(in.ToolsTier2) > 0 {
+		out.ToolsTier2 = append([]string{}, in.ToolsTier2...)
 	}
 	if len(in.FlowDataAccess) > 0 {
 		out.FlowDataAccess = append([]string{}, in.FlowDataAccess...)

@@ -29,30 +29,15 @@ func ResolveAgentMemoryProof(source Source, locator AgentMemoryLocator) AgentMem
 		return proof
 	}
 
-	if declaration, ok := agentMemoryDeclaration(source, locator); ok {
-		projection, projected := ScopedAgentContractProjection(source, declaration)
-		if projected {
-			proof.ContractSource = projection.ContractSource
-			proof.OwningFlowID = projection.OwnerFlowID
-			if proof.ProjectScopeKey == "" {
-				proof.ProjectScopeKey = strings.TrimSpace(projection.ContractSource.PackageKey)
-			}
-		}
-	}
-
-	if proof.AgentID == "" && proof.ProjectScopeKey == "" && strings.TrimSpace(locator.FlowID) == "" {
+	declaration, ok := agentMemoryDeclaration(source, locator)
+	if !ok {
 		return proof
 	}
-
-	if flowID := strings.TrimSpace(locator.FlowID); flowID != "" {
-		proof.OwningFlowID = flowID
-	} else if proof.ProjectScopeKey != "" {
-		if projectScope, ok := projectScopeByKey(source, proof.ProjectScopeKey); ok {
-			proof.ProjectScopeKey = projectScope.Key
-			proof.OwningFlowID = strings.TrimSpace(projectScope.OwningFlowID)
-		}
+	proof.ContractSource = declaration.Source
+	proof.OwningFlowID = strings.TrimSpace(declaration.OwnerFlowID)
+	if proof.ProjectScopeKey == "" {
+		proof.ProjectScopeKey = strings.TrimSpace(declaration.Source.PackageKey)
 	}
-
 	if proof.OwningFlowID == "" {
 		return proof
 	}
@@ -66,13 +51,26 @@ func ResolveAgentMemoryProof(source Source, locator AgentMemoryLocator) AgentMem
 	return proof
 }
 
+func AgentMemoryProofForDeclaration(source Source, declaration AgentDeclaration) AgentMemoryProof {
+	proof := AgentMemoryProof{
+		AgentID:         strings.TrimSpace(declaration.LocalID),
+		ProjectScopeKey: strings.TrimSpace(declaration.Source.PackageKey),
+		ContractSource:  declaration.Source,
+		OwningFlowID:    strings.TrimSpace(declaration.OwnerFlowID),
+	}
+	if source != nil && proof.OwningFlowID != "" {
+		proof.FlowPath = strings.Trim(strings.TrimSpace(source.FlowPath(proof.OwningFlowID)), "/")
+	}
+	return proof
+}
+
 func agentMemoryDeclaration(source Source, locator AgentMemoryLocator) (AgentDeclaration, bool) {
 	agentID := strings.TrimSpace(locator.AgentID)
 	projectScopeKey := strings.TrimSpace(locator.ProjectScopeKey)
 	flowID := strings.TrimSpace(locator.FlowID)
 	var matched AgentDeclaration
 	for _, declaration := range AgentDeclarations(source) {
-		if projectScopeKey != "" && strings.TrimSpace(declaration.ScopeID) != projectScopeKey {
+		if projectScopeKey != "" && strings.TrimSpace(declaration.Source.PackageKey) != projectScopeKey {
 			continue
 		}
 		if flowID != "" && !agentDeclarationMatchesFlow(declaration, flowID) {
@@ -88,17 +86,4 @@ func agentMemoryDeclaration(source Source, locator AgentMemoryLocator) (AgentDec
 		matched = declaration
 	}
 	return matched, strings.TrimSpace(matched.LocalID) != ""
-}
-
-func projectScopeByKey(source Source, key string) (ProjectScope, bool) {
-	key = strings.TrimSpace(key)
-	if source == nil || key == "" {
-		return ProjectScope{}, false
-	}
-	for _, scope := range source.ProjectScopes() {
-		if strings.TrimSpace(scope.Key) == key {
-			return scope, true
-		}
-	}
-	return ProjectScope{}, false
 }

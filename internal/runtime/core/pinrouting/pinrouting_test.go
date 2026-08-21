@@ -8,6 +8,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -153,6 +155,48 @@ func TestAdmitNodeExecutionRoutingSourceUsesNestedPackageOwningFlow(t *testing.T
 	hostile := identitytest.ExecutableNode(t, "packages/b", "orders", "shared")
 	if _, err := AdmitNodeExecutionRoutingSource(source, hostile, "orders", route); err == nil || !strings.Contains(err.Error(), "requires declared node") {
 		t.Fatalf("undeclared package sibling error = %v", err)
+	}
+}
+
+func TestAdmitAgentExecutionRoutingSourceSeparatesImportedDeclarationFromRuntimePath(t *testing.T) {
+	const owner = "test://pinrouting/bot/telegram-chat/phrase-bot"
+	flow := runtimecontracts.FlowContractView{
+		Path: "telegram-ingress/telegram-chat",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: "telegram-chat", Flow: "telegram-chat", PackageKey: "bot", AgentsFile: "/contracts/bot/flows/telegram-chat/agents.yaml",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"phrase-bot": runtimecontracts.EffectiveAgentRegistryEntry("phrase-bot", runtimecontracts.AgentRegistryEntry{ID: "phrase-bot", Role: "phrase-bot"}),
+		},
+		AgentURIs: map[string]string{"phrase-bot": owner},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"telegram-chat": &root.Children[0]}},
+		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+			owner: {Kind: "agent", FlowID: "telegram-chat", LocalID: "phrase-bot", Full: owner},
+		}},
+	})
+	actor := models.AgentConfig{
+		ID:       "phrase-bot",
+		FlowID:   "telegram-chat",
+		FlowPath: "telegram-ingress/telegram-chat/chat-1",
+		Identity: agentidentitytest.Declared(t, "phrase-bot", owner, "telegram-ingress/telegram-chat", "chat-1", "telegram-ingress/telegram-chat/chat-1"),
+	}
+	got, err := AdmitAgentExecutionRoutingSource(source, actor, "chat-entity")
+	if err != nil {
+		t.Fatalf("AdmitAgentExecutionRoutingSource: %v", err)
+	}
+	wantRoute := events.RouteIdentity{FlowID: "telegram-chat", FlowInstance: actor.FlowPath, EntityID: "chat-entity"}
+	if got.Kind() != events.RoutingSourceConcreteTemplateInstance || got.Route() != wantRoute {
+		t.Fatalf("routing source = %s %#v, want exact declaration flow plus runtime path %#v", got.Kind().StorageCode(), got.Route(), wantRoute)
+	}
+
+	hostile := actor
+	hostile.Identity = agentidentitytest.Runtime(t, "phrase-bot", owner, "telegram-ingress/telegram-chat", "chat-1", actor.FlowPath)
+	if _, err := AdmitAgentExecutionRoutingSource(source, hostile, "chat-entity"); err == nil || !strings.Contains(err.Error(), "declared agent identity") {
+		t.Fatalf("runtime-created declaration collision error = %v", err)
 	}
 }
 

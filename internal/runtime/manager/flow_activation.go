@@ -365,17 +365,21 @@ func (am *AgentManager) flowInstanceAgentRecords(req runtimepipeline.FlowInstanc
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	localEvents := flowLocalEventSet(schema, scope)
-	agentKeys := make([]string, 0, len(scope.Agents))
-	for key := range scope.Agents {
-		if key = strings.TrimSpace(key); key != "" {
-			agentKeys = append(agentKeys, key)
+	declarations := make([]semanticview.AgentDeclaration, 0)
+	for _, declaration := range semanticview.AgentDeclarations(req.ContractBundle) {
+		if strings.TrimSpace(declaration.Source.Layer) != "flow" || strings.TrimSpace(declaration.Source.FlowID) != strings.TrimSpace(scope.ID) {
+			continue
 		}
+		declarations = append(declarations, declaration)
 	}
-	sort.Strings(agentKeys)
-	records := make([]PersistedAgent, 0, len(agentKeys))
-	for _, key := range agentKeys {
-		entry := scope.Agents[key]
-		namePlan, err := semanticview.FlowAgentNamePlan(req.ContractBundle, scope, key)
+	sort.Slice(declarations, func(i, j int) bool {
+		return strings.TrimSpace(declarations[i].OwnerURI) < strings.TrimSpace(declarations[j].OwnerURI)
+	})
+	records := make([]PersistedAgent, 0, len(declarations))
+	for _, declaration := range declarations {
+		key := strings.TrimSpace(declaration.LocalID)
+		entry := declaration.Entry
+		namePlan, err := semanticview.ScopedAgentNamePlan(req.ContractBundle, declaration)
 		if err != nil {
 			return nil, fmt.Errorf("flow agent %s declared name: %w", key, err)
 		}
@@ -624,82 +628,42 @@ func StaticAgentMaterializationRecords(source semanticview.Source) ([]PersistedA
 		return nil, nil
 	}
 	standingFlows := standingActivatedFlowIDs(source)
-	records := []PersistedAgent{}
-	for _, scope := range source.ProjectScopes() {
-		projectAgents := make(map[string]runtimecontracts.AgentRegistryEntry, len(scope.Agents))
-		projectNamePlans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
-		packageFlowAgents := map[string]staticAgentFlowGroup{}
-		for logicalID, entry := range scope.Agents {
-			namePlan, err := semanticview.ProjectAgentNamePlan(source, scope, logicalID)
-			if err != nil {
-				return nil, fmt.Errorf("project scope %q agent %s declaration name: %w", scope.Key, logicalID, err)
+	groups := map[string]staticAgentFlowGroup{}
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		flowID := strings.TrimSpace(declaration.OwnerFlowID)
+		flowPath := ""
+		if flowID != "" {
+			scope, ok := source.FlowScopeByID(flowID)
+			if !ok {
+				return nil, fmt.Errorf("agent declaration %q references missing owning flow %q", declaration.LocalID, flowID)
 			}
-			proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{
-				AgentID:         logicalID,
-				ProjectScopeKey: scope.Key,
-			})
-			if strings.TrimSpace(proof.OwningFlowID) != "" {
-				if flowScope, ok := source.FlowScopeByID(proof.OwningFlowID); ok {
-					if _, represented := flowScope.Agents[logicalID]; represented {
-						flowPlan, flowPlanErr := semanticview.FlowAgentNamePlan(source, flowScope, logicalID)
-						if flowPlanErr == nil && flowPlan.OwnerURI == namePlan.OwnerURI {
-							continue
-						}
-					}
-				}
-				groupKey := staticAgentFlowGroupKey(proof.OwningFlowID, proof.FlowPath)
-				group := packageFlowAgents[groupKey]
-				group.FlowID = strings.TrimSpace(proof.OwningFlowID)
-				group.FlowPath = strings.Trim(strings.TrimSpace(proof.FlowPath), "/")
-				if group.Agents == nil {
-					group.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
-				}
-				if group.NamePlans == nil {
-					group.NamePlans = map[string]semanticview.AgentNamePlan{}
-				}
-				group.Agents[strings.TrimSpace(logicalID)] = entry
-				group.NamePlans[strings.TrimSpace(logicalID)] = namePlan
-				packageFlowAgents[groupKey] = group
+			if strings.EqualFold(strings.TrimSpace(scope.Mode), runtimecontracts.FlowModeTemplate) {
 				continue
 			}
-			projectAgents[strings.TrimSpace(logicalID)] = entry
-			projectNamePlans[strings.TrimSpace(logicalID)] = namePlan
-		}
-		scopeRecords, err := staticAgentsForScope(source, "", "", projectAgents, projectNamePlans)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, scopeRecords...)
-		groupKeys := make([]string, 0, len(packageFlowAgents))
-		for key := range packageFlowAgents {
-			groupKeys = append(groupKeys, key)
-		}
-		sort.Strings(groupKeys)
-		for _, key := range groupKeys {
-			group := packageFlowAgents[key]
-			scopeRecords, err := staticAgentsForScope(source, group.FlowID, group.FlowPath, group.Agents, group.NamePlans)
-			if err != nil {
-				return nil, err
+			if _, standing := standingFlows[flowID]; standing {
+				continue
 			}
-			records = append(records, scopeRecords...)
+			flowPath = strings.Trim(strings.TrimSpace(scope.Path), "/")
+			if flowPath == "" {
+				flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+			}
 		}
+		key := staticAgentFlowGroupKey(flowID, flowPath)
+		group := groups[key]
+		group.FlowID = flowID
+		group.FlowPath = flowPath
+		group.Declarations = append(group.Declarations, declaration)
+		groups[key] = group
 	}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-			continue
-		}
-		if _, standing := standingFlows[flowID]; standing {
-			continue
-		}
-		proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{
-			FlowID: flowID,
-		})
-		namePlans, err := flowAgentNamePlans(source, scope)
-		if err != nil {
-			return nil, err
-		}
-		scopeRecords, err := staticAgentsForScope(source, proof.OwningFlowID, proof.FlowPath, scope.Agents, namePlans)
+	groupKeys := make([]string, 0, len(groups))
+	for key := range groups {
+		groupKeys = append(groupKeys, key)
+	}
+	sort.Strings(groupKeys)
+	records := []PersistedAgent{}
+	for _, key := range groupKeys {
+		group := groups[key]
+		scopeRecords, err := staticAgentsForDeclarations(source, group)
 		if err != nil {
 			return nil, err
 		}
@@ -716,16 +680,8 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 	}
 	standingFlows := standingActivatedFlowIDs(source)
 	records := []PersistedAgent{}
-	if rootScope, ok := runtimerequiredagents.RootScope(source); ok {
-		projectScope, found := rootAgentProjectScope(source)
-		if !found && len(rootScope.Required) > 0 {
-			return nil, fmt.Errorf("root required agents have no exact project declaration scope")
-		}
-		namePlans, err := projectAgentNamePlans(source, projectScope)
-		if err != nil {
-			return nil, err
-		}
-		scopeRecords, err := staticRequiredAgentsForScope(source, "", "", rootScope.Agents, namePlans, rootScope.Required)
+	if required := source.RequiredAgents(); len(required) > 0 {
+		scopeRecords, err := staticRequiredAgentsForDeclarations(source, "", "", required)
 		if err != nil {
 			return nil, err
 		}
@@ -739,11 +695,7 @@ func StaticFlowRequiredAgentMaterializationRecords(source semanticview.Source) (
 		if _, standing := standingFlows[flowID]; standing {
 			continue
 		}
-		namePlans, err := flowAgentNamePlans(source, scope)
-		if err != nil {
-			return nil, err
-		}
-		scopeRecords, err := staticRequiredAgentsForScope(source, flowID, strings.Trim(scope.Path, "/"), scope.Agents, namePlans, source.FlowRequiredAgents(flowID))
+		scopeRecords, err := staticRequiredAgentsForDeclarations(source, flowID, strings.Trim(scope.Path, "/"), source.FlowRequiredAgents(flowID))
 		if err != nil {
 			return nil, err
 		}
@@ -770,52 +722,40 @@ func standingActivatedFlowIDs(source semanticview.Source) map[string]struct{} {
 }
 
 type staticAgentFlowGroup struct {
-	FlowID    string
-	FlowPath  string
-	Agents    map[string]runtimecontracts.AgentRegistryEntry
-	NamePlans map[string]semanticview.AgentNamePlan
+	FlowID       string
+	FlowPath     string
+	Declarations []semanticview.AgentDeclaration
 }
 
 func staticAgentFlowGroupKey(flowID, flowPath string) string {
 	return strings.TrimSpace(flowID) + "\x00" + strings.Trim(strings.TrimSpace(flowPath), "/")
 }
 
-func projectAgentNamePlans(source semanticview.Source, scope semanticview.ProjectScope) (map[string]semanticview.AgentNamePlan, error) {
-	plans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
-	for logicalID := range scope.Agents {
-		plan, err := semanticview.ProjectAgentNamePlan(source, scope, logicalID)
+func staticAgentsForDeclarations(source semanticview.Source, group staticAgentFlowGroup) ([]PersistedAgent, error) {
+	declarations := append([]semanticview.AgentDeclaration(nil), group.Declarations...)
+	sort.Slice(declarations, func(i, j int) bool {
+		left := strings.TrimSpace(declarations[i].OwnerURI) + "\x00" + strings.TrimSpace(declarations[i].LocalID)
+		right := strings.TrimSpace(declarations[j].OwnerURI) + "\x00" + strings.TrimSpace(declarations[j].LocalID)
+		return left < right
+	})
+	agents := make(map[string]runtimecontracts.AgentRegistryEntry, len(declarations))
+	for index, declaration := range declarations {
+		agents[fmt.Sprintf("%06d", index)] = declaration.Entry
+	}
+	localEvents := staticFlowLocalEventSet(agents)
+	records := make([]PersistedAgent, 0, len(declarations))
+	for _, declaration := range declarations {
+		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 		if err != nil {
-			return nil, fmt.Errorf("project scope %q agent %s declaration name: %w", scope.Key, logicalID, err)
+			return nil, fmt.Errorf("agent declaration %q name: %w", declaration.LocalID, err)
 		}
-		plans[strings.TrimSpace(logicalID)] = plan
-	}
-	return plans, nil
-}
-
-func flowAgentNamePlans(source semanticview.Source, scope semanticview.FlowScope) (map[string]semanticview.AgentNamePlan, error) {
-	plans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
-	for logicalID := range scope.Agents {
-		plan, err := semanticview.FlowAgentNamePlan(source, scope, logicalID)
+		cfg, err := buildStaticFlowAgentConfig(source, namePlan, group.FlowID, group.FlowPath, declaration.LocalID, declaration.Entry, localEvents)
 		if err != nil {
-			return nil, fmt.Errorf("flow scope %q agent %s declaration name: %w", scope.ID, logicalID, err)
+			return nil, err
 		}
-		plans[strings.TrimSpace(logicalID)] = plan
+		records = append(records, PersistedAgent{Config: cfg, Status: "active", HiredBy: "static-flow-agent"})
 	}
-	return plans, nil
-}
-
-func rootAgentProjectScope(source semanticview.Source) (semanticview.ProjectScope, bool) {
-	for _, scope := range source.ProjectScopes() {
-		if strings.TrimSpace(scope.OwningFlowID) == "" && scope.Depth == 0 {
-			return scope, true
-		}
-	}
-	for _, scope := range source.ProjectScopes() {
-		if strings.TrimSpace(scope.OwningFlowID) == "" {
-			return scope, true
-		}
-	}
-	return semanticview.ProjectScope{}, false
+	return records, nil
 }
 
 func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
@@ -1094,18 +1034,33 @@ func buildFlowAgentConfig(
 	return cfg, nil
 }
 
-func staticRequiredAgentsForScope(
+func staticRequiredAgentsForDeclarations(
 	source semanticview.Source,
 	flowID string,
 	flowPath string,
-	agents map[string]runtimecontracts.AgentRegistryEntry,
-	namePlans map[string]semanticview.AgentNamePlan,
 	required []runtimecontracts.FlowRequiredAgent,
 ) ([]PersistedAgent, error) {
 	flowID = strings.TrimSpace(flowID)
 	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if len(required) == 0 {
 		return nil, nil
+	}
+	agents := map[string]runtimecontracts.AgentRegistryEntry{}
+	namePlans := map[string]semanticview.AgentNamePlan{}
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		if !staticRequiredAgentDeclarationMatchesFlow(declaration, flowID) {
+			continue
+		}
+		logicalID := strings.TrimSpace(declaration.LocalID)
+		if _, exists := agents[logicalID]; exists {
+			return nil, fmt.Errorf("required agent declaration %q in scope %q is ambiguous", logicalID, flowID)
+		}
+		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			return nil, fmt.Errorf("required agent declaration %q in scope %q: %w", logicalID, flowID, err)
+		}
+		agents[logicalID] = declaration.Entry
+		namePlans[logicalID] = namePlan
 	}
 	localEvents := staticFlowLocalEventSet(agents)
 	records := make([]PersistedAgent, 0, len(required))
@@ -1132,46 +1087,15 @@ func staticRequiredAgentsForScope(
 	return records, nil
 }
 
-func staticAgentsForScope(
-	source semanticview.Source,
-	flowID string,
-	flowPath string,
-	agents map[string]runtimecontracts.AgentRegistryEntry,
-	namePlans map[string]semanticview.AgentNamePlan,
-) ([]PersistedAgent, error) {
-	flowID = strings.TrimSpace(flowID)
-	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-	if len(agents) == 0 {
-		return nil, nil
+func staticRequiredAgentDeclarationMatchesFlow(declaration semanticview.AgentDeclaration, flowID string) bool {
+	if strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(flowID) {
+		return false
 	}
-	localEvents := staticFlowLocalEventSet(agents)
-	logicalIDs := make([]string, 0, len(agents))
-	for logicalID := range agents {
-		logicalID = strings.TrimSpace(logicalID)
-		if logicalID != "" {
-			logicalIDs = append(logicalIDs, logicalID)
-		}
+	if strings.TrimSpace(flowID) != "" {
+		return true
 	}
-	sort.Strings(logicalIDs)
-	records := make([]PersistedAgent, 0, len(logicalIDs))
-	for _, logicalID := range logicalIDs {
-		entry := agents[logicalID]
-		namePlan, exists := namePlans[logicalID]
-		if !exists {
-			return nil, fmt.Errorf("static agent %q in scope %q has no exact scoped declaration name", logicalID, flowID)
-		}
-		cfg, err := buildStaticFlowAgentConfig(source, namePlan, flowID, flowPath, logicalID, entry, localEvents)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, PersistedAgent{
-			Config:          cfg,
-			Status:          "active",
-			HiredBy:         "static-flow-agent",
-			TemplateVersion: "",
-		})
-	}
-	return records, nil
+	packageKey := strings.Trim(strings.TrimSpace(declaration.Source.PackageKey), "/")
+	return packageKey == "" || packageKey == "."
 }
 
 func buildStaticFlowAgentConfig(

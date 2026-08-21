@@ -109,18 +109,32 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 			if err != nil {
 				t.Fatalf("RuntimeTools: %v", err)
 			}
+			agentOwner := "test://channel-runtime/global/channel-sender"
+			agentRef := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "global", LocalID: "channel-sender", Full: agentOwner}
 			global := runtimecontracts.FlowContractView{
-				Paths:  runtimecontracts.FlowContractPaths{ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate},
+				Paths: runtimecontracts.FlowContractPaths{
+					ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate,
+					PackageKey: "channel-runtime", AgentsFile: "/contracts/channel-runtime/flows/global/agents.yaml",
+				},
 				Path:   "global",
 				Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{
+					"channel-sender": runtimecontracts.EffectiveAgentRegistryEntry("channel-sender", runtimecontracts.AgentRegistryEntry{ID: "channel-sender", Role: "worker"}),
+				},
+				AgentURIs: map[string]string{"channel-sender": agentOwner},
 			}
+			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{global}}
 			base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				Semantics: runtimecontracts.WorkflowSemanticView{Name: "channel_runtime", Version: "1.0.0"},
 				FlowTree: runtimecontracts.FlowTree{
-					Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{global}},
-					ByID: map[string]*runtimecontracts.FlowContractView{"global": &global},
+					Root: &root,
+					ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
 				},
 				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"global": global.Schema},
+				URIRegistry: runtimecontracts.ContractURIRegistry{
+					Agents: map[string]runtimecontracts.ContractURIRef{"global/channel-sender": agentRef},
+					ByURI:  map[string]runtimecontracts.ContractURIRef{agentOwner: agentRef},
+				},
 			})
 			source, err := semanticview.WithRuntimeTools(base, publicTools)
 			if err != nil {
@@ -169,7 +183,7 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
 			actor := models.AgentConfig{
-				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.Runtime(t, "channel-sender", "channel-runtime-test", "global", flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
+				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.Declared(t, "channel-sender", agentOwner, "global", flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
 				FlowPath: flowInstance, EntityID: entityID, Tools: []string{"channel.ops.deliver"},
 			}
 			input := map[string]any{
@@ -213,7 +227,7 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls after replay = %d, want one", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, 1)
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 1)
 
 			if _, err := executor.Execute(callCtx, "channel.ops.deliver", map[string]any{
 				"presentation": map[string]any{"text": "Changed under same identity"}, "actions": []any{},
@@ -238,7 +252,7 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 			if calls.Load() != 2 {
 				t.Fatalf("provider calls after ack-loss replay = %d, want two total distinct operations", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, 2)
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 2)
 
 			if err := credentialStore.Delete(ctx, "telegram_bot_token"); err != nil {
 				t.Fatalf("delete Telegram credential: %v", err)
@@ -563,15 +577,17 @@ func channelRuntimeCredentialStore(t *testing.T, token string) runtimecredential
 	return credentials
 }
 
-func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, privateTool string, want int) {
+func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, privateTool, flowInstance, entityID string, want int) {
 	t.Helper()
 	requestQuery := `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
 	attemptQuery := `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid AND tool = $2 AND status = 'succeeded'`
+	sourceQuery := `SELECT source_route FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested' ORDER BY created_at, event_id LIMIT 1`
 	args := []any{runID}
 	attemptArgs := []any{runID, privateTool}
 	if selected == "sqlite" {
 		requestQuery = `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
 		attemptQuery = `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ? AND tool = ? AND status = 'succeeded'`
+		sourceQuery = `SELECT source_route FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested' ORDER BY created_at, event_id LIMIT 1`
 	}
 	var requests, attempts int
 	if err := db.QueryRowContext(ctx, requestQuery, args...).Scan(&requests); err != nil {
@@ -582,5 +598,17 @@ func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.D
 	}
 	if requests != want || attempts != want {
 		t.Fatalf("durable channel journal = requests:%d attempts:%d, want %d/%d", requests, attempts, want, want)
+	}
+	var rawRoute []byte
+	if err := db.QueryRowContext(ctx, sourceQuery, runID).Scan(&rawRoute); err != nil {
+		t.Fatalf("read channel activity routing source: %v", err)
+	}
+	var route events.RouteIdentity
+	if err := json.Unmarshal(rawRoute, &route); err != nil {
+		t.Fatalf("decode channel activity routing source %q: %v", rawRoute, err)
+	}
+	wantRoute := events.RouteIdentity{FlowID: "global", FlowInstance: flowInstance, EntityID: entityID}
+	if got := route.Normalized(); got != wantRoute {
+		t.Fatalf("durable channel routing source = %#v, want %#v", got, wantRoute)
 	}
 }

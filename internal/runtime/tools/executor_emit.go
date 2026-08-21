@@ -106,12 +106,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 	flowInstance := emitFlowInstanceForActorEvent(actor, inbound)
 	flowID := emitActorFlowID(e.workflowSource, actor, flowInstance)
-	actorIdentity, err := actor.ConcreteIdentity()
-	if err != nil {
-		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "routing_source_invalid", "routing_source", "construct", err)
-		return nil, err
-	}
-	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actorIdentity, entityID)
+	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor, entityID)
 	if err != nil {
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "routing_source_invalid", "routing_source", "construct", err)
 		return nil, err

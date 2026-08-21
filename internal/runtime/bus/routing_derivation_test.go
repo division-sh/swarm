@@ -111,6 +111,96 @@ func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRo
 	}
 }
 
+func TestDeriveRouteTableRegistersNestedPhysicalAgentDeclarationExactlyOnce(t *testing.T) {
+	source := loadNestedPhysicalAgentRouteSource(t)
+	declarations := semanticview.AgentDeclarations(source)
+	if len(declarations) != 1 {
+		t.Fatalf("canonical declarations = %#v, want one physical declaration", declarations)
+	}
+	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath("support")), "/")
+	if flowPath == "" {
+		t.Fatal("support flow path is empty")
+	}
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	resolved := routes.Resolve(flowPath + "/work.requested")
+	if len(resolved) != 1 {
+		t.Fatalf("nested agent subscribers = %#v, want one physical subscriber", resolved)
+	}
+	if resolved[0].Recipient.ID() != "public-worker" || resolved[0].AgentIdentity.Name.Owner != declarations[0].OwnerURI {
+		t.Fatalf("nested agent subscriber = %#v, want exact canonical declaration owner %#v", resolved[0], declarations[0])
+	}
+}
+
+func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	root := t.TempDir()
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", path, err)
+		}
+	}
+	write(filepath.Join(root, "package.yaml"), `
+name: nested-agent-route
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - {path: parent}
+`)
+	write(filepath.Join(root, "schema.yaml"), "name: nested-agent-route\n")
+	for _, name := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		write(filepath.Join(root, name), "{}\n")
+	}
+	write(filepath.Join(root, "parent", "package.yaml"), `
+name: parent
+version: "1.0.0"
+packages:
+  - {path: child}
+`)
+	write(filepath.Join(root, "parent", "child", "package.yaml"), `
+name: child
+version: "1.0.0"
+flows:
+  - {id: support, flow: support, mode: static}
+`)
+	flowRoot := filepath.Join(root, "parent", "child", "flows", "support")
+	write(filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
+	write(filepath.Join(flowRoot, "schema.yaml"), `
+name: support
+mode: static
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events: [work.requested]
+`)
+	write(filepath.Join(flowRoot, "events.yaml"), "work.requested: {}\n")
+	write(filepath.Join(flowRoot, "agents.yaml"), `
+worker:
+  id: public-worker
+  role: worker
+  intent: {inline: Register one nested physical subscriber.}
+  model: regular
+  memory: false
+  subscriptions: [work.requested]
+`)
+	for _, name := range []string{"nodes.yaml", "policy.yaml", "tools.yaml"} {
+		write(filepath.Join(flowRoot, name), "{}\n")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func TestDeriveRouteTableRequiresExactPackageOwnerAcrossRouteSurfaces(t *testing.T) {
 	for _, mode := range []string{"static", "template"} {
 		for _, reverse := range []bool{false, true} {
@@ -309,9 +399,9 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 		},
 	}
 	if len(agentSubscriptions) > 0 {
-		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{
-			"child/observer": {FlowID: "child", LocalID: "observer", Full: "test://fixture/child/observer"},
-		}
+		ref := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "child", LocalID: "observer", Full: "test://fixture/child/observer"}
+		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{"child/observer": ref}
+		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{ref.Full: ref}
 	}
 	return semanticview.Wrap(bundle)
 }
@@ -1114,6 +1204,10 @@ func routeMaterializationNodeSource(flowID string, node runtimecontracts.SystemN
 }
 
 func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBundle {
+	agentRef := runtimecontracts.ContractURIRef{
+		Kind: "agent", FlowID: "operating", LocalID: "ceo",
+		Full: "test://route-materialization/operating/ceo",
+	}
 	operating := runtimecontracts.FlowContractView{
 		Path:  "operating",
 		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
@@ -1142,11 +1236,9 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 		},
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
-				"operating/ceo": {
-					Kind: "agent", FlowID: "operating", LocalID: "ceo",
-					Full: "test://route-materialization/operating/ceo",
-				},
+				"operating/ceo": agentRef,
 			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{agentRef.Full: agentRef},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,

@@ -30,9 +30,10 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 		return AgentContractProjection{}, false
 	}
 	projection := AgentContractProjection{
-		Declaration: declaration,
-		OwnerFlowID: strings.TrimSpace(declaration.OwnerFlowID),
-		globalTools: source.ToolEntries(),
+		Declaration:    declaration,
+		ContractSource: declaration.Source,
+		OwnerFlowID:    strings.TrimSpace(declaration.OwnerFlowID),
+		globalTools:    source.ToolEntries(),
 	}
 	switch strings.TrimSpace(declaration.ScopeKind) {
 	case "flow":
@@ -40,15 +41,6 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 			if strings.TrimSpace(scope.ID) != strings.TrimSpace(declaration.ScopeID) {
 				continue
 			}
-			if _, exists := scope.Agents[strings.TrimSpace(declaration.LocalID)]; !exists {
-				return AgentContractProjection{}, false
-			}
-			projection.ContractSource = runtimecontracts.ContractItemSource{
-				PackageKey: strings.TrimSpace(scope.PackageKey),
-				FlowID:     strings.TrimSpace(scope.ID),
-				Layer:      "flow",
-			}
-			projection.ContractSource = exactAgentContractSource(source, projection.ContractSource, declaration.LocalID)
 			projection.scopedTools = scope.Tools
 			return projection, true
 		}
@@ -57,14 +49,6 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 			if strings.TrimSpace(scope.Key) != strings.TrimSpace(declaration.ScopeID) {
 				continue
 			}
-			if _, exists := scope.Agents[strings.TrimSpace(declaration.LocalID)]; !exists {
-				return AgentContractProjection{}, false
-			}
-			projection.ContractSource = runtimecontracts.ContractItemSource{
-				PackageKey: strings.TrimSpace(scope.Key),
-				Layer:      "project",
-			}
-			projection.ContractSource = exactAgentContractSource(source, projection.ContractSource, declaration.LocalID)
 			projection.scopedTools = scope.Tools
 			return projection, true
 		}
@@ -72,15 +56,6 @@ func ScopedAgentContractProjection(source Source, declaration AgentDeclaration) 
 		return AgentContractProjection{}, false
 	}
 	return AgentContractProjection{}, false
-}
-
-func exactAgentContractSource(source Source, scope runtimecontracts.ContractItemSource, localID string) runtimecontracts.ContractItemSource {
-	if bundle, ok := Bundle(source); ok {
-		if contractSource, exists := bundle.ScopedAgentContractSource(scope, localID); exists {
-			return contractSource
-		}
-	}
-	return scope
 }
 
 func (p AgentContractProjection) ToolEntry(toolID string) (runtimecontracts.ToolSchemaEntry, bool) {

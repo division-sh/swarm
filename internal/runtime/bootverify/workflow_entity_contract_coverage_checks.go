@@ -458,59 +458,17 @@ func wave1AgentPromptEntityContract(source semanticview.Source, agentSource runt
 }
 
 func wave1ScopedAgentRecords(source semanticview.Source) []wave1ScopedAgentRecord {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
+	if source == nil {
 		return nil
 	}
-	projectFlowIDs := map[string]string{}
-	for _, scope := range source.ProjectScopes() {
-		projectFlowIDs[strings.TrimSpace(scope.Key)] = strings.TrimSpace(scope.OwningFlowID)
-	}
-	out := make([]wave1ScopedAgentRecord, 0)
-	for _, view := range bundle.ProjectViews() {
-		agentIDs := make([]string, 0, len(view.Agents))
-		for logicalID := range view.Agents {
-			logicalID = strings.TrimSpace(logicalID)
-			if logicalID != "" {
-				agentIDs = append(agentIDs, logicalID)
-			}
-		}
-		sort.Strings(agentIDs)
-		for _, logicalID := range agentIDs {
-			packageKey := strings.TrimSpace(view.Paths.Key)
-			out = append(out, wave1ScopedAgentRecord{
-				LogicalID: logicalID,
-				Entry:     view.Agents[logicalID],
-				Source: runtimecontracts.ContractItemSource{
-					PackageKey: packageKey,
-					FlowID:     projectFlowIDs[packageKey],
-					Layer:      "project",
-					File:       strings.TrimSpace(view.Paths.ProjectAgentsFile),
-				},
-			})
-		}
-	}
-	for _, view := range bundle.FlowViews() {
-		agentIDs := make([]string, 0, len(view.Agents))
-		for logicalID := range view.Agents {
-			logicalID = strings.TrimSpace(logicalID)
-			if logicalID != "" {
-				agentIDs = append(agentIDs, logicalID)
-			}
-		}
-		sort.Strings(agentIDs)
-		for _, logicalID := range agentIDs {
-			out = append(out, wave1ScopedAgentRecord{
-				LogicalID: logicalID,
-				Entry:     view.Agents[logicalID],
-				Source: runtimecontracts.ContractItemSource{
-					PackageKey: strings.TrimSpace(view.Paths.PackageKey),
-					FlowID:     strings.TrimSpace(view.Paths.ID),
-					Layer:      "flow",
-					File:       strings.TrimSpace(view.Paths.AgentsFile),
-				},
-			})
-		}
+	declarations := semanticview.AgentDeclarations(source)
+	out := make([]wave1ScopedAgentRecord, 0, len(declarations))
+	for _, declaration := range declarations {
+		out = append(out, wave1ScopedAgentRecord{
+			LogicalID: declaration.LocalID,
+			Entry:     declaration.Entry,
+			Source:    declaration.Source,
+		})
 	}
 	return out
 }

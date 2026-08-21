@@ -927,7 +927,7 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
-		Identity:      agentidentitytest.RootRuntime(t, "campaign-coordinator", "directive-factory-test"),
+		Identity:      agentidentitytest.RootDeclared(t, "campaign-coordinator", "swarm-test://root/agents/campaign-coordinator"),
 		EntityID:      eventtest.UUID("campaign-coordinator-source"),
 		Role:          "campaign_coordinator",
 		EmitEvents:    []string{"scan.requested"},
@@ -968,6 +968,43 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 }
 
 func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitToolSurface(t *testing.T) {
+	const owner = "swarm-test://campaign-flow/agents/campaign-coordinator"
+	flow := &runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "campaign-flow",
+			Flow: "campaign-flow",
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"campaign-coordinator": {
+				ID: "campaign-coordinator", Role: "campaign_coordinator", EmitEvents: []string{"scan.requested"},
+			},
+		},
+		AgentURIs: map[string]string{"campaign-coordinator": owner},
+		Schema:    runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Path:      "campaign-flow",
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"campaign-flow/campaign-coordinator": {Kind: "agent", FlowID: "campaign-flow", LocalID: "campaign-coordinator", Full: owner},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				owner: {Kind: "agent", FlowID: "campaign-flow", LocalID: "campaign-coordinator", Full: owner},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {
+				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: flow,
+			ByID: map[string]*runtimecontracts.FlowContractView{"campaign-flow": flow},
+		},
+	}
 	rt := &directiveFactoryRuntime{
 		steps: []*llm.Response{
 			{Message: llm.Message{Role: "assistant", Content: "I will trigger the workflow now."}},
@@ -983,34 +1020,13 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
-		Identity:      agentidentitytest.Runtime(t, "campaign-coordinator", "directive-factory-test", "campaign-flow", "inst-1", "campaign-flow/inst-1"),
+		Identity:      agentidentitytest.Declared(t, "campaign-coordinator", owner, "campaign-flow", "inst-1", "campaign-flow/inst-1"),
 		EntityID:      eventtest.UUID("campaign-flow-inst-1-source"),
 		Role:          "campaign_coordinator",
 		FlowID:        "campaign-flow",
 		FlowPath:      "campaign-flow/inst-1",
 		EmitEvents:    []string{"campaign-flow/inst-1/scan.requested"},
-	}, rt, &runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"scan.requested": {
-				Payload: runtimecontracts.EventPayloadSpec{Type: "object"},
-			},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"campaign-flow": {
-					Paths: runtimecontracts.FlowContractPaths{
-						ID:   "campaign-flow",
-						Flow: "campaign-flow",
-					},
-					Events: map[string]runtimecontracts.EventCatalogEntry{
-						"scan.requested": {},
-					},
-					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-					Path:   "campaign-flow",
-				},
-			},
-		},
-	})
+	}, rt, bundle)
 
 	got, err := agent.BoardStep(agentManagedTestContext(t, agent), testBoardDirective("start a corpus run"))
 	if err != nil {

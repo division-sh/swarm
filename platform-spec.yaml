@@ -938,8 +938,9 @@ contract_formats:
           negative_proof: TestProductionEventConstructionUsesPublicAPI
         runtime.event.routing_source_typed_at_construction:
           owner: internal/events RoutingSource
-          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Static-flow and concrete-template source variants always carry exact flow and instance identity and carry entity identity exactly when the producing execution has one; an entityless receiver therefore remains an exact flow source without inventing an entity. Runtime-control publication preserves a root schedule's root source, converts declared-flow execution sources to entity-bound flow-owned control, and uses platform control only for closed global system work.
-          negative_proof: TestRunScopedRuntimeControlPreservesExactRootRoutingSource
+          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Static-flow and concrete-template source variants always carry exact flow and instance identity and carry entity identity exactly when the producing execution has one; an entityless receiver therefore remains an exact flow source without inventing an entity. A contract-backed agent source is admitted only from agent_identity_model.declaration_execution_scope and keeps the declaration owning flow distinct from the concrete runtime instance path. Runtime-control publication preserves a root schedule's root source, converts declared-flow execution sources to entity-bound flow-owned control, and uses platform control only for closed global system work.
+          negative_proof: TestRunScopedRuntimeControlPreservesExactRootRoutingSource;
+            TestResolveAgentExecutionSemanticScopeRejectsHostileIdentityContradictions
         runtime.event.admitted_persistence_boundary:
           owner: internal/events AdmittedEvent and the closed named store operations
           rule: Durable event writers accept only opaque admitted values; raw Event, SQL, row, transaction, and generic mutation capabilities are unavailable to runtime and API consumers.
@@ -16667,6 +16668,36 @@ agent_identity_model:
       repeated_template_instances: >
         Repeated instances of one template may carry the same declared agent_id because their explicit routes differ.
         No ownership-bearing consumer may collapse those siblings to the display slug.
+    declaration_execution_scope:
+      owner: contracts.AgentDeclarationRecord and semanticview.AgentExecutionSemanticScope
+      source: >
+        Strict contract loading emits one immutable semantic record for each physical agents.yaml declaration. The
+        private physical key is the exact source file plus local declaration key; consumers receive the exact package,
+        declaration owner URI, owning flow or explicit root absence, local declaration key, and effective declaration.
+      rule: >
+        Every identity-bearing declaration consumer uses that one record. Boot diagnostics and entity coverage, static
+        materialization, EventBus agent routes, flow-data validation, provider/tool/workspace/CLI/serve projections,
+        and contract-backed event producers MUST NOT independently pair project and flow maps, rank duplicate views,
+        or reconstruct declaration ownership from URI, package path, local ID, public name, runtime route, suffix, or
+        leaf equality. A project package nested under a declared flow retains its exact package identity and the loader-
+        established owning flow; a flow projection of the same physical declaration is not a second declaration.
+      execution_agreement: >
+        Source admission combines one declared record with one concrete live identity. The declared name and owner URI,
+        owning flow presence or explicit root absence, flow mode, and concrete route MUST agree exactly. Static and
+        singleton agents execute at the exact semantic flow path. Template agents execute at one concrete descendant
+        instance while retaining the declaration owning flow as source FlowID. The concrete instance path never becomes
+        declaration FlowID, and a runtime-created name never borrows declaration, tool, or source authority even when its
+        text and route collide with an authored declaration.
+      producer_consumption: >
+        Generated emit, channel activity, agent_message, schedule/control, and human-task publication are the complete
+        contract-backed producer set. Each consumes the admitted execution scope and copies its RoutingSource through
+        EventBus, persistence, settlement, recovery, replay, and public readback without reinterpretation.
+      unsupported_forms: >
+        Existing stores and declaration/path-derived source encodings are unsupported. Missing, duplicate, ambiguous,
+        or contradictory declaration/execution facts fail before mutation. There is no compatibility reader, migration,
+        alias, fallback, partial-source authority, or dual semantic owner.
+      proof: TestAgentDeclarationRecordsCanonicalizeDeepPackageBackedFlowProjection;
+        TestLoadAgentExecutionSemanticScopeMatrix; TestDeclaredAgentNameOwnershipBoundary
     bundle_scoped_lookup:
       status: not_supported_for_duplicate_agent_slugs
       rule: >

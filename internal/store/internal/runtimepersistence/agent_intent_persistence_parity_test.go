@@ -187,9 +187,11 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 		},
 	}}
 	flow := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
-		Policy: policy,
+		Path:      "review",
+		Paths:     runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
+		AgentURIs: map[string]string{"worker": owner},
+		Policy:    policy,
 	}
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -197,9 +199,14 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 			Root: root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
 		},
-		URIRegistry: runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
-			owner: {Kind: "agent", FlowID: "review", LocalID: "worker", Full: owner},
-		}},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{
+				"review/worker": {Kind: "agent", FlowID: "review", LocalID: "worker", Full: owner},
+			},
+			ByURI: map[string]runtimecontracts.ContractURIRef{
+				owner: {Kind: "agent", FlowID: "review", LocalID: "worker", Full: owner},
+			},
+		},
 	}
 	return selectedIntentSource{Source: semanticview.Wrap(bundle), flow: semanticview.FlowScope{
 		ID: "review", Path: "review", PackageKey: "flows/review", Mode: "static",

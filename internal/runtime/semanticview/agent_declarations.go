@@ -14,6 +14,7 @@ type AgentDeclaration struct {
 	OwnerURI    string
 	LocalID     string
 	Entry       runtimecontracts.AgentRegistryEntry
+	Source      runtimecontracts.ContractItemSource
 }
 
 func (d AgentDeclaration) Label(qualified bool) string {
@@ -27,58 +28,33 @@ func (d AgentDeclaration) Label(qualified bool) string {
 	return strings.Join([]string{strings.TrimSpace(d.ScopeKind), scopeID, "agent", strings.TrimSpace(d.LocalID)}, " ")
 }
 
-// AgentDeclarations enumerates canonical project/flow declarations directly.
+// AgentDeclarations projects the contracts-owned physical declaration census.
+// Raw project and flow maps are loader views, not declaration authority.
 func AgentDeclarations(source Source) []AgentDeclaration {
 	if source == nil {
 		return nil
 	}
-	entries := []AgentDeclaration{}
-	representedDeclarations := map[string]struct{}{}
-	appendScoped := func(scopeKind, scopeID, ownerFlowID, canonicalScopeID string, agents map[string]runtimecontracts.AgentRegistryEntry, agentURIs map[string]string) {
-		keys := make([]string, 0, len(agents))
-		for rawID := range agents {
-			if id := strings.TrimSpace(rawID); id != "" {
-				keys = append(keys, rawID)
-			}
-		}
-		sort.Slice(keys, func(i, j int) bool { return strings.TrimSpace(keys[i]) < strings.TrimSpace(keys[j]) })
-		for _, rawID := range keys {
-			localID := strings.TrimSpace(rawID)
-			declarationKey := strings.Join([]string{
-				strings.TrimSpace(ownerFlowID),
-				strings.TrimSpace(canonicalScopeID),
-				localID,
-			}, "\x00")
-			if _, represented := representedDeclarations[declarationKey]; represented {
-				continue
-			}
-			representedDeclarations[declarationKey] = struct{}{}
-			entries = append(entries, AgentDeclaration{
-				ScopeKind:   scopeKind,
-				ScopeID:     strings.TrimSpace(scopeID),
-				OwnerFlowID: strings.TrimSpace(ownerFlowID),
-				OwnerURI:    strings.TrimSpace(agentURIs[rawID]),
-				LocalID:     localID,
-				Entry:       agents[rawID],
-			})
-		}
+	bundle, ok := Bundle(source)
+	if !ok || bundle == nil {
+		return nil
 	}
-	projectScopes := sortedAuthoredProjectScopes(source.ProjectScopes())
-	flowScopes := sortedAuthoredFlowScopes(source.FlowScopes())
-	preferredFlowScopeKeys := authoredPreferredFlowScopeKeys(projectScopes, flowScopes)
-	for _, scope := range flowScopes {
-		flowID := strings.TrimSpace(scope.ID)
-		scopeKey := authoredEmitSiteFlowScopeKey(scope)
-		if preferred := preferredFlowScopeKeys[flowID]; preferred != "" && scopeKey != preferred {
-			continue
+	records := bundle.AgentDeclarationRecords()
+	entries := make([]AgentDeclaration, 0, len(records))
+	for _, record := range records {
+		scopeKind := strings.TrimSpace(record.Source.Layer)
+		scopeID := strings.TrimSpace(record.Source.PackageKey)
+		if scopeKind == "flow" {
+			scopeID = strings.TrimSpace(record.Source.FlowID)
 		}
-		appendScoped("flow", flowID, flowID, scopeKey, scope.Agents, scope.AgentURIs)
-	}
-	for _, scope := range projectScopes {
-		if authoredEmitSiteSkipsProjectScope(scope) {
-			continue
-		}
-		appendScoped("project", scope.Key, scope.OwningFlowID, scope.Key, scope.Agents, scope.AgentURIs)
+		entries = append(entries, AgentDeclaration{
+			ScopeKind:   scopeKind,
+			ScopeID:     scopeID,
+			OwnerFlowID: strings.TrimSpace(record.OwnerFlowID),
+			OwnerURI:    strings.TrimSpace(record.OwnerURI),
+			LocalID:     strings.TrimSpace(record.LogicalID),
+			Entry:       record.Entry,
+			Source:      record.Source,
+		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Label(true) < entries[j].Label(true) })
 	return entries

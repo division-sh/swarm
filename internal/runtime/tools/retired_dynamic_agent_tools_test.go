@@ -111,18 +111,30 @@ func retiredToolSourceForScope(
 	tools map[string]runtimecontracts.ToolSchemaEntry,
 	policy runtimecontracts.PolicyDocument,
 ) semanticview.Source {
+	bundle := &runtimecontracts.WorkflowContractBundle{}
 	source := retiredDynamicAgentToolSource{}
 	switch scope {
 	case "root":
+		bundle.Agents = agents
 		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents}}
 		source.rootTools, source.rootPolicy = tools, policy
 	case "project":
+		bundle.Agents = agents
 		source.projects = []semanticview.ProjectScope{{Key: "project-fixture", Agents: agents, Tools: tools, Policy: policy}}
 	case "flow":
+		flow := &runtimecontracts.FlowContractView{
+			Paths:  runtimecontracts.FlowContractPaths{ID: "flow-fixture", Flow: "flow-fixture", AgentsFile: "flow-fixture/agents.yaml", PackageKey: "."},
+			Path:   "flow-fixture",
+			Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Agents: agents,
+		}
+		bundle.FlowTree.Root = flow
+		bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{"flow-fixture": flow}
 		source.flows = []semanticview.FlowScope{{ID: "flow-fixture", Agents: agents, Tools: tools, Policy: policy}}
 	default:
 		panic("unsupported test scope: " + scope)
 	}
+	source.Source = semanticview.Wrap(bundle)
 	return source
 }
 

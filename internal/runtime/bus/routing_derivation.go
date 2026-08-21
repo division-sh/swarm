@@ -210,7 +210,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	}
 
 	for _, scope := range semanticview.ProjectScopes(source) {
-		agentNamePlans, err := routeProjectAgentNamePlans(source, scope)
+		agents, agentNamePlans, err := routeAgentDeclarationsForSource(source, "project", scope.Key, scope.OwningFlowID)
 		if err != nil {
 			return nil, err
 		}
@@ -236,7 +236,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		}
 		handlerFlowID := agentFlowID
 		rt.addAuthoredEventPathsLocked(basePath, localEvents)
-		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents, agentNamePlans); err != nil {
+		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, agents, agentNamePlans); err != nil {
 			return nil, err
 		}
 		nodes, err := routeExecutableNodeDeclarations(source, scope.Key, handlerFlowID, scope.Nodes)
@@ -249,15 +249,16 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	}
 
 	for _, scope := range semanticview.FlowScopes(source) {
+		agentPackageKey := normalizedRoutePackageKey(scope.PackageKey)
 		flowPackageKey := routeFlowPackageKey(source, scope)
-		agentNamePlans, err := routeFlowAgentNamePlans(source, scope)
+		agents, agentNamePlans, err := routeAgentDeclarationsForSource(source, "flow", agentPackageKey, scope.ID)
 		if err != nil {
 			return nil, err
 		}
 		flowPath := routeFlowPath(source, scope.ID)
 		localEvents := routeFlowLocalEventSet(source, scope)
 		if strings.EqualFold(scope.Mode, "template") || routeFlowStanding(source, scope.ID) {
-			subscribers, err := routeSubscriberTemplates(source, scope)
+			subscribers, err := routeSubscriberTemplates(source, scope, agents, agentNamePlans)
 			if err != nil {
 				return nil, err
 			}
@@ -274,7 +275,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 			rt.authoredScopes[flowPath] = struct{}{}
 		}
 		rt.addAuthoredEventPathsLocked(flowPath, localEvents)
-		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents, agentNamePlans); err != nil {
+		if err := rt.addAgentPatternsLocked(source, agentPackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, agents, agentNamePlans); err != nil {
 			return nil, err
 		}
 		nodes, err := routeExecutableNodeDeclarations(source, flowPackageKey, scope.ID, scope.Nodes)
@@ -1051,28 +1052,40 @@ func routeCanonicalPathsOverlap(left, right string) bool {
 	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
 }
 
-func routeProjectAgentNamePlans(source semanticview.Source, scope semanticview.ProjectScope) (map[string]semanticview.AgentNamePlan, error) {
-	plans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
-	for _, key := range sortedStringKeys(scope.Agents) {
-		plan, err := semanticview.ProjectAgentNamePlan(source, scope, key)
-		if err != nil {
-			return nil, fmt.Errorf("project scope %q agent %s declaration name: %w", scope.Key, key, err)
+func routeAgentDeclarationsForSource(source semanticview.Source, layer, packageKey, flowID string) (map[string]runtimecontracts.AgentRegistryEntry, map[string]semanticview.AgentNamePlan, error) {
+	layer = strings.TrimSpace(layer)
+	packageKey = normalizedRoutePackageKey(packageKey)
+	flowID = strings.TrimSpace(flowID)
+	agents := map[string]runtimecontracts.AgentRegistryEntry{}
+	plans := map[string]semanticview.AgentNamePlan{}
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		candidate := declaration.Source
+		if strings.TrimSpace(candidate.Layer) != layer || normalizedRoutePackageKey(candidate.PackageKey) != packageKey {
+			continue
 		}
+		if strings.TrimSpace(candidate.FlowID) != flowID {
+			continue
+		}
+		key := strings.TrimSpace(declaration.LocalID)
+		if _, duplicate := agents[key]; duplicate {
+			return nil, nil, fmt.Errorf("%s scope package %q flow %q has multiple physical agent declarations for %q", layer, packageKey, flowID, key)
+		}
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s scope package %q flow %q agent %s declaration name: %w", layer, packageKey, flowID, key, err)
+		}
+		agents[key] = declaration.Entry
 		plans[key] = plan
 	}
-	return plans, nil
+	return agents, plans, nil
 }
 
-func routeFlowAgentNamePlans(source semanticview.Source, scope semanticview.FlowScope) (map[string]semanticview.AgentNamePlan, error) {
-	plans := make(map[string]semanticview.AgentNamePlan, len(scope.Agents))
-	for _, key := range sortedStringKeys(scope.Agents) {
-		plan, err := semanticview.FlowAgentNamePlan(source, scope, key)
-		if err != nil {
-			return nil, fmt.Errorf("flow scope %q agent %s declaration name: %w", scope.ID, key, err)
-		}
-		plans[key] = plan
+func normalizedRoutePackageKey(packageKey string) string {
+	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
+	if packageKey == "" {
+		return runtimeidentity.RootPackageKey
 	}
-	return plans, nil
+	return packageKey
 }
 
 func (rt *RouteTable) addAgentPatternsLocked(
@@ -1429,11 +1442,11 @@ func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[st
 	return out
 }
 
-func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope) ([]routeSubscriberTemplate, error) {
-	out := make([]routeSubscriberTemplate, 0, len(scope.Agents)+len(scope.Nodes))
+func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope, agents map[string]runtimecontracts.AgentRegistryEntry, agentNamePlans map[string]semanticview.AgentNamePlan) ([]routeSubscriberTemplate, error) {
+	out := make([]routeSubscriberTemplate, 0, len(agents)+len(scope.Nodes))
 	localEvents := routeFlowLocalEventSet(source, scope)
-	for _, key := range sortedStringKeys(scope.Agents) {
-		entry := scope.Agents[key]
+	for _, key := range sortedStringKeys(agents) {
+		entry := agents[key]
 		patterns := normalizeStringList(entry.Subscriptions)
 		if len(patterns) == 0 {
 			continue
@@ -1444,14 +1457,13 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 				return nil, fmt.Errorf("route subscriber agent %s: %s", key, admission.Message())
 			}
 		}
-		namePlan, err := semanticview.FlowAgentNamePlan(source, scope, key)
-		if err != nil {
+		namePlan, ok := agentNamePlans[key]
+		if !ok {
 			return nil, fmt.Errorf(
-				"flow %q agent subscriber %q subscriptions %q has no valid declared name: %w; remediation: omit id to use the declaration key or author one non-empty literal id",
+				"flow %q agent subscriber %q subscriptions %q has no canonical declared name",
 				scope.ID,
 				key,
 				strings.Join(patterns, ","),
-				err,
 			)
 		}
 		out = append(out, routeSubscriberTemplate{
