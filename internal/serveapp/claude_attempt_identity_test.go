@@ -39,6 +39,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -101,6 +102,7 @@ type claudeAttemptProofStore interface {
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
+	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -651,7 +653,7 @@ func newClaudeAttemptProofEventBus(
 			ReplyContext: backend.store, RunLifecycle: backend.store,
 			DeliveryLifecycle: backend.store, FlowRoutes: backend.store, FlowRouteRecords: backend.store,
 			FlowRouteSets: backend.store, FlowRouteTopology: backend.store, FlowRouteRollback: backend.store, ActiveAgents: backend.store,
-			ActiveFlows: backend.store, TargetOwners: backend.store, PreparedEvents: backend.store,
+			ActiveFlows: backend.store, TargetOwners: backend.store, WorkflowInstances: backend.store, PreparedEvents: backend.store,
 			TargetFailureRecorder: backend.store, RunOrigins: backend.store,
 		},
 	})

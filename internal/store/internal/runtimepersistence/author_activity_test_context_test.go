@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -98,6 +99,7 @@ type storeTestDurableEventBusStore interface {
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
+	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -142,7 +144,7 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	opts.Durable = runtimebus.DurableDependencies{
 		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
+		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, WorkflowInstances: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store,
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(store, opts)

@@ -923,12 +923,13 @@ func routedExactSameInstanceNoTargetNodeDeliveryIntents(evt events.Event, routed
 	}
 	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if !subscriber.Recipient.IsNode() || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
+		if !subscriber.Recipient.IsNode() || subscriber.routeSource.importBoundaryWildcard() || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
+		flowInstance := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 		out = append(out, plannedDeliveryRoute{
 			Recipient: subscriber.Recipient,
-			Target:    routedNodeTargetRoute(evt, flowInstance),
+			Target:    routedNodeTargetRoute(flowInstance),
 			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
@@ -950,7 +951,7 @@ func routedImportBoundaryNoTargetNodeDeliveryIntents(evt events.Event, routed []
 		}
 		out = append(out, plannedDeliveryRoute{
 			Recipient: subscriber.Recipient,
-			Target:    routedNodeTargetRoute(evt, flowInstance),
+			Target:    routedNodeTargetRoute(flowInstance),
 			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
@@ -1080,7 +1081,7 @@ func eventTargetsRoutedSubscriber(evt events.Event, subscriber Subscriber) bool 
 	return false
 }
 
-func routedNodeTargetRoute(evt events.Event, targetFlowInstance string) events.RouteIdentity {
+func routedNodeTargetRoute(targetFlowInstance string) events.RouteIdentity {
 	return events.RouteIdentity{
 		FlowInstance: targetFlowInstance,
 	}.Normalized()
