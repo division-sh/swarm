@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -94,11 +96,20 @@ func appendProviderTriggerCapabilitySubjects(report *LocalPreflightReport, loade
 	report.addCapabilitySubjects(subjects)
 }
 
-func appendEffectiveProviderTriggerCapabilitySubjects(report *LocalPreflightReport, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) {
+func appendEffectiveProviderTriggerCapabilitySubjects(ctx context.Context, report *LocalPreflightReport, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store) {
 	if report == nil || source == nil || catalog == nil {
 		return
 	}
-	subjects, err := runtime.EffectiveStandingIngressCapabilitySubjects(source, catalog)
+	var owner *runtimecredentials.SnapshotOwner
+	if providerCredentials != nil {
+		var err error
+		owner, err = runtimecredentials.NewSnapshotOwner(providerCredentials)
+		if err != nil {
+			report.add(localPreflightProviderPackPrerequisite, "provider_trigger_credential_store_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix deployment provider credential storage")
+			return
+		}
+	}
+	subjects, err := runtime.EffectiveStandingIngressCapabilitySubjects(ctx, source, catalog, owner)
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_target_admission_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the standing ingress provider admission declaration or configured trigger packs")
 		return

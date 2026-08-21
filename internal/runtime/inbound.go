@@ -74,7 +74,7 @@ type InboundGateway struct {
 	shutdownAdmissionClosed func() bool
 	beginAdmission          func(context.Context) (context.Context, func(), bool)
 	runtimeIngress          *runtimeingress.Controller
-	credentials             runtimecredentials.Store
+	credentialOwner         *runtimecredentials.SnapshotOwner
 	standingAdmissionMu     sync.Mutex
 	standingAdmissions      map[string]*shutdownAdmission
 	publicationMu           sync.Mutex
@@ -124,10 +124,16 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdown
 	return g
 }
 
-func (g *InboundGateway) SetCredentialStore(store runtimecredentials.Store) {
-	if g != nil {
-		g.credentials = store
+func (g *InboundGateway) SetCredentialStore(store runtimecredentials.Store) error {
+	if g == nil {
+		return fmt.Errorf("inbound gateway is required")
 	}
+	owner, err := runtimecredentials.NewSnapshotOwner(store)
+	if err != nil {
+		return err
+	}
+	g.credentialOwner = owner
+	return nil
 }
 
 func (g *InboundGateway) SetRuntimeIngress(controller *runtimeingress.Controller) {
@@ -275,20 +281,20 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			http.Error(w, fmt.Sprintf("ingress alias %q provider %q requires a signing secret for %s request authentication", target.Alias, provider, target.AdmissionPlan.RequestAuthentication()), http.StatusServiceUnavailable)
 			return
 		}
-		if g.credentials == nil {
+		if g.credentialOwner == nil {
 			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
 			return
 		}
-		resolved, ok, err := g.credentials.Get(r.Context(), target.SigningSecret)
+		binding, err := g.credentialOwner.ObserveSecretBinding(r.Context(), target.SigningSecret)
 		if err != nil {
 			http.Error(w, "read signing secret failed", http.StatusServiceUnavailable)
 			return
 		}
-		if !ok || strings.TrimSpace(resolved) == "" {
+		if !binding.Bound() {
 			http.Error(w, fmt.Sprintf("signing secret %s is UNBOUND; run `swarm secrets set %s`", target.SigningSecret, target.SigningSecret), http.StatusServiceUnavailable)
 			return
 		}
-		signingValue = resolved
+		signingValue = binding.CredentialValue()
 	}
 	target.NormalizeEntity()
 	var payload any

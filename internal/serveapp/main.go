@@ -970,6 +970,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials, posture)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
+	validationOpts.ProviderCredentials = req.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
 	validationOpts.ChannelOutboundBindings = req.ChannelBindings
@@ -1265,13 +1266,18 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "provider_credentials", err)
 		return 1
 	}
+	providerCredentialOwner, err := runtimecredentials.NewSnapshotOwner(providerCredentialStore)
+	if err != nil {
+		presenter.fail(5, "provider_credentials", err)
+		return 1
+	}
 	channelPacks, err := cliapp.LoadConfiguredChannelPacks(ctx, repo, cfgResult, source.PlatformSpec(), providerPackLoad.Catalog, providerCredentialStore, managedCredentialStore)
 	if err != nil {
 		presenter.fail(5, "channel_packs", err)
 		return 1
 	}
 	if cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog, channelPacks)
+		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog, providerCredentialStore, channelPacks)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) bool {
@@ -1651,13 +1657,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	var reconcilePublicIngress func(context.Context, runtimepublicingress.Generation) error
 	if publicIngressEnabled {
-		credentialOwner, snapshotErr := runtimecredentials.NewSnapshotOwner(providerCredentialStore)
-		if snapshotErr != nil {
-			presenter.fail(20, "public_ingress", snapshotErr)
-			return 1
-		}
 		registrationController, controllerErr := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
-			CredentialOwner: credentialOwner, EffectsStore: stores.EffectsStore,
+			CredentialOwner: providerCredentialOwner, EffectsStore: stores.EffectsStore,
 			HTTP: runtimeregistration.HTTPExecutor{}, Posture: rt.ExecutionPosture, RuntimeInstanceID: runtimeInstanceID,
 			StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) {
 				current, _, _ := supervisor.PublicIngressState()
@@ -1781,7 +1782,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 	presenter.boot(21, "health_endpoints_respond", "ok", serveReadinessRoutes)
-	standing, err := serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialStore, apiListener.Addr())
+	standing, err := serveReadyStandingIngress(ctx, runtimeContextManager, providerCredentialOwner, apiListener.Addr())
 	if err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
@@ -2213,27 +2214,16 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 	return planned, nil
 }
 
-func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeContextManager, credentials runtimecredentials.Store, apiAddr net.Addr) ([]serveLifecycleIngressFact, error) {
+func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeContextManager, credentials *runtimecredentials.SnapshotOwner, apiAddr net.Addr) ([]serveLifecycleIngressFact, error) {
 	if manager == nil || apiAddr == nil {
 		return nil, nil
 	}
-	targets := map[string]runtime.StandingTarget{}
-	for _, contextDef := range manager.LoadedContexts() {
-		for _, target := range contextDef.StandingTargets {
-			lookup := manager.LookupIngress(target.Alias, target.Provider)
-			if !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
-				continue
-			}
-			key := serveStandingIngressKey(target.BundleHash, target.Alias, target.Provider)
-			if _, exists := targets[key]; exists {
-				return nil, fmt.Errorf("standing ingress readiness has duplicate loaded target %s/%s", target.Alias, target.Provider)
-			}
-			targets[key] = target
-		}
+	subjects, err := manager.EvaluatedCapabilitySubjects(ctx, credentials)
+	if err != nil {
+		return nil, err
 	}
-
 	facts := []serveLifecycleIngressFact{}
-	for _, subject := range manager.CapabilitySubjects() {
+	for _, subject := range subjects {
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Applicability != "effective" {
 			continue
 		}
@@ -2241,42 +2231,15 @@ func serveReadyStandingIngress(ctx context.Context, manager *runtime.RuntimeCont
 		if admission == nil {
 			return nil, fmt.Errorf("effective provider trigger %s has no compiled admission readback", subject.ID)
 		}
-		key := serveStandingIngressKey(admission.BundleHash, admission.Alias, subject.Provider)
-		target, ok := targets[key]
-		if !ok {
-			return nil, fmt.Errorf("effective provider trigger %s has no loaded standing target", subject.ID)
-		}
-		bound := false
-		signingSecret := strings.TrimSpace(target.SigningSecret)
-		if signingSecret != "" {
-			if credentials == nil {
-				return nil, fmt.Errorf("standing ingress credential readback is unavailable for %s/%s", target.Alias, target.Provider)
-			}
-			value, found, err := credentials.Get(ctx, signingSecret)
-			if err != nil {
-				return nil, fmt.Errorf("read standing ingress credential %s: %w", signingSecret, err)
-			}
-			bound = found && strings.TrimSpace(value) != ""
-		}
 		facts = append(facts, serveLifecycleIngressFact{
-			Provider:      strings.TrimSpace(target.Provider),
-			Alias:         strings.TrimSpace(target.Alias),
-			URL:           fmt.Sprintf("http://%s/webhooks/%s/%s", apiAddr.String(), target.Alias, target.Provider),
-			SigningSecret: signingSecret,
-			SigningBound:  bound,
-			BundleHash:    strings.TrimSpace(target.BundleHash),
-			Subject:       subject,
+			Provider:   strings.TrimSpace(subject.Provider),
+			Alias:      strings.TrimSpace(admission.Alias),
+			URL:        fmt.Sprintf("http://%s/webhooks/%s/%s", apiAddr.String(), admission.Alias, subject.Provider),
+			BundleHash: strings.TrimSpace(admission.BundleHash),
+			Subject:    subject,
 		})
-		delete(targets, key)
-	}
-	if len(targets) != 0 {
-		return nil, fmt.Errorf("standing ingress readiness is missing %d effective capability subjects", len(targets))
 	}
 	return facts, nil
-}
-
-func serveStandingIngressKey(bundleHash, alias, provider string) string {
-	return strings.TrimSpace(bundleHash) + "\x00" + strings.TrimSpace(alias) + "\x00" + strings.TrimSpace(provider)
 }
 
 func serveLifecycleSourceCounts(contexts []serveRuntimeBundleContext) (flows, agents, tools int) {

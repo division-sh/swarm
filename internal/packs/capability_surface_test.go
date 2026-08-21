@@ -43,7 +43,20 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	if normalized[0].Status != StatusAvailable {
-		t.Fatalf("effective trigger status = %q, want AVAILABLE until target binding readback", normalized[0].Status)
+		t.Fatalf("base effective trigger status = %q, want AVAILABLE while target binding is unevaluated", normalized[0].Status)
+	}
+
+	bound := base
+	bound.Requirements = []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.acme", RequirementScopeTarget, RequirementStatusBound, "credential_store")}
+	normalized, err = NormalizeSubjects([]Subject{bound})
+	if err != nil || normalized[0].Status != StatusReady {
+		t.Fatalf("bound effective trigger = (%#v, %v), want READY", normalized, err)
+	}
+	unbound := base
+	unbound.Requirements = []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.acme", RequirementScopeTarget, RequirementStatusUnbound, "credential_store")}
+	normalized, err = NormalizeSubjects([]Subject{unbound})
+	if err != nil || normalized[0].Status != StatusNotReady {
+		t.Fatalf("unbound effective trigger = (%#v, %v), want NOT_READY", normalized, err)
 	}
 
 	invalid := base
@@ -65,6 +78,9 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 	normalized, err = NormalizeSubjects([]Subject{invalid})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if normalized[0].Status != StatusReady {
+		t.Fatalf("unauthenticated trigger status = %q, want READY", normalized[0].Status)
 	}
 	if rendered := RenderSubject(normalized[0], false); !strings.Contains(rendered, "request_authentication=UNAUTHENTICATED") || !strings.Contains(rendered, "policy_source=raw_declaration") {
 		t.Fatalf("unauthenticated trigger readback = %q", rendered)
@@ -241,5 +257,56 @@ func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"carry_eligible":true`) || !strings.Contains(text, "record_id:text:required:carry-eligible") {
 		t.Fatalf("normalized carry descriptor missing from JSON or text\njson=%s\ntext=%s", body, text)
+	}
+}
+
+func TestRenderEffectiveTriggerReadinessIsConciseAndRedacted(t *testing.T) {
+	tests := []struct {
+		name      string
+		subject   Subject
+		want      string
+		forbidden []string
+	}{
+		{
+			name:    "bound",
+			subject: effectiveTriggerSubject(RequirementStatusBound),
+			want:    "READY · HMAC_SHA256 · webhook_signing.telegram bound",
+		},
+		{
+			name:    "unbound",
+			subject: effectiveTriggerSubject(RequirementStatusUnbound),
+			want:    "NOT READY · HMAC_SHA256 · webhook_signing.telegram unbound · fix: swarm secrets set webhook_signing.telegram",
+		},
+		{
+			name: "unauthenticated",
+			subject: Subject{
+				ID: "ingress:bundle:chat:telegram", Kind: SubjectProviderTrigger, Provider: "telegram",
+				Source: "raw_declaration", Applicability: "effective",
+				TriggerAdmission: &TriggerAdmission{BundleHash: "bundle", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "UNAUTHENTICATED", Event: "inbound.telegram"},
+			},
+			want: "READY · UNAUTHENTICATED",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := RenderEffectiveTriggerReadiness(test.subject)
+			if got != test.want {
+				t.Fatalf("RenderEffectiveTriggerReadiness = %q, want %q", got, test.want)
+			}
+			for _, forbidden := range append(test.forbidden, "bundle", "catalog_generation", "policy_source", "manifest_hash", "provenance", "source_path") {
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("RenderEffectiveTriggerReadiness leaked %q in %q", forbidden, got)
+				}
+			}
+		})
+	}
+}
+
+func effectiveTriggerSubject(status string) Subject {
+	return Subject{
+		ID: "ingress:bundle:chat:telegram", Kind: SubjectProviderTrigger, Provider: "telegram",
+		Source: "raw_declaration", Applicability: "effective",
+		TriggerAdmission: &TriggerAdmission{BundleHash: "bundle", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound.telegram"},
+		Requirements:     []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.telegram", RequirementScopeTarget, status, "credential_store")},
 	}
 }

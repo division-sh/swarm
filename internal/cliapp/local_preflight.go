@@ -17,6 +17,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -92,6 +93,7 @@ type localPreflightRequest struct {
 	ContractSecretSeverity LocalPreflightSeverity
 	ProviderTriggerPacks   []providertriggers.LoadedPack
 	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
+	ProviderCredentials    runtimecredentials.Store
 	ChannelPacks           ChannelPackLoad
 }
 
@@ -292,7 +294,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 	}
 	source = projection.Source()
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
-	appendEffectiveProviderTriggerCapabilitySubjects(report, source, req.ProviderTriggerCatalog)
+	appendEffectiveProviderTriggerCapabilitySubjects(ctx, report, source, req.ProviderTriggerCatalog, req.ProviderCredentials)
 	appendChannelCapabilitySubjects(report, req.ChannelPacks)
 	return source, contractsRoot, true
 }
@@ -669,7 +671,7 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLIContractPlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, channelPacks ChannelPackLoad) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLIContractPlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,
@@ -687,6 +689,7 @@ func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts Serv
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets(mode),
 		ProviderTriggerPacks:   providerTriggerPacks,
 		ProviderTriggerCatalog: providerTriggerCatalog,
+		ProviderCredentials:    providerCredentials,
 		ChannelPacks:           channelPacks,
 	})
 }

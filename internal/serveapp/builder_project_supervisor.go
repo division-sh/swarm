@@ -256,6 +256,10 @@ func newBuilderProjectSourceValidator(cfg *config.Config) func(context.Context, 
 		if err != nil {
 			return err
 		}
+		providerCredentialStore, err := cliapp.BuildProviderCredentialStore()
+		if err != nil {
+			return err
+		}
 		profile, err := cfg.LLMBackendProfile()
 		if err != nil {
 			return fmt.Errorf("resolve llm backend profile for Builder validation: %w", err)
@@ -267,6 +271,7 @@ func newBuilderProjectSourceValidator(cfg *config.Config) func(context.Context, 
 		opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore, posture)
 		opts.LLMProfile = profile
 		opts.ProviderTriggerCatalog = catalog
+		opts.ProviderCredentials = providerCredentialStore
 		_, err = runtime.ValidateWorkflowContractSurface(ctx, source, opts)
 		return err
 	}

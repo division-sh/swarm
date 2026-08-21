@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -29,6 +30,10 @@ func (boundedProviderCredentialStore) Get(_ context.Context, key string) (string
 func (boundedProviderCredentialStore) Set(context.Context, string, string) error { return nil }
 func (boundedProviderCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (boundedProviderCredentialStore) Delete(context.Context, string) error      { return nil }
+func (s boundedProviderCredentialStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	value, present, err := s.Get(ctx, key)
+	return runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: key, Present: present}, value), err
+}
 
 func testProviderTriggerCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
 	t.Helper()

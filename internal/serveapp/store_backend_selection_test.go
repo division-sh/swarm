@@ -472,6 +472,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		WorkflowModule:         stubWorkflowModule{source: semanticview.Wrap(bundle)},
 		LLMRuntime:             storeBackendSelectionNoopLLMRuntime{},
 		ProviderTriggerCatalog: testProviderTriggerCatalog(t),
+		ProviderCredentials:    processIngressCredentialStore{},
 	}
 	rt, err := runtime.NewRuntime(ctx, runtimeDeps)
 	if err != nil {

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -267,7 +269,7 @@ func RecompileStandingTargetAdmissions(source semanticview.Source, catalog *prov
 	return out, nil
 }
 
-func EffectiveStandingIngressCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
+func baseStandingIngressCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return nil, fmt.Errorf("effective standing ingress capability subjects require a bundle-backed semantic source")
@@ -302,9 +304,81 @@ func EffectiveStandingIngressCapabilitySubjects(source semanticview.Source, cata
 	return packs.NormalizeSubjects(subjects)
 }
 
+// EvaluateProviderTriggerCapabilitySubject resolves one immutable effective
+// target subject against the deployment credential store. Installed inventory
+// is intentionally outside this target-scoped projection.
+func EvaluateProviderTriggerCapabilitySubject(ctx context.Context, subject packs.Subject, owner *runtimecredentials.SnapshotOwner) (packs.Subject, error) {
+	normalized, err := packs.NormalizeSubjects([]packs.Subject{subject})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	if len(normalized) != 1 || normalized[0].Kind != packs.SubjectProviderTrigger || normalized[0].Applicability != "effective" {
+		return packs.Subject{}, fmt.Errorf("target credential evaluation requires one effective provider trigger subject")
+	}
+	base := normalized[0]
+	if base.TriggerAdmission.RequestAuthentication == string(providertriggers.RequestAuthenticationNone) {
+		return base, nil
+	}
+	if len(subject.Requirements) != 1 || subject.Requirements[0].Satisfied != nil || strings.TrimSpace(subject.Requirements[0].Status) != "" || strings.TrimSpace(subject.Requirements[0].Remediation) != "" || strings.TrimSpace(subject.Requirements[0].Source) != "" {
+		return packs.Subject{}, fmt.Errorf("effective provider trigger subject %q must enter credential evaluation with one unevaluated target requirement", base.ID)
+	}
+	if owner == nil {
+		return packs.Subject{}, fmt.Errorf("deployment provider credential snapshot owner is required for target %q", base.ID)
+	}
+	binding, err := owner.ObserveSecretBinding(ctx, base.Requirements[0].Name)
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	evaluated := packs.CloneSubjects([]packs.Subject{base})[0]
+	evaluated.Status = ""
+	evaluated.Requirements[0] = packs.RequirementWithStatus(
+		packs.RequirementSecret,
+		base.Requirements[0].Name,
+		packs.RequirementScopeTarget,
+		string(binding.Status()),
+		"credential_store",
+	)
+	normalized, err = packs.NormalizeSubjects([]packs.Subject{evaluated})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	return normalized[0], nil
+}
+
+func EvaluateStandingIngressCapabilitySubject(ctx context.Context, target StandingTarget, subject packs.Subject, owner *runtimecredentials.SnapshotOwner) (packs.Subject, error) {
+	expected, err := target.CapabilitySubject()
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	actual, err := packs.NormalizeSubjects([]packs.Subject{subject})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	if len(actual) != 1 || !reflect.DeepEqual(actual[0], expected) {
+		return packs.Subject{}, fmt.Errorf("standing target %q/%q capability subject does not match its compiled admission authority", target.Alias, target.Provider)
+	}
+	return EvaluateProviderTriggerCapabilitySubject(ctx, expected, owner)
+}
+
+func EffectiveStandingIngressCapabilitySubjects(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, owner *runtimecredentials.SnapshotOwner) ([]packs.Subject, error) {
+	base, err := baseStandingIngressCapabilitySubjects(source, catalog)
+	if err != nil {
+		return nil, err
+	}
+	evaluated := make([]packs.Subject, 0, len(base))
+	for _, subject := range base {
+		current, err := EvaluateProviderTriggerCapabilitySubject(ctx, subject, owner)
+		if err != nil {
+			return nil, err
+		}
+		evaluated = append(evaluated, current)
+	}
+	return packs.NormalizeSubjects(evaluated)
+}
+
 // ProviderTriggerCapabilitySubjects is the canonical installed-plus-effective
 // trigger projection for contract verification surfaces.
-func ProviderTriggerCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
+func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot, owner *runtimecredentials.SnapshotOwner) ([]packs.Subject, error) {
 	var subjects []packs.Subject
 	if catalog != nil {
 		installed, err := catalog.InstalledCapabilitySubjects()
@@ -313,7 +387,7 @@ func ProviderTriggerCapabilitySubjects(source semanticview.Source, catalog *prov
 		}
 		subjects = append(subjects, installed...)
 	}
-	effective, err := EffectiveStandingIngressCapabilitySubjects(source, catalog)
+	effective, err := EffectiveStandingIngressCapabilitySubjects(ctx, source, catalog, owner)
 	if err != nil {
 		return nil, err
 	}

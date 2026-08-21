@@ -320,6 +320,7 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure provider credentials: %w", err)
 	}
+	opts.ProviderCredentials = providerCredentials
 	channelPacks, err := LoadConfiguredChannelPacks(context.Background(), repo, configResult, source.PlatformSpec(), providerPacks.Catalog, providerCredentials, managedCredentialStore)
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load channel packs: %w", err)

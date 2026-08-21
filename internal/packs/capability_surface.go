@@ -377,10 +377,11 @@ func normalizeSubject(subject *Subject) error {
 	var derivedStatus SubjectStatus
 	switch subject.Kind {
 	case SubjectProviderTrigger:
-		if err := normalizeProviderTriggerSubject(subject); err != nil {
+		var err error
+		derivedStatus, err = normalizeProviderTriggerSubject(subject)
+		if err != nil {
 			return err
 		}
-		derivedStatus = StatusAvailable
 	case SubjectProviderConnector:
 		switch subject.Applicability {
 		case "installed":
@@ -480,20 +481,20 @@ func normalizeSubject(subject *Subject) error {
 	return nil
 }
 
-func normalizeProviderTriggerSubject(subject *Subject) error {
+func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 	for i := range subject.TriggerEvents {
 		descriptor := &subject.TriggerEvents[i]
 		descriptor.Event = strings.TrimSpace(descriptor.Event)
 		descriptor.Kind = strings.TrimSpace(descriptor.Kind)
 		if descriptor.Event == "" || (descriptor.Kind != "raw" && descriptor.Kind != "normalized") {
-			return fmt.Errorf("provider trigger subject %q has invalid trigger event descriptor", subject.ID)
+			return "", fmt.Errorf("provider trigger subject %q has invalid trigger event descriptor", subject.ID)
 		}
 		for j := range descriptor.Fields {
 			field := &descriptor.Fields[j]
 			field.Name = strings.TrimSpace(field.Name)
 			field.Type = strings.TrimSpace(field.Type)
 			if field.Name == "" || field.Type == "" {
-				return fmt.Errorf("provider trigger subject %q event %q has incomplete field descriptor", subject.ID, descriptor.Event)
+				return "", fmt.Errorf("provider trigger subject %q event %q has incomplete field descriptor", subject.ID, descriptor.Event)
 			}
 		}
 		sort.SliceStable(descriptor.Fields, func(a, b int) bool { return descriptor.Fields[a].Name < descriptor.Fields[b].Name })
@@ -506,20 +507,20 @@ func normalizeProviderTriggerSubject(subject *Subject) error {
 	})
 	for i := 1; i < len(subject.TriggerEvents); i++ {
 		if subject.TriggerEvents[i-1].Event == subject.TriggerEvents[i].Event {
-			return fmt.Errorf("provider trigger subject %q has duplicate event descriptor %q", subject.ID, subject.TriggerEvents[i].Event)
+			return "", fmt.Errorf("provider trigger subject %q has duplicate event descriptor %q", subject.ID, subject.TriggerEvents[i].Event)
 		}
 	}
 	switch subject.Applicability {
 	case "installed":
 		if subject.Source != "trigger_pack" || subject.TriggerAdmission != nil {
-			return fmt.Errorf("installed provider trigger subject %q must use trigger_pack source and must not carry target admission", subject.ID)
+			return "", fmt.Errorf("installed provider trigger subject %q must use trigger_pack source and must not carry target admission", subject.ID)
 		}
 	case "effective":
 		if subject.Source != "trigger_pack_binding" && subject.Source != "raw_declaration" {
-			return fmt.Errorf("effective provider trigger subject %q has invalid source %q", subject.ID, subject.Source)
+			return "", fmt.Errorf("effective provider trigger subject %q has invalid source %q", subject.ID, subject.Source)
 		}
 		if subject.TriggerAdmission == nil {
-			return fmt.Errorf("effective provider trigger subject %q requires typed trigger_admission", subject.ID)
+			return "", fmt.Errorf("effective provider trigger subject %q requires typed trigger_admission", subject.ID)
 		}
 		admission := subject.TriggerAdmission
 		admission.BundleHash = strings.TrimSpace(admission.BundleHash)
@@ -531,55 +532,99 @@ func normalizeProviderTriggerSubject(subject *Subject) error {
 		admission.SignedPayload = strings.TrimSpace(admission.SignedPayload)
 		admission.DigestEncoding = strings.TrimSpace(admission.DigestEncoding)
 		if admission.BundleHash == "" || admission.Alias == "" || admission.CatalogGeneration == "" || admission.Event == "" {
-			return fmt.Errorf("effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event", subject.ID)
+			return "", fmt.Errorf("effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event", subject.ID)
 		}
 		wantID := "ingress:" + admission.BundleHash + ":" + admission.Alias + ":" + subject.Provider
 		if subject.ID != wantID {
-			return fmt.Errorf("effective provider trigger subject %q must use stable target id %q", subject.ID, wantID)
+			return "", fmt.Errorf("effective provider trigger subject %q must use stable target id %q", subject.ID, wantID)
 		}
 		if admission.PolicySource != "verified_pack" && admission.PolicySource != "raw_declaration" {
-			return fmt.Errorf("effective provider trigger subject %q has invalid policy_source %q", subject.ID, admission.PolicySource)
+			return "", fmt.Errorf("effective provider trigger subject %q has invalid policy_source %q", subject.ID, admission.PolicySource)
 		}
 		allowedAuth := map[string]bool{"TOKEN_EQUALITY": true, "TOKEN": true, "HMAC_SHA256": true, "HMAC_SHA1": true, "UNAUTHENTICATED": true}
 		if !allowedAuth[admission.RequestAuthentication] {
-			return fmt.Errorf("effective provider trigger subject %q has invalid request_authentication %q", subject.ID, admission.RequestAuthentication)
+			return "", fmt.Errorf("effective provider trigger subject %q has invalid request_authentication %q", subject.ID, admission.RequestAuthentication)
 		}
 		if admission.PolicySource == "verified_pack" {
 			if subject.Source != "trigger_pack_binding" || admission.Pack == nil {
-				return fmt.Errorf("effective verified-pack trigger subject %q requires trigger_pack_binding source and pack identity", subject.ID)
+				return "", fmt.Errorf("effective verified-pack trigger subject %q requires trigger_pack_binding source and pack identity", subject.ID)
 			}
 			pack := admission.Pack
 			source, err := NewPackSource(pack.Provenance, "")
 			if err != nil {
-				return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
+				return "", fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 			}
 			identity, err := NewPackIdentity(pack.ID, pack.Version, pack.ManifestHash, TypeTrigger, source)
 			if err != nil {
-				return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
+				return "", fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 			}
 			pack.ID = identity.ID()
 			pack.Version = identity.Version()
 			pack.ManifestHash = identity.ManifestHash()
 			pack.Provenance = identity.Source().Provenance()
 		} else if subject.Source != "raw_declaration" || admission.Pack != nil {
-			return fmt.Errorf("effective raw trigger subject %q must use raw_declaration source without pack identity", subject.ID)
+			return "", fmt.Errorf("effective raw trigger subject %q must use raw_declaration source without pack identity", subject.ID)
 		}
 	default:
-		return fmt.Errorf("provider trigger subject %q has invalid applicability %q", subject.ID, subject.Applicability)
+		return "", fmt.Errorf("provider trigger subject %q has invalid applicability %q", subject.ID, subject.Applicability)
 	}
 	for _, requirement := range subject.Requirements {
-		if requirement.Scope != RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" || requirement.Remediation != "" {
-			return fmt.Errorf("provider trigger subject %q requirement %q must remain target-scoped and unevaluated", subject.ID, requirement.Name)
+		if requirement.Scope != RequirementScopeTarget {
+			return "", fmt.Errorf("provider trigger subject %q requirement %q must be target-scoped", subject.ID, requirement.Name)
 		}
+		if subject.Applicability == "installed" && (requirement.Satisfied != nil || requirement.Status != "" || requirement.Remediation != "" || requirement.Source != "") {
+			return "", fmt.Errorf("installed provider trigger subject %q requirement %q must remain target-scoped and unevaluated", subject.ID, requirement.Name)
+		}
+	}
+	if subject.Applicability == "installed" {
+		return StatusAvailable, nil
 	}
 	if subject.Applicability == "effective" {
 		unauthenticated := subject.TriggerAdmission.RequestAuthentication == "UNAUTHENTICATED"
 		if unauthenticated && len(subject.Requirements) != 0 {
-			return fmt.Errorf("effective unauthenticated provider trigger subject %q must not carry secret requirements", subject.ID)
+			return "", fmt.Errorf("effective unauthenticated provider trigger subject %q must not carry secret requirements", subject.ID)
 		}
 		if !unauthenticated && len(subject.Requirements) != 1 {
-			return fmt.Errorf("effective authenticated provider trigger subject %q must carry exactly one unevaluated secret requirement", subject.ID)
+			return "", fmt.Errorf("effective authenticated provider trigger subject %q must carry exactly one target secret requirement", subject.ID)
 		}
+		if unauthenticated {
+			return StatusReady, nil
+		}
+		requirement := subject.Requirements[0]
+		if requirement.Kind != RequirementSecret {
+			return "", fmt.Errorf("effective authenticated provider trigger subject %q requirement %q must be a secret", subject.ID, requirement.Name)
+		}
+		if requirement.Satisfied == nil && requirement.Status == "" && requirement.Remediation == "" && requirement.Source == "" {
+			return StatusAvailable, nil
+		}
+		if err := validateTriggerRequirement(subject.ID, requirement); err != nil {
+			return "", err
+		}
+		if *requirement.Satisfied {
+			return StatusReady, nil
+		}
+		return StatusNotReady, nil
+	}
+	return "", fmt.Errorf("provider trigger subject %q has invalid applicability %q", subject.ID, subject.Applicability)
+}
+
+func validateTriggerRequirement(subjectID string, requirement Requirement) error {
+	if requirement.Satisfied == nil || requirement.Status == "" {
+		return fmt.Errorf("effective provider trigger subject %q requirement %q must be wholly evaluated or wholly unevaluated", subjectID, requirement.Name)
+	}
+	if requirement.Status != RequirementStatusBound && requirement.Status != RequirementStatusUnbound {
+		return fmt.Errorf("effective provider trigger subject %q requirement %q has invalid secret status %q", subjectID, requirement.Name, requirement.Status)
+	}
+	wantSatisfied := requirementSatisfied(requirement.Kind, requirement.Status)
+	if *requirement.Satisfied != wantSatisfied {
+		return fmt.Errorf("effective provider trigger subject %q requirement %q status %q contradicts satisfied=%t", subjectID, requirement.Name, requirement.Status, *requirement.Satisfied)
+	}
+	wantRemediation := requirementRemediation(requirement.Kind, requirement.Name, requirement.Status)
+	if requirement.Remediation != wantRemediation {
+		return fmt.Errorf("effective provider trigger subject %q requirement %q remediation does not match canonical secret/%s remediation", subjectID, requirement.Name, requirement.Status)
+	}
+	if requirement.Source != "credential_store" {
+		return fmt.Errorf("effective provider trigger subject %q requirement %q must use credential_store source", subjectID, requirement.Name)
 	}
 	return nil
 }
@@ -684,6 +729,34 @@ func RenderSubject(subject Subject, verbose bool) string {
 		}
 	}
 	return strings.Join(parts, "; ")
+}
+
+// RenderEffectiveTriggerReadiness projects the concise operational readiness
+// facts for one effective inbound trigger without exposing diagnostic identity.
+func RenderEffectiveTriggerReadiness(subject Subject) string {
+	normalized, err := NormalizeSubjects([]Subject{subject})
+	if err != nil {
+		return "INVALID · " + err.Error()
+	}
+	subject = normalized[0]
+	if subject.Kind != SubjectProviderTrigger || subject.Applicability != "effective" || subject.TriggerAdmission == nil {
+		return "INVALID · effective provider trigger subject required"
+	}
+
+	parts := []string{userfacing.ProjectHumanCode(userfacing.HumanCodeProviderSubjectStatus, string(subject.Status))}
+	authentication := subject.TriggerAdmission.RequestAuthentication
+	parts = append(parts, authentication)
+	if authentication == "UNAUTHENTICATED" {
+		return strings.Join(parts, " · ")
+	}
+
+	requirement := subject.Requirements[0]
+	status := strings.ToLower(userfacing.ProjectHumanCode(userfacing.HumanCodeProviderRequirementStatus, requirement.Status))
+	parts = append(parts, requirement.Name+" "+status)
+	if requirement.Remediation != "" && requirement.Satisfied != nil && !*requirement.Satisfied {
+		parts = append(parts, "fix: "+requirement.Remediation)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func renderRequirement(requirement Requirement) string {

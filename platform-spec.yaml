@@ -8889,18 +8889,26 @@ tool_model:
         effective: compiled ingress target or callable connector declaration selected by the contract
         installed: verified pack inventory that is not an effective callable connector
     status:
-      READY: effective connector whose every static or managed credential requirement is satisfied
-      NOT_READY: effective connector with at least one unsatisfied static or managed credential requirement
+      READY: >
+        Effective connector whose every static or managed credential requirement is satisfied; effective authenticated
+        provider-trigger target whose exact declared signing requirement is BOUND; or legal effective unauthenticated
+        provider-trigger target, which remains visibly UNAUTHENTICATED and carries no invented secret requirement.
+      NOT_READY: >
+        Effective connector with at least one unsatisfied static or managed credential requirement, or effective
+        authenticated provider-trigger target whose exact declared signing requirement is UNBOUND.
       AVAILABLE: >
-        Installed capability that is not effective in the current contract, or an effective provider-trigger target whose
-        target-scoped secret binding is intentionally unevaluated until #1944 contributes BOUND/UNBOUND readiness. Unimported
-        connector actions are AVAILABLE and carry import remediation but MUST remain absent from ToolEntries, agent
-        surfaces, validation, and execution.
+        Installed capability that is not effective in the current contract, or the immutable lifecycle-owned base projection
+        of an effective provider-trigger target before read-time deployment credential evaluation. Operator-facing verify,
+        preflight, doctor, serve, and prove surfaces MUST evaluate effective target requirements and MUST NOT publish the base
+        AVAILABLE state as readiness. Unimported connector actions are AVAILABLE and carry import remediation but MUST remain
+        absent from ToolEntries, agent surfaces, validation, and execution.
       rollup_rule: >
         `internal/packs NormalizeSubjects` derives status from kind, applicability, and validated requirement state.
-        Body adapters MUST NOT compute status. A supplied status that contradicts the derived tuple, an installed connector
-        without import remediation, an effective connector with an import requirement, or a status/satisfied/remediation
-        inconsistency fails closed.
+        Effective provider-trigger base subjects may carry exactly one wholly unevaluated target secret requirement, while
+        evaluated authenticated subjects require the canonical BOUND/UNBOUND, satisfied, remediation, and credential_store
+        tuple. Body adapters MUST NOT compute status. A supplied status that contradicts the derived tuple, a partial or
+        contradictory requirement, an installed connector without import remediation, an effective connector with an import
+        requirement, or a status/satisfied/remediation inconsistency fails closed.
     facts:
       capability_shape: {code: stable_machine_code, target: optional_body_derived_target}
       guarantee_shape: {code: stable_machine_code, enforced_by: registry_pinned_enforcement_id}
@@ -9995,10 +10003,16 @@ tool_model:
       The value names one deployment credential-store entry; package and flow-instance data never carry the secret value.
       `webhook_signing.<provider>` is the built-in pack requirement naming convention, not an inferred default or override of
       an explicitly declared signing_secret reference. Runtime admission resolves the selected target's declared reference
-      through the deployment credential store and fails closed before signature verification, dedupe persistence, or publish
-      when it is unbound. Flow-instance config and provider-specific runtime readers are non-authoritative. Secret values are
-      never returned by webhook responses or readback surfaces; an external vault may back the deployment credential store
-      without changing this semantic boundary.
+      through one atomic exact-key snapshot-usability owner. Observation failure is a typed failure; absent, empty, and
+      whitespace-only values are UNBOUND; a present non-empty value is BOUND. The same owner feeds effective target
+      READY/NOT_READY projection, webhook admission, and the target-signing prerequisite of channel-backed public
+      registration. Webhook admission fails before signature verification, dedupe persistence, or publish when unbound;
+      public registration fails before provider identify/apply, external-effect launch/settlement, or readiness publication.
+      The immutable target subject remains the lifecycle owner and deployment truth is evaluated at read/admission time with
+      manager/target revision currentness, so removal, rotation, replacement, suppression, and unload cannot retain stale
+      BOUND/READY state. Flow-instance config, store-entry presence alone, caller-computed booleans, and provider-specific
+      runtime readers are non-authoritative. Secret values remain process-private and are never returned by webhook responses
+      or readback surfaces; an external vault may back the deployment credential store without changing this semantic boundary.
     configured_provider_manifests:
     - provider: github
       signature: >
@@ -15350,18 +15364,21 @@ platform_tables:
       same production owner through storetest.StartSQLiteRuntimeStore or storetest.AdmitPostgresRuntimeStore; no test-only
       platform bootstrap or legacy SQL path exists.
   credentials_policy:
-    description: Webhook secrets, API keys, and other credentials are NOT stored in platform tables. The platform provides
-      a config surface; products choose their storage strategy.
-    options:
-      flow_instance_config: 'For per-instance secrets (webhook signing keys, API tokens): store in flow_instances.config JSONB
-        under a "secrets" key. The platform does not encrypt this field — the product layer or infrastructure (encrypted-at-rest
-        DB, vault sidecar) handles encryption.'
-      external_vault: 'For production deployments: use an external secrets manager (HashiCorp Vault, AWS Secrets Manager,
-        etc.). flow_instances.config stores a vault reference, not the secret itself.'
-    migration_from_legacy: Legacy code that read workflow_instances.metadata.credentials must be rewritten to read from flow_instances.config.secrets.
-      This is a product-level migration — inbound.go is product code, not platform code. Move it out of generic runtime.
-    platform_guarantee: The platform never reads, writes, logs, or indexes credential fields. It treats flow_instances.config
-      as opaque JSONB. Products own their secrets.
+    description: >
+      Webhook secrets, API keys, and other deployment credential values are owned only by the deployment credential store
+      behind `swarm secrets set|check|list|rm`. Typed declarations such as
+      `package.yaml flows[].ingress.providers[].signing_secret` own credential reference names; they never carry values.
+    storage_boundary: >
+      Platform/runtime rows, package data, standing target rows, and `flow_instances.config` contain neither deployment
+      credential values nor external-vault references for those values. An external vault may back the deployment credential
+      store, but runtime consumers still use the same typed credential-store owner.
+    no_legacy_semantics: >
+      There is no legacy flow-instance credential reader, fallback, dual owner, migration, export, purge, or compatibility
+      path. Existing unsupported data is not interpreted or moved; operators configure current credential references through
+      the supported deployment store.
+    platform_guarantee: >
+      Credential values remain process-private after an atomic store observation and are never persisted, indexed, logged,
+      included in errors, or projected through human/structured capability readback.
 run_model:
   description: 'A run is the top-level execution context for the platform. Every event, delivery, session, turn,
     entity mutation, and current entity-state row belongs to exactly one run. Runs provide isolation for observability,

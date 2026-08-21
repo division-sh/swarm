@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -15,11 +16,118 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
 )
+
+type blockingCredentialSnapshotStore struct {
+	runtimecredentials.Store
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingCredentialSnapshotStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-ctx.Done():
+		return runtimecredentials.AtomicSnapshot{}, ctx.Err()
+	case <-s.release:
+	}
+	return s.Store.(runtimecredentials.Snapshotter).Snapshot(ctx, key)
+}
+
+func TestRuntimeContextManagerEvaluatesExactTargetCredentialAtReadTime(t *testing.T) {
+	ctx := context.Background()
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := runtimecredentials.NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEffectiveTargetStatus := func(want packs.SubjectStatus, wantRequirement string) {
+		t.Helper()
+		subjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, subject := range subjects {
+			if subject.Applicability != "effective" {
+				continue
+			}
+			if subject.Status != want || len(subject.Requirements) != 1 || subject.Requirements[0].Status != wantRequirement {
+				t.Fatalf("effective subject = %#v, want %s/%s", subject, want, wantRequirement)
+			}
+			return
+		}
+		t.Fatal("effective target subject missing")
+	}
+	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusUnbound)
+	const secretValue = "issue-1944-secret-value-must-not-leak"
+	if err := store.Set(ctx, "webhook_signing.acme", secretValue); err != nil {
+		t.Fatal(err)
+	}
+	assertEffectiveTargetStatus(packs.StatusReady, packs.RequirementStatusBound)
+	boundSubjects, err := manager.EvaluatedCapabilitySubjects(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subject := range boundSubjects {
+		if strings.Contains(packs.RenderSubject(subject, true), secretValue) {
+			t.Fatal("credential value leaked into capability readback")
+		}
+	}
+	if err := store.Delete(ctx, "webhook_signing.acme"); err != nil {
+		t.Fatal(err)
+	}
+	assertEffectiveTargetStatus(packs.StatusNotReady, packs.RequirementStatusUnbound)
+}
+
+func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t *testing.T) {
+	ctx := context.Background()
+	catalog := runtimeAdmissionTestCatalog(t, "a")
+	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Set(ctx, "webhook_signing.acme", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	blocking := &blockingCredentialSnapshotStore{Store: store, entered: make(chan struct{}), release: make(chan struct{})}
+	owner, err := runtimecredentials.NewSnapshotOwner(blocking)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
+		errCh <- projectionErr
+	}()
+	<-blocking.entered
+	if err := manager.SuppressStandingServiceTargets("service-primary"); err != nil {
+		t.Fatal(err)
+	}
+	close(blocking.release)
+	if err := <-errCh; err == nil || !strings.Contains(err.Error(), "became stale") {
+		t.Fatalf("stale projection error = %v", err)
+	}
+}
 
 func TestValidateRuntimeContextSetWithAdmissionDoesNotActivateStandingOccurrences(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
@@ -67,7 +175,7 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 				return
 			default:
 			}
-			subjects := manager.CapabilitySubjects()
+			subjects := manager.BaseCapabilitySubjects()
 			lookup := manager.LookupIngress("survivor", "acme")
 			if !lookup.Loaded() {
 				select {
@@ -127,7 +235,7 @@ func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t
 			t.Fatalf("lookup %q = %#v, want loaded new generation", alias, lookup)
 		}
 	}
-	subjects := manager.CapabilitySubjects()
+	subjects := manager.BaseCapabilitySubjects()
 	assertRuntimeAdmissionSubjectGeneration(t, subjects, newCatalog.Generation(), 2)
 	for _, subject := range subjects {
 		if subject.Applicability != "effective" || subject.TriggerAdmission == nil {
@@ -215,7 +323,7 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 			if !survivorLookup.Loaded() || !survivorLookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
 				t.Fatalf("restored survivor admission = %#v, want old generation", survivorLookup)
 			}
-			assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), oldCatalog.Generation(), 2)
+			assertRuntimeAdmissionSubjectGeneration(t, manager.BaseCapabilitySubjects(), oldCatalog.Generation(), 2)
 		})
 	}
 }
@@ -756,7 +864,7 @@ func TestRuntimeContextManagerRejectsIncompleteAdmissionGenerationWithoutMutatio
 			t.Fatalf("failed candidate changed lookup %q: %#v", alias, lookup)
 		}
 	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), oldCatalog.Generation(), 2)
+	assertRuntimeAdmissionSubjectGeneration(t, manager.BaseCapabilitySubjects(), oldCatalog.Generation(), 2)
 }
 
 func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t *testing.T) {
@@ -899,7 +1007,7 @@ func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedReco
 	if !lookup.Loaded() || lookup.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone || !lookup.Target.AdmissionPlan.Generation().Equal(unsigned.Generation()) {
 		t.Fatalf("acknowledged transition lookup = %#v", lookup)
 	}
-	for _, subject := range manager.CapabilitySubjects() {
+	for _, subject := range manager.BaseCapabilitySubjects() {
 		if subject.TriggerAdmission != nil && subject.Applicability == "effective" && subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" {
 			t.Fatalf("transition readback retained stale authentication: %#v", subject)
 		}
@@ -928,7 +1036,7 @@ func TestRuntimeContextManagerRejectsAdmissionTargetsOnLegacyPublishAndRestoresP
 	if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(catalog.Generation()) {
 		t.Fatalf("restored lookup = %#v", lookup)
 	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.CapabilitySubjects(), catalog.Generation(), 1)
+	assertRuntimeAdmissionSubjectGeneration(t, manager.BaseCapabilitySubjects(), catalog.Generation(), 1)
 }
 
 type mixedAdmissionGenerationError struct{ first, second string }

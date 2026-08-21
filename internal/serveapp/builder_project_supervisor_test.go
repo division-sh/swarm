@@ -56,6 +56,9 @@ func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options run
 	if cfg != nil && !cfg.Runtime.ExecutionPosture.Valid() {
 		cfg.Runtime.ExecutionPosture = executionposture.Live
 	}
+	if options.ProviderCredentials == nil {
+		options.ProviderCredentials = processIngressCredentialStore{}
+	}
 	deps := stores.runtimeDeps()
 	deps.Config = cfg
 	deps.Options = options
@@ -1850,6 +1853,10 @@ func (s processIngressCredentialStore) Get(_ context.Context, key string) (strin
 func (processIngressCredentialStore) Set(context.Context, string, string) error { return nil }
 func (processIngressCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (processIngressCredentialStore) Delete(context.Context, string) error      { return nil }
+func (s processIngressCredentialStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	value, present, err := s.Get(ctx, key)
+	return runtimecredentials.NewAtomicSnapshot(runtimecredentials.Metadata{Key: key, Present: present}, value), err
+}
 
 type processIngressProofStore struct {
 	recorded  bool
@@ -2356,7 +2363,7 @@ flows:
 	supervisor := newRuntimeProjectSupervisor(
 		cliapp.RepoRoot(), runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()), cfg, stores, &ready,
 		cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"},
-		nil, nil, candidateCatalog, "", nil, nil, nil,
+		nil, processIngressCredentialStore{}, candidateCatalog, "", nil, nil, nil,
 	)
 	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = newSupervisorTestProcessOwner(t)

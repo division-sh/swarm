@@ -44,6 +44,15 @@ type Snapshotter interface {
 	Snapshot(context.Context, string) (AtomicSnapshot, error)
 }
 
+// NewAtomicSnapshot lets Store implementations outside this package satisfy
+// Snapshotter without exposing the credential value as a struct field.
+func NewAtomicSnapshot(metadata Metadata, value string) AtomicSnapshot {
+	return AtomicSnapshot{
+		Key: strings.TrimSpace(metadata.Key), Present: metadata.Present, Source: strings.TrimSpace(metadata.Source),
+		Writable: metadata.Writable, Shadowed: metadata.Shadowed, UpdatedAt: timePtrValue(metadata.UpdatedAt), value: value,
+	}
+}
+
 func (s AtomicSnapshot) Metadata() Metadata {
 	return Metadata{Key: s.Key, Present: s.Present, Source: s.Source, Writable: s.Writable, Shadowed: s.Shadowed, UpdatedAt: timePtrValue(s.UpdatedAt)}
 }
@@ -59,6 +68,50 @@ type AdmittedSnapshot struct {
 }
 
 func (s AdmittedSnapshot) Epoch() string { return s.epoch }
+
+type SecretBindingStatus string
+
+const (
+	SecretBindingBound   SecretBindingStatus = "BOUND"
+	SecretBindingUnbound SecretBindingStatus = "UNBOUND"
+)
+
+// SecretBinding is the one exact-key usability projection used by ingress
+// readback and authenticated execution. Its admitted snapshot remains private
+// to process memory and has no serialization surface.
+type SecretBinding struct {
+	status   SecretBindingStatus
+	snapshot AdmittedSnapshot
+}
+
+func (b SecretBinding) Status() SecretBindingStatus { return b.status }
+func (b SecretBinding) Bound() bool                 { return b.status == SecretBindingBound }
+func (b SecretBinding) Epoch() string               { return b.snapshot.Epoch() }
+
+func (b SecretBinding) CredentialValue() string {
+	if !b.Bound() {
+		return ""
+	}
+	return b.snapshot.CredentialValue()
+}
+
+func (b SecretBinding) AdmittedSnapshot() (AdmittedSnapshot, error) {
+	if !b.Bound() {
+		return AdmittedSnapshot{}, fmt.Errorf("credential %q is unbound", b.snapshot.Key)
+	}
+	return b.snapshot, nil
+}
+
+type SecretBindingObservationError struct {
+	Key string
+	Err error
+}
+
+func (e *SecretBindingObservationError) Error() string {
+	return fmt.Sprintf("observe credential binding %q: %v", e.Key, e.Err)
+}
+
+func (e *SecretBindingObservationError) Unwrap() error { return e.Err }
 
 type SnapshotOwner struct {
 	store Snapshotter
@@ -100,6 +153,19 @@ func (o *SnapshotOwner) Observe(ctx context.Context, key string) (AdmittedSnapsh
 		o.seen[key] = observation
 	}
 	return AdmittedSnapshot{AtomicSnapshot: cloneAtomicSnapshot(snapshot), epoch: observation.epoch}, nil
+}
+
+func (o *SnapshotOwner) ObserveSecretBinding(ctx context.Context, key string) (SecretBinding, error) {
+	key = strings.TrimSpace(key)
+	snapshot, err := o.Observe(ctx, key)
+	if err != nil {
+		return SecretBinding{}, &SecretBindingObservationError{Key: key, Err: err}
+	}
+	status := SecretBindingUnbound
+	if snapshot.Present && strings.TrimSpace(snapshot.CredentialValue()) != "" {
+		status = SecretBindingBound
+	}
+	return SecretBinding{status: status, snapshot: snapshot}, nil
 }
 
 func cloneAtomicSnapshot(snapshot AtomicSnapshot) AtomicSnapshot {

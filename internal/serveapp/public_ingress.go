@@ -72,6 +72,9 @@ func resolveServeRegistrationPairs(bindings []packs.OutboundBindingPlan, manager
 		if err != nil {
 			return nil, err
 		}
+		if !target.AdmissionPlan.RequiresSecret() {
+			return nil, fmt.Errorf("channels.bindings.%s.register target %q requires a signing credential role but the exact ingress target is %s", binding.BindingID(), rawSelector, target.AdmissionPlan.RequestAuthentication())
+		}
 		if strings.TrimSpace(target.SigningSecret) == "" {
 			return nil, fmt.Errorf("channels.bindings.%s.register target %q has no signing credential binding", binding.BindingID(), rawSelector)
 		}

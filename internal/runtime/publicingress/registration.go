@@ -321,12 +321,16 @@ func (c *ProviderRegistrationController) admitCredentials(ctx context.Context, p
 		provider[logical] = snapshot
 	}
 	signingKey := strings.TrimSpace(pair.Target.SigningCredentialKey)
-	signing, err := c.opts.CredentialOwner.Observe(ctx, signingKey)
+	binding, err := c.opts.CredentialOwner.ObserveSecretBinding(ctx, signingKey)
 	if err != nil {
 		return nil, runtimecredentials.AdmittedSnapshot{}, err
 	}
-	if !signing.Present {
-		return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s signing credential %q is missing", key, signingKey)
+	if !binding.Bound() {
+		return nil, runtimecredentials.AdmittedSnapshot{}, fmt.Errorf("provider registration pair %s signing credential %q is UNBOUND; run `swarm secrets set %s`", key, signingKey, signingKey)
+	}
+	signing, err := binding.AdmittedSnapshot()
+	if err != nil {
+		return nil, runtimecredentials.AdmittedSnapshot{}, err
 	}
 	return provider, signing, nil
 }

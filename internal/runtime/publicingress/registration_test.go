@@ -160,6 +160,18 @@ type telegramRegistrationTransport struct {
 	identifyErr   error
 }
 
+type failingSigningSnapshotStore struct {
+	runtimecredentials.Store
+	err error
+}
+
+func (s failingSigningSnapshotStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	if key == "signing" {
+		return runtimecredentials.AtomicSnapshot{}, s.err
+	}
+	return s.Store.(runtimecredentials.Snapshotter).Snapshot(ctx, key)
+}
+
 func (transport *telegramRegistrationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	transport.t.Helper()
 	transport.mu.Lock()
@@ -217,6 +229,75 @@ func (transport *telegramRegistrationTransport) counts() (int, int) {
 	transport.mu.Lock()
 	defer transport.mu.Unlock()
 	return transport.identifyCount, transport.applyCount
+}
+
+func TestProviderRegistrationRejectsUnusableSigningBeforeAnySideEffect(t *testing.T) {
+	registration := loadTelegramRegistrationPlan(t)
+	for _, tc := range []struct {
+		name       string
+		value      string
+		set        bool
+		unreadable bool
+	}{
+		{name: "missing"},
+		{name: "empty", set: true},
+		{name: "whitespace", value: " \t\n", set: true},
+		{name: "unreadable", unreadable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Set(ctx, "bot", "provider-token"); err != nil {
+				t.Fatal(err)
+			}
+			if tc.set {
+				if err := store.Set(ctx, "signing", tc.value); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var credentialStore runtimecredentials.Store = store
+			if tc.unreadable {
+				credentialStore = failingSigningSnapshotStore{Store: store, err: errors.New("signing store unavailable")}
+			}
+			owner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			effectsStore := &registrationEffectStore{Harness: effecttest.New(), current: true}
+			transport := &telegramRegistrationTransport{t: t}
+			readiness := NewReadinessOwner(true)
+			startup := testStartupAuthority(t, "runtime-negative")
+			controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+				CredentialOwner: owner, EffectsStore: effectsStore,
+				HTTP:    runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}},
+				Posture: executionposture.Live, RuntimeInstanceID: uuid.NewString(),
+				StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil }, Readiness: readiness,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: time.Now().UTC()}
+			readiness.SetRuntimeReady(true)
+			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(EvidenceTTL)})
+			pair := testRegistrationPair(t, registration, "negative", "ingress:support:telegram:telegram")
+			if err := controller.Reconcile(ctx, exposure, []RegistrationPair{pair}); err == nil {
+				t.Fatal("Reconcile succeeded with unusable target signing credential")
+			}
+			identified, applied := transport.counts()
+			if identified != 0 || applied != 0 {
+				t.Fatalf("provider calls identify=%d apply=%d, want 0/0", identified, applied)
+			}
+			if _, launched := effectsStore.StateForAdapter("provider_registration"); launched {
+				t.Fatal("unusable signing credential launched an external effect")
+			}
+			if snapshot := readiness.Snapshot(time.Now().UTC()); snapshot.PublicIngressReady {
+				t.Fatalf("unusable signing credential published readiness: %#v", snapshot)
+			}
+		})
+	}
 }
 
 func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testing.T) {
@@ -485,6 +566,11 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	restartedExposure := exposure
 	restartedExposure.ID = uuid.NewString()
 	restartedExposure.PublicOrigin = "https://replacement.example.test"
+	restartedReadiness.SetRuntimeReady(true)
+	restartedReadiness.SetExposure(ExposureEvidence{
+		GenerationID: restartedExposure.ID, StartupAuthorityID: startup.GrantID,
+		ObservedAt: restartedExposure.CreatedAt, ExpiresAt: restartedExposure.CreatedAt.Add(EvidenceTTL),
+	})
 	if err := restartedController.Reconcile(context.Background(), restartedExposure, []RegistrationPair{routeChanged}); err != nil {
 		t.Fatalf("process restart registration reconcile: %v", err)
 	}
@@ -495,6 +581,21 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	restarted := restartedReadiness.Snapshot(time.Now().UTC())
 	if len(restarted.Registrations) != 1 || !strings.HasPrefix(restarted.Registrations[0].CallbackURL, restartedExposure.PublicOrigin) || restarted.Registrations[0].CallbackURL == routed.Registrations[0].CallbackURL {
 		t.Fatalf("process restart registration = %#v", restarted.Registrations)
+	}
+
+	identifiedBeforeDelete, appliedBeforeDelete := transport.counts()
+	if err := credentialStore.Delete(context.Background(), "signing"); err != nil {
+		t.Fatalf("delete signing credential: %v", err)
+	}
+	if stale := restartedReadiness.Snapshot(time.Now().UTC()); stale.Ready || stale.PublicIngressReady || !strings.Contains(stale.Failure, "credential snapshots") {
+		t.Fatalf("deleted signing credential read-time readiness = %#v, want revoked", stale)
+	}
+	if err := restartedController.Reconcile(context.Background(), restartedExposure, []RegistrationPair{routeChanged}); err == nil || !strings.Contains(err.Error(), "signing credential") {
+		t.Fatalf("deleted signing credential reconcile error = %v", err)
+	}
+	identifiedAfterDelete, appliedAfterDelete := transport.counts()
+	if identifiedAfterDelete != identifiedBeforeDelete || appliedAfterDelete != appliedBeforeDelete {
+		t.Fatalf("deleted signing credential reached provider: identify/apply %d/%d -> %d/%d", identifiedBeforeDelete, appliedBeforeDelete, identifiedAfterDelete, appliedAfterDelete)
 	}
 }
 

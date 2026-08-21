@@ -240,7 +240,77 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 }
 
+func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
+	catalog, err := providertriggers.NewCatalogSnapshot()
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	admission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "chat", Provider: "telegram",
+		Declaration: providertriggers.AdmissionDeclaration{
+			Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
+			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
+			Event:          "inbound.telegram.raw",
+			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "body_sha256"},
+			Payload:        "json",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompileAdmission: %v", err)
+	}
+
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
+	bus, err := runtimebus.NewEphemeralEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEphemeralEventBus: %v", err)
+	}
+	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
+	target := runtimepkg.StandingTarget{
+		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001",
+		PackageKey: "telegram-package", FlowID: "telegram-chat", Alias: "chat", Provider: "telegram",
+		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-chat/chat",
+		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
+		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
+	}
+	manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{Generation: catalog.Generation()}, runtimepkg.BundleContext{
+		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash),
+		Source:           semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Runtime:          &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus},
+		WorkOwner:        workOwner,
+		StandingTargets:  []runtimepkg.StandingTarget{target},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.QuiesceAllRuntimeContexts(context.Background()) })
+
+	plan := loadSupportedTelegramChannelPlan(t)
+	binding, err := packs.NewOutboundBindingPlanWithRegistration(
+		"telegram", plan, "42", nil,
+		map[string]string{"telegram_bot_token": "bot"},
+		"ingress:telegram-package:telegram-chat:telegram",
+	)
+	if err != nil {
+		t.Fatalf("NewOutboundBindingPlanWithRegistration: %v", err)
+	}
+	pairs, err := resolveServeRegistrationPairs([]packs.OutboundBindingPlan{binding}, manager)
+	if err == nil || !strings.Contains(err.Error(), "requires a signing credential role") || !strings.Contains(err.Error(), "UNAUTHENTICATED") {
+		t.Fatalf("resolveServeRegistrationPairs pairs=%#v err=%v, want unsigned signing-role contradiction", pairs, err)
+	}
+}
+
 func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegistration {
+	t.Helper()
+	plan := loadSupportedTelegramChannelPlan(t)
+	registration, ok := plan.Registration()
+	if !ok {
+		t.Fatal("Telegram registration plan is missing")
+	}
+	return registration
+}
+
+func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
 	repo := cliapp.RepoRoot()
 	version, err := platform.PlatformVersion()
@@ -278,11 +348,7 @@ func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegist
 	if err != nil {
 		t.Fatalf("CompileChannel: %v", err)
 	}
-	registration, ok := plan.Registration()
-	if !ok {
-		t.Fatal("Telegram registration plan is missing")
-	}
-	return registration
+	return plan
 }
 
 func supportedRegistrationResponse(status int, body string) *http.Response {
