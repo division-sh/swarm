@@ -3761,7 +3761,7 @@ func routedNodeStaticValidationBundle() *runtimecontracts.WorkflowContractBundle
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"validation": {},
+			"validation": {Mode: runtimecontracts.FlowModeTemplate},
 		},
 	}
 }

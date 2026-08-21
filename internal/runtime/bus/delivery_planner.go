@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -279,7 +280,7 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients, p.rootFlowID)...)
 	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, evt, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(localEvent, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
@@ -913,7 +914,7 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []p
 	return normalizePlannedDeliveryRoutes(out)
 }
 
-func routedExactSameInstanceNoTargetNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+func routedExactSameInstanceNoTargetNodeDeliveryIntents(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
 		return nil
 	}
@@ -926,10 +927,18 @@ func routedExactSameInstanceNoTargetNodeDeliveryIntents(evt events.Event, routed
 		if !subscriber.Recipient.IsNode() || subscriber.routeSource.importBoundaryWildcard() || !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
-		flowInstance := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+		targetFlowInstance := flowInstance
+		if node, ok := subscriber.Recipient.Node(); ok && source != nil {
+			if scope, found := source.FlowScopeByID(node.FlowID()); found {
+				switch strings.ToLower(strings.TrimSpace(scope.Mode)) {
+				case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+					targetFlowInstance = strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+				}
+			}
+		}
 		out = append(out, plannedDeliveryRoute{
 			Recipient: subscriber.Recipient,
-			Target:    routedNodeTargetRoute(flowInstance),
+			Target:    routedNodeTargetRoute(targetFlowInstance),
 			Handler:   routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
 	}
