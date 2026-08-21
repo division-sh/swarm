@@ -364,13 +364,16 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope Ex
 	if parentPath == "" {
 		return nil
 	}
+	declarationPackageKey := semanticScope.Node.PackageKey()
 	out := make([]eventidentity.DescendantScope, 0)
 	var walk func([]FlowContractView)
 	walk = func(children []FlowContractView) {
 		for index := range children {
 			candidate := children[index]
 			candidatePath := eventidentity.Normalize(candidate.Path)
-			if candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
+			candidatePackageKey := b.executableFlowViewPackageKey(&candidate)
+			packageVisible := candidatePackageKey == declarationPackageKey || strings.HasPrefix(candidatePackageKey, declarationPackageKey+"/")
+			if packageVisible && candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
 				localEvents := make([]string, 0, len(candidate.Events)+len(candidate.Schema.Pins.Inputs.Events)+len(candidate.Schema.Pins.Outputs.Events))
 				for eventType := range candidate.Events {
 					localEvents = append(localEvents, strings.TrimSpace(eventType))
