@@ -1,0 +1,15 @@
+runtime:
+  execution_posture: live
+  recovery_on_startup: true
+workspace:
+  data_source: ./.swarm/workspaces
+store:
+  backend: sqlite
+  sqlite:
+    path: ./.swarm/swarm.db
+llm:
+  backend: anthropic
+provider_triggers:
+  packs:
+    platform_dirs:
+      - ./provider-triggers/telegram

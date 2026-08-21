@@ -1,0 +1,15 @@
+name: Telegram bot smoke
+derive:
+  flow: telegram-chat
+  input: telegram_text_message
+  payload:
+    generate: true
+    set:
+      text: hello from Telegram
+      external_account_reference: "42"
+      conversation_reference: "1001"
+      provider_message_reference: 1
+connector_responses:
+  telegram.send_message: {}
+expect:
+  no_dead_letters: true
