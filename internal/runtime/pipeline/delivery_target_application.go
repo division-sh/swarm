@@ -203,13 +203,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			return DeliveryTargetApplication{}, fmt.Errorf("load exact admitted delivery target state: %w", stateErr)
 		}
 		if stateExists {
-			workflowName := flowID
-			workflowVersion := ""
-			if source != nil {
-				workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
-				workflowVersion = source.WorkflowVersion()
-			}
-			instance, err = DecodeWorkflowEntityStatePersistenceRecord(record, route, workflowName, workflowVersion)
+			instance, err = decodeDeliveryTargetWorkflowEntityState(source, flowID, record)
 			if err != nil {
 				return DeliveryTargetApplication{}, fmt.Errorf("decode exact admitted delivery target state: %w", err)
 			}

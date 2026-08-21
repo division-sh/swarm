@@ -58,19 +58,76 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.
 	if r.dialect == workflowStoreDialectPostgres {
 		query = `SELECT entity_id::text, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
 	}
-	var record WorkflowEntityStatePersistenceRecord
-	var slug, name sql.NullString
-	var enteredAt, gates, fields, bookkeeping, accumulator, createdAt, updatedAt any
-	err = r.db.QueryRowContext(ctx, query, runID, entityID.String(), route.InstancePath).Scan(
-		&record.EntityID, &record.FlowInstance, &record.EntityType, &slug, &name,
-		&record.CurrentState, &record.Revision, &enteredAt, &gates, &fields, &bookkeeping, &accumulator,
-		&createdAt, &updatedAt,
-	)
+	record, err := scanPipelineTestWorkflowEntityState(r.db.QueryRowContext(ctx, query, runID, entityID.String(), route.InstancePath))
 	if err == sql.ErrNoRows {
 		return WorkflowEntityStatePersistenceRecord{}, false, nil
 	}
 	if err != nil {
 		return WorkflowEntityStatePersistenceRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
+	if scopeKey == "" || len(selectors) == 0 {
+		return nil, nil
+	}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	query := `SELECT es.entity_id, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
+		FROM entity_state es
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = ?
+		  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN (?, ?))
+		  AND (es.flow_instance = ? OR es.flow_instance LIKE ?)
+		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+		ORDER BY es.created_at ASC, es.entity_id ASC`
+	args := []any{runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey + "/%"}
+	if r.dialect == workflowStoreDialectPostgres {
+		query = `SELECT es.entity_id::text, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
+			FROM entity_state es
+			LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+			WHERE es.run_id = $1::uuid
+			  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN ($2, $3))
+			  AND (es.flow_instance = $4 OR es.flow_instance LIKE $5)
+			  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+			ORDER BY es.created_at ASC, es.entity_id ASC`
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := make([]WorkflowEntityStatePersistenceRecord, 0, 8)
+	for rows.Next() {
+		record, err := scanPipelineTestWorkflowEntityState(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return FilterWorkflowEntityStatePersistenceRecords(records, selectors, excludedStates)
+}
+
+func scanPipelineTestWorkflowEntityState(row interface{ Scan(...any) error }) (WorkflowEntityStatePersistenceRecord, error) {
+	var record WorkflowEntityStatePersistenceRecord
+	var slug, name sql.NullString
+	var enteredAt, gates, fields, bookkeeping, accumulator, createdAt, updatedAt any
+	err := row.Scan(
+		&record.EntityID, &record.FlowInstance, &record.EntityType, &slug, &name,
+		&record.CurrentState, &record.Revision, &enteredAt, &gates, &fields, &bookkeeping, &accumulator,
+		&createdAt, &updatedAt,
+	)
+	if err != nil {
+		return WorkflowEntityStatePersistenceRecord{}, err
 	}
 	record.Slug = slug.String
 	record.Name = name.String
@@ -91,11 +148,11 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.
 			if err == nil {
 				err = fmt.Errorf("workflow entity timestamp is required")
 			}
-			return WorkflowEntityStatePersistenceRecord{}, false, err
+			return WorkflowEntityStatePersistenceRecord{}, err
 		}
 		*item.target = value
 	}
-	return record, true, nil
+	return record, nil
 }
 
 func (r pipelineTestWorkflowInstanceReader) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {
@@ -268,6 +325,10 @@ func (r *recordingRuntimeMutationRunner) LoadWorkflowInstance(ctx context.Contex
 
 func (r *recordingRuntimeMutationRunner) LoadWorkflowEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowEntityState(ctx, route, entityID)
+}
+
+func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.SelectActiveWorkflowEntityStates(ctx, scopeKey, selectors, excludedStates)
 }
 
 func (r *recordingRuntimeMutationRunner) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {

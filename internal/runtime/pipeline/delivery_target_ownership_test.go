@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -464,8 +466,10 @@ func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppeara
 }
 
 type deliveryTargetWorkflowReader struct {
-	selected []WorkflowInstance
-	loaded   map[string]WorkflowInstance
+	selected       []WorkflowInstance
+	loaded         map[string]WorkflowInstance
+	selectedStates []WorkflowEntityStatePersistenceRecord
+	loadedStates   map[string]WorkflowEntityStatePersistenceRecord
 }
 
 func (r deliveryTargetWorkflowReader) LoadWorkflowInstance(_ context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
@@ -477,8 +481,44 @@ func (r deliveryTargetWorkflowReader) ListWorkflowInstances(context.Context) ([]
 	return append([]WorkflowInstance(nil), r.selected...), nil
 }
 
+func (r deliveryTargetWorkflowReader) LoadWorkflowEntityState(_ context.Context, route runtimeflowidentity.Route, _ runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
+	if record, ok := r.loadedStates[route.InstancePath]; ok {
+		return record, true, nil
+	}
+	instance, ok := r.loaded[route.InstancePath]
+	if !ok {
+		return WorkflowEntityStatePersistenceRecord{}, false, nil
+	}
+	return deliveryTargetStateRecord(instance), true, nil
+}
+
+func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+	if r.selectedStates != nil {
+		return append([]WorkflowEntityStatePersistenceRecord(nil), r.selectedStates...), nil
+	}
+	records := make([]WorkflowEntityStatePersistenceRecord, 0, len(r.selected))
+	for _, instance := range r.selected {
+		records = append(records, deliveryTargetStateRecord(instance))
+	}
+	return records, nil
+}
+
 func (r deliveryTargetWorkflowReader) SelectActiveWorkflowInstances(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error) {
 	return append([]WorkflowInstance(nil), r.selected...), nil
+}
+
+func deliveryTargetStateRecord(instance WorkflowInstance) WorkflowEntityStatePersistenceRecord {
+	marshal := func(value any) json.RawMessage {
+		raw, _ := json.Marshal(value)
+		return raw
+	}
+	return WorkflowEntityStatePersistenceRecord{
+		EntityID: instance.EntityID, FlowInstance: instance.StorageRef, EntityType: instance.EntityType,
+		Slug: instance.Slug, Name: instance.Name, CurrentState: instance.CurrentState, Revision: instance.Revision,
+		EnteredStageAt: instance.EnteredStageAt, Gates: marshal(instance.Gates), Fields: marshal(instance.Fields),
+		Bookkeeping: marshal(instance.Bookkeeping), Accumulator: marshal(instance.StateBuckets),
+		CreatedAt: instance.CreatedAt, UpdatedAt: instance.UpdatedAt,
+	}
 }
 
 func withDeliveryTargetInstanceIdentity(instance WorkflowInstance, instanceID, entityID string) WorkflowInstance {

@@ -69,20 +69,23 @@ type WorkflowInstance struct {
 	InitialFieldValues map[string]any
 }
 
+// WorkflowEntityStatePersistenceReader owns exact state-row reads for an
+// admitted route and entity. Scenario setup can establish this state before a
+// flow_instances lifecycle row exists; declared-key acquisition therefore
+// selects this authority directly rather than inferring state from lifecycle.
+type WorkflowEntityStatePersistenceReader interface {
+	LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
+	SelectActiveWorkflowEntityStates(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
+}
+
 // WorkflowInstancePersistenceReader owns exact selected-store workflow reads.
 // Runtime consumers receive final semantic values and never select a backend,
 // query shape, transaction, or SQL executor.
 type WorkflowInstancePersistenceReader interface {
+	WorkflowEntityStatePersistenceReader
 	LoadWorkflowInstance(context.Context, runtimeflowidentity.Route) (WorkflowInstance, bool, error)
 	ListWorkflowInstances(context.Context) ([]WorkflowInstance, error)
 	SelectActiveWorkflowInstances(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowInstance, error)
-}
-
-// WorkflowEntityStatePersistenceReader owns exact state-row reads for an
-// admitted route and entity. Scenario setup can establish this state before a
-// flow_instances lifecycle row exists; callers must not broaden this lookup.
-type WorkflowEntityStatePersistenceReader interface {
-	LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
 }
 
 type WorkflowEntityStatePersistenceRecord struct {
@@ -100,6 +103,41 @@ type WorkflowEntityStatePersistenceRecord struct {
 	Accumulator    json.RawMessage
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// FilterWorkflowEntityStatePersistenceRecords applies the backend-neutral
+// terminal-state and declared-key semantics after a selected store has bounded
+// rows to the active run, flow scope, and lifecycle companion state.
+func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePersistenceRecord, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
+	excluded := make(map[string]struct{})
+	for _, state := range NormalizeWorkflowInstanceExcludedStates(excludedStates) {
+		excluded[state] = struct{}{}
+	}
+	out := make([]WorkflowEntityStatePersistenceRecord, 0, len(records))
+	for _, record := range records {
+		if _, skip := excluded[strings.ToLower(strings.TrimSpace(record.CurrentState))]; skip {
+			continue
+		}
+		var fields map[string]any
+		if len(record.Fields) > 0 {
+			if err := json.Unmarshal(record.Fields, &fields); err != nil {
+				return nil, fmt.Errorf("decode workflow entity state fields for %s: %w", record.FlowInstance, err)
+			}
+		}
+		matched := true
+		for _, selector := range selectors {
+			value, ok := WorkflowMetadataValue(fields, selector.Field)
+			if !ok || !WorkflowJSONValuesEqual(value, selector.Value) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			out = append(out, record)
+		}
+	}
+	return out, nil
 }
 
 func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersistenceRecord, route runtimeflowidentity.Route, workflowName, workflowVersion string) (WorkflowInstance, error) {
