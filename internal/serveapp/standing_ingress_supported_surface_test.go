@@ -1405,7 +1405,8 @@ func standingSQLiteDiagnostics(path string) string {
 
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
-	return canonicalrouting.CopyStandingTelegramServe(t, telegramBaseURL)
+	_ = telegramBaseURL
+	return canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 }
 
 func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runtime) error {

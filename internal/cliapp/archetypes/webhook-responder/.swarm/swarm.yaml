@@ -1,4 +1,0 @@
-store:
-  backend: sqlite
-  sqlite:
-    path: ./swarm.db

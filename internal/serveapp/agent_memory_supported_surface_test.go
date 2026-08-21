@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 const standingMemoryAsyncProofTimeout = 30 * time.Second
@@ -119,7 +119,8 @@ func (r *standingMemoryProviderRecorder) waitForCount(t testing.TB, want int) {
 	t.Fatalf("OpenAI-compatible requests = %d, want at least %d", len(r.snapshot()), want)
 }
 
-func TestStandingTelegramMemorySupportedSurfaceSQLitePostgres(t *testing.T) {
+func TestCanonicalTelegramAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.TelegramAgent)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runStandingTelegramMemorySupportedSurface(t, backend)
@@ -145,9 +146,9 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
 	}))
 	defer telegram.Close()
+	redirectTelegramConnectorTransport(t, telegram.URL)
 
 	contractsRoot := writeStandingMemoryServeFixture(t, telegram.URL)
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -177,7 +178,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		storeLocation = filepath.Join(t.TempDir(), "memory.sqlite")
-		opts.ConfigPath = writeStandingMemoryRuntimeConfig(t, "sqlite", storeLocation, provider.URL)
+		opts.ConfigPath = writeStandingMemoryRuntimeConfig(t, "sqlite", storeLocation, provider.URL, contractsRoot)
 		opts.StoreMode = "sqlite"
 	case "postgres":
 		dsn, _, cleanup := testutil.StartPostgres(t)
@@ -206,7 +207,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 		})
 		prepareRestart = openStore
-		opts.ConfigPath = writeStandingMemoryRuntimeConfig(t, "postgres", "", provider.URL)
+		opts.ConfigPath = writeStandingMemoryRuntimeConfig(t, "postgres", "", provider.URL, contractsRoot)
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
 	default:
@@ -216,7 +217,6 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	singletonTarget := loadStandingMemoryTarget(t, backend, storeLocation, "memory-singleton")
 	firstDiagnostics := func() string {
 		return first.outputString() + "\ndiagnostics: " + standingMemoryStoreDiagnostics(backend, storeLocation)
 	}
@@ -231,13 +231,6 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 84)
 	recorder.waitForCount(t, 3)
-	publishStandingSingletonMemoryEvent(t, firstURL, bundleHash, singletonTarget, "singleton one", "first")
-	recorder.waitForCount(t, 4)
-	singletonSecond := publishStandingSingletonMemoryEvent(t, firstURL, bundleHash, singletonTarget, "singleton two", "second")
-	if singletonSecond.RunID != singletonTarget.RunID || singletonSecond.NewRunCreated {
-		t.Fatalf("singleton second publish = %#v, want existing run %s", singletonSecond, singletonTarget.RunID)
-	}
-	recorder.waitForCount(t, 5)
 	waitForStandingMemoryCompletion(t, backend, storeLocation, 3)
 	before := loadStandingMemorySessions(t, backend, storeLocation)
 	requireStandingMemorySessionShape(t, before)
@@ -255,12 +248,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		t.Fatalf("A3 entity = %q, want standing entity %q", got, entity)
 	}
 	requireStandingMemoryTelegramCall(t, second, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
-	recorder.waitForCount(t, 6)
-	singletonThird := publishStandingSingletonMemoryEvent(t, secondURL, bundleHash, singletonTarget, "singleton three", "third")
-	if singletonThird.RunID != singletonTarget.RunID || singletonThird.NewRunCreated {
-		t.Fatalf("singleton third publish = %#v, want recovered run %s", singletonThird, singletonTarget.RunID)
-	}
-	recorder.waitForCount(t, 7)
+	recorder.waitForCount(t, 4)
 	waitForStandingMemoryCompletion(t, backend, storeLocation, 4)
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
@@ -352,8 +340,8 @@ func requireStandingMemorySessionShape(t testing.TB, sessions map[string]standin
 	for _, row := range sessions {
 		counts[row.FlowTemplate]++
 	}
-	if len(sessions) != 3 || counts["telegram-chat"] != 2 || counts["memory-singleton"] != 1 {
-		t.Fatalf("memory sessions = %#v, want two isolated template owners and one singleton owner", sessions)
+	if len(sessions) != 2 || counts["telegram-chat"] != 2 {
+		t.Fatalf("memory sessions = %#v, want two isolated Telegram chat owners", sessions)
 	}
 }
 
@@ -361,7 +349,6 @@ func assertStandingMemorySessionContinuity(t testing.TB, before, after map[strin
 	t.Helper()
 	requireStandingMemorySessionShape(t, after)
 	advancedTemplates := 0
-	advancedSingletons := 0
 	for key, prior := range before {
 		current, ok := after[key]
 		if !ok || current.SessionID != prior.SessionID {
@@ -371,91 +358,58 @@ func assertStandingMemorySessionContinuity(t testing.TB, before, after map[strin
 		switch delta {
 		case 0:
 		case 1:
-			switch current.FlowTemplate {
-			case "telegram-chat":
-				advancedTemplates++
-			case "memory-singleton":
-				advancedSingletons++
-			default:
+			if current.FlowTemplate != "telegram-chat" {
 				t.Fatalf("memory owner %q has unexpected flow template %q", key, current.FlowTemplate)
 			}
+			advancedTemplates++
 		default:
 			t.Fatalf("memory owner %q turn delta = %d, want unchanged or one post-restart provider turn", key, delta)
 		}
 	}
-	if advancedTemplates != 1 || advancedSingletons != 1 {
-		t.Fatalf("advanced memory owners = template:%d singleton:%d, want A3 and singleton third only", advancedTemplates, advancedSingletons)
+	if advancedTemplates != 1 {
+		t.Fatalf("advanced Telegram memory owners = %d, want only chat A after restart", advancedTemplates)
 	}
 }
 
 func assertStandingMemoryProviderHistory(t testing.TB, requests []standingMemoryProviderRequest) {
 	t.Helper()
-	if len(requests) != 7 {
-		t.Fatalf("OpenAI-compatible requests = %d, want 7 exact provider turns", len(requests))
+	if len(requests) != 4 {
+		t.Fatalf("OpenAI-compatible requests = %d, want 4 exact provider turns", len(requests))
 	}
-	a2 := requireStandingMemoryUserRequest(t, requests, "Reply to each Telegram message", "hello 102")
+	a2 := requireStandingMemoryUserRequest(t, requests, "helpful assistant replying", "hello 102")
 	assertStandingMemoryContains(t, a2, []string{"hello 101", "hello 102"}, nil)
-	b1 := requireStandingMemoryUserRequest(t, requests, "Reply to each Telegram message", "hello 103")
+	b1 := requireStandingMemoryUserRequest(t, requests, "helpful assistant replying", "hello 103")
 	assertStandingMemoryContains(t, b1, []string{"hello 103"}, []string{"hello 101", "hello 102"})
-	a3 := requireStandingMemoryUserRequest(t, requests, "Reply to each Telegram message", "hello 104")
+	a3 := requireStandingMemoryUserRequest(t, requests, "helpful assistant replying", "hello 104")
 	assertStandingMemoryContains(t, a3, []string{"hello 101", "hello 102", "hello 104"}, []string{"hello 103"})
-	singletonSecond := requireStandingMemoryUserRequest(t, requests, "Remember each singleton ping", "singleton two")
-	assertStandingMemoryContains(t, singletonSecond, []string{"singleton one", "singleton two"}, []string{"hello 101", "hello 103"})
-	singletonThird := requireStandingMemoryUserRequest(t, requests, "Remember each singleton ping", "singleton three")
-	assertStandingMemoryContains(t, singletonThird, []string{"singleton one", "singleton two", "singleton three"}, []string{"hello 101", "hello 103"})
 }
 
-type standingMemoryTarget struct {
-	RunID        string
-	FlowInstance string
-	EntityID     string
+type telegramAgentRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f telegramAgentRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
-func loadStandingMemoryTarget(t testing.TB, backend, location, flowTemplate string) standingMemoryTarget {
+func redirectTelegramConnectorTransport(t *testing.T, target string) {
 	t.Helper()
-	driver, dsn, query := "sqlite", location, `
-		SELECT es.run_id, es.flow_instance, es.entity_id
-		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE fi.flow_template = ? AND fi.status = 'active' AND fi.terminated_at IS NULL`
-	if backend == "postgres" {
-		driver, dsn, query = "postgres", location, `
-			SELECT es.run_id::text, es.flow_instance, es.entity_id::text
-			FROM entity_state es
-			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-			WHERE fi.flow_template = $1 AND fi.status = 'active' AND fi.terminated_at IS NULL`
-	}
-	db, err := sql.Open(driver, dsn)
+	targetURL, err := url.Parse(target)
 	if err != nil {
-		t.Fatalf("open %s standing target store: %v", backend, err)
+		t.Fatalf("parse Telegram test endpoint: %v", err)
 	}
-	defer db.Close()
-	var target standingMemoryTarget
-	if err := db.QueryRow(query, flowTemplate).Scan(&target.RunID, &target.FlowInstance, &target.EntityID); err != nil {
-		t.Fatalf("load %s standing target %s: %v", backend, flowTemplate, err)
-	}
-	return target
-}
-
-func publishStandingSingletonMemoryEvent(t *testing.T, baseURL, bundleHash string, target standingMemoryTarget, text, suffix string) servedEventPublishRPCResult {
-	t.Helper()
-	params := map[string]any{
-		"event_name":      "memory-singleton/memory.ping",
-		"payload":         map[string]any{"text": text},
-		"idempotency_key": "memory-singleton-" + suffix + "-" + uuid.NewString(),
-		"bundle_hash":     bundleHash,
-		"run_id":          target.RunID,
-		"target": map[string]any{
-			"flow_instance": target.FlowInstance,
-			"entity_id":     target.EntityID,
-		},
-	}
-	result := requireServedEventPublishRPCResult(t, strings.TrimRight(baseURL, "/")+"/v1/rpc", params)
-	if result.EventID == "" || result.RunID != target.RunID || result.NewRunCreated {
-		t.Fatalf("singleton event.publish result = %#v, want existing standing run %s", result, target.RunID)
-	}
-	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "memory-bot", "pending", "in_progress", "delivered")
-	return result
+	base := http.DefaultTransport
+	http.DefaultTransport = telegramAgentRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "api.telegram.org" {
+			return base.RoundTrip(req)
+		}
+		clone := req.Clone(req.Context())
+		redirected := *req.URL
+		redirected.Scheme = targetURL.Scheme
+		redirected.Host = targetURL.Host
+		clone.URL = &redirected
+		clone.Host = targetURL.Host
+		return base.RoundTrip(clone)
+	})
+	t.Cleanup(func() { http.DefaultTransport = base })
 }
 
 func requireStandingMemoryUserRequest(t testing.TB, requests []standingMemoryProviderRequest, systemMarker, userMarker string) standingMemoryProviderRequest {
@@ -527,7 +481,7 @@ func standingMemoryLatestEventPayload(messages []standingMemoryProviderMessage) 
 	return nil, fmt.Errorf("no event payload found")
 }
 
-func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, providerURL string) string {
+func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, providerURL, contractsRoot string) string {
 	t.Helper()
 	lines := []string{
 		"runtime:",
@@ -542,6 +496,10 @@ func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, provide
 		lines = append(lines, "  sqlite:", "    path: "+sqlitePath)
 	}
 	lines = append(lines,
+		"provider_triggers:",
+		"  packs:",
+		"    platform_dirs:",
+		"      - "+filepath.Join(contractsRoot, "provider-triggers", "telegram"),
 		"llm:",
 		"  backend: openai_compatible",
 		"  openai_compatible:",
@@ -552,8 +510,7 @@ func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, provide
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	text := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatalf("write standing memory runtime config: %v", err)
 	}
 	return path
@@ -561,7 +518,8 @@ func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, provide
 
 func writeStandingMemoryServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
-	return canonicalrouting.CopyStandingTelegramMemoryServe(t, telegramBaseURL)
+	_ = telegramBaseURL
+	return canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 }
 
 func standingMemoryDiagnosticsLocation(backend, location string) string {

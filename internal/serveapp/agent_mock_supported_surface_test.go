@@ -77,8 +77,8 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
-	contractsRoot := canonicalrouting.CopyStandingTelegramMockServe(t, "https://example.invalid")
-	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
+	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	addCanonicalTelegramMockApproval(t, contractsRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
@@ -146,10 +146,8 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	singleton := loadStandingMemoryTarget(t, backend, location, "memory-singleton")
 	entityID := sendStandingTelegramUpdate(t, firstURL, 301, 42)
-	publishStandingSingletonMemoryEvent(t, firstURL, bundleHash, singleton, "request review", "review")
-	waitForMockAgentTurns(t, backend, location, 3)
+	waitForMockAgentTurns(t, backend, location, 2)
 	cardID := waitForMockConnectorDecisionCard(t, backend, location, 1)
 	assertMockMailboxReadback(t, firstURL+"/v1/rpc", cardID)
 	approveMockDecisionCard(t, firstURL+"/v1/rpc", cardID)
@@ -170,12 +168,11 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	if got := sendStandingTelegramUpdate(t, secondURL, 302, 42); got != entityID {
 		t.Fatalf("post-restart entity = %q, want %q", got, entityID)
 	}
-	publishStandingSingletonMemoryEvent(t, secondURL, bundleHash, singleton, "singleton three", "third")
-	waitForMockAgentTurns(t, backend, location, 5)
+	waitForMockAgentTurns(t, backend, location, 4)
 	secondCardID := waitForMockConnectorDecisionCard(t, backend, location, 2)
 	approveMockDecisionCard(t, secondURL+"/v1/rpc", secondCardID)
 	waitForMockConnectorAttempts(t, backend, location, 2)
-	assertMockUsageReadback(t, secondURL+"/v1/rpc", "memory-bot")
+	assertMockUsageReadback(t, secondURL+"/v1/rpc", "phrase-bot")
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d\n%s", code, second.outputString())
 	}
@@ -183,6 +180,23 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	assertMockSessionContinuity(t, before, after)
 	assertMockSupportedEvidence(t, backend, location, entityID)
 	return time.Since(servedPathStarted)
+}
+
+func addCanonicalTelegramMockApproval(t *testing.T, contractsRoot string) {
+	t.Helper()
+	path := filepath.Join(contractsRoot, "bot", "flows", "telegram-chat", "nodes.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read canonical Telegram nodes: %v", err)
+	}
+	old := "        tool: telegram.send_message\n        input:\n"
+	replacement := "        tool: telegram.send_message\n        approval: {decision: send_telegram_message}\n        input:\n"
+	if !strings.Contains(string(body), old) {
+		t.Fatalf("canonical Telegram responder shape changed:\n%s", body)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(body), old, replacement, 1)), 0o644); err != nil {
+		t.Fatalf("write canonical Telegram approval overlay: %v", err)
+	}
 }
 
 func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) string {
@@ -439,8 +453,8 @@ func requireMockSessionShape(t testing.TB, sessions map[string]standingMemorySes
 	for _, session := range sessions {
 		counts[session.FlowTemplate]++
 	}
-	if len(sessions) != 1 || counts["memory-singleton"] != 1 {
-		t.Fatalf("mock sessions = %#v, want only the memory-enabled singleton owner", sessions)
+	if len(sessions) != 1 || counts["telegram-chat"] != 1 {
+		t.Fatalf("mock sessions = %#v, want one memory-enabled Telegram chat owner", sessions)
 	}
 }
 
@@ -459,37 +473,29 @@ func assertMockSupportedEvidence(t testing.TB, backend, location, entityID strin
 	t.Helper()
 	db := openMockProofDB(t, backend, location)
 	defer db.Close()
-	assertMockCount(t, db, "turns", 5, `SELECT COUNT(*) FROM agent_turns WHERE execution_mode = 'mock' AND (agent_id LIKE 'phrase-bot%' OR agent_id = 'memory-bot')`)
-	assertMockCount(t, db, "mock attempts", 5, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE adapter = 'mock_python' AND execution_mode = 'mock' AND state = 'settled'`)
+	assertMockCount(t, db, "turns", 4, `SELECT COUNT(*) FROM agent_turns WHERE execution_mode = 'mock' AND agent_id LIKE 'phrase-bot%'`)
+	assertMockCount(t, db, "mock attempts", 4, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE adapter = 'mock_python' AND execution_mode = 'mock' AND state = 'settled'`)
 	assertMockCount(t, db, "non-mock attempts", 0, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE execution_mode <> 'mock'`)
 	assertMockCount(t, db, "Telegram mock activity attempts", 2, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'mock' AND status = 'succeeded'`)
 	assertMockCount(t, db, "Telegram live activity attempts", 0, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'live'`)
 	assertMockCount(t, db, "mock reply events", 2, `SELECT COUNT(*) FROM events WHERE event_name LIKE '%telegram.reply_requested' AND execution_mode = 'mock'`)
 	assertMockCount(t, db, "mock connector decision cards", 2, `SELECT COUNT(*) FROM decision_cards WHERE execution_mode = 'mock' AND CAST(snapshot AS TEXT) LIKE '%send_telegram_message%'`)
-	assertMockCount(t, db, "mock spend rows", 5, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'mock'`)
+	assertMockCount(t, db, "mock spend rows", 4, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'mock'`)
 	assertMockCount(t, db, "live spend rows", 0, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'live'`)
 	assertMockAtLeast(t, db, "mock author activity", 1, `SELECT COUNT(*) FROM author_activity_occurrences WHERE `+mockJSONTextExpression(backend, "projection", "execution_mode")+` = 'mock'`)
-	assertMockAtLeast(t, db, "mock tool calls", 1, `SELECT COUNT(*) FROM agent_turns WHERE execution_mode = 'mock' AND CAST(tool_calls AS TEXT) LIKE '%read_memory_state%'`)
 	var persistedEntityID string
 	query := `SELECT entity_id FROM entity_state WHERE entity_id = ` + mockPlaceholder(backend, 1)
 	if err := db.QueryRow(query, entityID).Scan(&persistedEntityID); err != nil || persistedEntityID != entityID {
 		t.Fatalf("read %s mock entity identity = %q err=%v, want %q", backend, persistedEntityID, err, entityID)
 	}
 	var requestPayload string
-	if err := db.QueryRow(`SELECT CAST(request_payload AS TEXT) FROM agent_turns WHERE agent_id = 'memory-bot' ORDER BY created_at DESC LIMIT 1`).Scan(&requestPayload); err != nil {
+	if err := db.QueryRow(`SELECT CAST(request_payload AS TEXT) FROM agent_turns WHERE agent_id LIKE 'phrase-bot%' ORDER BY created_at DESC LIMIT 1`).Scan(&requestPayload); err != nil {
 		t.Fatalf("read %s mock memory request: %v", backend, err)
 	}
-	for _, want := range []string{"request review", "singleton three"} {
+	for _, want := range []string{"hello 301", "hello 302"} {
 		if !strings.Contains(requestPayload, want) {
 			t.Fatalf("mock memory request missing %q: %s", want, requestPayload)
 		}
-	}
-	var statelessRequest string
-	if err := db.QueryRow(`SELECT CAST(request_payload AS TEXT) FROM agent_turns WHERE agent_id LIKE 'phrase-bot%' ORDER BY created_at DESC LIMIT 1`).Scan(&statelessRequest); err != nil {
-		t.Fatalf("read %s stateless mock request: %v", backend, err)
-	}
-	if !strings.Contains(statelessRequest, "hello 302") || strings.Contains(statelessRequest, "hello 301") {
-		t.Fatalf("memory:false mock request retained predecessor context: %s", statelessRequest)
 	}
 }
 

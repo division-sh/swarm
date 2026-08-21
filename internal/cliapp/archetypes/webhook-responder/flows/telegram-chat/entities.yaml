@@ -1,5 +1,0 @@
-chat:
-  conversation_reference:
-    type: text
-    indexed: true
-    _unused_reason: populated by normalized input resolution

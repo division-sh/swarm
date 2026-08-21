@@ -170,7 +170,7 @@ func TestRuntimeProjectSupervisorRejectsExecutionPostureChangeBeforeQuiesceOrPub
 }
 
 func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *testing.T) {
-	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	projectRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
@@ -2269,7 +2269,7 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 }
 
 func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSource(t *testing.T) {
-	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	projectRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
