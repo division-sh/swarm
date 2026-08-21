@@ -480,11 +480,22 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 	if !report.OK || report.Owner != localPreflightOwner || report.Mode != "doctor" || report.Backend != "claude_cli" {
 		t.Fatalf("report = %#v", report)
 	}
-	if len(report.CapabilitySubjects) != 18 {
-		t.Fatalf("capability subjects = %#v, want eight triggers plus ten connector actions", report.CapabilitySubjects)
+	if report.PackInventory == nil || report.PackInventory.BaseMode != "embedded" ||
+		len(report.PackInventory.Packs) != 14 || report.PackInventory.BaseDigest == "" || report.PackInventory.EffectiveDigest == "" {
+		t.Fatalf("doctor pack inventory = %#v", report.PackInventory)
+	}
+	if len(report.CapabilitySubjects) != 19 {
+		t.Fatalf("capability subjects = %#v, want eight triggers, ten connector actions, and one channel pack", report.CapabilitySubjects)
 	}
 	for _, subject := range report.CapabilitySubjects {
 		code := "provider_connector_" + findingCode(subject.ID)
+		if subject.Kind == packs.SubjectChannelPack {
+			code = "channel_pack_" + findingCode(subject.ID)
+			if finding, ok := localPreflightReportFinding(report, code); !ok || finding.Message != packs.RenderSubject(subject, false) {
+				t.Fatalf("channel subject/finding projection drift for %s: subject=%#v finding=%#v", subject.ID, subject, finding)
+			}
+			continue
+		}
 		if subject.Kind != packs.SubjectProviderTrigger {
 			if finding, ok := localPreflightReportFinding(report, code); !ok || finding.Message != packs.RenderSubject(subject, false) {
 				t.Fatalf("connector subject/finding projection drift for %s: subject=%#v finding=%#v", subject.ID, subject, finding)
@@ -524,8 +535,8 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 		}
 		provider := strings.TrimPrefix(want, "provider_trigger_pack_")
 		if !localPreflightReportFindingContains(report, want, "provenance=platform") ||
-			!localPreflightReportFindingContains(report, want, filepath.Join("packs", "provider-triggers", provider)) {
-			t.Fatalf("provider pack %s missing filesystem source/provenance readback: %#v", provider, report.Findings)
+			!localPreflightReportFindingContains(report, want, filepath.Join("provider-triggers", provider)) {
+			t.Fatalf("provider pack %s missing selected inventory path/provenance readback: %#v", provider, report.Findings)
 		}
 	}
 	if !localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CAN receive HTTPS route /webhooks/{alias}/github") ||
@@ -1434,10 +1445,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	if strings.TrimSpace(dockerBin) != "" {
 		workspace = append(workspace, fmt.Sprintf("  docker_bin: %q", dockerBin))
 	}
-	providerPacks := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
-	for _, dir := range testProviderTriggerPackDirs(t) {
-		providerPacks = append(providerPacks, fmt.Sprintf("      - %q", dir))
-	}
 	writeRuntimeConfigText(t, path, strings.Join([]string{
 		"store:",
 		"  backend: sqlite",
@@ -1456,7 +1463,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		"    command: claude",
 		"    timeout: 2s",
 		"    output_format: json",
-		strings.Join(providerPacks, "\n"),
 	}, "\n")+"\n")
 	return path
 }

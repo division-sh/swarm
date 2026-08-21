@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	platformpacks "github.com/division-sh/swarm/packs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,7 +29,7 @@ func TestGeneratedCatalogIsDeterministicCurrentAndProviderGeneric(t *testing.T) 
 	if !reflect.DeepEqual(first, second) {
 		t.Fatal("GenerateCatalog output is not deterministic")
 	}
-	checked, err := CheckGeneratedCatalog(root)
+	checked, err := CheckGeneratedCatalog(root, platformpacks.FS())
 	if err != nil {
 		t.Fatalf("CheckGeneratedCatalog: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestGeneratedCatalogIsDeterministicCurrentAndProviderGeneric(t *testing.T) 
 	if len(credentials) != 1 || credentials[0] != "acme_api_key" {
 		t.Fatalf("synthetic generated credentials = %#v", credentials)
 	}
-	if _, exists := BuiltinTool("acme", "acme.create_widget"); exists {
+	if _, exists := testBuiltinTool(t, "acme", "acme.create_widget"); exists {
 		t.Fatal("synthetic conformance connector became an ambient builtin tool")
 	}
 }
@@ -188,11 +189,11 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 			name: "generation removed with repaired manifest hash",
 			mutate: func(t *testing.T, files fstest.MapFS) {
 				var manifest ConnectorManifest
-				mustYAMLUnmarshal(t, files["packs/github/connector.yaml"].Data, &manifest)
+				mustYAMLUnmarshal(t, files["provider-connectors/github/connector.yaml"].Data, &manifest)
 				manifest.Generation = nil
 				body := mustYAMLMarshal(t, manifest)
-				files["packs/github/connector.yaml"].Data = body
-				rewritePackManifestHash(t, files, "packs/github/pack.yaml", body)
+				files["provider-connectors/github/connector.yaml"].Data = body
+				rewritePackManifestHash(t, files, "provider-connectors/github/pack.yaml", body)
 			},
 			want: "indexed as generated but generation evidence is missing",
 		},
@@ -202,7 +203,7 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 				var index GeneratedPackIndex
 				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
 				files["catalog/generator-profiles/unknown.yaml"] = &fstest.MapFile{Data: append([]byte(nil), files["catalog/generator-profiles/acme.yaml"].Data...)}
-				index.Packs = append(index.Packs, GeneratedPackIndexEntry{ID: "provider.unknown.connector", Provider: "unknown", Profile: "catalog/generator-profiles/unknown.yaml", Kind: GeneratedPackKindBuiltin, Output: "packs/unknown"})
+				index.Packs = append(index.Packs, GeneratedPackIndexEntry{ID: "provider.unknown.connector", Provider: "unknown", Profile: "catalog/generator-profiles/unknown.yaml", Kind: GeneratedPackKindBuiltin, Output: "provider-connectors/unknown"})
 				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
 			},
 			want: "references unknown builtin pack id",
@@ -214,7 +215,7 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
 				duplicate := index.Packs[0]
 				duplicate.Profile = "catalog/generator-profiles/duplicate.yaml"
-				duplicate.Output = "packs/duplicate"
+				duplicate.Output = "provider-connectors/duplicate"
 				files[duplicate.Profile] = &fstest.MapFile{Data: append([]byte(nil), files[index.Packs[0].Profile].Data...)}
 				index.Packs = append(index.Packs, duplicate)
 				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
@@ -228,7 +229,7 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
 				duplicate := index.Packs[0]
 				duplicate.ID = "provider.alias.connector"
-				duplicate.Output = "packs/alias"
+				duplicate.Output = "provider-connectors/alias"
 				index.Packs = append(index.Packs, duplicate)
 				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
 			},
@@ -305,9 +306,9 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			files := builtinCatalogFS(t)
 			tc.mutate(t, files)
-			_, err := loadBuiltinPackRegistryFS(files, "0.7.0")
+			_, err := CheckGeneratedCatalog(files, files)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("loadBuiltinPackRegistryFS error = %v, want containing %q", err, tc.want)
+				t.Fatalf("CheckGeneratedCatalog error = %v, want containing %q", err, tc.want)
 			}
 		})
 	}
@@ -568,12 +569,16 @@ func jsonSchema(t *testing.T, value any) []byte {
 
 func builtinCatalogFS(t *testing.T) fstest.MapFS {
 	t.Helper()
-	return copyTestFS(t, builtinConnectorPackFS)
+	return catalogWorkingTreeFS(t)
 }
 
 func catalogWorkingTreeFS(t *testing.T) fstest.MapFS {
 	t.Helper()
-	return copyTestFS(t, os.DirFS("."))
+	out := copyTestFS(t, os.DirFS("."))
+	for name, file := range copyTestFS(t, platformpacks.FS()) {
+		out[name] = file
+	}
+	return out
 }
 
 func copyTestFS(t *testing.T, source fs.FS) fstest.MapFS {
@@ -619,11 +624,11 @@ func rewritePackManifestHash(t *testing.T, files fstest.MapFS, name string, mani
 func mutateGeneratedGitHubManifest(t *testing.T, files fstest.MapFS, mutate func(*ConnectorManifest)) {
 	t.Helper()
 	var manifest ConnectorManifest
-	mustYAMLUnmarshal(t, files["packs/github/connector.yaml"].Data, &manifest)
+	mustYAMLUnmarshal(t, files["provider-connectors/github/connector.yaml"].Data, &manifest)
 	mutate(&manifest)
 	body := mustYAMLMarshal(t, manifest)
-	files["packs/github/connector.yaml"].Data = body
-	rewritePackManifestHash(t, files, "packs/github/pack.yaml", body)
+	files["provider-connectors/github/connector.yaml"].Data = body
+	rewritePackManifestHash(t, files, "provider-connectors/github/pack.yaml", body)
 }
 
 func mustYAMLUnmarshal(t *testing.T, body []byte, target any) {

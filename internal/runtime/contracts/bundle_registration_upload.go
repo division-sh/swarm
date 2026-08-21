@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -45,7 +44,11 @@ type bundleRegistrationUploadFile struct {
 // into the public bundle.register request shape without computing bundle_hash
 // or building a catalog projection.
 func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpecPath string) (BundleRegistrationUpload, error) {
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, platformSpecPath)
+	return BuildBundleRegistrationDirectoryUploadWithOptions(repoRoot, contractsRoot, platformSpecPath, WorkflowContractLoadOptions{})
+}
+
+func BuildBundleRegistrationDirectoryUploadWithOptions(repoRoot, contractsRoot, platformSpecPath string, options WorkflowContractLoadOptions) (BundleRegistrationUpload, error) {
+	bundle, err := LoadWorkflowContractBundleWithOptions(repoRoot, contractsRoot, platformSpecPath, options)
 	if err != nil {
 		return BundleRegistrationUpload{}, err
 	}
@@ -66,7 +69,7 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 		if !ok {
 			return BundleRegistrationUpload{}, fmt.Errorf("bundle registration input %q is not under bundle/", entry.Label)
 		}
-		raw, err := os.ReadFile(entry.Path)
+		raw, err := bundleHashEntryRawContent(entry)
 		if err != nil {
 			return BundleRegistrationUpload{}, fmt.Errorf("read %s: %w", rel, err)
 		}

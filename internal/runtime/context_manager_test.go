@@ -428,13 +428,6 @@ func newTestRuntimeContextManager(t testing.TB, availability RunBundleAvailabili
 	return manager, err
 }
 
-func newTestRuntimeContextManagerWithAdmission(t testing.TB, availability RunBundleAvailabilityReader, state ProcessAdmissionState, contexts ...BundleContext) (*RuntimeContextManager, error) {
-	t.Helper()
-	manager, err := NewRuntimeContextManagerWithAdmission(availability, state, contexts...)
-	registerRuntimeContextManagerCleanup(t, manager)
-	return manager, err
-}
-
 func registerRuntimeContextManagerCleanup(t testing.TB, manager *RuntimeContextManager) {
 	t.Helper()
 	if manager == nil {

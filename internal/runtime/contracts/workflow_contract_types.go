@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -72,6 +73,10 @@ type WorkflowContractBundle struct {
 	FlowSchemas           map[string]FlowSchemaDocument
 	FlowTree              FlowTree
 	URIRegistry           ContractURIRegistry
+	PackInventory         *packartifact.EffectivePackInventory
+	ProjectPacks          packartifact.ProjectPackSet
+	PackSelectionPath     string
+	PackSelectionBody     []byte
 }
 type WorkflowSemanticView struct {
 	Name                   string

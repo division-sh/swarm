@@ -75,9 +75,9 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			if err := predecessor.Start(context.Background()); err != nil {
 				t.Fatalf("start predecessor: %v", err)
 			}
-			manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 				BundleSourceFact: fact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(),
-			})
+			}))
 			if err != nil {
 				t.Fatalf("NewRuntimeContextManager: %v", err)
 			}

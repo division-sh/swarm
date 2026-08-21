@@ -2,6 +2,7 @@ package cliapp
 
 import (
 	"context"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -11,8 +12,17 @@ func appendProviderConnectorCapabilitySubjects(ctx context.Context, report *Loca
 	if report == nil || source == nil {
 		return
 	}
-	opts := providerconnectors.CapabilityOptions{Registry: providerconnectors.DefaultPackRegistry(), IncludeInstalled: true}
-	var err error
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.PackInventory == nil {
+		report.add(localPreflightProviderPackPrerequisite, "provider_connector_surface_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, "bundle-specific effective pack inventory is required", "fix the selected contract source")
+		return
+	}
+	registry, err := providerconnectors.NewPackRegistryFromInventory(bundle.PackInventory, strings.TrimSpace(bundle.Platform.Platform.Version))
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "provider_connector_surface_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the selected platform or project pack inventory")
+		return
+	}
+	opts := providerconnectors.CapabilityOptions{Registry: registry, IncludeInstalled: true}
 	if providerconnectors.HasEffectiveConnectors(source) {
 		opts.StaticCredentials, err = BuildProviderCredentialStore()
 		if err != nil {

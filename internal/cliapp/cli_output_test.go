@@ -25,10 +25,12 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	}
 	versionMetadata := currentTestVersionMetadata(t)
 	versionJSON := decodeOutputJSON[map[string]any](t, stdout.String())
+	embeddedPackDigest, _ := versionJSON["embedded_pack_inventory_digest"].(string)
 	if versionJSON["binary_version"] != versionMetadata.BinaryVersion ||
 		versionJSON["module_version"] != versionMetadata.ModuleVersion ||
 		versionJSON["platform_version"] != versionMetadata.PlatformVersion ||
 		versionJSON["platform_spec_digest"] != versionMetadata.PlatformSpecDigest ||
+		!strings.HasPrefix(embeddedPackDigest, "sha256:") ||
 		versionJSON["commit"] != versionMetadata.Commit {
 		t.Fatalf("version json = %#v, want local metadata", versionJSON)
 	}

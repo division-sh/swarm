@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -41,10 +41,7 @@ func serveRegistrationTestContext(harness *effecttest.Harness, identity string) 
 }
 
 func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
-	tool, ok := providerconnectors.BuiltinTool("telegram", "telegram.apply_webhook")
-	if !ok {
-		t.Fatal("Telegram registration apply tool is missing")
-	}
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
 	input := map[string]any{"callback_url": "https://hooks.example.test/webhooks/support/telegram?swarm_callback_generation=current"}
 	credentials := map[string]any{"telegram_bot_token": "bot-secret", "webhook_signing_secret": "signing-secret"}
 	lineage := map[string]string{"binding_id": "hitl", "target": "ingress:support:telegram:telegram", "intent_id": uuid.NewString(), "slot_id": "telegram:bot_webhook:42"}
@@ -194,10 +191,7 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 }
 
 func TestProviderRegistrationTransportFailsClosedBeforeCredentialsLeaveProcess(t *testing.T) {
-	tool, ok := providerconnectors.BuiltinTool("telegram", "telegram.apply_webhook")
-	if !ok {
-		t.Fatal("Telegram registration apply tool is missing")
-	}
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.apply_webhook").Tool
 	httpSpec, ok := tool.HTTP()
 	if !ok {
 		t.Fatal("Telegram registration HTTP contract is missing")

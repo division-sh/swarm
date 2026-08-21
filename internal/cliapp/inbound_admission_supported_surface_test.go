@@ -4,22 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
-func TestVerifyDoesNotLoadAmbientCheckoutProviderTriggerInventory(t *testing.T) {
+func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
@@ -30,29 +29,27 @@ func TestVerifyDoesNotLoadAmbientCheckoutProviderTriggerInventory(t *testing.T) 
 		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code != 0 {
 			t.Fatalf("verify repo %q exit=%d stdout=%s stderr=%s", repo, code, out.String(), errOut.String())
 		}
-		if strings.Contains(out.String(), "provider trigger pack") {
-			t.Fatalf("verify repo %q projected ambient provider inventory:\n%s", repo, out.String())
-		}
-		if strings.Contains(errOut.String(), "provider_triggers.packs") || strings.Contains(errOut.String(), "provider trigger pack") {
-			t.Fatalf("verify repo %q interpreted ambient provider inventory:\n%s", repo, errOut.String())
+		for _, want := range []string{"pack inventory: base=embedded", "provider trigger pack provider.telegram AVAILABLE"} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("verify repo %q omitted embedded inventory %q:\n%s", repo, want, out.String())
+			}
 		}
 	}
 }
 
 func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
 	root := writeVerifyLintEvidenceFixture(t)
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = root
 	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
-	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"), platformDirs, externalDirs)
+	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
 	var textOut, textErr bytes.Buffer
 	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &textOut, &textErr); code != 0 {
 		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
 	}
-	for _, provider := range []string{"acme_public", "github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
+	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
 		if !strings.Contains(textOut.String(), "provider trigger pack provider."+provider+" AVAILABLE") {
 			t.Fatalf("verify text omitted installed %s trigger:\n%s", provider, textOut.String())
 		}
@@ -63,24 +60,27 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 		t.Fatalf("verify JSON exit=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
 	}
 	result := decodeOutputJSON[verifyCommandResult](t, jsonOut.String())
+	if result.PackInventory.BaseMode != "embedded" || len(result.PackInventory.Packs) != 14 ||
+		result.PackInventory.BaseDigest == "" || result.PackInventory.EffectiveDigest == "" {
+		t.Fatalf("verify pack inventory = %#v", result.PackInventory)
+	}
 	installed := 0
 	for _, subject := range result.CapabilitySubjects {
 		if subject.Kind == packs.SubjectProviderTrigger && subject.Applicability == "installed" {
 			installed++
 		}
 	}
-	if installed != 9 {
-		t.Fatalf("verify installed trigger subjects=%d, want 9: %#v", installed, result.CapabilitySubjects)
+	if installed != 8 {
+		t.Fatalf("verify installed trigger subjects=%d, want 8: %#v", installed, result.CapabilitySubjects)
 	}
 }
 
 func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = writeInboundAdmissionPolicyMatrixFixture(t)
 	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
-	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"), platformDirs, externalDirs)
+	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
 
 	var textOut, textErr bytes.Buffer
@@ -125,6 +125,9 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 	readback := map[string]packs.Subject{}
 	installed, effective := 0, 0
 	for _, subject := range result.CapabilitySubjects {
+		if subject.Kind != packs.SubjectProviderTrigger {
+			continue
+		}
 		switch subject.Applicability {
 		case "installed":
 			installed++
@@ -133,7 +136,7 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 			readback[subject.Provider] = subject
 		}
 	}
-	if installed != 9 || effective != 6 {
+	if installed != 8 || effective != 6 {
 		t.Fatalf("verify subject multiplicity installed=%d effective=%d", installed, effective)
 	}
 	for _, provider := range []string{"partner_open", "partner_ack"} {
@@ -148,11 +151,7 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 }
 
 func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicityAndRendering(t *testing.T) {
-	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", platformDirs, externalDirs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalog := packfixture.TriggerCatalog(t)
 	contractsRoot := writeInboundAdmissionPolicyMatrixFixture(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), contractsRoot, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()))
 	if err != nil {
@@ -194,7 +193,7 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 			}
 		}
 	}
-	if installed != 9 || effective != 6 || raw != 3 {
+	if installed != 8 || effective != 6 || raw != 4 {
 		t.Fatalf("subject multiplicity installed=%d effective=%d raw=%d", installed, effective, raw)
 	}
 	body, err := json.Marshal(verifyCommandResult{OK: true, CapabilitySubjects: subjects})
@@ -220,76 +219,13 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 	return canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
 }
 
-func writeInboundAdmissionPackInventory(t *testing.T) ([]string, []string) {
-	t.Helper()
-	platformRoot := t.TempDir()
-	providers := configuredProviderTriggerFixtureProviders()
-	platformDirs := make([]string, 0, len(providers))
-	for _, provider := range providers {
-		dir := filepath.Join(platformRoot, provider)
-		copyProviderTriggerPackFixture(t, provider, dir, false)
-		platformDirs = append(platformDirs, dir)
-	}
-	writeUnsignedProviderTriggerPack(t, filepath.Join(platformRoot, "intercom"), "provider.intercom", "intercom", "platform", "inbound.intercom")
-	externalDir := filepath.Join(t.TempDir(), "acme_public")
-	writeUnsignedProviderTriggerPack(t, externalDir, "provider.acme_public", "acme_public", "external", "inbound.acme_public")
-	return platformDirs, []string{externalDir}
-}
-
-func writeUnsignedProviderTriggerPack(t testing.TB, dir, id, provider, provenance, event string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := []byte(fmt.Sprintf(`provider: %s
-payload_object_required: true
-secret: {required: false}
-delivery_id: {json_path: $.id, required: true}
-event_type: {literal: event, required: true}
-event_name: {literal: %s}
-ack: {mode: durable_before_dispatch}
-`, provider, event))
-	envelope := []byte(fmt.Sprintf(`id: %s
-version: 0.1.0
-platform_version: '>=0.7.0 <0.8.0'
-type: trigger
-manifest_hash: sha256:%s
-provenance: {source: %s}
-capabilities:
-  can:
-    receive_https_route: /webhooks/{alias}/%s
-    emit_events: [%s]
-    persist_dedupe_markers: true
-  cannot: [emit_undeclared_events, run_code_before_admission, touch_unbound_resources]
-requires: {}
-tests: [providertriggers/%s]
-`, id, strings.Repeat("0", 64), provenance, provider, event, provider))
-	_, stamped, err := providertriggers.StampPackEnvelope(envelope, manifest)
-	if err != nil {
-		t.Fatalf("stamp %s: %v", id, err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "trigger.yaml"), manifest, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "pack.yaml"), stamped, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string, platformDirs, externalDirs []string) string {
+func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string) string {
 	t.Helper()
 	lines := []string{"runtime:", "  recovery_on_startup: false", "workspace:", "  data_source: " + t.TempDir()}
 	if backend == "sqlite" {
 		lines = append(lines, "store:", "  backend: sqlite", "  sqlite:", "    path: "+sqlitePath)
 	}
-	lines = append(lines, "llm:", "  backend: anthropic", "provider_triggers:", "  packs:", "    platform_dirs:")
-	for _, dir := range platformDirs {
-		lines = append(lines, fmt.Sprintf("      - %q", dir))
-	}
-	lines = append(lines, "    external_dirs:")
-	for _, dir := range externalDirs {
-		lines = append(lines, fmt.Sprintf("      - %q", dir))
-	}
+	lines = append(lines, "llm:", "  backend: anthropic")
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)

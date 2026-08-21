@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/spf13/cobra"
 )
@@ -147,6 +148,8 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		newMigrateProducerRoutingCommand(repo),
 		newTestCommand(repo, opts),
 		newDescribeCommand(ctx, repo, opts),
+		newPacksCommand(ctx, repo, opts),
+		newImportPackCommand(repo, opts),
 		newBundleCommand(repo, opts),
 		newSecretsCommand(ctx, repo),
 		newConnectionsCommand(ctx, repo),
@@ -451,16 +454,17 @@ type versionCommandOptions struct {
 }
 
 type versionOutputResult struct {
-	BinaryVersion      string                       `json:"binary_version"`
-	ModuleVersion      string                       `json:"module_version"`
-	PlatformVersion    string                       `json:"platform_version"`
-	PlatformSpecDigest string                       `json:"platform_spec_digest"`
-	Commit             string                       `json:"commit"`
-	Built              string                       `json:"built"`
-	GoVersion          string                       `json:"go_version"`
-	GOOS               string                       `json:"goos"`
-	GOARCH             string                       `json:"goarch"`
-	Server             *diagnosticHealthCheckResult `json:"server,omitempty"`
+	BinaryVersion               string                       `json:"binary_version"`
+	ModuleVersion               string                       `json:"module_version"`
+	PlatformVersion             string                       `json:"platform_version"`
+	PlatformSpecDigest          string                       `json:"platform_spec_digest"`
+	EmbeddedPackInventoryDigest string                       `json:"embedded_pack_inventory_digest"`
+	Commit                      string                       `json:"commit"`
+	Built                       string                       `json:"built"`
+	GoVersion                   string                       `json:"go_version"`
+	GOOS                        string                       `json:"goos"`
+	GOARCH                      string                       `json:"goarch"`
+	Server                      *diagnosticHealthCheckResult `json:"server,omitempty"`
 }
 
 func newVersionCommand(opts rootCommandOptions) *cobra.Command {
@@ -494,20 +498,25 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 	if err != nil {
 		return err
 	}
+	embeddedPacks, err := packartifact.LoadEmbeddedPlatformPackInventory(metadata.PlatformVersion)
+	if err != nil {
+		return fmt.Errorf("load embedded platform pack inventory: %w", err)
+	}
 	result := versionOutputResult{
-		BinaryVersion:      metadata.BinaryVersion,
-		ModuleVersion:      metadata.ModuleVersion,
-		PlatformVersion:    metadata.PlatformVersion,
-		PlatformSpecDigest: metadata.PlatformSpecDigest,
-		Commit:             metadata.Commit,
-		Built:              metadata.Built,
-		GoVersion:          metadata.GoVersion,
-		GOOS:               metadata.GOOS,
-		GOARCH:             metadata.GOARCH,
+		BinaryVersion:               metadata.BinaryVersion,
+		ModuleVersion:               metadata.ModuleVersion,
+		PlatformVersion:             metadata.PlatformVersion,
+		PlatformSpecDigest:          metadata.PlatformSpecDigest,
+		EmbeddedPackInventoryDigest: embeddedPacks.Digest(),
+		Commit:                      metadata.Commit,
+		Built:                       metadata.Built,
+		GoVersion:                   metadata.GoVersion,
+		GOOS:                        metadata.GOOS,
+		GOARCH:                      metadata.GOARCH,
 	}
 	if !opts.server {
 		return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-			writeLocalVersion(w, metadata)
+			writeLocalVersion(w, metadata, embeddedPacks.Digest())
 		}, func() ([]string, error) {
 			return []string{metadata.BinaryVersion}, nil
 		})
@@ -518,14 +527,14 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 	}
 	result.Server = &health
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		writeLocalVersion(w, metadata)
+		writeLocalVersion(w, metadata, embeddedPacks.Digest())
 		writeVersionServerIdentity(w, health)
 	}, func() ([]string, error) {
 		return []string{metadata.BinaryVersion, health.Bundle.BundleHash}, nil
 	})
 }
 
-func writeLocalVersion(out io.Writer, metadata versionmetadata.Metadata) {
+func writeLocalVersion(out io.Writer, metadata versionmetadata.Metadata, embeddedPackInventoryDigest string) {
 	if out == nil {
 		return
 	}
@@ -535,6 +544,9 @@ func writeLocalVersion(out io.Writer, metadata versionmetadata.Metadata) {
 	fmt.Fprintf(out, "Go: %s %s/%s\n", metadata.GoVersion, metadata.GOOS, metadata.GOARCH)
 	if digest := strings.TrimSpace(metadata.PlatformSpecDigest); digest != "" {
 		fmt.Fprintf(out, "Platform spec digest: %s\n", digest)
+	}
+	if digest := strings.TrimSpace(embeddedPackInventoryDigest); digest != "" {
+		fmt.Fprintf(out, "Embedded pack inventory digest: %s\n", digest)
 	}
 }
 

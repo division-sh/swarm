@@ -40,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -2036,10 +2037,7 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 		UserAgent: "telegram-test",
 	}
 	req.Headers.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", []string{filepath.Join("..", "..", "..", "packs", "provider-triggers", "telegram")}, nil)
-	if err != nil {
-		t.Fatalf("load Telegram provider trigger pack: %v", err)
-	}
+	catalog := packfixture.TriggerCatalog(t)
 	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: "telegram-chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 	})

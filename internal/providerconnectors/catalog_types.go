@@ -20,6 +20,7 @@ const (
 	CatalogGeneratorVersion  = "swarm-openapi-gen/v1"
 	generatedPackIndexFile   = "catalog/generated-packs.yaml"
 	generatedProfileRoot     = "catalog/generator-profiles"
+	connectorPackRoot        = "provider-connectors"
 	GeneratedPackKindBuiltin = "builtin"
 	GeneratedPackKindFixture = "fixture"
 	GenerationReviewApproved = "approved"

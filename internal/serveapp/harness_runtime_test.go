@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
@@ -17,7 +18,7 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
 	loaded, err := loadServeRuntimeBundle(context.Background(), repo, storeBundle{}, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-	}, cliapp.ServeOptions{})
+	}, cliapp.ServeOptions{}, packfixture.EmbeddedBase(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)
 	}

@@ -405,16 +405,16 @@ func notionManagedConnectorSource(t *testing.T, baseURL, flowInstance string) se
 			},
 		},
 	}
-	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, notionManagedConnectorPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, notionManagedConnectorPackRegistry(t, baseURL))
 	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
 	return source
 }
 
 func notionManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
 	t.Helper()
-	tool, ok := providerconnectors.BuiltinTool("notion", "notion.append_block_children")
+	tool, ok := embeddedConnectorTool(t, "notion", "notion.append_block_children")
 	if !ok {
 		t.Fatal("provider connector pack notion.append_block_children not found")
 	}

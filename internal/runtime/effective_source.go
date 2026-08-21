@@ -59,12 +59,15 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("effective semantic source is required")
 	}
 
-	var err error
-	source, err = providerconnectors.SourceWithConnectorPackImports(source)
+	connectorRegistry, triggerCatalog, err := packProjectionsForEffectiveSource(source, request.ProviderTriggerCatalog)
+	if err != nil {
+		return AdmittedEffectiveSourceProjection{}, err
+	}
+	source, err = providerconnectors.SourceWithConnectorPackImports(source, connectorRegistry)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider connector pack import failed: %w", err)
 	}
-	source, err = SourceWithProviderTriggerEvents(source, request.ProviderTriggerCatalog)
+	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider trigger event import failed: %w", err)
 	}
@@ -104,6 +107,26 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		module = connectorPackWorkflowModule{WorkflowModule: module, source: source}
 	}
 	return AdmittedEffectiveSourceProjection{source: source, module: module, identity: identity}, nil
+}
+
+func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTriggers *providertriggers.CatalogSnapshot) (*providerconnectors.PackRegistry, *providertriggers.CatalogSnapshot, error) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.PackInventory == nil {
+		return nil, suppliedTriggers, nil
+	}
+	runningVersion := strings.TrimSpace(bundle.Platform.Platform.Version)
+	connectors, err := providerconnectors.NewPackRegistryFromInventory(bundle.PackInventory, runningVersion)
+	if err != nil {
+		return nil, nil, fmt.Errorf("derive provider connector registry from effective pack inventory: %w", err)
+	}
+	triggers, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, runningVersion)
+	if err != nil {
+		return nil, nil, fmt.Errorf("derive provider trigger catalog from effective pack inventory: %w", err)
+	}
+	if suppliedTriggers != nil && !suppliedTriggers.Generation().Equal(triggers.Generation()) {
+		return nil, nil, fmt.Errorf("supplied provider trigger catalog generation %s contradicts bundle effective inventory generation %s", suppliedTriggers.Generation().Diagnostic(), triggers.Generation().Diagnostic())
+	}
+	return connectors, triggers, nil
 }
 
 func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.BundleSourceFact, channelPlans []packs.SatisfactionPlan, bindings []packs.OutboundBindingPlan) (map[string]any, error) {

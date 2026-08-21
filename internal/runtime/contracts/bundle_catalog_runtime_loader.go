@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,6 +18,7 @@ type BundleCatalogRuntimeLoadRequest struct {
 	ContentYAML             string
 	DataBlob                []byte
 	RunningPlatformSpecPath string
+	PlatformPackBase        *packartifact.PlatformPackInventory
 }
 
 type BundleCatalogRuntimeSource struct {
@@ -81,7 +83,7 @@ func LoadBundleCatalogRuntimeSource(repoRoot string, req BundleCatalogRuntimeLoa
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("bundle catalog runtime source missing platform/platform-spec.yaml: %w", err)
 	}
 
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, platformSpecPath)
+	bundle, err := LoadWorkflowContractBundleWithOptions(repoRoot, contractsRoot, platformSpecPath, WorkflowContractLoadOptions{PlatformPackBase: req.PlatformPackBase})
 	if err != nil {
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("load bundle catalog runtime source: %w", err)
 	}

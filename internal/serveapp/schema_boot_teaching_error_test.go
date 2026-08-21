@@ -13,6 +13,7 @@ import (
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 // TestServeBootLegacySchemaRendersTeachingError proves the #995 teaching-error
@@ -25,7 +26,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
 	loaded, err := loadServeRuntimeBundle(context.Background(), repo, storeBundle{}, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-	}, cliapp.ServeOptions{})
+	}, cliapp.ServeOptions{}, packfixture.EmbeddedBase(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)
 	}

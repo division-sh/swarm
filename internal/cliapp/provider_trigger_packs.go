@@ -6,61 +6,62 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type ProviderTriggerPackLoad struct {
-	Catalog      *providertriggers.CatalogSnapshot
-	Loaded       []providertriggers.LoadedPack
-	PlatformDirs []string
-	ExternalDirs []string
+	Catalog   *providertriggers.CatalogSnapshot
+	Loaded    []providertriggers.LoadedPack
+	Inventory *packartifact.EffectivePackInventory
 }
 
-func (l ProviderTriggerPackLoad) Reload() (*providertriggers.CatalogSnapshot, error) {
+func LoadConfiguredPlatformPackBase(repo string, cfgResult RuntimeConfigLoadResult) (*packartifact.PlatformPackInventory, error) {
+	if cfgResult.Config == nil {
+		return nil, fmt.Errorf("runtime config is required")
+	}
 	runningVersion, err := platform.PlatformVersion()
 	if err != nil {
 		return nil, err
 	}
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(runningVersion, l.PlatformDirs, l.ExternalDirs)
-	return catalog, err
+	embedded, err := packartifact.LoadEmbeddedPlatformPackInventory(runningVersion)
+	if err != nil {
+		return nil, err
+	}
+	configured := cfgResult.Config.Platform.Packs.PlatformDirs
+	if len(configured) == 0 {
+		return embedded, nil
+	}
+	dirs := resolvePlatformPackDirs(repo, packConfigOrigin(cfgResult, "platform.packs.platform_dirs"), configured)
+	return packartifact.LoadDevelopmentPlatformPackInventory(runningVersion, dirs, embedded)
 }
 
-func LoadConfiguredProviderTriggerPacks(repo string, cfgResult RuntimeConfigLoadResult) (ProviderTriggerPackLoad, error) {
-	if cfgResult.Config == nil {
-		return ProviderTriggerPackLoad{}, fmt.Errorf("runtime config is required")
+func LoadBundleProviderTriggerPacks(bundle *runtimecontracts.WorkflowContractBundle) (ProviderTriggerPackLoad, error) {
+	if bundle == nil || bundle.PackInventory == nil {
+		return ProviderTriggerPackLoad{}, fmt.Errorf("workflow bundle effective pack inventory is required")
 	}
-	configuredPlatformDirs := cfgResult.Config.ProviderTriggers.Packs.PlatformDirs
-	runningVersion, err := platform.PlatformVersion()
+	runningVersion := strings.TrimSpace(bundle.Platform.Platform.Version)
+	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, runningVersion)
 	if err != nil {
 		return ProviderTriggerPackLoad{}, err
 	}
-	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.platform_dirs"), configuredPlatformDirs)
-	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.external_dirs"), cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
-	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromPackDirs(runningVersion, platformDirs, externalDirs)
-	if err != nil {
-		return ProviderTriggerPackLoad{}, err
-	}
-	return ProviderTriggerPackLoad{
-		Catalog:      catalog,
-		Loaded:       loaded,
-		PlatformDirs: platformDirs,
-		ExternalDirs: externalDirs,
-	}, nil
+	return ProviderTriggerPackLoad{Catalog: catalog, Loaded: loaded, Inventory: bundle.PackInventory}, nil
 }
 
-func providerTriggerPackConfigOrigin(cfgResult RuntimeConfigLoadResult, key string) string {
+func packConfigOrigin(cfgResult RuntimeConfigLoadResult, key string) string {
 	if origin, ok := cfgResult.KeyOrigins[strings.TrimSpace(key)]; ok {
 		return strings.TrimSpace(origin.Path)
 	}
 	return ""
 }
 
-func resolveProviderTriggerPackDirs(repo, configPath string, dirs []string) []string {
+func resolvePlatformPackDirs(repo, configPath string, dirs []string) []string {
 	if len(dirs) == 0 {
 		return nil
 	}

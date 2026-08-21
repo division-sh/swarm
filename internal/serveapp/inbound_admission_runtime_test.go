@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,7 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -26,6 +26,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestInboundAdmissionSupportedSurfacePolicyMatrixSQLiteAndPostgres(t *testing.T) {
@@ -62,10 +63,9 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 			}
 
 			for _, tc := range []struct {
-				name           string
-				mutatePackage  func(string) string
-				removeExternal bool
-				want           string
+				name          string
+				mutatePackage func(string) string
+				want          string
 			}{
 				{
 					name: "missing pinned pack",
@@ -82,16 +82,23 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					want: `which provides "slack"`,
 				},
 				{
-					name:          "removed external pack",
-					mutatePackage: func(body string) string { return body }, removeExternal: true,
-					want: `pins pack "provider.acme_public", but that id is not loaded`,
+					name: "missing project pack",
+					mutatePackage: func(body string) string {
+						return strings.Replace(body, `        - provider: acme_public
+          admission:
+            kind: raw
+            acknowledge: unsigned_webhook
+            authentication: {kind: none}
+            event: inbound.acme_public
+            delivery_id: {source: body_sha256}
+            payload: json`, `        - provider: acme_public
+          admission:
+            pack: {id: provider.acme_public}`, 1)
+					},
+					want: `pins pack "provider.acme_public", but that id is not selected`,
 				},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
-					if tc.removeExternal {
-						externalDirs = nil
-					}
 					contractsRoot := writeInboundAdmissionPolicyMatrixFixture(t)
 					packagePath := filepath.Join(contractsRoot, "package.yaml")
 					body, err := os.ReadFile(packagePath)
@@ -107,7 +114,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 							t.Fatal(err)
 						}
 					}
-					configPath := writeInboundAdmissionRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "failure.sqlite"), platformDirs, externalDirs)
+					configPath := writeInboundAdmissionRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "failure.sqlite"))
 					process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 						ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 						StoreMode: backend, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -132,8 +139,8 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend string) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
-	platformDirs, externalDirs := writeInboundAdmissionPackInventory(t)
 	contractsRoot := writeInboundAdmissionPolicyMatrixFixture(t)
+	importProjectTelegramTrigger(t, contractsRoot)
 	dataRoot := t.TempDir()
 	credentialPath := filepath.Join(dataRoot, "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -143,6 +150,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	for key, value := range map[string]string{
 		"webhook_signing.telegram": "telegram-secret",
+		"webhook_signing.intercom": "intercom-secret",
 		"webhook_signing.partner":  "partner-secret",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
@@ -156,7 +164,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	configPath := ""
 	if backend == "sqlite" {
 		sqlitePath := filepath.Join(dataRoot, "admission.sqlite")
-		configPath = writeInboundAdmissionRuntimeConfig(t, backend, sqlitePath, platformDirs, externalDirs)
+		configPath = writeInboundAdmissionRuntimeConfig(t, backend, sqlitePath)
 	} else {
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		postgresDSN = dsn
@@ -178,7 +186,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			buildStoresForServe = oldBuildStores
 			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 		})
-		configPath = writeInboundAdmissionRuntimeConfig(t, backend, "", platformDirs, externalDirs)
+		configPath = writeInboundAdmissionRuntimeConfig(t, backend, "")
 	}
 
 	opts := cliapp.ServeOptions{
@@ -191,6 +199,11 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	process.waitForReadyLine()
 	waitForInboundAdmissionServeOutput(t, process, "[WARN] inbound_unsigned_webhook")
 	serveOutput := process.outputString()
+	for _, want := range []string{"packs                      embedded · 14 packs", "effective sha256:", "project provider.telegram"} {
+		if !strings.Contains(serveOutput, want) {
+			t.Fatalf("serve readback omitted imported Telegram inventory fact %q:\n%s", want, serveOutput)
+		}
+	}
 	var unsignedWarningLine string
 	for _, line := range strings.Split(serveOutput, "\n") {
 		if strings.Contains(line, "[WARN] inbound_unsigned_webhook") {
@@ -237,6 +250,14 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 	for i := range tests {
 		test := &tests[i]
+		if test.headers == nil {
+			test.headers = map[string]string{}
+		}
+		if test.provider == "intercom" {
+			mac := hmac.New(sha1.New, []byte("intercom-secret"))
+			_, _ = mac.Write(test.body)
+			test.headers["X-Hub-Signature"] = "sha1=" + hex.EncodeToString(mac.Sum(nil))
+		}
 		if test.provider == "partner_auth" {
 			mac := hmac.New(sha256.New, []byte("partner-secret"))
 			_, _ = mac.Write(test.body)
@@ -266,8 +287,32 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	if status != http.StatusUnauthorized {
 		t.Fatalf("invalid authenticated raw status=%d, want 401", status)
 	}
+	status, response := sendInboundAdmissionSupportedRequest(t, baseURL, "telegram", []byte(`[]`), map[string]string{
+		"X-Telegram-Bot-Api-Secret-Token": "telegram-secret",
+	})
+	if status != http.StatusBadRequest || !strings.Contains(response, "project telegram update object is required") {
+		t.Fatalf("project Telegram invalid-payload status=%d response=%s", status, response)
+	}
 	if code := process.stop(); code != 0 {
 		t.Fatalf("serve exit=%d\n%s", code, process.outputString())
+	}
+	if backend == "postgres" {
+		postgresStore, err = store.NewPostgresStore(postgresDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	restarted := startServeRuntimeTestProcess(t, opts)
+	restarted.waitForReadyLine()
+	restartURL := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString())
+	status, response = sendInboundAdmissionSupportedRequest(t, restartURL, "telegram", []byte(`{"update_id":902,"message":{"message_id":902,"from":{"id":7},"chat":{"id":42,"type":"private"},"text":"after restart"}}`), map[string]string{
+		"X-Telegram-Bot-Api-Secret-Token": "telegram-secret",
+	})
+	if status != http.StatusAccepted {
+		t.Fatalf("project Telegram after restart status=%d response=%s\nserve output:\n%s", status, response, restarted.outputString())
+	}
+	if code := restarted.stop(); code != 0 {
+		t.Fatalf("restarted serve exit=%d\n%s", code, restarted.outputString())
 	}
 
 	if backend == "sqlite" {
@@ -291,10 +336,34 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 			} else {
 				err = storetest.DatabaseForTest(postgresStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count)
 			}
-			if err != nil || count != 1 {
-				t.Fatalf("%s persisted count=%d err=%v, want 1", eventName, count, err)
+			want := 1
+			if test.provider == "telegram" {
+				want = 2
+			}
+			if err != nil || count != want {
+				t.Fatalf("%s persisted count=%d err=%v, want %d", eventName, count, err, want)
 			}
 		}
+	}
+}
+
+func importProjectTelegramTrigger(t testing.TB, contractsRoot string) {
+	t.Helper()
+	base := packfixture.EmbeddedBase(t)
+	if changed, err := packartifact.ImportEmbeddedPack(contractsRoot, "provider.telegram", base); err != nil || !changed {
+		t.Fatalf("import project Telegram trigger changed=%t: %v", changed, err)
+	}
+	path := filepath.Join(contractsRoot, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(body), "telegram update object is required", "project telegram update object is required", 1)
+	if edited == string(body) {
+		t.Fatal("project Telegram trigger edit found no canonical validation message")
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -356,76 +425,13 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 	return canonicalrouting.CopyInboundAdmissionPolicyMatrix(t)
 }
 
-func writeInboundAdmissionPackInventory(t *testing.T) ([]string, []string) {
+func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string) string {
 	t.Helper()
-	platformRoot := t.TempDir()
-	providers := []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"}
-	platformDirs := make([]string, 0, len(providers))
-	for _, provider := range providers {
-		dir := filepath.Join(platformRoot, provider)
-		copyProviderTriggerPackFixture(t, provider, dir, false)
-		platformDirs = append(platformDirs, dir)
-	}
-	writeUnsignedProviderTriggerPack(t, filepath.Join(platformRoot, "intercom"), "provider.intercom", "intercom", "platform", "inbound.intercom")
-	externalDir := filepath.Join(t.TempDir(), "acme_public")
-	writeUnsignedProviderTriggerPack(t, externalDir, "provider.acme_public", "acme_public", "external", "inbound.acme_public")
-	return platformDirs, []string{externalDir}
-}
-
-func writeUnsignedProviderTriggerPack(t testing.TB, dir, id, provider, provenance, event string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := []byte(fmt.Sprintf(`provider: %s
-payload_object_required: true
-secret: {required: false}
-delivery_id: {json_path: $.id, required: true}
-event_type: {literal: event, required: true}
-event_name: {literal: %s}
-ack: {mode: durable_before_dispatch}
-`, provider, event))
-	envelope := []byte(fmt.Sprintf(`id: %s
-version: 0.1.0
-platform_version: '>=0.7.0 <0.8.0'
-type: trigger
-manifest_hash: sha256:%s
-provenance: {source: %s}
-capabilities:
-  can:
-    receive_https_route: /webhooks/{alias}/%s
-    emit_events: [%s]
-    persist_dedupe_markers: true
-  cannot: [emit_undeclared_events, run_code_before_admission, touch_unbound_resources]
-requires: {}
-tests: [providertriggers/%s]
-`, id, strings.Repeat("0", 64), provenance, provider, event, provider))
-	_, stamped, err := providertriggers.StampPackEnvelope(envelope, manifest)
-	if err != nil {
-		t.Fatalf("stamp %s: %v", id, err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "trigger.yaml"), manifest, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "pack.yaml"), stamped, 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string, platformDirs, externalDirs []string) string {
-	t.Helper()
-	lines := []string{"runtime:", "  execution_posture: live", "  recovery_on_startup: false", "workspace:", "  data_source: " + t.TempDir()}
+	lines := []string{"runtime:", "  execution_posture: live", "  recovery_on_startup: true", "workspace:", "  data_source: " + t.TempDir()}
 	if backend == "sqlite" {
 		lines = append(lines, "store:", "  backend: sqlite", "  sqlite:", "    path: "+sqlitePath)
 	}
-	lines = append(lines, "llm:", "  backend: anthropic", "provider_triggers:", "  packs:", "    platform_dirs:")
-	for _, dir := range platformDirs {
-		lines = append(lines, fmt.Sprintf("      - %q", dir))
-	}
-	lines = append(lines, "    external_dirs:")
-	for _, dir := range externalDirs {
-		lines = append(lines, fmt.Sprintf("      - %q", dir))
-	}
+	lines = append(lines, "llm:", "  backend: anthropic")
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)

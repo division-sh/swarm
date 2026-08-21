@@ -148,9 +148,9 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		t.Fatalf("start third runtime: %v", err)
 	}
 	contexts, err := runtimepkg.NewRuntimeContextManager(nil,
-		runtimepkg.BundleContext{BundleSourceFact: first.runtime.Options.BundleSourceFact, Source: first.source, Runtime: first.runtime, WorkOwner: first.runtime.WorkOccurrence()},
-		runtimepkg.BundleContext{BundleSourceFact: second.runtime.Options.BundleSourceFact, Source: second.source, Runtime: second.runtime, WorkOwner: second.runtime.WorkOccurrence()},
-		runtimepkg.BundleContext{BundleSourceFact: third.runtime.Options.BundleSourceFact, Source: third.source, Runtime: third.runtime, WorkOwner: third.runtime.WorkOccurrence()},
+		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: first.runtime.Options.BundleSourceFact, Source: first.source, Runtime: first.runtime, WorkOwner: first.runtime.WorkOccurrence()}),
+		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: second.runtime.Options.BundleSourceFact, Source: second.source, Runtime: second.runtime, WorkOwner: second.runtime.WorkOccurrence()}),
+		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: third.runtime.Options.BundleSourceFact, Source: third.source, Runtime: third.runtime, WorkOwner: third.runtime.WorkOccurrence()}),
 	)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
