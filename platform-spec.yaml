@@ -14214,7 +14214,8 @@ platform_tables:
       description: >-
         Append-only typed evidence for the one process-composition-owned retained selected-store
         capability. authority_generation is the sole global ordering authority; timestamps are
-        diagnostic evidence only. Acquisition is bound to one exact boot/request hash. A crash
+        diagnostic evidence only and storage timestamp precision never participates in snapshot
+        validity or authority matching. Acquisition is bound to one exact boot/request hash. A crash
         takeover atomically supersedes the exact active predecessor, retires that predecessor's
         new-work grants, and appends its successor after backend-exclusive possession has already
         been proved. Runtime generations consume revocable grants and cannot acquire, release,
@@ -34351,14 +34352,17 @@ agent_topology_authority:
       Every durable static and flow-readiness lifecycle cell carries the exact process authority, owner, boot,
       generation grant, bundle source coordinate, runtime instance, and runtime generation allowed to execute it.
       After takeover, process_takeover advances and rebinds every predecessor-bound cell before any runtime context
-      hydrates. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
+      hydrates. Reconciliation consumes a complete durable lifecycle-cell census owned by lifecycle persistence;
+      execution-hydration projections and status filters cannot define that census, so terminated cells remain in
+      scope while ephemeral cells remain excluded. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
       removed source cell whose execution grant changes at terminalization. Reconciliation is deterministic,
       idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline
       starts only after serialization. Release cancellation is checked after serialization and before backend I/O;
-      a probe already in I/O is cancelled and joined before unlock. The first failed proof terminalizes exactly once
+      a probe already in I/O is cancelled and joined before unlock. Cancellation before or during a proof is a
+      neutral monitor outcome: it cannot terminalize the retained adapter or release possession. The first failed proof terminalizes exactly once
       as ownership_unprovable. ownership_superseded requires exact durable successor authority evidence and is never
       inferred from probe failure. Monitor failure cannot append or authorize a successor.
     repair:
@@ -34369,6 +34373,9 @@ agent_topology_authority:
         findings digest, refuses a proven live holder and unprovable SQLite identity, appends one monotonic terminal
         authority repair and immutable repair journal atomically, and cannot mutate source sets, lifecycle topology,
         deliveries, drains, flows, runs, events, or user data.
+        Repair lineage is derived from the trusted repair operation and findings digest, never from malformed
+        authority, boot, runtime, predecessor, successor, or snapshot fields; the exact untrusted row survives only
+        as immutable before-snapshot journal evidence.
     presentation: >-
       Automatic crash takeover prints at most `✓ Recovered previous session`. A live holder refusal says another
       swarm serve is running, includes its durable recorded start age when available, and tells the operator to stop

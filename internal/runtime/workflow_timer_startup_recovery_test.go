@@ -42,6 +42,7 @@ type workflowTimerStartupStore interface {
 	runtimegenericschedule.Store
 	storetest.AgentFixtureStore
 	runtimemanager.ManagerPersistence
+	runtimemanager.AgentLifecycleCellCensus
 	runtimetimerobligation.Reader
 	PipelineObligations() runtimepipelineobligation.Store
 }
@@ -383,9 +384,9 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			restarted, restartedProcess := newRuntime(flakyManagerStore)
 			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
 			err = restarted.Start(ctx)
-			if err == nil || !strings.Contains(err.Error(), "prepare static declaration topology") {
+			if err == nil || !strings.Contains(err.Error(), "hydrate static declaration topology") {
 				shutdown("unexpected successful restart", restarted, restartedProcess)
-				t.Fatalf("Start error = %v, want topology reconciliation failure before workflow-timer restoration", err)
+				t.Fatalf("Start error = %v, want topology hydration failure before workflow-timer restoration", err)
 			}
 			shutdown("failed restart", restarted, restartedProcess)
 			if err := capability.Release(context.Background()); err != nil {

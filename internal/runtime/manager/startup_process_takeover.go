@@ -20,7 +20,7 @@ type processExecutionBindingProvider interface {
 // RebindLifecycleExecutionForStartup advances every lifecycle cell belonging
 // to this bundle coordinate onto the exact current process generation grant.
 func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) error {
-	if am == nil || am.store == nil || am.lifecycle == nil {
+	if am == nil || am.lifecycle == nil {
 		return nil
 	}
 	store := am.lifecycle.persistence()
@@ -35,21 +35,26 @@ func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) 
 	if err := target.Validate(); err != nil {
 		return err
 	}
-	agents, err := am.store.LoadAgents(ctx)
-	if err != nil {
-		return fmt.Errorf("load agents for process takeover: %w", err)
+	if am.roles.LifecycleCensus == nil {
+		return errors.New("startup lifecycle persistence does not expose the durable lifecycle cell census")
 	}
-	sort.Slice(agents, func(i, j int) bool {
-		left, _ := agents[i].Config.ConcreteIdentity()
-		right, _ := agents[j].Config.ConcreteIdentity()
-		leftKey, _ := left.Fingerprint()
-		rightKey, _ := right.Fingerprint()
+	states, err := am.roles.LifecycleCensus.ListDurableAgentLifecycleStates(ctx)
+	if err != nil {
+		return fmt.Errorf("list durable lifecycle cells for process takeover: %w", err)
+	}
+	sort.Slice(states, func(i, j int) bool {
+		leftKey, _ := states[i].Identity.Fingerprint()
+		rightKey, _ := states[j].Identity.Fingerprint()
 		return leftKey < rightKey
 	})
-	for _, rec := range agents {
-		current := rec.ProcessBinding
+	for _, state := range states {
+		identity := state.Identity.Normalize()
+		if err := identity.Validate(); err != nil {
+			return fmt.Errorf("durable lifecycle census identity is invalid: %w", err)
+		}
+		current := state.ProcessBinding
 		if err := current.Validate(); err != nil {
-			return fmt.Errorf("persisted lifecycle process binding for %s is invalid: %w", rec.Config.ID, err)
+			return fmt.Errorf("persisted lifecycle process binding for %s is invalid: %w", identity.Description(), err)
 		}
 		if strings.TrimSpace(current.BundleHash) != strings.TrimSpace(target.BundleHash) ||
 			strings.TrimSpace(current.BundleSource) != strings.TrimSpace(target.BundleSource) {
@@ -57,26 +62,6 @@ func (am *AgentManager) RebindLifecycleExecutionForStartup(ctx context.Context) 
 		}
 		if current.Equal(target) {
 			continue
-		}
-		if am.roles.LifecycleState == nil {
-			return errors.New("startup lifecycle takeover requires lifecycle state readback")
-		}
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		state, found, err := am.roles.LifecycleState.LoadAgentLifecycleState(ctx, identity)
-		if err != nil {
-			return fmt.Errorf("load lifecycle takeover state for %s: %w", identity.Description(), err)
-		}
-		if !found {
-			return fmt.Errorf("lifecycle takeover state disappeared for %s", identity.Description())
-		}
-		if state.ProcessBinding.Equal(target) {
-			continue
-		}
-		if state.ProcessBinding.BundleHash != target.BundleHash || state.ProcessBinding.BundleSource != target.BundleSource {
-			return fmt.Errorf("lifecycle takeover source changed for %s", identity.Description())
 		}
 		if err := commitProcessTakeover(ctx, store, identity, state, target); err != nil {
 			return err

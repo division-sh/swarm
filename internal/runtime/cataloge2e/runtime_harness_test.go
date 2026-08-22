@@ -428,7 +428,7 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		ManagerStore:                   pg,
 		ManagerLifecycleDiagnostics:    pg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleState: pg, LifecycleEffects: pg,
+			LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg,
 			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
 			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
 		},
@@ -486,7 +486,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		ManagerStore:                   sqlite,
 		ManagerLifecycleDiagnostics:    sqlite,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleState: sqlite, LifecycleEffects: sqlite,
+			LifecycleCensus: sqlite, LifecycleState: sqlite, LifecycleEffects: sqlite,
 			LifecycleDiagnostics: sqlite, EffectsRecovery: sqlite, DeliveryQuiescence: sqlite,
 			EventExistence: sqlite, DirectiveOperations: sqlite, DirectiveTargets: sqlite, FlowRoutes: sqlite,
 		},

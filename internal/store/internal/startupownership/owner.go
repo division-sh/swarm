@@ -482,22 +482,33 @@ func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {
 }
 
 func (s *sqliteSession) ProveCurrent(ctx context.Context) error {
-	if _, err := s.Authority(); err != nil {
+	return s.proveCurrent(ctx, true)
+}
+
+func (s *sqliteSession) proveCurrent(ctx context.Context, terminalOnFailure bool) error {
+	authority, err := s.Authority()
+	if err != nil {
 		return err
 	}
 	if err := s.possession.ProveCurrent(ctx); err != nil {
-		s.terminal()
+		if terminalOnFailure {
+			s.terminal()
+		}
 		return err
 	}
 	var snapshot []byte
-	err := s.owner.backend.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, s.authority.AuthorityID).Scan(&snapshot)
+	err = s.owner.backend.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&snapshot)
 	if err != nil {
-		s.terminal()
+		if terminalOnFailure {
+			s.terminal()
+		}
 		return err
 	}
 	var persisted runtimestartupownership.Authority
-	if err := json.Unmarshal(snapshot, &persisted); err != nil || persisted != s.authority {
-		s.terminal()
+	if err := json.Unmarshal(snapshot, &persisted); err != nil || persisted != authority {
+		if terminalOnFailure {
+			s.terminal()
+		}
 		return errors.New("SQLite process capability durable head changed")
 	}
 	return nil
@@ -509,7 +520,11 @@ func (s *sqliteSession) MonitorProveCurrent(ctx context.Context, deadline time.D
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
-	return s.ProveCurrent(probeCtx)
+	err := s.proveCurrent(probeCtx, false)
+	if err != nil && ctx.Err() == nil {
+		s.terminal()
+	}
+	return err
 }
 
 func (s *sqliteSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {

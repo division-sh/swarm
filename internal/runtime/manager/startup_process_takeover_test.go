@@ -40,6 +40,14 @@ func (s *startupProcessTakeoverStore) LoadAgentLifecycleState(_ context.Context,
 	return state, ok, nil
 }
 
+func (s *startupProcessTakeoverStore) ListDurableAgentLifecycleStates(context.Context) ([]AgentLifecycleState, error) {
+	states := make([]AgentLifecycleState, 0, len(s.states))
+	for _, state := range s.states {
+		states = append(states, state)
+	}
+	return states, nil
+}
+
 func (s *startupProcessTakeoverStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	s.commitAttempt++
 	s.requests = append(s.requests, req)
@@ -117,8 +125,12 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	records := []PersistedAgent{
 		startupTakeoverAgent(t, "static-agent", staticTopology, predecessor),
 		startupTakeoverAgent(t, "readiness-agent", readinessTopology, predecessor),
+		startupTakeoverAgent(t, "terminated-static-agent", staticTopology, predecessor),
 		startupTakeoverAgent(t, "other-agent", otherTopology, unrelated),
 	}
+	records[2].Status = "terminated"
+	records[2].LifecyclePhase = AgentLifecycleTerminated
+	records[2].LifecycleRunMode = AgentRunModeStopped
 	store := &startupProcessTakeoverStore{
 		target: successor, agents: append([]PersistedAgent(nil), records...), states: map[string]AgentLifecycleState{}, failCommitAt: 2,
 	}
@@ -138,7 +150,7 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	manager := &AgentManager{
 		store:     store,
 		lifecycle: newAgentLifecycleCoordinator(store, nil, nil, store, nil),
-		roles:     PersistenceRoles{LifecycleState: store},
+		roles:     PersistenceRoles{LifecycleCensus: store, LifecycleState: store},
 	}
 
 	if err := manager.RebindLifecycleExecutionForStartup(context.Background()); err == nil || !strings.Contains(err.Error(), "injected process takeover interruption") {
@@ -151,8 +163,8 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	if err := manager.RebindLifecycleExecutionForStartup(context.Background()); err != nil {
 		t.Fatalf("resume process takeover: %v", err)
 	}
-	if got := len(store.requests); got != 3 {
-		t.Fatalf("process takeover attempts = %d, want one success, one interrupted attempt, and one resumed success", got)
+	if got := len(store.requests); got != 4 {
+		t.Fatalf("process takeover attempts = %d, want one success, one interrupted attempt, and two resumed successes", got)
 	}
 	for _, request := range store.requests {
 		if request.OperationKind != "process_takeover" {
@@ -160,7 +172,7 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 		}
 	}
 	for i, record := range store.agents {
-		if i < 2 {
+		if i < 3 {
 			if !record.ProcessBinding.Equal(successor) || record.LifecycleGeneration != records[i].LifecycleGeneration+1 {
 				t.Fatalf("rebound record %d = %#v generation=%d", i, record.ProcessBinding, record.LifecycleGeneration)
 			}

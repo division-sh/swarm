@@ -485,7 +485,7 @@ func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence
 		TargetFailureRecorder: pg, RunOrigins: pg,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{
-		LifecycleState: pg, LifecycleEffects: pg, LifecycleDiagnostics: pg, EffectsRecovery: pg,
+		LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg, LifecycleDiagnostics: pg, EffectsRecovery: pg,
 		DeliveryQuiescence: pg, EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg,
 		FlowRoutes: pg,
 	}
@@ -532,7 +532,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		ManagerStore:                   pg,
 		ManagerLifecycleDiagnostics:    pg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleState: pg, LifecycleEffects: pg,
+			LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg,
 			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
 			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
 		},
@@ -2696,7 +2696,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:                   sqliteStore,
 			ManagerLifecycleDiagnostics:    sqliteStore,
 			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-				LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
+				LifecycleCensus: sqliteStore, LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
 				LifecycleDiagnostics: sqliteStore, EffectsRecovery: sqliteStore, DeliveryQuiescence: sqliteStore,
 				EventExistence: sqliteStore, DirectiveOperations: sqliteStore, DirectiveTargets: sqliteStore, FlowRoutes: sqliteStore,
 			},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ import (
 
 var _ runtimemanager.AgentLifecycleStateReader = (*AgentPostgresOwner)(nil)
 var _ runtimemanager.AgentLifecycleStateReader = (*AgentSQLiteOwner)(nil)
+var _ runtimemanager.AgentLifecycleCellCensus = (*AgentPostgresOwner)(nil)
+var _ runtimemanager.AgentLifecycleCellCensus = (*AgentSQLiteOwner)(nil)
 var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*AgentPostgresOwner)(nil)
 var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*AgentSQLiteOwner)(nil)
 
@@ -146,6 +149,119 @@ func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
 		return runtimemanager.AgentLifecycleState{}, false, err
 	}
 	return state, true, nil
+}
+
+func (s *AgentPostgresOwner) ListDurableAgentLifecycleStates(ctx context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode,
+		       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
+		       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
+		       lifecycle_bundle_hash, lifecycle_bundle_source,
+		       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
+		       topology_admission
+		FROM agents
+		WHERE topology_admission ->> 'execution_lifetime' = 'durable_managed'
+		ORDER BY agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		         flow_scope_key, flow_instance_id, flow_instance
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query durable PostgreSQL lifecycle cell census: %w", err)
+	}
+	defer rows.Close()
+	return scanDurableAgentLifecycleStates(rows)
+}
+
+func (s *AgentSQLiteOwner) ListDurableAgentLifecycleStates(ctx context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode,
+		       lifecycle_process_authority_id, lifecycle_process_owner_id,
+		       lifecycle_process_boot_id, lifecycle_generation_grant_id,
+		       lifecycle_bundle_hash, lifecycle_bundle_source,
+		       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+		       topology_admission
+		FROM agents
+		WHERE json_extract(topology_admission, '$.execution_lifetime') = 'durable_managed'
+		ORDER BY agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		         flow_scope_key, flow_instance_id, flow_instance
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query durable SQLite lifecycle cell census: %w", err)
+	}
+	defer rows.Close()
+	return scanDurableAgentLifecycleStates(rows)
+}
+
+func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLifecycleState, error) {
+	states := make([]runtimemanager.AgentLifecycleState, 0)
+	for rows.Next() {
+		var state runtimemanager.AgentLifecycleState
+		var nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
+		var generation int64
+		var topologyRaw []byte
+		if err := rows.Scan(
+			&state.AgentID, &nameOwner, &nameSource, &routePresence,
+			&flowScopeKey, &flowInstanceID, &flowInstance,
+			&state.RuntimeEpoch, &generation, &state.Phase,
+			&state.ConfigRevision, &state.RunMode,
+			&state.ProcessBinding.ProcessAuthorityID,
+			&state.ProcessBinding.ProcessOwnerID,
+			&state.ProcessBinding.ProcessBootID,
+			&state.ProcessBinding.GenerationGrantID,
+			&state.ProcessBinding.BundleHash,
+			&state.ProcessBinding.BundleSource,
+			&state.ProcessBinding.RuntimeInstanceID,
+			&state.ProcessBinding.RuntimeGeneration,
+			&topologyRaw,
+		); err != nil {
+			return nil, fmt.Errorf("scan durable lifecycle cell census: %w", err)
+		}
+		if generation < 0 {
+			return nil, errors.New("durable lifecycle cell generation is negative")
+		}
+		identity, err := IdentityFromColumns(
+			state.AgentID, nameOwner, nameSource, routePresence,
+			flowScopeKey, flowInstanceID, flowInstance,
+		)
+		if err != nil {
+			return nil, err
+		}
+		state.Identity = identity
+		state.Generation = uint64(generation)
+		if err := json.Unmarshal(topologyRaw, &state.Topology); err != nil {
+			return nil, fmt.Errorf("decode durable lifecycle topology admission: %w", err)
+		}
+		if err := state.Topology.Validate(); err != nil {
+			return nil, err
+		}
+		if state.Topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+			return nil, errors.New("durable lifecycle census returned a non-durable cell")
+		}
+		switch state.Topology.Authority.Kind {
+		case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan:
+		default:
+			return nil, fmt.Errorf("durable lifecycle census returned unsupported authority %q", state.Topology.Authority.Kind)
+		}
+		if err := state.ProcessBinding.Validate(); err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read durable lifecycle cell census: %w", err)
+	}
+	return states, nil
 }
 
 func (s *AgentPostgresOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {

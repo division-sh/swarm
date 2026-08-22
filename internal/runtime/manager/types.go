@@ -257,6 +257,13 @@ type AgentLifecycleStateReader interface {
 	LoadAgentLifecycleState(context.Context, runtimeagentidentity.Identity) (AgentLifecycleState, bool, error)
 }
 
+// AgentLifecycleCellCensus enumerates every durable lifecycle cell that can
+// retain process execution authority, including terminal cells omitted from
+// execution hydration.
+type AgentLifecycleCellCensus interface {
+	ListDurableAgentLifecycleStates(context.Context) ([]AgentLifecycleState, error)
+}
+
 type AgentLifecycleDiagnostic struct {
 	OutboxID    string
 	OperationID string
@@ -302,6 +309,7 @@ type PersistenceRoles struct {
 	RouteRemover         FlowInstanceRouteContextRemover
 	FlowTermination      FlowInstanceTerminalMutationOwner
 	CreationPublisher    runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
+	LifecycleCensus      AgentLifecycleCellCensus
 	LifecycleState       AgentLifecycleStateReader
 	LifecycleEffects     runtimeeffects.Store
 	LifecycleDiagnostics AgentLifecycleDiagnosticPersistence

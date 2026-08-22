@@ -15,6 +15,7 @@ import (
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -202,6 +203,40 @@ func (s *runtimeTestRetainedSession) LoadAgentLifecycleState(_ context.Context, 
 		Generation: rec.LifecycleGeneration, Phase: rec.LifecyclePhase,
 		RunMode: rec.LifecycleRunMode, Topology: rec.Topology, ProcessBinding: rec.ProcessBinding,
 	}, true, nil
+}
+
+func (s *runtimeTestRetainedSession) ListDurableAgentLifecycleStates(context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	agents := make([]runtimemanager.PersistedAgent, 0, len(s.agents))
+	for _, rec := range s.agents {
+		agents = append(agents, rec)
+	}
+	return runtimeTestDurableAgentLifecycleStates(agents)
+}
+
+func runtimeTestDurableAgentLifecycleStates(agents []runtimemanager.PersistedAgent) ([]runtimemanager.AgentLifecycleState, error) {
+	states := make([]runtimemanager.AgentLifecycleState, 0, len(agents))
+	for _, rec := range agents {
+		if rec.Topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+			continue
+		}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return nil, err
+		}
+		configRevision, err := canonicaljson.Hash(rec.Config)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, runtimemanager.AgentLifecycleState{
+			Identity: identity.Normalize(), AgentID: identity.AgentID(), RuntimeEpoch: rec.LifecycleEpoch,
+			Generation: rec.LifecycleGeneration, Phase: rec.LifecyclePhase,
+			ConfigRevision: strings.TrimPrefix(configRevision, "sha256:"), RunMode: rec.LifecycleRunMode,
+			Topology: rec.Topology, ProcessBinding: rec.ProcessBinding,
+		})
+	}
+	return states, nil
 }
 
 func (s *runtimeTestRetainedSession) Release(context.Context) error {
@@ -627,6 +662,11 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 		}
 		retainedSession = &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 		deps.ManagerStore = retainedSession
+	}
+	if retainedSession != nil {
+		if deps.ManagerPersistenceRoles.LifecycleCensus == nil {
+			deps.ManagerPersistenceRoles.LifecycleCensus = retainedSession
+		}
 		if deps.ManagerPersistenceRoles.LifecycleState == nil {
 			deps.ManagerPersistenceRoles.LifecycleState = retainedSession
 		}
