@@ -1350,6 +1350,9 @@ contract_formats:
             from the bundle workflow name, and additionally admits its exact current run UUID as the run-root instance grammar. Store
             candidate bounds include that exact run UUID, never a UUID-shaped wildcard or authored-scope substitute. Zero-match
             root select_or_create materializes the exact run route and derives its future entity from that route.
+            Reads of the exact receiver persistence aggregate MUST observe entity state and its lifecycle companion from one
+            database statement snapshot (or one explicitly consistent transaction snapshot). Consumers MUST NOT assemble a
+            presence value from independently timed reads that can fabricate absent, state-only, or lifecycle-only evidence.
             An overlap between a template instance spelling and an authored child scope is ambiguous and fails closed. A
             nested child row never becomes a parent candidate even when it shares the declared key and has no
             lifecycle companion. Broad selection, exact select_or_create appearance, target application, and engine preparation

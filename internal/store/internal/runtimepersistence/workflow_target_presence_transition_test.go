@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -163,6 +164,71 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "settled", 3, 1)
 			})
+		})
+	}
+}
+
+func TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			selected, _, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+			reader, ok := selected.(runtimepipeline.WorkflowTargetPersistenceReader)
+			if !ok {
+				t.Fatalf("%s selected store does not expose the workflow target reader", backend)
+			}
+			owner, ok := selected.(runtimepipeline.WorkflowEngineMutationOwner)
+			if !ok {
+				t.Fatalf("%s selected store does not expose the workflow mutation owner", backend)
+			}
+
+			for attempt := range 12 {
+				flowID := "snapshot-target-" + uuid.NewString()
+				instancePath := flowID + "/receiver"
+				entityID := uuid.NewString()
+				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "", 0, createdAt)
+				record.Transition = runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
+				routeEntityID := runtimeidentity.NormalizeEntityID(entityID)
+
+				initial, err := reader.LoadWorkflowTargetPersistence(ctx, record.Route, routeEntityID)
+				if err != nil || initial.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent {
+					t.Fatalf("attempt %d initial target presence = %d error = %v, want absent", attempt, initial.Presence, err)
+				}
+
+				start := make(chan struct{})
+				errors := make(chan error, 49)
+				var readers sync.WaitGroup
+				for range 3 {
+					readers.Add(1)
+					go func() {
+						defer readers.Done()
+						<-start
+						for range 16 {
+							target, err := reader.LoadWorkflowTargetPersistence(ctx, record.Route, routeEntityID)
+							if err != nil {
+								errors <- err
+								continue
+							}
+							if target.Presence != runtimepipeline.WorkflowTargetPersistenceAbsent && target.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+								errors <- fmt.Errorf("observed impossible atomic create presence %d", target.Presence)
+							}
+						}
+					}()
+				}
+				close(start)
+				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
+					t.Fatalf("attempt %d commit atomic target pair: %v", attempt, err)
+				}
+				readers.Wait()
+				close(errors)
+				for err := range errors {
+					t.Fatalf("attempt %d target snapshot read: %v", attempt, err)
+				}
+				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, record.Route, routeEntityID)
+				if err != nil || persisted.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+					t.Fatalf("attempt %d final target presence = %d error = %v, want complete", attempt, persisted.Presence, err)
+				}
+			}
 		})
 	}
 }
