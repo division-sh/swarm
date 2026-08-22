@@ -144,6 +144,15 @@ func (a Authority) Validate() error {
 	if a.AuthorityGeneration == 0 || a.TransitionOrdinal == 0 || a.StateVersion == 0 || strings.TrimSpace(a.OwnerID) == "" || strings.TrimSpace(a.Backend) == "" || len(strings.TrimSpace(a.AcquisitionRequestHash)) != sha256.Size*2 || a.RecordedAt.IsZero() {
 		return errors.New("process capability authority identity is incomplete")
 	}
+	req := AcquireRequest{
+		OwnerID:           a.OwnerID,
+		BootID:            a.BootID,
+		RuntimeInstanceID: a.RuntimeInstanceID,
+	}
+	expectedRequestHash := AcquireRequestHash(req, a.Backend)
+	if a.AcquisitionID != a.BootID || a.AcquisitionRequestHash != expectedRequestHash || a.AuthorityID != authorityIDForAcquisition(a.BootID, expectedRequestHash) {
+		return errors.New("process capability acquisition binding is invalid")
+	}
 	if a.AuthorityGeneration == 1 {
 		if strings.TrimSpace(a.PredecessorAuthorityID) != "" || a.AcquisitionKind != AcquisitionCold {
 			return errors.New("initial process capability authority has invalid lineage")
@@ -268,7 +277,7 @@ func NewAuthority(req AcquireRequest, backend string, generation uint64, predece
 	}
 	backend = strings.TrimSpace(backend)
 	requestHash := AcquireRequestHash(req, backend)
-	authorityID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-process-authority-v1\x00"+strings.TrimSpace(req.BootID)+"\x00"+requestHash)).String()
+	authorityID := authorityIDForAcquisition(req.BootID, requestHash)
 	value := Authority{
 		AuthorityID: authorityID, AuthorityGeneration: generation, TransitionOrdinal: 1, StateVersion: 1, State: StateActive,
 		OwnerID: strings.TrimSpace(req.OwnerID), BootID: strings.TrimSpace(req.BootID),
@@ -286,6 +295,10 @@ func AcquireRequestHash(req AcquireRequest, backend string) string {
 		strings.TrimSpace(req.RuntimeInstanceID), strings.TrimSpace(backend),
 	}, "\x00")
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(payload)))
+}
+
+func authorityIDForAcquisition(bootID, requestHash string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-process-authority-v1\x00"+strings.TrimSpace(bootID)+"\x00"+requestHash)).String()
 }
 
 func ReleasedAuthority(previous Authority) (Authority, error) {

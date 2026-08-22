@@ -14284,8 +14284,10 @@ platform_tables:
         Append-only typed evidence for the one process-composition-owned retained selected-store
         capability. authority_generation is the sole global ordering authority; timestamps are
         diagnostic evidence only and storage timestamp precision never participates in snapshot
-        validity or authority matching. Acquisition is bound to one exact boot/request hash. A crash
-        takeover atomically supersedes the exact active predecessor, retires that predecessor's
+        validity or authority matching. Acquisition is bound to one exact boot/request hash. Every
+        readback recomputes the acquisition ID, request hash, and deterministic authority ID from
+        the canonical acquisition fields and rejects evidence whose backend differs from the
+        selected adapter. A crash takeover atomically supersedes the exact active predecessor, retires that predecessor's
         new-work grants, and appends its successor after backend-exclusive possession has already
         been proved. Runtime generations consume revocable grants and cannot acquire, release,
         copy, infer, or replace this authority.
