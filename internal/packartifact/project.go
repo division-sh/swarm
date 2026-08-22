@@ -56,13 +56,6 @@ func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
 	if !present {
 		return ProjectPackSet{}, nil
 	}
-	packsRoot := filepath.Join(root, ProjectPackDirectory)
-	if _, err := os.Lstat(packsRoot); err != nil {
-		if os.IsNotExist(err) {
-			return ProjectPackSet{}, nil
-		}
-		return ProjectPackSet{}, fmt.Errorf("inspect project pack directory: %w", err)
-	}
 	transaction, err := acquireProjectPackTransaction(root, false)
 	if err != nil {
 		return ProjectPackSet{}, err

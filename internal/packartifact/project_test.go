@@ -195,6 +195,70 @@ func TestProjectPackSnapshotReaderSeesOnlyPredecessorOrSuccessor(t *testing.T) {
 	}
 }
 
+func TestProjectPackSnapshotReaderWaitsBeforeInitialPackDirectoryExists(t *testing.T) {
+	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: initial-snapshot\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := acquireProjectPackTransaction(project, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = transaction.close()
+		}
+	}()
+
+	readerStarted := make(chan struct{})
+	readerResult := make(chan struct {
+		set ProjectPackSet
+		err error
+	}, 1)
+	go func() {
+		close(readerStarted)
+		set, err := LoadProjectPackSet(project)
+		readerResult <- struct {
+			set ProjectPackSet
+			err error
+		}{set: set, err: err}
+	}()
+	<-readerStarted
+	select {
+	case result := <-readerResult:
+		t.Fatalf("initial snapshot reader escaped active transaction: set=%v err=%v", projectPackSourceIDs(result.set.Sources), result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	telegram, ok := base.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack missing")
+	}
+	if changed, err := importEmbeddedPackLocked(project, "provider.telegram", telegram, transaction); err != nil || !changed {
+		t.Fatalf("locked initial import changed=%t err=%v", changed, err)
+	}
+	if err := transaction.close(); err != nil {
+		t.Fatal(err)
+	}
+	closed = true
+	select {
+	case result := <-readerResult:
+		if result.err != nil {
+			t.Fatalf("initial snapshot reader: %v", result.err)
+		}
+		if got, want := projectPackSourceIDs(result.set.Sources), []string{"provider.telegram"}; !equalStrings(got, want) {
+			t.Fatalf("initial successor ids = %v, want %v", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial snapshot reader did not resume after transaction commit")
+	}
+}
+
 func TestProjectPackImportFailureRollsBackCandidateInventory(t *testing.T) {
 	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
 	if err != nil {
