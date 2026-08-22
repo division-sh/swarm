@@ -3,11 +3,20 @@ package packartifact
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	projectPackSubprocessEnv     = "SWARM_TEST_PROJECT_PACK_SUBPROCESS"
+	projectPackSubprocessRootEnv = "SWARM_TEST_PROJECT_PACK_ROOT"
+	projectPackSubprocessIDEnv   = "SWARM_TEST_PROJECT_PACK_ID"
+	projectPackSubprocessGateEnv = "SWARM_TEST_PROJECT_PACK_GATE"
 )
 
 func TestImportEmbeddedPackIsIdempotentAndPreservesEditedConflict(t *testing.T) {
@@ -52,6 +61,209 @@ func TestImportEmbeddedPackIsIdempotentAndPreservesEditedConflict(t *testing.T) 
 	if err == nil || changed || !strings.Contains(err.Error(), "will not overwrite") {
 		t.Fatalf("edited import changed=%v error=%v", changed, err)
 	}
+}
+
+func TestProjectPackTransactionSerializesSubprocessImports(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: concurrent-imports\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gate := filepath.Join(t.TempDir(), "start")
+	command := func(id string) (*exec.Cmd, *bytes.Buffer) {
+		output := &bytes.Buffer{}
+		cmd := exec.Command(os.Args[0], "-test.run=^TestProjectPackImportSubprocessHelper$")
+		cmd.Env = append(os.Environ(),
+			projectPackSubprocessEnv+"=1",
+			projectPackSubprocessRootEnv+"="+project,
+			projectPackSubprocessIDEnv+"="+id,
+			projectPackSubprocessGateEnv+"="+gate,
+		)
+		cmd.Stdout = output
+		cmd.Stderr = output
+		return cmd, output
+	}
+	github, githubOutput := command("provider.github")
+	telegram, telegramOutput := command("provider.telegram")
+	if err := github.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := telegram.Start(); err != nil {
+		_ = github.Process.Kill()
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gate, []byte("go\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := github.Wait(); err != nil {
+		t.Fatalf("GitHub import failed: %v\n%s", err, githubOutput.String())
+	}
+	if err := telegram.Wait(); err != nil {
+		t.Fatalf("Telegram import failed: %v\n%s", err, telegramOutput.String())
+	}
+
+	set, err := LoadProjectPackSet(project)
+	if err != nil {
+		t.Fatalf("load concurrently imported project: %v", err)
+	}
+	if got, want := projectPackSourceIDs(set.Sources), []string{"provider.github", "provider.telegram"}; !equalStrings(got, want) {
+		t.Fatalf("concurrent import ids = %v, want %v", got, want)
+	}
+	for _, id := range []string{"provider.github", "provider.telegram"} {
+		if info, err := os.Stat(filepath.Join(project, ProjectPackDirectory, id)); err != nil || !info.IsDir() {
+			t.Fatalf("published directory %s info=%v err=%v", id, info, err)
+		}
+	}
+}
+
+func TestProjectPackSnapshotReaderSeesOnlyPredecessorOrSuccessor(t *testing.T) {
+	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: snapshot\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := ImportEmbeddedPack(project, "provider.github", base); err != nil || !changed {
+		t.Fatalf("initial import changed=%t err=%v", changed, err)
+	}
+	predecessor, err := LoadProjectPackSet(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := projectPackSourceIDs(predecessor.Sources); !equalStrings(got, []string{"provider.github"}) {
+		t.Fatalf("predecessor ids = %v", got)
+	}
+
+	root, _, err := resolveProjectPackRoot(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := acquireProjectPackTransaction(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = transaction.close()
+		}
+	}()
+	readerStarted := make(chan struct{})
+	readerResult := make(chan struct {
+		set ProjectPackSet
+		err error
+	}, 1)
+	go func() {
+		close(readerStarted)
+		set, err := LoadProjectPackSet(project)
+		readerResult <- struct {
+			set ProjectPackSet
+			err error
+		}{set: set, err: err}
+	}()
+	<-readerStarted
+	select {
+	case result := <-readerResult:
+		t.Fatalf("snapshot reader escaped active transaction: set=%v err=%v", projectPackSourceIDs(result.set.Sources), result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	telegram, ok := base.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack missing")
+	}
+	if changed, err := importEmbeddedPackLocked(root, "provider.telegram", telegram, transaction); err != nil || !changed {
+		t.Fatalf("locked successor import changed=%t err=%v", changed, err)
+	}
+	if err := transaction.close(); err != nil {
+		t.Fatal(err)
+	}
+	closed = true
+	select {
+	case result := <-readerResult:
+		if result.err != nil {
+			t.Fatalf("snapshot reader: %v", result.err)
+		}
+		if got, want := projectPackSourceIDs(result.set.Sources), []string{"provider.github", "provider.telegram"}; !equalStrings(got, want) {
+			t.Fatalf("successor ids = %v, want %v", got, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("snapshot reader did not resume after transaction commit")
+	}
+}
+
+func TestProjectPackImportFailureRollsBackCandidateInventory(t *testing.T) {
+	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := base.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack missing")
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: rollback\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := acquireProjectPackTransaction(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.close()
+	transaction.stateRoot = filepath.Join(project, "missing", "transaction-state")
+	if changed, err := importEmbeddedPackLocked(project, "provider.telegram", entry, transaction); err == nil || changed || !strings.Contains(err.Error(), "stage project pack import") {
+		t.Fatalf("failed import changed=%t err=%v", changed, err)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ProjectPackDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("failed import left reader-visible inventory: %v", err)
+	}
+}
+
+func TestProjectPackImportSubprocessHelper(t *testing.T) {
+	if os.Getenv(projectPackSubprocessEnv) != "1" {
+		return
+	}
+	gate := os.Getenv(projectPackSubprocessGateEnv)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(gate); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for subprocess import gate")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ImportEmbeddedPack(os.Getenv(projectPackSubprocessRootEnv), os.Getenv(projectPackSubprocessIDEnv), base)
+	if err != nil || !changed {
+		t.Fatalf("subprocess import changed=%t err=%v", changed, err)
+	}
+}
+
+func projectPackSourceIDs(sources []ProjectPackSource) []string {
+	ids := make([]string, 0, len(sources))
+	for _, source := range sources {
+		ids = append(ids, filepath.Base(source.Path))
+	}
+	return ids
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {

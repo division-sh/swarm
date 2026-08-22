@@ -49,14 +49,36 @@ type ProjectPackFile struct {
 }
 
 func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
-	projectRoot = strings.TrimSpace(projectRoot)
-	if projectRoot == "" {
+	root, present, err := resolveProjectPackRoot(projectRoot)
+	if err != nil {
+		return ProjectPackSet{}, err
+	}
+	if !present {
 		return ProjectPackSet{}, nil
 	}
-	root, err := filepath.Abs(projectRoot)
-	if err != nil {
-		return ProjectPackSet{}, fmt.Errorf("resolve project pack root: %w", err)
+	packsRoot := filepath.Join(root, ProjectPackDirectory)
+	if _, err := os.Lstat(packsRoot); err != nil {
+		if os.IsNotExist(err) {
+			return ProjectPackSet{}, nil
+		}
+		return ProjectPackSet{}, fmt.Errorf("inspect project pack directory: %w", err)
 	}
+	transaction, err := acquireProjectPackTransaction(root)
+	if err != nil {
+		return ProjectPackSet{}, err
+	}
+	set, loadErr := loadProjectPackSetLocked(root)
+	closeErr := transaction.close()
+	if loadErr != nil {
+		return ProjectPackSet{}, loadErr
+	}
+	if closeErr != nil {
+		return ProjectPackSet{}, closeErr
+	}
+	return set, nil
+}
+
+func loadProjectPackSetLocked(root string) (ProjectPackSet, error) {
 	packsRoot := filepath.Join(root, ProjectPackDirectory)
 	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)
 	rootInfo, err := os.Lstat(packsRoot)
@@ -169,6 +191,18 @@ func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
 	return set, nil
 }
 
+func resolveProjectPackRoot(projectRoot string) (string, bool, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return "", false, nil
+	}
+	root, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve project pack root: %w", err)
+	}
+	return root, true, nil
+}
+
 func ParseProjectPackManifest(body []byte) (ProjectPackManifest, error) {
 	var manifest ProjectPackManifest
 	decoder := yaml.NewDecoder(bytes.NewReader(body))
@@ -208,13 +242,29 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 		}
 		return false, fmt.Errorf("embedded pack %q is unavailable; available embedded packs: %s", id, strings.Join(available, ", "))
 	}
-	root, err := filepath.Abs(strings.TrimSpace(projectRoot))
-	if err != nil || strings.TrimSpace(projectRoot) == "" {
+	root, present, err := resolveProjectPackRoot(projectRoot)
+	if err != nil || !present {
 		return false, fmt.Errorf("selected project root is required")
 	}
 	if info, statErr := os.Stat(filepath.Join(root, "package.yaml")); statErr != nil || !info.Mode().IsRegular() {
 		return false, fmt.Errorf("selected project %q has no package.yaml", root)
 	}
+	transaction, err := acquireProjectPackTransaction(root)
+	if err != nil {
+		return false, err
+	}
+	changed, importErr := importEmbeddedPackLocked(root, id, entry, transaction)
+	closeErr := transaction.close()
+	if importErr != nil {
+		return false, importErr
+	}
+	if closeErr != nil {
+		return false, closeErr
+	}
+	return changed, nil
+}
+
+func importEmbeddedPackLocked(root, id string, entry Entry, transaction *projectPackTransaction) (bool, error) {
 	packsRoot := filepath.Join(root, ProjectPackDirectory)
 	if info, statErr := os.Lstat(packsRoot); statErr == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
 		return false, fmt.Errorf("project pack path %q must be a real directory", ProjectPackDirectory)
@@ -236,11 +286,11 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 	}
 	expectedManifest := ProjectPackManifest{Version: ProjectPackManifestVersion, Imports: []ProjectPackManifestImport{declared}}
 	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)
-	if _, statErr := os.Lstat(manifestPath); statErr == nil {
-		set, loadErr := LoadProjectPackSet(root)
-		if loadErr != nil {
-			return false, loadErr
-		}
+	set, loadErr := loadProjectPackSetLocked(root)
+	if loadErr != nil {
+		return false, loadErr
+	}
+	if len(set.ManifestBody) > 0 {
 		manifest, parseErr := ParseProjectPackManifest(set.ManifestBody)
 		if parseErr != nil {
 			return false, parseErr
@@ -267,26 +317,48 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 	if err != nil {
 		return false, fmt.Errorf("marshal project pack manifest: %w", err)
 	}
-	if err := os.MkdirAll(packsRoot, 0o755); err != nil {
-		return false, fmt.Errorf("create project packs directory: %w", err)
+	packsRootExisted := true
+	if _, statErr := os.Lstat(packsRoot); os.IsNotExist(statErr) {
+		packsRootExisted = false
+	} else if statErr != nil {
+		return false, fmt.Errorf("inspect project packs directory: %w", statErr)
 	}
-	tmp, err := os.MkdirTemp(packsRoot, ".import-*")
+	if !packsRootExisted {
+		if err := os.Mkdir(packsRoot, 0o755); err != nil {
+			return false, fmt.Errorf("create project packs directory: %w", err)
+		}
+	}
+	cleanupEmptyRoot := func() {
+		if !packsRootExisted {
+			_ = os.Remove(packsRoot)
+		}
+	}
+	if transaction == nil || strings.TrimSpace(transaction.stateRoot) == "" {
+		cleanupEmptyRoot()
+		return false, fmt.Errorf("project pack transaction is required")
+	}
+	tmp, err := os.MkdirTemp(transaction.stateRoot, ".pack-import-*")
 	if err != nil {
+		cleanupEmptyRoot()
 		return false, fmt.Errorf("stage project pack import: %w", err)
 	}
 	defer os.RemoveAll(tmp)
 	if err := os.WriteFile(filepath.Join(tmp, EnvelopeFileName), envelopeBody, 0o644); err != nil {
+		cleanupEmptyRoot()
 		return false, err
 	}
 	if err := os.WriteFile(filepath.Join(tmp, manifestFile), entry.ManifestBody(), 0o644); err != nil {
+		cleanupEmptyRoot()
 		return false, err
 	}
 	if err := os.Rename(tmp, packPath); err != nil {
+		cleanupEmptyRoot()
 		return false, fmt.Errorf("publish project pack %q: %w", id, err)
 	}
-	manifestTmp, err := os.CreateTemp(packsRoot, ".manifest-*")
+	manifestTmp, err := os.CreateTemp(transaction.stateRoot, ".pack-manifest-*")
 	if err != nil {
 		_ = os.RemoveAll(packPath)
+		cleanupEmptyRoot()
 		return false, err
 	}
 	manifestTmpPath := manifestTmp.Name()
@@ -294,14 +366,17 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 	if _, err := manifestTmp.Write(manifestBody); err != nil {
 		_ = manifestTmp.Close()
 		_ = os.RemoveAll(packPath)
+		cleanupEmptyRoot()
 		return false, err
 	}
 	if err := manifestTmp.Close(); err != nil {
 		_ = os.RemoveAll(packPath)
+		cleanupEmptyRoot()
 		return false, err
 	}
 	if err := os.Rename(manifestTmpPath, manifestPath); err != nil {
 		_ = os.RemoveAll(packPath)
+		cleanupEmptyRoot()
 		return false, fmt.Errorf("publish project pack manifest: %w", err)
 	}
 	return true, nil
