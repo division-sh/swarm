@@ -280,7 +280,7 @@ func newPostgresStoreWithBackend(backend *postgresbackend.Backend) *PostgresStor
 	return store
 }
 
-func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend) (*SQLiteRuntimeStore, error) {
+func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, backendIdentity *storestartupownership.SQLiteBackendIdentity) (*SQLiteRuntimeStore, error) {
 	if schema == nil {
 		return nil, fmt.Errorf("sqlite schema store is required")
 	}
@@ -407,7 +407,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.lLMSQLiteOwner = llmOwner
-	startupOwner, err := storestartupownership.NewSQLite(backend, schema.Path(), store.requireCurrentSchema, schema.CatalogEmpty, agentOwner)
+	startupOwner, err := storestartupownership.NewSQLiteWithBackendIdentity(backend, schema.Path(), backendIdentity, store.requireCurrentSchema, schema.CatalogEmpty, agentOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -489,8 +489,18 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	return store, nil
 }
 
-// ComposeSQLiteRuntimeStore is the exact process-construction entrypoint.
-// Runtime consumers receive only the resulting typed facade.
+// ComposeSQLiteRuntimeStore is reserved for read-only inspection and explicit
+// test construction. Mutable process construction must bind the backend file
+// identity through ComposeSQLiteRuntimeStoreWithBackendIdentity.
 func ComposeSQLiteRuntimeStore(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend) (*SQLiteRuntimeStore, error) {
-	return newSQLiteStoreComposition(schema, backend)
+	return newSQLiteStoreComposition(schema, backend, nil)
+}
+
+// ComposeSQLiteRuntimeStoreWithBackendIdentity is the exact mutable process-
+// construction entrypoint. Runtime consumers receive only the typed facade.
+func ComposeSQLiteRuntimeStoreWithBackendIdentity(schema *SQLiteSchemaStore, backend *sqlitebackend.Backend, identity *storestartupownership.SQLiteBackendIdentity) (*SQLiteRuntimeStore, error) {
+	if identity == nil {
+		return nil, fmt.Errorf("SQLite backend identity is required")
+	}
+	return newSQLiteStoreComposition(schema, backend, identity)
 }

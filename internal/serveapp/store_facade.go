@@ -232,6 +232,9 @@ func (f selectedRuntimeStoreFacade) close() {
 }
 
 func (f selectedRuntimeStoreFacade) closeWithError() error {
+	if closer, ok := f.stores.StartupOwnership.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
 	if f.stores.SQLDB == nil {
 		return nil
 	}

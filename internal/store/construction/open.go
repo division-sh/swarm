@@ -4,13 +4,16 @@
 package construction
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
+	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	_ "github.com/lib/pq"
 )
 
@@ -45,6 +48,29 @@ func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error
 	if err != nil {
 		_ = schema.Close()
 		return nil, nil, err
+	}
+	return store, backend.ConstructionHandle(), nil
+}
+
+// OpenSQLiteRuntimeWithOwnershipBinding is the mutable process/repair
+// construction path. It binds the opened pool to the exact file identity that
+// later retained possession must protect.
+func OpenSQLiteRuntimeWithOwnershipBinding(path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+	constructionGuard, err := storestartupownership.AcquireSQLiteConstructionGuard(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	schema, backend, err := storeschema.OpenSQLiteForConstruction(path)
+	if err != nil {
+		return nil, nil, errors.Join(err, constructionGuard.Release())
+	}
+	identity, err := constructionGuard.BackendIdentity(context.Background())
+	if err != nil {
+		return nil, nil, errors.Join(err, schema.Close(), constructionGuard.Release())
+	}
+	store, err := private.ComposeSQLiteRuntimeStoreWithBackendIdentity(schema, backend, identity)
+	if err != nil {
+		return nil, nil, errors.Join(err, identity.ReleaseConstructionPossession(), schema.Close(), constructionGuard.Release())
 	}
 	return store, backend.ConstructionHandle(), nil
 }

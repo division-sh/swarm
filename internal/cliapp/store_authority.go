@@ -257,7 +257,7 @@ func resolveAuthorityStoreSelection(repo, configPath string, cmd *cobra.Command,
 func constructAuthorityMaintenanceStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityMaintenanceStore, error) {
 	switch selection.Backend {
 	case storebackend.BackendSQLite:
-		selected, _, err := storeconstruction.OpenSQLiteRuntime(selection.SQLitePath)
+		selected, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(selection.SQLitePath)
 		return selected, err
 	case storebackend.BackendPostgres:
 		var credentials runtimecredentials.Store

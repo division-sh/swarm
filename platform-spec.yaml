@@ -34519,7 +34519,10 @@ agent_topology_authority:
       Acquisition first proves exact backend-exclusive possession: one retained PostgreSQL advisory-lock session or
       one retained SQLite OS lock applied directly to the canonical open database file on a supported local filesystem.
       A replaceable sidecar, path marker, or independently recreated inode is never SQLite possession authority. Only
-      then may the same retained capability lock and classify the global durable authority head. A valid active
+      process/repair SQLite construction opens and configures its backend pool while holding that same file coordinate and
+      records the resulting immutable backend-file identity. Every later acquisition or repair must lock that exact
+      recorded identity before selected-store mutation; a pool bound to one inode and a possession lock bound to
+      another fails closed. Only then may the same retained capability lock and classify the global durable authority head. A valid active
       predecessor with absent backend possession is atomically superseded, every predecessor new-work grant is
       retired, and one monotonic successor authority generation is appended in the same transaction. Source-set
       topology, durable delivery continuations, and provider drains are distinct facts and remain unchanged.
@@ -34530,7 +34533,7 @@ agent_topology_authority:
       immutable repair journal. Isolated row validity, synchronized row/snapshot agreement, or a raised generation
       is never lineage proof. Exact acquisition replay is idempotent; conflicting replay and corrupt or contradictory evidence fail closed.
       PIDs, descriptors, endpoints, hostnames, heartbeats, timestamps, and elapsed time never authorize takeover.
-      SQLite aliases, replaced file identity, and unsupported or unprovable filesystems fail closed without mutation.
+      SQLite aliases, construction/backend identity mismatch, replaced file identity, and unsupported or unprovable filesystems fail closed without mutation.
     grants: >-
       Exact revocable grants bind one runtime instance/generation, bundle source coordinate,
       and source-set revision. Readiness, grant-state changes, execution admission, and every

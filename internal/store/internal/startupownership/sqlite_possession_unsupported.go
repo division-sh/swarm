@@ -10,3 +10,5 @@ func acquireSQLiteFilePossession(string) (sqlitePossession, error) {
 		Detail:  "SQLite selected-store filesystem ownership is unsupported on this platform",
 	}
 }
+
+func sameSQLitePossessionResource(sqlitePossession, sqlitePossession) bool { return false }

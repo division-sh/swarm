@@ -34,7 +34,7 @@ func NewSQLiteRuntimeStoreForTest(db *sql.DB) *SQLiteRuntimeStore {
 	if err != nil {
 		panic(err)
 	}
-	store, err := newSQLiteStoreComposition(schema, backend)
+	store, err := newSQLiteStoreComposition(schema, backend, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -97,7 +97,7 @@ func (s *StartupSQLiteOwner) RepairAuthority(ctx context.Context, req runtimesta
 	if err := s.schemaGuard(); err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
-	possession, err := s.acquirePossession()
+	possession, err := s.acquirePossession(ctx)
 	if err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
