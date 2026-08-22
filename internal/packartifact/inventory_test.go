@@ -3,6 +3,7 @@ package packartifact
 import (
 	"bytes"
 	"io/fs"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -11,6 +12,93 @@ import (
 )
 
 const testPlatformVersion = "0.7.0"
+
+func TestPlatformPackInventoryDefensivelyCopiesEnvelopeCollections(t *testing.T) {
+	manifestBody := []byte("provider: demo\n")
+	envelope, envelopeBody, err := StampEnvelope(Envelope{
+		ID: "provider.demo", Version: "0.1.0", PlatformVersion: ">=0.7.0 <0.8.0", Type: TypeTrigger,
+		Implements: []string{"provider.demo"},
+		Provenance: Provenance{Source: ProvenancePlatform},
+		Capabilities: Capabilities{
+			Can: CanCapabilities{
+				EmitEvents:          []string{"inbound.demo"},
+				CallProviderActions: []string{"demo.send"},
+			},
+			Cannot: []string{"emit_undeclared_events"},
+		},
+		Requires: Requires{
+			Secrets:            []string{"demo_signing"},
+			ManagedCredentials: []string{"demo_oauth"},
+			Packs:              map[string]string{"provider.base": ">=0.1.0"},
+		},
+		Tests: []string{"providertriggers/demo"},
+	}, manifestBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := cloneEnvelope(envelope)
+	inventory := &PlatformPackInventory{
+		mode: SelectionEmbedded, digest: "sha256:immutable",
+		entries: map[string]Entry{"provider.demo": {
+			envelope: envelope, envelopeBody: envelopeBody, manifestBody: manifestBody,
+			directory: "provider-triggers/demo", selection: ProvenanceEmbedded,
+		}},
+	}
+	baselineFS, err := fs.ReadFile(mustLookupEntry(t, inventory, "provider.demo").FileSystem(), EnvelopeFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	accessorEntry := mustLookupEntry(t, inventory, "provider.demo")
+	accessorEnvelope := accessorEntry.Envelope()
+	mutateEnvelopeCollections(&accessorEnvelope)
+	if !reflect.DeepEqual(accessorEntry.envelope, want) {
+		t.Fatal("Envelope returned aliases into its entry")
+	}
+
+	lookup, ok := inventory.Lookup("provider.demo")
+	if !ok {
+		t.Fatal("provider.demo missing")
+	}
+	mutateEnvelopeCollections(&lookup.envelope)
+	entries := inventory.Entries()
+	mutateEnvelopeCollections(&entries[0].envelope)
+
+	fresh := mustLookupEntry(t, inventory, "provider.demo")
+	if got := fresh.Envelope(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("stored envelope changed through returned aliases:\n got=%#v\nwant=%#v", got, want)
+	}
+	if inventory.Digest() != "sha256:immutable" {
+		t.Fatalf("inventory digest changed: %q", inventory.Digest())
+	}
+	afterFS, err := fs.ReadFile(fresh.FileSystem(), EnvelopeFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(afterFS, baselineFS) || !bytes.Equal(fresh.EnvelopeBody(), envelopeBody) || !bytes.Equal(fresh.ManifestBody(), manifestBody) {
+		t.Fatal("inventory bytes changed through returned envelope aliases")
+	}
+}
+
+func mustLookupEntry(t *testing.T, inventory *PlatformPackInventory, id string) Entry {
+	t.Helper()
+	entry, ok := inventory.Lookup(id)
+	if !ok {
+		t.Fatalf("inventory entry %q missing", id)
+	}
+	return entry
+}
+
+func mutateEnvelopeCollections(envelope *Envelope) {
+	envelope.Implements[0] = "mutated.implements"
+	envelope.Capabilities.Can.EmitEvents[0] = "mutated.event"
+	envelope.Capabilities.Can.CallProviderActions[0] = "mutated.action"
+	envelope.Capabilities.Cannot[0] = "mutated.constraint"
+	envelope.Requires.Secrets[0] = "mutated_secret"
+	envelope.Requires.ManagedCredentials[0] = "mutated_credential"
+	envelope.Requires.Packs["provider.base"] = "mutated"
+	envelope.Tests[0] = "mutated/test"
+}
 
 func TestLoadPlatformPackInventoryRejectsHostileMembership(t *testing.T) {
 	valid := testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", "platform", []byte("provider: demo\n"))

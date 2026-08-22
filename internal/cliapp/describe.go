@@ -116,19 +116,9 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
 		return 2
 	}
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
+	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLIContractPlatformSpecPathOptions{
 		ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
 	})
-	if err != nil {
-		writeDescribeRoutesError(errOut, "describe routes failed: resolve path config: %v\n", err)
-		return cliAPIErrorExitCode(err, cliAPIErrorClassifier{})
-	}
-	contractsRoot, err := NormalizeContractsRoot(resolvedPaths.ContractsPath)
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return CLIExitValidation
-	}
-	_, bundle, err := NewSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
@@ -175,27 +165,16 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		}
 		return 2
 	}
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{
+	_, bundle, resolvedPaths, err := loadConfiguredCLIWorkflowModule(repo, CLIContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,
 		ConfigPath:       opts.configPath,
 	})
 	if err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "describe failed: resolve path config: %v\n", err)
-		}
-		return cliAPIErrorExitCode(err, cliAPIErrorClassifier{})
-	}
-	contractsRoot, err := NormalizeContractsRoot(resolvedPaths.ContractsPath)
-	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	_, bundle, err := NewSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return CLIExitValidation
-	}
+	contractsRoot := resolvedPaths.ContractsPath
 	source := semanticview.Wrap(bundle)
 	workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, opts.configPath, source)
 	if err != nil {

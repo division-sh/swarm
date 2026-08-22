@@ -11,6 +11,7 @@ import (
 
 func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testing.T) {
 	allowedCalls := map[string]map[string]struct{}{
+		"NewSwarmWorkflowModule": pathSet(),
 		"LoadPlatformPackInventoryFS": pathSet(
 			"internal/packartifact/development.go",
 			"internal/packartifact/embedded.go",
