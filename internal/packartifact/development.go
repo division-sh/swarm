@@ -105,6 +105,11 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 	if err != nil {
 		return nil, err
 	}
+	for _, candidate := range candidates {
+		entry := inventory.entries[candidate.envelope.ID]
+		entry.directory = candidate.directory
+		inventory.entries[candidate.envelope.ID] = entry
+	}
 	if err := requireCompleteReplacement(embedded, inventory); err != nil {
 		return nil, err
 	}

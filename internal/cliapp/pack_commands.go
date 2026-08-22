@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
@@ -226,19 +225,9 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 }
 
 func resolvePackInventoryPaths(opts packCommandOptions, cfgResult RuntimeConfigLoadResult) (CLIContractPlatformSpecPaths, error) {
-	contractsPath := firstNonEmpty(opts.contractsPath, os.Getenv(cliContractsPathEnv), cfgResult.cli.Paths.ContractsPath, discoverRepoContractsPath(opts.repoRoot))
-	platformSpecPath := firstNonEmpty(opts.platformSpecPath, cfgResult.cli.Paths.PlatformSpecPath)
-	if platformSpecPath == "" {
-		embedded, err := EmbeddedPlatformSpecPath()
-		if err != nil {
-			return CLIContractPlatformSpecPaths{}, fmt.Errorf("resolve embedded platform spec: %w", err)
-		}
-		platformSpecPath = embedded
-	}
-	return CLIContractPlatformSpecPaths{
-		ContractsPath:    ResolvePath(opts.repoRoot, contractsPath),
-		PlatformSpecPath: ResolvePath(opts.repoRoot, platformSpecPath),
-	}, nil
+	return resolveCLIContractPlatformSpecPathsFromConfig(opts.repoRoot, CLIContractPlatformSpecPathOptions{
+		ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath,
+	}, cfgResult.cli)
 }
 
 func loadPackInventoryConfig(repoRoot, explicitPath string) (RuntimeConfigLoadResult, error) {

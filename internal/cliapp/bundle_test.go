@@ -814,6 +814,60 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 	}
 }
 
+func TestBundleRegisterContractsDoesNotRequireExecutionPosture(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(userConfigDir, "swarm", "swarm.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	contractsDir := writeBundleRegisterContractsFixture(t)
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, "platform:\n  packs: {}\n")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleRegistrationResult(validBundleHash("7")))
+	}))
+	defer server.Close()
+	rootOpts := defaultRootCommandOptions()
+	rootOpts.apiRPCEndpointOverride = server.URL + "/v1/rpc"
+	rootOpts.apiTokenFile = writeCLIAPITokenFile(t, "test-token")
+	rootOpts.httpClient = server.Client()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"bundle", "register", "--contracts", contractsDir, "--config", configPath,
+	}, &stdout, &stderr, rootOpts)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != bundleRegisterMethod {
+		t.Fatalf("method = %q, want %q", captured.Method, bundleRegisterMethod)
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	writeRuntimeConfigText(t, configPath, "runtime:\n  execution_posture: invalid\n")
+	captured = jsonRPCRequest{}
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"bundle", "register", "--contracts", contractsDir, "--config", configPath,
+	}, &stdout, &stderr, rootOpts)
+	if code != CLIExitValidation || !strings.Contains(stderr.String(), `runtime.execution_posture must be exactly live or mock_only, got "invalid"`) {
+		t.Fatalf("invalid posture code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != "" {
+		t.Fatalf("invalid posture reached RPC method %q", captured.Method)
+	}
+}
+
 func TestBundleRegisterContractsPackageFileShorthandUsesCanonicalRPC(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("8")
