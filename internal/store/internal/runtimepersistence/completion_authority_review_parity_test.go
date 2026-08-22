@@ -170,10 +170,12 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 		t.Fatalf("settle generation-1 prelaunch failure: %v", err)
 	}
 
-	setCompletionFixtureGeneration(t, fixture, 2)
+	initialGeneration := int(fixture.authority.Normal.Generation)
+	nextGeneration := initialGeneration + 1
+	setCompletionFixtureGeneration(t, fixture, nextGeneration)
 	nextAuthority := fixture.authority
-	nextAuthority.Normal.Generation = 2
-	nextAuthority.FenceGeneration = 2
+	nextAuthority.Normal.Generation = uint64(nextGeneration)
+	nextAuthority.FenceGeneration = uint64(nextGeneration)
 	nextAuthority.Target.ID = uuid.NewString()
 	nextCtx := runtimeeffects.WithLogicalOperationIdentity(
 		fixture.contextFor(nextAuthority),
@@ -194,8 +196,8 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	if err := fixture.db.QueryRow(query, handle.Attempt().OperationID).Scan(&attempts, &generation); err != nil {
 		t.Fatalf("read Claude retry operation: %v", err)
 	}
-	if attempts != 1 || generation != 1 {
-		t.Fatalf("Claude retry attempts/generation=%d/%d, want 1/1", attempts, generation)
+	if attempts != 1 || generation != initialGeneration {
+		t.Fatalf("Claude retry attempts/generation=%d/%d, want 1/%d", attempts, generation, initialGeneration)
 	}
 }
 

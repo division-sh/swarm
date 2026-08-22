@@ -21,7 +21,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
@@ -91,14 +90,15 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx 
 		ReceiverExecution: eventreceiver.NormalExecution(),
 		ExecutionPosture:  executionposture.Live,
 	}, store)
-	runtimeInstanceID := uuid.NewString()
-	capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "agent-intent-parity", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
-	})
+	capability, err := agentfixture.ProcessCapability(t, ctx, store)
 	if err != nil {
-		t.Fatalf("acquire process capability: %v", err)
+		t.Fatalf("load fixture process capability: %v", err)
 	}
-	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+	authority, err := capability.Evidence()
+	if err != nil {
+		t.Fatalf("load fixture process authority: %v", err)
+	}
+	runtimeInstanceID := authority.RuntimeInstanceID
 	plan, exists, err := capability.CurrentSourceSet(ctx)
 	if err != nil || !exists || len(plan.Sources) != 1 {
 		t.Fatalf("load fixture source set: exists=%v sources=%d err=%v", exists, len(plan.Sources), err)
@@ -154,7 +154,7 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agent
 		Prompt:             prompt,
 		Criteria:           []string{"hostile-replacement"},
 	}
-	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
+	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 }

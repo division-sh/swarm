@@ -453,6 +453,12 @@ func sqliteRenderPredicate(raw string) (string, error) {
 	if predicate == "" {
 		return "", fmt.Errorf("predicate is required")
 	}
+	// Render longer bundle-hash column names before the generic bundle_hash
+	// spelling so a suffix match cannot leave an invalid identifier prefix.
+	predicate = strings.ReplaceAll(predicate,
+		"lifecycle_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
+		sqliteBundleHashPredicate("lifecycle_bundle_hash"),
+	)
 	predicate = strings.ReplaceAll(predicate,
 		"current_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'",
 		sqliteBundleHashPredicate("current_bundle_hash"),
@@ -469,7 +475,7 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		"route_identity ~ '^delivery-route-v2:sha256:[0-9a-f]{64}$'",
 		sqliteDeliveryRouteIdentityPredicate("route_identity"),
 	)
-	for _, column := range []string{"profile_digest", "effective_source_digest"} {
+	for _, column := range []string{"profile_digest", "effective_source_digest", "request_hash", "findings_digest"} {
 		predicate = strings.ReplaceAll(predicate,
 			column+" ~ '^sha256:[0-9a-f]{64}$'",
 			sqliteSHA256Predicate(column),

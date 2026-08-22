@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -50,6 +51,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
@@ -2020,6 +2022,27 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("c")),
 				mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("d")),
 			}
+			sources := make([]runtimeagenttopology.SourceCoordinate, 0, len(facts))
+			for _, fact := range facts {
+				bundleHash, bundleSource := fact.StorageValues()
+				sources = append(sources, runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource})
+			}
+			plan, err := runtimeagenttopology.NewSourceSetPlan(sources, nil)
+			if err != nil {
+				t.Fatalf("construct rollback source set: %v", err)
+			}
+			capability, err := stores.StartupOwnership.AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+				OwnerID: "serve-context-rollback-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
+			})
+			if err != nil {
+				t.Fatalf("acquire rollback process capability: %v", err)
+			}
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			if _, err := capability.InstallCompleteSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), Plan: plan,
+			}); err != nil {
+				t.Fatalf("install rollback source set: %v", err)
+			}
 			contexts := make([]serveRuntimeBundleContext, 0, len(facts))
 			for _, fact := range facts {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
@@ -2034,6 +2057,17 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				}))
 				if err != nil {
 					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash(), err)
+				}
+				_, bundleSource := fact.StorageValues()
+				grant, err := capability.IssueGenerationGrant(context.Background(), runtimestartupownership.GrantRequest{
+					BundleHash: fact.BundleHash(), BundleSource: bundleSource, RuntimeInstanceID: runtimeInstanceID,
+					RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+				})
+				if err != nil {
+					t.Fatalf("issue rollback generation grant: %v", err)
+				}
+				if err := rt.InstallStartupGrant(grant); err != nil {
+					t.Fatalf("install rollback generation grant: %v", err)
 				}
 				t.Cleanup(func() { _ = rt.Shutdown() })
 				contexts = append(contexts, serveRuntimeBundleContext{runtime: rt, bundleSourceFact: fact})

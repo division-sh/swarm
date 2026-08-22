@@ -425,6 +425,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				runtimeContexts:         contexts, executionPosture: executionposture.Live,
 				runtimeInstanceID: runtimeInstanceID, runtimeGeneration: 1,
 				replacementShutdown: runtimepkg.ShutdownOptions{Grace: 5 * time.Second},
+				stores:              stores,
 			}
 			supervisor.SetProcessCapability(capability)
 			status, err := supervisor.replaceCurrentRuntimeWithSource(

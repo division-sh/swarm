@@ -192,7 +192,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				DeliveryStore:      deliveryStore,
 				TestLifecycleProbe: probe.Raw(),
 			}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
 				Identity:      managerAgentIdentity(agent.ID()),
@@ -311,7 +311,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				DeliveryStore:      deliveryStore,
 				TestLifecycleProbe: probe.Raw(),
 			}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            agent.ID(),
 				Identity:      managerAgentIdentity(agent.ID()),

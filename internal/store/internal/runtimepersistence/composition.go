@@ -407,7 +407,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.lLMSQLiteOwner = llmOwner
-	startupOwner, err := storestartupownership.NewSQLite(backend, store.requireCurrentSchema, agentOwner)
+	startupOwner, err := storestartupownership.NewSQLite(backend, schema.Path(), store.requireCurrentSchema, agentOwner)
 	if err != nil {
 		return nil, err
 	}

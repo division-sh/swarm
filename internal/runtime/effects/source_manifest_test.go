@@ -102,7 +102,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/pythonmodule/runtime.go:newInterpreterModule:http_do:1":                                             ownerComputeSandbox,
 	"internal/runtime/pythonmodule/runtime.go:runHarness:filesystem_write:1":                                              ownerComputeSandbox,
 	"internal/runtime/runtime.go:startSystemNodesAndWaitForSubscriptions:http_do:1":                                       ownerRuntimeDependency,
-	"internal/runtime/startupownership/process_capability.go:retire:http_do:1":                                            ownerRuntimeDependency,
+	"internal/runtime/startupownership/process_capability.go:terminalize:http_do:1":                                       ownerRuntimeDependency,
 	"internal/runtime/startupownership/process_capability.go:retireLocal:http_do:1":                                       ownerRuntimeDependency,
 	"internal/runtime/runtime_claude_startup.go:startupCallMCP:http_do:1":                                                 ownerRuntimeDependency,
 	"internal/runtime/runlifecycle/executor.go:Cancel:http_do:1":                                                          ownerRuntimeDependency,

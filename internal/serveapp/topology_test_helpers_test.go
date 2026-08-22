@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -30,7 +31,7 @@ type supervisorTestRetainedSession struct {
 	sourceSetRequests        []runtimeagenttopology.SourceSetCommitRequest
 	bundleDeleteRequests     []runtimebundledelete.FinalMutationRequest
 	destructiveResetRequests []runtimedestructivereset.CleanupRequest
-	callback                 func()
+	callback                 func(runtimestartupownership.TerminalResult)
 	released                 bool
 }
 
@@ -46,6 +47,10 @@ func (s *supervisorTestRetainedSession) Authority() (runtimestartupownership.Aut
 func (s *supervisorTestRetainedSession) ProveCurrent(context.Context) error {
 	_, err := s.Authority()
 	return err
+}
+
+func (s *supervisorTestRetainedSession) MonitorProveCurrent(ctx context.Context, _ time.Duration) error {
+	return s.ProveCurrent(ctx)
 }
 
 func (s *supervisorTestRetainedSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
@@ -120,7 +125,7 @@ func (s *supervisorTestRetainedSession) Release(context.Context) error {
 	callback := s.callback
 	s.mu.Unlock()
 	if callback != nil {
-		callback()
+		callback(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	}
 	return nil
 }
@@ -282,7 +287,7 @@ func registerServeTestDurableAgent(
 	rec := runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "serve-test-declaration",
 	}
-	if err := storetest.UpsertAgentFixture(ctx, selected, rec); err != nil {
+	if err := storetest.UpsertAgentFixture(t, ctx, selected, rec); err != nil {
 		t.Fatalf("persist serve test durable agent: %v", err)
 	}
 	committed, err := selected.LoadAgents(ctx)

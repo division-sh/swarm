@@ -37,7 +37,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "agent-a", "")
-			if err := agentfixture.Upsert(ctx, selected, runtimemanager.PersistedAgent{
+			if err := agentfixture.Upsert(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{}`),

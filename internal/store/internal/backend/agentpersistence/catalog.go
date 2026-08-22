@@ -47,8 +47,12 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			COALESCE(permissions, '[]'::jsonb),
 			COALESCE(status, 'active'),
 			COALESCE(created_at, now()),
-			lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
-			topology_admission
+				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
+				lifecycle_process_authority_id::text, lifecycle_process_owner_id,
+				lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
+				lifecycle_bundle_hash, lifecycle_bundle_source,
+				lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
+				topology_admission
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
@@ -92,6 +96,14 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			&lifecycleGeneration,
 			&rec.LifecyclePhase,
 			&rec.LifecycleRunMode,
+			&rec.ProcessBinding.ProcessAuthorityID,
+			&rec.ProcessBinding.ProcessOwnerID,
+			&rec.ProcessBinding.ProcessBootID,
+			&rec.ProcessBinding.GenerationGrantID,
+			&rec.ProcessBinding.BundleHash,
+			&rec.ProcessBinding.BundleSource,
+			&rec.ProcessBinding.RuntimeInstanceID,
+			&rec.ProcessBinding.RuntimeGeneration,
 			&topologyRaw,
 		); err != nil {
 			return nil, fmt.Errorf("scan agent row: %w", err)
@@ -108,6 +120,9 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			return nil, fmt.Errorf("decode agent topology admission: %w", err)
 		}
 		if err := rec.Topology.Validate(); err != nil {
+			return nil, err
+		}
+		if err := rec.ProcessBinding.Validate(); err != nil {
 			return nil, err
 		}
 		rec.Config = cfg

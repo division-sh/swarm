@@ -218,7 +218,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(pg),
+		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	bus.SetInterceptors(pc)
@@ -322,7 +322,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(pg),
+		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	bus.SetInterceptors(pc)
@@ -415,7 +415,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(pg), ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999940",
@@ -500,7 +500,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(pg),
+		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
@@ -622,7 +622,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    storetest.AgentLifecycleFixture(pg),
+		LifecycleStore:    storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 

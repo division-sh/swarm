@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
@@ -80,7 +81,10 @@ type serveLifecyclePresenter struct {
 	cleanupErr         error
 	runtimeFailureErr  error
 	runtimeFailureName string
+	ownershipTerminal  string
 	shutdownErr        error
+	recoveredSession   bool
+	recoveryWritten    bool
 	warningsWritten    bool
 	bootWritten        bool
 	terminalWritten    bool
@@ -297,6 +301,30 @@ func (p *serveLifecyclePresenter) recordClosedUnavailableWork() {
 	p.notices = append(p.notices, serveLifecycleNotice{Kind: serveLifecycleNoticeUnavailableClosed})
 }
 
+func (p *serveLifecyclePresenter) recordRecoveredPreviousSession() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.recoveredSession = true
+	p.mu.Unlock()
+}
+
+func (p *serveLifecyclePresenter) ownershipLost(result runtimestartupownership.TerminalResult) {
+	if p == nil {
+		return
+	}
+	message := "This serve can no longer verify project ownership and is shutting down."
+	if result.Cause == runtimestartupownership.TerminalOwnershipSuperseded && strings.TrimSpace(result.SuccessorAuthorityID) != "" {
+		message = "This serve lost ownership to a newer serve and is shutting down."
+	}
+	p.mu.Lock()
+	p.ownershipTerminal = message
+	p.runtimeFailureName = "project ownership"
+	p.runtimeFailureErr = errors.New(message)
+	p.mu.Unlock()
+}
+
 func (p *serveLifecyclePresenter) recordBootWarnings(report runtimebootverify.Report) {
 	if p == nil {
 		return
@@ -323,6 +351,7 @@ func (p *serveLifecyclePresenter) commitReady(facts serveLifecycleReadyFacts, pu
 	if publish != nil {
 		publish()
 	}
+	p.writeRecoveredSessionLocked()
 	if !p.verbose {
 		p.writeConciseReadyLocked(facts)
 	} else {
@@ -457,6 +486,10 @@ func (p *serveLifecyclePresenter) finish() {
 		return
 	}
 	if p.runtimeFailureErr != nil {
+		if p.ownershipTerminal != "" {
+			fmt.Fprintln(p.errOut, p.ownershipTerminal)
+			return
+		}
 		detail := serveLifecycleErrorDetail(errors.Join(p.runtimeFailureErr, p.shutdownErr, p.cleanupErr))
 		fmt.Fprintf(p.errOut, "ERROR: runtime failed · %s", p.runtimeFailureName)
 		if detail != "" {
@@ -545,6 +578,14 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 	}
 	p.writeStandingIngressLocked(facts.Standing)
 	fmt.Fprintln(p.out)
+}
+
+func (p *serveLifecyclePresenter) writeRecoveredSessionLocked() {
+	if !p.recoveredSession || p.recoveryWritten {
+		return
+	}
+	p.recoveryWritten = true
+	fmt.Fprintln(p.out, "✓ Recovered previous session")
 }
 
 func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleReadyFacts) {

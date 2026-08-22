@@ -72,7 +72,7 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 			}),
 			Status: "active", HiredBy: "test", StartedAt: now,
 		}
-		spawned, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
+		spawned, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 			OperationID: fixture.spawnID, OperationKind: "spawn", RequestHash: "sibling-spawn",
 			Identity: fixture.identity, AgentID: rec.Config.ID, Trigger: "spawn", TargetEpoch: 21,
 			TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
@@ -82,7 +82,7 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 		if err != nil {
 			t.Fatalf("spawn sibling %s: %v", fixture.identity.FlowInstance(), err)
 		}
-		started, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
+		started, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 			OperationID: fixture.startID, OperationKind: "start", RequestHash: "sibling-start",
 			Identity: fixture.identity, AgentID: rec.Config.ID, Trigger: "start",
 			ExpectedEpoch: spawned.RuntimeEpoch, ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
@@ -170,7 +170,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
 		RunMode: runtimemanager.AgentRunModeStopped, Agent: &rec, Now: now,
 	}
-	spawned, err := agentfixture.Commit(ctx, store, spawn)
+	spawned, err := agentfixture.Commit(t, ctx, store, spawn)
 	if err != nil {
 		t.Fatalf("spawn lifecycle transition: %v", err)
 	}
@@ -181,11 +181,11 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 		TargetEpoch: 11, TargetGeneration: 2, TargetPhase: runtimemanager.AgentLifecycleRunning,
 		ConfigRevision: "revision-1", RunMode: runtimemanager.AgentRunModeStandard, Now: now.Add(time.Second),
 	}
-	started, err := agentfixture.Commit(ctx, store, start)
+	started, err := agentfixture.Commit(t, ctx, store, start)
 	if err != nil {
 		t.Fatalf("start lifecycle transition: %v", err)
 	}
-	replayed, err := agentfixture.Commit(ctx, store, start)
+	replayed, err := agentfixture.Commit(t, ctx, store, start)
 	if err != nil || !replayed.Replayed || replayed.Generation != started.Generation {
 		t.Fatalf("lifecycle replay = %#v err=%v", replayed, err)
 	}
@@ -258,7 +258,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	requireExternalOperationState(t, db, sqlite, prelaunch.Attempt().OperationID, runtimeeffects.StateTerminalFailure)
 	requireExternalOperationState(t, db, sqlite, launched.Attempt().OperationID, runtimeeffects.StateOutcomeUncertain)
 
-	restarted, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
+	restarted, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: "00000000-0000-0000-0000-000000001903", OperationKind: "restart", RequestHash: "restart-hash",
 		Identity: identity, AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: started.RuntimeEpoch,
 		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,
@@ -316,7 +316,7 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	if err != nil {
 		t.Fatalf("authorize launch-fence effect: %v", err)
 	}
-	if _, err := agentfixture.Commit(ctx, store, runtimemanager.AgentLifecycleTransition{
+	if _, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: "00000000-0000-0000-0000-000000001904", OperationKind: "restart", RequestHash: "restart-launch-fence-hash",
 		Identity: identity, AgentID: rec.Config.ID, Trigger: "restart", ExpectedEpoch: restarted.RuntimeEpoch,
 		ExpectedGeneration: restarted.Generation, ExpectedPhase: restarted.Phase,
