@@ -61,11 +61,9 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 	return out, nil
 }
 
-// ReconcileStaticTopologyForStartup settles predecessor effect authority,
-// then linearizes the declaration diff before constructing process-local
-// execution. Recovery must finalize terminal drains before a declaration can
-// compute a reintroduction generation.
-func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, source semanticview.Source) error {
+// PrepareStaticTopologyForStartup settles predecessor effect authority and
+// linearizes the declaration diff without constructing process-local execution.
+func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, source semanticview.Source) error {
 	if am == nil || source == nil || am.store == nil || am.lifecycle == nil || am.lifecycle.persistence() == nil {
 		return nil
 	}
@@ -131,7 +129,7 @@ func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, s
 		owner := current.Topology.Authority.Static
 		ownerSource := runtimeagenttopology.SourceCoordinate{BundleHash: owner.BundleHash, BundleSource: owner.BundleSource}
 		if !sourceSetContainsCoordinate(completePlan, ownerSource) {
-			if err := am.commitStaticTopologyReconciliation(ctx, current, nil, admission); err != nil {
+			if err := am.retireRemovedStaticTopology(ctx, current, admission); err != nil {
 				return err
 			}
 			continue
@@ -183,6 +181,7 @@ func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, s
 			current := PersistedAgent{
 				Config: desired.Config, LifecycleEpoch: state.RuntimeEpoch, LifecycleGeneration: state.Generation,
 				LifecyclePhase: state.Phase, LifecycleRunMode: state.RunMode, Topology: state.Topology,
+				ProcessBinding: state.ProcessBinding,
 			}
 			if err := am.commitStaticTopologyReconciliation(ctx, current, &desired, admission); err != nil {
 				return err
@@ -193,7 +192,93 @@ func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, s
 			return err
 		}
 	}
+	return nil
+}
+
+func (am *AgentManager) retireRemovedStaticTopology(
+	ctx context.Context,
+	current PersistedAgent,
+	admission runtimeagenttopology.Admission,
+) error {
+	store := am.lifecycle.persistence()
+	provider, ok := store.(processExecutionBindingProvider)
+	if !ok {
+		return errors.New("static topology source removal requires process execution binding")
+	}
+	target, err := provider.ProcessExecutionBinding()
+	if err != nil {
+		return err
+	}
+	identity, err := current.Config.ConcreteIdentity()
+	if err != nil {
+		return err
+	}
+	subordinate, planHash, err := normalizedLifecycleSubordinate(reconfigureSessionMutationPlan(current.Config, current.Config))
+	if err != nil {
+		return err
+	}
+	identityKey, err := identity.Fingerprint()
+	if err != nil {
+		return err
+	}
+	revision, err := lifecycleConfigRevision(current)
+	if err != nil {
+		return err
+	}
+	if current.LifecycleGeneration == ^uint64(0) {
+		return fmt.Errorf("static topology retirement generation exhausted for %s", identity.Description())
+	}
+	operationKind := "source_set_retire"
+	if !sameProcessExecutionOwner(current.ProcessBinding, target) {
+		operationKind = "process_takeover"
+	}
+	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
+		"agent-static-source-retire-v1", operationKind, target.GenerationGrantID, identityKey,
+		current.ProcessBinding.GenerationGrantID, fmt.Sprint(current.LifecycleEpoch),
+		fmt.Sprint(current.LifecycleGeneration), string(current.LifecyclePhase),
+	}, "\x00"))).String()
+	requestHash := lifecycleRequestHashForIdentity(
+		identity, admission, operationKind, revision, planHash,
+	)
+	targetEpoch := runtimebus.CurrentRuntimeEpoch()
+	if targetEpoch <= 0 {
+		targetEpoch = 1
+	}
+	result, err := store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+		OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
+		Identity: identity, AgentID: identity.AgentID(), Trigger: operationKind,
+		ExpectedEpoch: current.LifecycleEpoch, ExpectedGeneration: current.LifecycleGeneration,
+		ExpectedPhase: current.LifecyclePhase, TargetEpoch: targetEpoch,
+		TargetGeneration: current.LifecycleGeneration + 1, TargetPhase: AgentLifecycleTerminated,
+		ConfigRevision: revision, RunMode: current.LifecycleRunMode,
+		Subordinate: subordinate, Topology: admission, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		return fmt.Errorf("retire removed static topology %s: %w", identity.Description(), err)
+	}
+	if !result.ProcessBinding.Equal(target) || result.RuntimeEpoch != targetEpoch ||
+		result.Generation != current.LifecycleGeneration+1 || result.Phase != AgentLifecycleTerminated {
+		return fmt.Errorf("retire removed static topology %s returned conflicting lifecycle evidence", identity.Description())
+	}
+	return nil
+}
+
+// HydrateStaticTopologyForStartup constructs process-local execution only
+// after every selected-store lifecycle cell has been rebound.
+func (am *AgentManager) HydrateStaticTopologyForStartup(ctx context.Context) error {
+	if am == nil || am.store == nil {
+		return nil
+	}
 	return am.hydratePersistedAgentExecutions(ctx)
+}
+
+// ReconcileStaticTopologyForStartup preserves the single-runtime call surface
+// while keeping preparation and hydration independently orderable by serve.
+func (am *AgentManager) ReconcileStaticTopologyForStartup(ctx context.Context, source semanticview.Source) error {
+	if err := am.PrepareStaticTopologyForStartup(ctx, source); err != nil {
+		return err
+	}
+	return am.HydrateStaticTopologyForStartup(ctx)
 }
 
 type staticTopologySourceSetBinding struct {
@@ -380,7 +465,8 @@ func (p *PreparedStaticTopologySourceSetRebind) Commit(ctx context.Context, stor
 	if err != nil {
 		return err
 	}
-	for _, item := range p.bindings {
+	committedBindings := make([]ProcessExecutionBinding, len(p.bindings))
+	for index, item := range p.bindings {
 		operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
 			"agent-static-source-set-rebind-v1", strings.TrimSpace(operationScopeID), p.plan.Revision, item.identityKey,
 			fmt.Sprint(item.epoch), fmt.Sprint(item.generation), string(item.phase), item.revision,
@@ -401,6 +487,10 @@ func (p *PreparedStaticTopologySourceSetRebind) Commit(ctx context.Context, stor
 			result.Generation != item.generation || result.Phase != item.phase || result.ConfigRevision != item.revision {
 			return fmt.Errorf("rebind static topology for %s returned conflicting lifecycle evidence", item.identity.Description())
 		}
+		if err := result.ProcessBinding.Validate(); err != nil {
+			return fmt.Errorf("rebind static topology for %s returned invalid process binding: %w", item.identity.Description(), err)
+		}
+		committedBindings[index] = result.ProcessBinding
 	}
 
 	p.manager.lifecycle.replacePersistence(store)
@@ -411,7 +501,10 @@ func (p *PreparedStaticTopologySourceSetRebind) Commit(ctx context.Context, stor
 			p.manager.lifecycle.mu.Unlock()
 			return fmt.Errorf("static topology source-set rebind projection changed for %s", item.identity.Description())
 		}
-		cell.topology = p.admission
+	}
+	for index, item := range p.bindings {
+		item.cell.topology = p.admission
+		item.cell.processBinding = committedBindings[index]
 	}
 	p.manager.lifecycle.mu.Unlock()
 	p.manager.mu.Lock()
@@ -600,6 +693,22 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 	} else if expectedGeneration > 0 {
 		plan = reconfigureSessionMutationPlan(current.Config, desired.Config)
 	}
+	if expectedGeneration > 0 && !current.ProcessBinding.IsZero() {
+		provider, ok := store.(processExecutionBindingProvider)
+		if !ok {
+			return errors.New("static topology reconciliation requires process execution binding")
+		}
+		target, bindingErr := provider.ProcessExecutionBinding()
+		if bindingErr != nil {
+			return bindingErr
+		}
+		if !current.ProcessBinding.Equal(target) {
+			operationKind = "process_takeover"
+			if sameProcessExecutionOwner(current.ProcessBinding, target) {
+				operationKind = "source_set_rebind"
+			}
+		}
+	}
 	targetEpoch := runtimebus.CurrentRuntimeEpoch()
 	if targetEpoch <= 0 {
 		targetEpoch = 1
@@ -620,4 +729,10 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		Subordinate: plan, Topology: admission, Now: time.Now().UTC(),
 	})
 	return err
+}
+
+func sameProcessExecutionOwner(left, right ProcessExecutionBinding) bool {
+	return left.ProcessAuthorityID == right.ProcessAuthorityID &&
+		left.ProcessOwnerID == right.ProcessOwnerID &&
+		left.ProcessBootID == right.ProcessBootID
 }

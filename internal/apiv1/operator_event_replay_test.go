@@ -288,7 +288,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
 				envelope := routeShape.envelope(entityID, auditEntityID)
-				if err := storetest.UpsertAgentFixture(ctx, f.store, runtimemanager.PersistedAgent{
+				if err := storetest.UpsertAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
 					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
 						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
@@ -303,7 +303,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if routeShape.fanOut {
 					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
 					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
-					if err := storetest.UpsertAgentFixture(ctx, f.store, runtimemanager.PersistedAgent{
+					if err := storetest.UpsertAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
 						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
 							FlowID: "audit-flow", FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
@@ -467,7 +467,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			originalID := uuid.NewString()
 			createdAt := time.Unix(1700001400, 0).UTC()
 			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
-			if err := storetest.UpsertAgentFixture(ctx, f.store, runtimemanager.PersistedAgent{
+			if err := storetest.UpsertAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID,
 					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
@@ -713,13 +713,18 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	})
 }
 
-func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner runtimedelivery.Store, db *sql.DB, sqlite bool, evt events.Event, route events.DeliveryRoute) {
+type operatorReplayDeliverySessionStore interface {
+	runtimedelivery.Store
+	storetest.AgentFixtureStore
+}
+
+func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner operatorReplayDeliverySessionStore, db *sql.DB, sqlite bool, evt events.Event, route events.DeliveryRoute) {
 	t.Helper()
 	claimed, err := storetest.ClaimDelivery(ctx, owner, evt, route)
 	if err != nil {
 		t.Fatalf("claim original delivery: %v", err)
 	}
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, evt.RunID(), route.AgentIdentity)
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, owner, db, sqlite, evt.RunID(), route.AgentIdentity)
 	if _, err := owner.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind original delivery session: %v", err)
 	}
@@ -728,7 +733,7 @@ func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner
 	}
 }
 
-func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sql.DB, sqlite bool, runID string, identity agentidentity.Identity) string {
+func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, db *sql.DB, sqlite bool, runID string, identity agentidentity.Identity) string {
 	t.Helper()
 	identity = identity.Normalize()
 	fields, err := identity.StorageFields()
@@ -736,20 +741,20 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sq
 		t.Fatalf("operator replay identity fields: %v", err)
 	}
 	sessionID := uuid.NewString()
-	agentQuery := `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source,
-			topology_authority_kind, topology_admission, execution_lifetime
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'operator-replay-test', 'operator-replay-test', TRUE, 'authored',
-			'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}'::jsonb, 'durable_managed')
-		ON CONFLICT (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance
-		) DO NOTHING
-	`
+	if _, found, err := selected.LoadAgentLifecycleState(ctx, identity); err != nil {
+		t.Fatalf("load operator replay delivery agent: %v", err)
+	} else if !found {
+		if err := storetest.UpsertAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+			Config: withAPITestIntent(t, runtimeactors.AgentConfig{
+				Identity: identity, ID: identity.AgentID(), Role: "operator-replay-test", Type: "stub",
+				Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
+				FlowPath: identity.FlowInstance(), Config: []byte(`{}`),
+			}),
+			Status: "active", StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed operator replay delivery agent: %v", err)
+		}
+	}
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -757,20 +762,6 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sq
 		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)
 	`
 	if sqlite {
-		agentQuery = `
-			INSERT INTO agents (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, memory_enabled, memory_source,
-				topology_authority_kind, topology_admission, execution_lifetime
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'operator-replay-test', 'operator-replay-test', 1, 'authored',
-				'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}', 'durable_managed')
-			ON CONFLICT (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance
-			) DO NOTHING
-		`
 		query = `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -781,9 +772,6 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, db *sq
 	identityArgs := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-	}
-	if _, err := db.ExecContext(ctx, agentQuery, identityArgs...); err != nil {
-		t.Fatalf("seed operator replay delivery agent: %v", err)
 	}
 	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
 	if _, err := db.ExecContext(ctx, query, sessionArgs...); err != nil {
@@ -1524,7 +1512,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
+			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}

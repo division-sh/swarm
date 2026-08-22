@@ -485,7 +485,7 @@ func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence
 		TargetFailureRecorder: pg, RunOrigins: pg,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{
-		LifecycleState: pg, LifecycleEffects: pg, LifecycleDiagnostics: pg, EffectsRecovery: pg,
+		LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg, LifecycleDiagnostics: pg, EffectsRecovery: pg,
 		DeliveryQuiescence: pg, EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg,
 		FlowRoutes: pg,
 	}
@@ -532,7 +532,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		ManagerStore:                   pg,
 		ManagerLifecycleDiagnostics:    pg,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleState: pg, LifecycleEffects: pg,
+			LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg,
 			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
 			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
 		},
@@ -1403,7 +1403,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
+		presenter.fail(5, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
 		return 3
 	}
 	processCapabilityShutdownOwned := false
@@ -1412,6 +1412,21 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			_ = processCapability.Release(context.Background())
 		}
 	}()
+	processAuthority, err := processCapability.Evidence()
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
+	if processAuthority.AcquisitionKind == runtimestartupownership.AcquisitionCrashTakeover {
+		presenter.recordRecoveredPreviousSession()
+	}
+	ownershipWatchCtx, cancelOwnershipWatch := context.WithCancel(ctx)
+	defer cancelOwnershipWatch()
+	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
+	if err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
 	if err := installServeSourceSet(ctx, processCapability, processSourceSet); err != nil {
 		presenter.fail(5, "startup_topology", err)
 		return 3
@@ -1547,6 +1562,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
 		shutdownErr = errors.Join(shutdownErr, cleanupLoadedBundleSources())
 		bundleSourcesCleaned = true
+		cancelOwnershipWatch()
 		processWorkOwner.Retire()
 		receipt, joinErr := processWorkOwner.Join(shutdownCtx)
 		if joinErr != nil {
@@ -1845,6 +1861,96 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 
 	<-ctx.Done()
 	ready.Store(false)
+	return serveCancellationExitCode(ownershipLoss)
+}
+
+func serveOwnershipAcquisitionError(err error) error {
+	var acquisitionErr *runtimestartupownership.AcquisitionError
+	if !errors.As(err, &acquisitionErr) {
+		return err
+	}
+	switch acquisitionErr.Failure {
+	case runtimestartupownership.AcquisitionTakeoverRequired:
+		started := ""
+		if !acquisitionErr.RecordedAt.IsZero() {
+			started = fmt.Sprintf(" (started %s ago)", conciseOwnershipAge(time.Since(acquisitionErr.RecordedAt)))
+		}
+		return fmt.Errorf("Another swarm serve is already running for this project%s. Stop it first, or serve a different project.", started)
+	case runtimestartupownership.AcquisitionPriorOwnerAmbiguous:
+		return errors.New("Swarm cannot verify who owns this project. Run `swarm store repair-authority` to inspect and repair it.")
+	default:
+		return err
+	}
+}
+
+func conciseOwnershipAge(age time.Duration) string {
+	if age < 0 {
+		age = 0
+	}
+	switch {
+	case age < time.Minute:
+		return "less than 1m"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm", int(age/time.Minute))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(age/time.Hour))
+	default:
+		return fmt.Sprintf("%dd", int(age/(24*time.Hour)))
+	}
+}
+
+func startServeOwnershipWatch(
+	ctx context.Context,
+	workOwner *worklifetime.Process,
+	capability runtimestartupownership.ProcessCapability,
+	presenter *serveLifecyclePresenter,
+	cancel context.CancelFunc,
+) (<-chan runtimestartupownership.TerminalResult, error) {
+	if workOwner == nil || capability == nil || presenter == nil || cancel == nil {
+		return nil, errors.New("serve ownership watcher requires process work, capability, presenter, and cancellation")
+	}
+	lease, err := workOwner.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("admit serve ownership watcher: %w", err)
+	}
+	ownershipLoss := make(chan runtimestartupownership.TerminalResult, 1)
+	go func() {
+		settled := false
+		defer func() {
+			if !settled {
+				_ = lease.Done()
+			}
+		}()
+		select {
+		case <-ctx.Done():
+			select {
+			case <-capability.Done():
+			default:
+				return
+			}
+		case <-capability.Done():
+		}
+		result, ok := capability.TerminalResult()
+		if !ok || result.Cause == runtimestartupownership.TerminalReleased {
+			return
+		}
+		presenter.ownershipLost(result)
+		_ = lease.Done()
+		settled = true
+		ownershipLoss <- result
+		cancel()
+	}()
+	return ownershipLoss, nil
+}
+
+func serveCancellationExitCode(ownershipLoss <-chan runtimestartupownership.TerminalResult) int {
+	select {
+	case result := <-ownershipLoss:
+		if result.Cause == runtimestartupownership.TerminalOwnershipUnprovable || result.Cause == runtimestartupownership.TerminalOwnershipSuperseded {
+			return 1
+		}
+	default:
+	}
 	return 0
 }
 
@@ -2381,6 +2487,14 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 		}
 		prepared = append(prepared, contextDef.runtime)
 	}
+	for _, rt := range prepared {
+		if err := rt.PrepareStartupLifecycle(ctx); err != nil {
+			for _, preparedRuntime := range prepared {
+				_ = preparedRuntime.Shutdown()
+			}
+			return fmt.Errorf("prepare runtime lifecycle: %w", err)
+		}
+	}
 	registered := make([]struct {
 		hash    string
 		runtime *runtime.Runtime
@@ -2607,7 +2721,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagerStore:                   sqliteStore,
 			ManagerLifecycleDiagnostics:    sqliteStore,
 			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-				LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
+				LifecycleCensus: sqliteStore, LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
 				LifecycleDiagnostics: sqliteStore, EffectsRecovery: sqliteStore, DeliveryQuiescence: sqliteStore,
 				EventExistence: sqliteStore, DirectiveOperations: sqliteStore, DirectiveTargets: sqliteStore, FlowRoutes: sqliteStore,
 			},

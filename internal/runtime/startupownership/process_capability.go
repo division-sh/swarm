@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -101,6 +102,7 @@ func (e GrantEvidence) Validate() error {
 type GenerationGrant interface {
 	runtimemanager.AgentLifecyclePersistence
 	Evidence() (GrantEvidence, error)
+	ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error)
 	SourceSetPlan(context.Context) (runtimeagenttopology.SourceSetPlan, error)
 	ProveCurrent(context.Context) error
 	MarkProbesSettled(context.Context, []string) (GrantEvidence, error)
@@ -123,15 +125,22 @@ type ProcessCapability interface {
 	ApplyDestructiveResetTopology(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)
 	Release(context.Context) error
 	Done() <-chan struct{}
+	TerminalResult() (TerminalResult, bool)
 }
 
 type processCapability struct {
-	opMu     sync.Mutex
-	mu       sync.Mutex
-	session  RetainedSession
-	grants   map[string]*generationGrant
-	done     chan struct{}
-	doneOnce sync.Once
+	opMu            sync.Mutex
+	mu              sync.Mutex
+	monitorMu       sync.Mutex
+	session         RetainedSession
+	grants          map[string]*generationGrant
+	done            chan struct{}
+	doneOnce        sync.Once
+	terminal        TerminalResult
+	monitorCancel   context.CancelFunc
+	monitorDone     chan struct{}
+	monitorCadence  time.Duration
+	monitorDeadline time.Duration
 }
 
 type generationGrant struct {
@@ -143,16 +152,27 @@ type generationGrant struct {
 }
 
 func NewProcessCapability(session RetainedSession) (ProcessCapability, error) {
+	return newProcessCapability(session, time.Second, 2*time.Second)
+}
+
+func newProcessCapability(session RetainedSession, cadence, deadline time.Duration) (ProcessCapability, error) {
 	if session == nil {
 		return nil, errors.New("process startup/topology capability requires a retained selected-store session")
 	}
 	if _, err := session.Authority(); err != nil {
 		return nil, err
 	}
-	p := &processCapability{session: session, grants: map[string]*generationGrant{}, done: make(chan struct{})}
-	if err := session.InstallTerminalOwner(p); err != nil {
+	if cadence <= 0 || deadline <= 0 {
+		return nil, errors.New("process capability possession monitor timing must be positive")
+	}
+	p := &processCapability{
+		session: session, grants: map[string]*generationGrant{}, done: make(chan struct{}),
+		monitorCadence: cadence, monitorDeadline: deadline,
+	}
+	if err := session.InstallTerminalOwner(p, deadline); err != nil {
 		return nil, err
 	}
+	p.startPossessionMonitor()
 	return p, nil
 }
 
@@ -190,7 +210,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 	}
 	authority, err := p.session.Authority()
 	if err != nil {
-		p.retire()
+		p.terminalize(TerminalResult{Cause: TerminalOwnershipUnprovable})
 		return nil, err
 	}
 	if authority.RuntimeInstanceID != strings.TrimSpace(req.RuntimeInstanceID) {
@@ -345,20 +365,37 @@ func (p *processCapability) Release(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
+	p.stopPossessionMonitor()
 	p.opMu.Lock()
 	defer p.opMu.Unlock()
 	if p.session == nil {
-		p.retire()
+		p.terminalize(TerminalResult{Cause: TerminalReleased})
 		return nil
 	}
 	for _, grant := range p.snapshotGrants() {
 		if err := grant.retireWithSession(ctx); err != nil {
 			p.retireOnPossessionFailure(err)
+			if p.requireLive() == nil {
+				p.startPossessionMonitor()
+			}
 			return err
 		}
 	}
 	err := p.session.Release(ctx)
-	p.retire()
+	if err == nil {
+		p.terminalize(TerminalResult{Cause: TerminalReleased})
+		return nil
+	}
+	if p.requireLive() != nil {
+		return err
+	}
+	if proveErr := p.session.MonitorProveCurrent(context.Background(), p.monitorDeadline); proveErr != nil {
+		p.terminalize(TerminalResult{Cause: TerminalOwnershipUnprovable})
+		return err
+	}
+	if p.requireLive() == nil {
+		p.startPossessionMonitor()
+	}
 	return err
 }
 
@@ -371,15 +408,42 @@ func (p *processCapability) Done() <-chan struct{} {
 	return p.done
 }
 
+func (p *processCapability) TerminalResult() (TerminalResult, bool) {
+	if p == nil {
+		return TerminalResult{Cause: TerminalOwnershipUnprovable}, true
+	}
+	select {
+	case <-p.done:
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.terminal, true
+	default:
+		return TerminalResult{}, false
+	}
+}
+
 func (p *processCapability) proveCurrent(ctx context.Context) error {
 	if err := p.requireLive(); err != nil {
 		return err
 	}
+	if err := callerContextError(ctx); err != nil {
+		return err
+	}
 	if err := p.session.ProveCurrent(ctx); err != nil {
-		p.retire()
+		if callerErr := callerContextError(ctx); callerErr != nil {
+			return fmt.Errorf("prove current process startup/topology capability: %w", callerErr)
+		}
+		p.terminalize(possessionTerminalResult(err))
 		return fmt.Errorf("prove current process startup/topology capability: %w", err)
 	}
 	return p.requireLive()
+}
+
+func callerContextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func (p *processCapability) requireLive() error {
@@ -400,8 +464,8 @@ func (p *processCapability) retireOnPossessionFailure(err error) {
 	}
 	// Closed selected-store operations own semantic failures without implying
 	// session loss. A failed proof or terminal callback performs retirement.
-	if proveErr := p.session.ProveCurrent(context.Background()); proveErr != nil {
-		p.retire()
+	if proveErr := p.session.MonitorProveCurrent(context.Background(), p.monitorDeadline); proveErr != nil {
+		p.terminalize(possessionTerminalResult(proveErr))
 	}
 }
 
@@ -415,27 +479,128 @@ func (p *processCapability) snapshotGrants() []*generationGrant {
 	return out
 }
 
-func (p *processCapability) retire() {
+func (p *processCapability) terminalize(result TerminalResult) {
 	if p == nil {
 		return
 	}
 	p.doneOnce.Do(func() {
-		close(p.done)
 		p.mu.Lock()
+		p.terminal = result
 		grants := make([]*generationGrant, 0, len(p.grants))
 		for _, grant := range p.grants {
 			grants = append(grants, grant)
 		}
 		p.grants = map[string]*generationGrant{}
 		p.mu.Unlock()
+		close(p.done)
+		p.cancelPossessionMonitor()
 		for _, grant := range grants {
 			grant.retireLocal()
 		}
 	})
 }
 
-func (p *processCapability) SelectedStoreSessionTerminal() {
-	p.retire()
+func (p *processCapability) SelectedStoreSessionTerminal(result TerminalResult) {
+	if result.Cause != TerminalOwnershipSuperseded || strings.TrimSpace(result.SuccessorAuthorityID) == "" {
+		result = TerminalResult{Cause: TerminalOwnershipUnprovable}
+	}
+	p.terminalize(result)
+}
+
+func possessionTerminalResult(err error) TerminalResult {
+	var possessionErr *PossessionError
+	if errors.As(err, &possessionErr) && possessionErr.Cause == TerminalOwnershipSuperseded && strings.TrimSpace(possessionErr.SuccessorAuthorityID) != "" {
+		return TerminalResult{Cause: TerminalOwnershipSuperseded, SuccessorAuthorityID: strings.TrimSpace(possessionErr.SuccessorAuthorityID)}
+	}
+	return TerminalResult{Cause: TerminalOwnershipUnprovable}
+}
+
+func (p *processCapability) monitorPossession(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(p.monitorCadence)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		err := p.monitorPossessionOnce(ctx, nil)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			p.terminalize(possessionTerminalResult(err))
+			return
+		}
+	}
+}
+
+func (p *processCapability) monitorPossessionOnce(ctx context.Context, beforeSerialize func()) error {
+	if beforeSerialize != nil {
+		beforeSerialize()
+	}
+	// Waiting for the canonical process-operation boundary is neutral. The
+	// backend deadline begins only after this exact serialization is held.
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return p.session.MonitorProveCurrent(ctx, p.monitorDeadline)
+}
+
+func (p *processCapability) startPossessionMonitor() {
+	if p == nil {
+		return
+	}
+	p.monitorMu.Lock()
+	defer p.monitorMu.Unlock()
+	select {
+	case <-p.done:
+		return
+	default:
+	}
+	if p.monitorDone != nil {
+		select {
+		case <-p.monitorDone:
+		default:
+			return
+		}
+	}
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	monitorDone := make(chan struct{})
+	p.monitorCancel = monitorCancel
+	p.monitorDone = monitorDone
+	go p.monitorPossession(monitorCtx, monitorDone)
+}
+
+func (p *processCapability) cancelPossessionMonitor() {
+	if p == nil {
+		return
+	}
+	p.monitorMu.Lock()
+	monitorCancel := p.monitorCancel
+	p.monitorMu.Unlock()
+	if monitorCancel != nil {
+		monitorCancel()
+	}
+}
+
+func (p *processCapability) stopPossessionMonitor() {
+	if p == nil {
+		return
+	}
+	p.monitorMu.Lock()
+	monitorCancel := p.monitorCancel
+	monitorDone := p.monitorDone
+	p.monitorMu.Unlock()
+	if monitorCancel == nil || monitorDone == nil {
+		return
+	}
+	monitorCancel()
+	<-monitorDone
 }
 
 func (g *generationGrant) Evidence() (GrantEvidence, error) {
@@ -448,6 +613,24 @@ func (g *generationGrant) Evidence() (GrantEvidence, error) {
 		return GrantEvidence{}, errors.New("runtime generation grant is retired")
 	}
 	return g.evidence, nil
+}
+
+func (g *generationGrant) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
+	evidence, err := g.Evidence()
+	if err != nil {
+		return runtimemanager.ProcessExecutionBinding{}, err
+	}
+	binding := runtimemanager.ProcessExecutionBinding{
+		ProcessAuthorityID: evidence.ProcessAuthorityID,
+		ProcessOwnerID:     evidence.ProcessOwnerID,
+		ProcessBootID:      evidence.ProcessBootID,
+		GenerationGrantID:  evidence.GrantID,
+		BundleHash:         evidence.BundleHash,
+		BundleSource:       evidence.BundleSource,
+		RuntimeInstanceID:  evidence.RuntimeInstanceID,
+		RuntimeGeneration:  evidence.RuntimeGeneration,
+	}
+	return binding, binding.Validate()
 }
 
 func (g *generationGrant) SourceSetPlan(ctx context.Context) (runtimeagenttopology.SourceSetPlan, error) {
@@ -568,6 +751,19 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 	if evidence.State == GrantRetired {
 		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("runtime generation grant is retired")
 	}
+	if !req.ProcessBinding.IsZero() {
+		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("agent lifecycle process binding is owned by the runtime generation grant")
+	}
+	req.ProcessBinding = runtimemanager.ProcessExecutionBinding{
+		ProcessAuthorityID: evidence.ProcessAuthorityID,
+		ProcessOwnerID:     evidence.ProcessOwnerID,
+		ProcessBootID:      evidence.ProcessBootID,
+		GenerationGrantID:  evidence.GrantID,
+		BundleHash:         evidence.BundleHash,
+		BundleSource:       evidence.BundleSource,
+		RuntimeInstanceID:  evidence.RuntimeInstanceID,
+		RuntimeGeneration:  evidence.RuntimeGeneration,
+	}
 	if _, err := g.requireCurrentSourceSetLocked(ctx, evidence); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -609,10 +805,15 @@ func (g *generationGrant) retireWithSession(ctx context.Context) error {
 	next := previous
 	next.State = GrantRetired
 	next.StateVersion++
+	g.mu.Unlock()
+
+	// The retained session can terminalize the process capability while the
+	// store call is in flight. Do not hold the grant lock across that callback;
+	// local terminalization must be able to settle every accepted grant.
 	if err := g.owner.session.RecordGenerationGrantTransition(ctx, &previous, next); err != nil {
-		g.mu.Unlock()
 		return err
 	}
+	g.mu.Lock()
 	g.evidence = next
 	g.mu.Unlock()
 	g.retireLocal()

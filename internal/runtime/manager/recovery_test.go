@@ -179,9 +179,18 @@ func (b *startupRecoveryOrderBus) SweepPipelineObligations(context.Context, int)
 
 func (s *recoveryTestStore) UpsertAgent(context.Context, PersistedAgent) error { return nil }
 func (s *recoveryTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
-	return append([]PersistedAgent(nil), s.agents...), nil
+	out := append([]PersistedAgent(nil), s.agents...)
+	for i := range out {
+		out[i].ProcessBinding = lifecycleProbeProcessBinding()
+	}
+	return out, nil
 }
 func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
+
+func (*recoveryTestStore) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
+	binding := lifecycleProbeProcessBinding()
+	return binding, binding.Validate()
+}
 
 func (*recoveryTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	return AgentLifecycleTransitionResult{
@@ -191,6 +200,7 @@ func (*recoveryTestStore) CommitAgentLifecycleTransition(_ context.Context, req 
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: lifecycleProbeProcessBinding(),
 	}, nil
 }
 

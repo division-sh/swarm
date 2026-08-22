@@ -15,6 +15,7 @@ import (
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -65,12 +66,16 @@ type runtimeTestRetainedSession struct {
 	authority runtimestartupownership.Authority
 	plan      runtimeagenttopology.SourceSetPlan
 	agents    map[string]runtimemanager.PersistedAgent
-	callback  func()
+	callback  func(runtimestartupownership.TerminalResult)
 	released  bool
 }
 
 type runtimeTestRetainedSessionProvider interface {
 	runtimeTestStartupSession() *runtimeTestRetainedSession
+}
+
+type runtimeTestProcessBindingSeeder interface {
+	seedRuntimeTestProcessBinding(runtimemanager.ProcessExecutionBinding)
 }
 
 func (s *runtimeTestRetainedSession) Authority() (runtimestartupownership.Authority, error) {
@@ -87,7 +92,11 @@ func (s *runtimeTestRetainedSession) ProveCurrent(context.Context) error {
 	return err
 }
 
-func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
+func (s *runtimeTestRetainedSession) MonitorProveCurrent(ctx context.Context, _ time.Duration) error {
+	return s.ProveCurrent(ctx)
+}
+
+func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner, _ time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.callback != nil || owner == nil {
@@ -133,6 +142,7 @@ func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Co
 		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch, PreviousGeneration: req.ExpectedGeneration,
 		Generation: req.TargetGeneration, PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: req.ProcessBinding,
 	}
 	key, err := req.Identity.Normalize().Fingerprint()
 	if err != nil {
@@ -156,6 +166,7 @@ func (s *runtimeTestRetainedSession) CommitAgentLifecycleTransition(_ context.Co
 	rec.LifecycleGeneration = req.TargetGeneration
 	rec.LifecyclePhase = req.TargetPhase
 	rec.LifecycleRunMode = req.RunMode
+	rec.ProcessBinding = req.ProcessBinding
 	if req.TargetPhase == runtimemanager.AgentLifecycleTerminated {
 		rec.Status = "terminated"
 	}
@@ -190,8 +201,42 @@ func (s *runtimeTestRetainedSession) LoadAgentLifecycleState(_ context.Context, 
 	return runtimemanager.AgentLifecycleState{
 		Identity: identity.Normalize(), AgentID: identity.AgentID(), RuntimeEpoch: rec.LifecycleEpoch,
 		Generation: rec.LifecycleGeneration, Phase: rec.LifecyclePhase,
-		RunMode: rec.LifecycleRunMode, Topology: rec.Topology,
+		RunMode: rec.LifecycleRunMode, Topology: rec.Topology, ProcessBinding: rec.ProcessBinding,
 	}, true, nil
+}
+
+func (s *runtimeTestRetainedSession) ListDurableAgentLifecycleStates(context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	agents := make([]runtimemanager.PersistedAgent, 0, len(s.agents))
+	for _, rec := range s.agents {
+		agents = append(agents, rec)
+	}
+	return runtimeTestDurableAgentLifecycleStates(agents)
+}
+
+func runtimeTestDurableAgentLifecycleStates(agents []runtimemanager.PersistedAgent) ([]runtimemanager.AgentLifecycleState, error) {
+	states := make([]runtimemanager.AgentLifecycleState, 0, len(agents))
+	for _, rec := range agents {
+		if rec.Topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+			continue
+		}
+		identity, err := rec.Config.ConcreteIdentity()
+		if err != nil {
+			return nil, err
+		}
+		configRevision, err := canonicaljson.Hash(rec.Config)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, runtimemanager.AgentLifecycleState{
+			Identity: identity.Normalize(), AgentID: identity.AgentID(), RuntimeEpoch: rec.LifecycleEpoch,
+			Generation: rec.LifecycleGeneration, Phase: rec.LifecyclePhase,
+			ConfigRevision: strings.TrimPrefix(configRevision, "sha256:"), RunMode: rec.LifecycleRunMode,
+			Topology: rec.Topology, ProcessBinding: rec.ProcessBinding,
+		})
+	}
+	return states, nil
 }
 
 func (s *runtimeTestRetainedSession) Release(context.Context) error {
@@ -204,7 +249,7 @@ func (s *runtimeTestRetainedSession) Release(context.Context) error {
 	callback := s.callback
 	s.mu.Unlock()
 	if callback != nil {
-		callback()
+		callback(runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable})
 	}
 	return nil
 }
@@ -256,6 +301,19 @@ func newRuntimeTestProcessCapabilityWithSession(t testing.TB, manager *runtimema
 		_ = capability.Release(context.Background())
 		return nil, nil, err
 	}
+	binding, err := grant.ProcessExecutionBinding()
+	if err != nil {
+		_ = capability.Release(context.Background())
+		return nil, nil, err
+	}
+	session.mu.Lock()
+	for key, rec := range session.agents {
+		if rec.ProcessBinding.IsZero() {
+			rec.ProcessBinding = binding
+			session.agents[key] = rec
+		}
+	}
+	session.mu.Unlock()
 	t.Cleanup(func() { _ = capability.Release(context.Background()) })
 	return capability, grant, nil
 }
@@ -604,6 +662,11 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 		}
 		retainedSession = &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 		deps.ManagerStore = retainedSession
+	}
+	if retainedSession != nil {
+		if deps.ManagerPersistenceRoles.LifecycleCensus == nil {
+			deps.ManagerPersistenceRoles.LifecycleCensus = retainedSession
+		}
 		if deps.ManagerPersistenceRoles.LifecycleState == nil {
 			deps.ManagerPersistenceRoles.LifecycleState = retainedSession
 		}
@@ -642,6 +705,13 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.BundleSourceFact, deps.Options.RuntimeInstanceID, retainedSession)
 			if grantErr != nil {
 				return nil, grantErr
+			}
+			if seeder, ok := deps.ManagerStore.(runtimeTestProcessBindingSeeder); ok {
+				binding, bindingErr := grant.ProcessExecutionBinding()
+				if bindingErr != nil {
+					return nil, bindingErr
+				}
+				seeder.seedRuntimeTestProcessBinding(binding)
 			}
 			if grantErr = runtime.InstallStartupGrant(grant); grantErr != nil {
 				return nil, grantErr

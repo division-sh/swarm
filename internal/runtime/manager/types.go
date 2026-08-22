@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -26,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/google/uuid"
 )
 
 type Agent interface {
@@ -65,6 +68,68 @@ type PersistedAgent struct {
 	LifecycleGeneration uint64
 	LifecyclePhase      AgentLifecyclePhase
 	LifecycleRunMode    AgentRunMode
+	ProcessBinding      ProcessExecutionBinding
+}
+
+// ProcessExecutionBinding seals a durable lifecycle cell to the exact
+// selected-store process and generation grant allowed to execute it.
+type ProcessExecutionBinding struct {
+	ProcessAuthorityID string `json:"process_authority_id"`
+	ProcessOwnerID     string `json:"process_owner_id"`
+	ProcessBootID      string `json:"process_boot_id"`
+	GenerationGrantID  string `json:"generation_grant_id"`
+	BundleHash         string `json:"bundle_hash"`
+	BundleSource       string `json:"bundle_source"`
+	RuntimeInstanceID  string `json:"runtime_instance_id"`
+	RuntimeGeneration  uint64 `json:"runtime_generation"`
+}
+
+func (b ProcessExecutionBinding) IsZero() bool {
+	return strings.TrimSpace(b.ProcessAuthorityID) == "" && strings.TrimSpace(b.ProcessOwnerID) == "" &&
+		strings.TrimSpace(b.ProcessBootID) == "" && strings.TrimSpace(b.GenerationGrantID) == "" &&
+		strings.TrimSpace(b.BundleHash) == "" && strings.TrimSpace(b.BundleSource) == "" &&
+		strings.TrimSpace(b.RuntimeInstanceID) == "" && b.RuntimeGeneration == 0
+}
+
+func (b ProcessExecutionBinding) Validate() error {
+	if _, err := uuid.Parse(strings.TrimSpace(b.ProcessAuthorityID)); err != nil {
+		return fmt.Errorf("process execution authority is invalid: %w", err)
+	}
+	if strings.TrimSpace(b.ProcessOwnerID) == "" {
+		return fmt.Errorf("process execution owner is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(b.ProcessBootID)); err != nil {
+		return fmt.Errorf("process execution boot is invalid: %w", err)
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(b.GenerationGrantID)); err != nil {
+		return fmt.Errorf("process execution generation grant is invalid: %w", err)
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(b.BundleHash)); err != nil {
+		return fmt.Errorf("process execution bundle hash is invalid: %w", err)
+	}
+	switch strings.TrimSpace(b.BundleSource) {
+	case "persisted", "ephemeral":
+	default:
+		return fmt.Errorf("process execution bundle source is invalid")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(b.RuntimeInstanceID)); err != nil {
+		return fmt.Errorf("process execution runtime instance is invalid: %w", err)
+	}
+	if b.RuntimeGeneration == 0 {
+		return fmt.Errorf("process execution runtime generation is required")
+	}
+	return nil
+}
+
+func (b ProcessExecutionBinding) Equal(other ProcessExecutionBinding) bool {
+	return strings.TrimSpace(b.ProcessAuthorityID) == strings.TrimSpace(other.ProcessAuthorityID) &&
+		strings.TrimSpace(b.ProcessOwnerID) == strings.TrimSpace(other.ProcessOwnerID) &&
+		strings.TrimSpace(b.ProcessBootID) == strings.TrimSpace(other.ProcessBootID) &&
+		strings.TrimSpace(b.GenerationGrantID) == strings.TrimSpace(other.GenerationGrantID) &&
+		strings.TrimSpace(b.BundleHash) == strings.TrimSpace(other.BundleHash) &&
+		strings.TrimSpace(b.BundleSource) == strings.TrimSpace(other.BundleSource) &&
+		strings.TrimSpace(b.RuntimeInstanceID) == strings.TrimSpace(other.RuntimeInstanceID) &&
+		b.RuntimeGeneration == other.RuntimeGeneration
 }
 
 type PersistedRoutingRule struct {
@@ -147,6 +212,7 @@ type AgentLifecycleTransition struct {
 	Agent              *PersistedAgent
 	Subordinate        sessions.LifecycleMutationPlan
 	Topology           runtimeagenttopology.Admission
+	ProcessBinding     ProcessExecutionBinding
 	Now                time.Time
 }
 
@@ -159,6 +225,7 @@ type AgentLifecycleState struct {
 	ConfigRevision string
 	RunMode        AgentRunMode
 	Topology       runtimeagenttopology.Admission
+	ProcessBinding ProcessExecutionBinding
 }
 
 type AgentLifecycleTransitionResult struct {
@@ -175,6 +242,7 @@ type AgentLifecycleTransitionResult struct {
 	ConfigRevision      string                            `json:"config_revision"`
 	RunMode             AgentRunMode                      `json:"run_mode"`
 	Topology            runtimeagenttopology.Admission    `json:"topology"`
+	ProcessBinding      ProcessExecutionBinding           `json:"process_binding"`
 	Subordinate         sessions.LifecycleMutationOutcome `json:"subordinate"`
 	ProviderDrainCount  int                               `json:"provider_drain_count"`
 	ProviderDrainTarget AgentLifecyclePhase               `json:"provider_drain_target,omitempty"`
@@ -187,6 +255,13 @@ type AgentLifecyclePersistence interface {
 
 type AgentLifecycleStateReader interface {
 	LoadAgentLifecycleState(context.Context, runtimeagentidentity.Identity) (AgentLifecycleState, bool, error)
+}
+
+// AgentLifecycleCellCensus enumerates every durable lifecycle cell that can
+// retain process execution authority, including terminal cells omitted from
+// execution hydration.
+type AgentLifecycleCellCensus interface {
+	ListDurableAgentLifecycleStates(context.Context) ([]AgentLifecycleState, error)
 }
 
 type AgentLifecycleDiagnostic struct {
@@ -234,6 +309,7 @@ type PersistenceRoles struct {
 	RouteRemover         FlowInstanceRouteContextRemover
 	FlowTermination      FlowInstanceTerminalMutationOwner
 	CreationPublisher    runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
+	LifecycleCensus      AgentLifecycleCellCensus
 	LifecycleState       AgentLifecycleStateReader
 	LifecycleEffects     runtimeeffects.Store
 	LifecycleDiagnostics AgentLifecycleDiagnosticPersistence

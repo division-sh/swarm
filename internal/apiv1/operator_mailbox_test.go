@@ -272,7 +272,7 @@ func seedActiveAPIV1RuntimeBusAgent(t *testing.T, ctx context.Context, owner act
 func seedActiveAPIV1RuntimeBusAgentAt(t *testing.T, ctx context.Context, owner activeAPIV1RuntimeBusAgentStore, agentID, flowPath string) {
 	t.Helper()
 	identity := runtimebustest.Identity(t, agentID, flowPath)
-	if err := storetest.UpsertAgentFixture(ctx, owner, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(t, ctx, owner, runtimemanager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "observer", FlowID: "global", FlowPath: identity.FlowInstance(),
 			Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),

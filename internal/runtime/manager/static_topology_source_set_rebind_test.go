@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -176,6 +177,69 @@ func TestPreparedStaticTopologySourceSetRebindPreservesFailedDeclaration(t *test
 	}
 }
 
+type failSecondStaticTopologyRebindStore struct {
+	calls   int
+	binding ProcessExecutionBinding
+	err     error
+}
+
+func (s *failSecondStaticTopologyRebindStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
+	s.calls++
+	if s.calls == 2 {
+		return AgentLifecycleTransitionResult{}, s.err
+	}
+	return AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, Identity: req.Identity, AgentID: req.AgentID,
+		RuntimeEpoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase,
+		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: s.binding,
+	}, nil
+}
+
+func TestPreparedStaticTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit(t *testing.T) {
+	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
+	record := lifecycleTestPersistedAgent(t)
+	identity, err := record.Config.ConcreteIdentity()
+	if err != nil {
+		t.Fatalf("resolve lifecycle identity: %v", err)
+	}
+	revision, err := lifecycleConfigRevision(record)
+	if err != nil {
+		t.Fatalf("resolve lifecycle config revision: %v", err)
+	}
+	admission := managerTestTopologyAdmission(t)
+	first := &agentLifecycleCell{
+		identity: identity, epoch: 31, generation: 7, phase: AgentLifecycleRunning,
+		configRevision: revision, runMode: AgentRunModeStandard, topology: admission,
+	}
+	second := &agentLifecycleCell{
+		identity: identity, epoch: 32, generation: 8, phase: AgentLifecycleFailed,
+		configRevision: revision, runMode: AgentRunModeStopped, topology: admission,
+	}
+	manager.lifecycle.executionPublishMu.Lock()
+	first.opMu.Lock()
+	second.opMu.Lock()
+	prepared := &PreparedStaticTopologySourceSetRebind{
+		manager: manager, admission: admission,
+		plan: runtimeagenttopology.SourceSetPlan{Revision: admission.Authority.Static.SourceSetRevision},
+		bindings: []staticTopologySourceSetBinding{
+			{identity: identity, identityKey: "first", cell: first, epoch: first.epoch, generation: first.generation, phase: first.phase, runMode: first.runMode, revision: revision},
+			{identity: identity, identityKey: "second", cell: second, epoch: second.epoch, generation: second.generation, phase: second.phase, runMode: second.runMode, revision: revision},
+		},
+		locked: []*agentLifecycleCell{first, second},
+	}
+	injected := errors.New("injected second lifecycle commit failure")
+	store := &failSecondStaticTopologyRebindStore{binding: lifecycleProbeProcessBinding(), err: injected}
+	if err := prepared.Commit(context.Background(), store, "88888888-8888-4888-8888-888888888888"); !errors.Is(err, injected) {
+		t.Fatalf("source-set rebind error = %v, want injected second commit failure", err)
+	}
+	manager.lifecycle.mu.Lock()
+	defer manager.lifecycle.mu.Unlock()
+	if !first.processBinding.IsZero() || !second.processBinding.IsZero() {
+		t.Fatalf("failed source-set rebind published partial bindings: first=%#v second=%#v", first.processBinding, second.processBinding)
+	}
+}
+
 type staticStartupReconcileStore struct {
 	recoveryTestStore
 	transitions []AgentLifecycleTransition
@@ -201,6 +265,7 @@ func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(_ context.C
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: lifecycleProbeProcessBinding(),
 	}, nil
 }
 

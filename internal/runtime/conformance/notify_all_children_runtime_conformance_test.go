@@ -136,6 +136,52 @@ type notifyAllChildrenProcessTopology struct {
 	nextGeneration    uint64
 }
 
+type notifyAllChildrenLifecycleOwner struct {
+	mu    sync.RWMutex
+	grant runtimestartupownership.GenerationGrant
+}
+
+func (o *notifyAllChildrenLifecycleOwner) bind(grant runtimestartupownership.GenerationGrant) error {
+	if grant == nil {
+		return fmt.Errorf("notify-all-children lifecycle generation grant is required")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.grant != nil {
+		return fmt.Errorf("notify-all-children lifecycle generation grant is already bound")
+	}
+	o.grant = grant
+	return nil
+}
+
+func (o *notifyAllChildrenLifecycleOwner) current() (runtimestartupownership.GenerationGrant, error) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.grant == nil {
+		return nil, fmt.Errorf("notify-all-children lifecycle generation grant is not bound")
+	}
+	return o.grant, nil
+}
+
+func (o *notifyAllChildrenLifecycleOwner) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
+	grant, err := o.current()
+	if err != nil {
+		return runtimemanager.ProcessExecutionBinding{}, err
+	}
+	return grant.ProcessExecutionBinding()
+}
+
+func (o *notifyAllChildrenLifecycleOwner) CommitAgentLifecycleTransition(
+	ctx context.Context,
+	req runtimemanager.AgentLifecycleTransition,
+) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	grant, err := o.current()
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	return grant.CommitAgentLifecycleTransition(ctx, req)
+}
+
 func newNotifyAllChildrenProcessTopology(t testing.TB, ctx context.Context, selected notifyAllChildrenStore) *notifyAllChildrenProcessTopology {
 	t.Helper()
 	runtimeInstanceID := uuid.NewString()
@@ -163,6 +209,7 @@ func (p *notifyAllChildrenProcessTopology) install(
 	ctx context.Context,
 	manager *runtimemanager.AgentManager,
 	source semanticview.Source,
+	lifecycle *notifyAllChildrenLifecycleOwner,
 ) {
 	t.Helper()
 	if p == nil || p.capability == nil {
@@ -202,12 +249,18 @@ func (p *notifyAllChildrenProcessTopology) install(
 	if err != nil {
 		t.Fatalf("issue notify-all-children generation grant: %v", err)
 	}
+	if err := lifecycle.bind(grant); err != nil {
+		t.Fatalf("bind notify-all-children lifecycle generation grant: %v", err)
+	}
 	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("construct notify-all-children static admission: %v", err)
 	}
 	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
 		t.Fatalf("install notify-all-children startup topology: %v", err)
+	}
+	if err := manager.RebindLifecycleExecutionForStartup(ctx); err != nil {
+		t.Fatalf("rebind notify-all-children lifecycle execution: %v", err)
 	}
 	if err := manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
 		t.Fatalf("reconcile notify-all-children static topology: %v", err)
@@ -1369,6 +1422,14 @@ func newNotifyAllChildrenRuntime(
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
+	var lifecycleStore runtimemanager.AgentLifecyclePersistence
+	var generationLifecycle *notifyAllChildrenLifecycleOwner
+	if opts.processTopology != nil {
+		generationLifecycle = &notifyAllChildrenLifecycleOwner{}
+		lifecycleStore = generationLifecycle
+	} else {
+		lifecycleStore = storetest.AgentLifecycleFixture(t, backend)
+	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:  executionposture.Live,
 		BaseContext:       testAuthorActivityContext(context.Background()),
@@ -1376,14 +1437,14 @@ func newNotifyAllChildrenRuntime(
 		WorkflowInstances: coordinator,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,
-		LifecycleStore:    storetest.AgentLifecycleFixture(backend),
+		LifecycleStore:    lifecycleStore,
 		SemanticSource:    source,
 		Sessions:          sessionStore,
 		LLMBackend:        llmBackend,
 		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	if opts.processTopology != nil {
-		opts.processTopology.install(t, testAuthorActivityContext(context.Background()), manager, source)
+		opts.processTopology.install(t, testAuthorActivityContext(context.Background()), manager, source, generationLifecycle)
 	}
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,

@@ -195,7 +195,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	}, pg)
 
 	ctx = managedExecutionStoreTestContext(t, ctx)
-	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(pg))
+	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg))
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	}, pg)
 
 	ctx = managedExecutionStoreTestContext(t, ctx)
-	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(pg))
+	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg))
 	if err := am.Recover(ctx); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 		return selectedRouteRecoveryAgent{id: cfg.ID}, nil
 	}, pg)
 
-	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(pg))
+	prepareSelectedRouteRecoveryStartup(t, ctx, am, agentfixture.Lifecycle(t, pg))
 	err := am.Recover(ctx)
 	if err == nil || !strings.Contains(err.Error(), "recipient planning fingerprint mismatch") {
 		t.Fatalf("Recover error = %v, want recipient planning fingerprint mismatch", err)

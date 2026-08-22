@@ -97,6 +97,9 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	if roles.CreationPublisher == nil {
 		roles.CreationPublisher, _ = candidate.(runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher)
 	}
+	if roles.LifecycleCensus == nil {
+		roles.LifecycleCensus, _ = candidate.(AgentLifecycleCellCensus)
+	}
 	if roles.LifecycleState == nil {
 		roles.LifecycleState, _ = candidate.(AgentLifecycleStateReader)
 	}

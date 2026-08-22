@@ -49,6 +49,19 @@ func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error
 	return store, backend.ConstructionHandle(), nil
 }
 
+func OpenSQLiteRuntimeReadOnly(path string) (*private.SQLiteRuntimeStore, error) {
+	schema, backend, err := storeschema.OpenSQLiteReadOnlyForInspection(path)
+	if err != nil {
+		return nil, err
+	}
+	store, err := private.ComposeSQLiteRuntimeStore(schema, backend)
+	if err != nil {
+		_ = schema.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
 func NewPostgres(dsn string) (*private.PostgresStore, error) {
 	store, _, err := OpenPostgres(dsn)
 	return store, err

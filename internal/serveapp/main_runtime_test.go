@@ -35,12 +35,14 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -60,6 +62,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -69,6 +72,7 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -77,6 +81,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -90,11 +95,43 @@ func (servedNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 	return runtimellm.AnthropicAPIProviderContract()
 }
 
+type servedOpenAICompatibleNoopLLMRuntime struct{ runtimellm.NoopRuntime }
+
+func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.OpenAICompatibleProviderContract()
+}
+
 const serveRuntimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 func servedRuntimeRootIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
 	return agentidentitytest.RootRuntime(t, agentID, "serveapp-test")
+}
+
+func requireServeTestAgentFixture(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig) {
+	t.Helper()
+	cfg = serveTestAgentConfig(cfg)
+	cfg.FlowPath = cfg.Identity.FlowInstance()
+	if cfg.Memory.Source == "" {
+		cfg.Memory = runtimeagentmemory.PlatformDefault()
+	}
+	if cfg.ExecutionMode == "" {
+		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
+	}
+	storetest.RequireAgentFixture(t, context.Background(), selected, runtimemanager.PersistedAgent{
+		Config: cfg, Status: "active", HiredBy: "serve-test-fixture",
+	})
+}
+
+func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.AgentFixtureStore) {
+	t.Helper()
+	capability, err := agentfixture.ProcessCapability(t, context.Background(), selected)
+	if err != nil {
+		t.Fatalf("load serve test agent process capability: %v", err)
+	}
+	if err := capability.Release(context.Background()); err != nil {
+		t.Fatalf("release serve test agent process capability: %v", err)
+	}
 }
 
 func servedRuntimeRootIdentityFields(t testing.TB, agentID string) runtimeagentidentity.StorageFields {
@@ -2341,7 +2378,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 			return stores, err
 		}
 		opts.ConfigPath = configPath
-		contractsPath := writeServedExternalEventFixture(t)
+		contractsPath := canonicalrouting.CopyRootIngressServedConversationFork(t)
 		opts.ContractsPath = contractsPath
 		opts.PlatformSpecPath = defaultPlatformSpecPath
 		opts.APIListenAddr = "127.0.0.1:0"
@@ -2350,7 +2387,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		opts.RequireBundleMatch = false
 		opts.NoRequireBundleMatch = true
 		opts.Verbose = true
-		opts.TestLLMRuntime = servedNoopLLMRuntime{}
+		opts.TestLLMRuntime = servedOpenAICompatibleNoopLLMRuntime{}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
@@ -2641,34 +2678,47 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(),
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
-	identity := servedRuntimeFlowIdentityFields(t, fixture.AgentID, "fork-source", "source")
-	agentDescriptor := serveTestAgentRuntimeDescriptor(fixture.AgentID, "researcher", map[string]any{
-		"model":                  "regular",
-		"resolved_model":         "gpt-compatible",
-		"resolved_llm_provider":  "openai_compatible",
-		"resolved_llm_transport": "api",
-	})
-	actorIdentity, err := runtimeagentidentity.FromStorageFields(identity)
-	if err != nil {
-		t.Fatalf("build %s conversation fork source identity: %v", backend, err)
-	}
 	ctx := context.Background()
-	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, fixture.RunID, identity.FlowInstancePath)
 	capabilityIDs := make([]string, 0, 2)
 	var capabilityStore managedcapabilities.Persistence
+	var agentStore storetest.AgentFixtureStore
 	switch backend {
 	case "postgres":
 		if rt.Postgres == nil {
 			t.Fatal("accepted Postgres store owner is required")
 		}
 		capabilityStore = rt.Postgres
+		agentStore = rt.Postgres
 	case "sqlite":
 		if rt.SQLite == nil {
 			t.Fatal("accepted SQLite store owner is required")
 		}
 		capabilityStore = rt.SQLite
+		agentStore = rt.SQLite
 	default:
 		t.Fatalf("unknown conversation fork proof backend %q", backend)
+	}
+	agents, err := agentStore.LoadAgents(ctx)
+	if err != nil {
+		t.Fatalf("load %s conversation fork source agent: %v", backend, err)
+	}
+	var actorIdentity runtimeagentidentity.Identity
+	for _, rec := range agents {
+		if rec.Config.ID != fixture.AgentID {
+			continue
+		}
+		actorIdentity, err = rec.Config.ConcreteIdentity()
+		if err != nil {
+			t.Fatalf("decode %s conversation fork source identity: %v", backend, err)
+		}
+		break
+	}
+	if actorIdentity.IsZero() {
+		t.Fatalf("%s conversation fork source agent was not admitted by startup topology", backend)
+	}
+	identity, err := actorIdentity.StorageFields()
+	if err != nil {
+		t.Fatalf("project %s conversation fork source identity: %v", backend, err)
 	}
 	for i, turnID := range []string{fixture.Turn1ID, fixture.Turn2ID} {
 		surface, err := managedcapabilities.New(managedcapabilities.Plan{
@@ -2699,13 +2749,6 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			query string
 			args  []any
 		}{
-			{`INSERT INTO agents (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
-				topology_authority_kind, topology_admission, execution_lifetime
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,'researcher','regular','openai_compatible',TRUE,'authored',$8::jsonb,$9,$10::jsonb,$11)`,
-				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime}},
 			{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -2734,13 +2777,6 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 			query string
 			args  []any
 		}{
-			{`INSERT INTO agents (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
-				topology_authority_kind, topology_admission, execution_lifetime
-			) VALUES (?,?,?,?,?,?,?,'researcher','regular','openai_compatible',1,'authored',?,?,?,?)`,
-				[]any{identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime}},
 			{`INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
@@ -2778,19 +2814,6 @@ type servedConversationForkCounts struct {
 	Events    int
 	Mailbox   int
 	Mutations int
-}
-
-func serveTestFlowReadinessTopologyValues(t testing.TB, runID, instancePath string) (string, string, string) {
-	t.Helper()
-	admission, err := runtimeagenttopology.FlowReadinessAdmission(runID, instancePath, "serve-test-flow-readiness-plan-v1")
-	if err != nil {
-		t.Fatalf("construct serve test flow-readiness topology: %v", err)
-	}
-	raw, err := json.Marshal(admission)
-	if err != nil {
-		t.Fatalf("encode serve test flow-readiness topology: %v", err)
-	}
-	return string(admission.Authority.Kind), string(raw), string(admission.Lifetime)
 }
 
 func servedConversationForkLiveCounts(t *testing.T, db *sql.DB, backend, runID string) servedConversationForkCounts {
@@ -7051,6 +7074,402 @@ func TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon(t *testing.T) {
 	runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t, false)
 }
 
+func TestServeExplicitContextOwnershipMatrix(t *testing.T) {
+	stubServeRuntimeWorkspaceLifecycle(t)
+	unsetStoreSelectorEnv(t)
+	swarmDir := t.TempDir()
+	storeA := filepath.Join(t.TempDir(), "store-a.db")
+	storeB := filepath.Join(t.TempDir(), "store-b.db")
+	contractsPath := filepath.Join("examples", "routing", "root-ingress")
+	base := func(contextName, storePath string) cliapp.ServeOptions {
+		return cliapp.ServeOptions{
+			ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), storePath),
+			ContractsPath:        contractsPath,
+			PlatformSpecPath:     defaultPlatformSpecPath,
+			SwarmDir:             swarmDir,
+			SwarmDirSet:          true,
+			ContextName:          contextName,
+			ContextNameSet:       true,
+			APIListenAddr:        "127.0.0.1:0",
+			MCPListenAddr:        "127.0.0.1:0",
+			ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
+			Dev:                  true,
+			SelfCheck:            true,
+			NoRequireBundleMatch: true,
+			NoFeed:               true,
+			Verbose:              true,
+		}
+	}
+	first := startServeRuntimeTestProcess(t, base("first", storeA))
+	first.waitForReadyLine()
+
+	t.Run("same context and different store remains an endpoint collision", func(t *testing.T) {
+		var out lockedBuffer
+		opts := base("first", storeB)
+		opts.Output = &out
+		code := Run(context.Background(), cliapp.RepoRoot(), opts)
+		if code != 3 || !strings.Contains(out.String(), "context first already exists") {
+			t.Fatalf("same-context/different-store code=%d output:\n%s", code, out.String())
+		}
+		if strings.Contains(out.String(), "Recovered previous session") {
+			t.Fatalf("context collision reached selected-store takeover:\n%s", out.String())
+		}
+	})
+
+	t.Run("different context and same store reaches selected-store refusal", func(t *testing.T) {
+		var out lockedBuffer
+		opts := base("second", storeA)
+		opts.Output = &out
+		code := Run(context.Background(), cliapp.RepoRoot(), opts)
+		if code != 3 || !strings.Contains(out.String(), "Another swarm serve is already running for this project") {
+			t.Fatalf("different-context/same-store code=%d output:\n%s", code, out.String())
+		}
+		if strings.Contains(out.String(), "--context") {
+			t.Fatalf("same-store refusal advertised context as a store selector:\n%s", out.String())
+		}
+	})
+
+	t.Run("different context and different store reaches readiness", func(t *testing.T) {
+		second := startServeRuntimeTestProcess(t, base("second", storeB))
+		second.waitForReadyLine()
+		if code := second.stop(); code != 0 {
+			t.Fatalf("different-context/different-store code=%d output:\n%s", code, second.outputString())
+		}
+	})
+
+	if code := first.stop(); code != 0 {
+		t.Fatalf("first serve code=%d output:\n%s", code, first.outputString())
+	}
+}
+
+func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
+	_, db, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	storetest.BootstrapPostgresRuntimeStore(t, selected)
+	capability, err := selected.AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+		OwnerID: "serve:idle-session", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatalf("AcquireProcessCapability: %v", err)
+	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+
+	workOwner := worklifetime.NewProcess()
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	defer cancelServe()
+	var stdout, stderr bytes.Buffer
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
+	ownershipLoss, err := startServeOwnershipWatch(watchCtx, workOwner, capability, presenter, cancelServe)
+	if err != nil {
+		t.Fatalf("startServeOwnershipWatch: %v", err)
+	}
+
+	var retainedPID int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT pid FROM pg_locks
+		WHERE locktype = 'advisory' AND granted
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND classid::bigint = CASE WHEN hashtext($1) < 0 THEN 4294967295::bigint ELSE 0::bigint END
+		  AND objid::bigint = (hashtext($1)::bigint & 4294967295::bigint)
+		  AND objsubid = 1
+		ORDER BY pid LIMIT 1
+	`, "swarm:runtime:shared-store-owner").Scan(&retainedPID); err != nil {
+		t.Fatalf("find retained process session: %v", err)
+	}
+	var terminated bool
+	if err := db.QueryRowContext(context.Background(), `SELECT pg_terminate_backend($1)`, retainedPID).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminate retained process session pid=%d terminated=%v err=%v", retainedPID, terminated, err)
+	}
+	select {
+	case <-serveCtx.Done():
+	case <-time.After(4 * time.Second):
+		t.Fatal("serve was not cancelled after its retained session was lost")
+	}
+	if code := serveCancellationExitCode(ownershipLoss); code != 1 {
+		t.Fatalf("ownership-loss cancellation exit code = %d, want 1", code)
+	}
+	presenter.finish()
+	if got := stderr.String(); got != "This serve can no longer verify project ownership and is shutting down.\n" {
+		t.Fatalf("ownership loss transcript = %q", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("ownership loss contaminated stdout: %q", stdout.String())
+	}
+	stopWatch()
+	workOwner.Retire()
+	if _, err := workOwner.Join(context.Background()); err != nil {
+		t.Fatalf("join ownership watcher: %v", err)
+	}
+}
+
+func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
+	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		StoreModeSet:       true,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+	})
+	serve.waitForReadyLine()
+
+	var retainedPID int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT pid FROM pg_locks
+		WHERE locktype = 'advisory' AND granted
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND classid::bigint = CASE WHEN hashtext($1) < 0 THEN 4294967295::bigint ELSE 0::bigint END
+		  AND objid::bigint = (hashtext($1)::bigint & 4294967295::bigint)
+		  AND objsubid = 1
+		ORDER BY pid LIMIT 1
+	`, "swarm:runtime:shared-store-owner").Scan(&retainedPID); err != nil {
+		t.Fatalf("find serve retained process session: %v", err)
+	}
+	var terminated bool
+	if err := db.QueryRowContext(context.Background(), `SELECT pg_terminate_backend($1)`, retainedPID).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminate serve retained process session pid=%d terminated=%v err=%v", retainedPID, terminated, err)
+	}
+	code, ok := serve.waitForExit(serveRuntimeStopTimeout)
+	if !ok {
+		t.Fatalf("serve did not exit after ownership loss\noutput:\n%s", serve.outputString())
+	}
+	if code == 0 {
+		t.Fatalf("serve ownership-loss exit code = 0, want failure\noutput:\n%s", serve.outputString())
+	}
+	if !strings.Contains(serve.outputString(), "This serve can no longer verify project ownership and is shutting down.") {
+		t.Fatalf("serve output omitted ownership-loss diagnosis:\n%s", serve.outputString())
+	}
+}
+
+func TestServeCancellationExitCodeDistinguishesOwnershipLoss(t *testing.T) {
+	for _, cause := range []runtimestartupownership.TerminalCause{
+		runtimestartupownership.TerminalOwnershipUnprovable,
+		runtimestartupownership.TerminalOwnershipSuperseded,
+	} {
+		t.Run(string(cause), func(t *testing.T) {
+			terminal := make(chan runtimestartupownership.TerminalResult, 1)
+			terminal <- runtimestartupownership.TerminalResult{Cause: cause}
+			if code := serveCancellationExitCode(terminal); code != 1 {
+				t.Fatalf("serve cancellation exit code = %d, want 1", code)
+			}
+		})
+	}
+	t.Run("external cancellation", func(t *testing.T) {
+		if code := serveCancellationExitCode(make(chan runtimestartupownership.TerminalResult)); code != 0 {
+			t.Fatalf("external cancellation exit code = %d, want 0", code)
+		}
+	})
+}
+
+func TestNonDevServeOwnershipParity(t *testing.T) {
+	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	base := func(configPath, backend string) cliapp.ServeOptions {
+		return cliapp.ServeOptions{
+			ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+			StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+			ShutdownGrace: runtimepkg.DefaultShutdownGrace, SelfCheck: true, RequireBundleMatch: true, Verbose: true,
+		}
+	}
+	assertLiveRefusal := func(t *testing.T, opts cliapp.ServeOptions) {
+		t.Helper()
+		first := startServeRuntimeTestProcess(t, opts)
+		first.waitForReadyLine()
+		var out lockedBuffer
+		second := opts
+		second.Output = &out
+		if code := Run(context.Background(), cliapp.RepoRoot(), second); code != 3 || !strings.Contains(out.String(), "Another swarm serve is already running for this project") {
+			t.Fatalf("second non-dev serve code=%d output:\n%s", code, out.String())
+		}
+		if code := first.stop(); code != 0 {
+			t.Fatalf("first non-dev serve code=%d output:\n%s", code, first.outputString())
+		}
+	}
+
+	t.Run("sqlite", func(t *testing.T) {
+		stubServeRuntimeWorkspaceLifecycle(t)
+		unsetStoreSelectorEnv(t)
+		path := filepath.Join(t.TempDir(), "runtime.db")
+		assertLiveRefusal(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String()))
+	})
+	t.Run("postgres", func(t *testing.T) {
+		installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		assertLiveRefusal(t, base(writeServeRuntimeTestConfig(t), storebackend.BackendPostgres.String()))
+	})
+}
+
+func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
+	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	run := func(t *testing.T, configPath string) {
+		t.Helper()
+		payloadPath := filepath.Join(t.TempDir(), "payload.json")
+		if err := os.WriteFile(payloadPath, []byte(`{}`), 0o600); err != nil {
+			t.Fatalf("write run payload: %v", err)
+		}
+		apiPort := freeDoctorTCPPort(t)
+		mcpPort := freeDoctorTCPPort(t)
+		if apiPort == mcpPort {
+			mcpPort = freeDoctorTCPPort(t)
+		}
+		var stdout, stderr bytes.Buffer
+		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+			"--swarm-dir", t.TempDir(),
+			"run", "start", "--event", "task.requested", "--payload", payloadPath,
+			"--config", configPath, "--contracts", contractsPath, "--api-port", apiPort, "--mcp-port", mcpPort,
+		}, &stdout, &stderr, Run)
+		if code != 0 {
+			t.Fatalf("local run start code=%d stdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "run terminal:") || !strings.Contains(stdout.String(), "status=completed") {
+			t.Fatalf("local run did not reach terminal public readback:\n%s", stdout.String())
+		}
+	}
+
+	t.Run("sqlite", func(t *testing.T) {
+		stubServeRuntimeWorkspaceLifecycle(t)
+		unsetStoreSelectorEnv(t)
+		path := filepath.Join(t.TempDir(), "runtime.db")
+		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+		if err != nil {
+			t.Fatalf("load platform spec: %v", err)
+		}
+		plans, err := store.GeneratePlatformTableDDLs(spec)
+		if err != nil {
+			t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+		}
+		selected, err := store.NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+		}
+		bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
+		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), true)
+		if err := selected.Close(); err != nil {
+			t.Fatalf("close seeded SQLite store: %v", err)
+		}
+		run(t, writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path))
+	})
+	t.Run("postgres", func(t *testing.T) {
+		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		storetest.BootstrapPostgresRuntimeStore(t, selected)
+		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), false)
+		run(t, writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), ""))
+	})
+}
+
+func TestServeDevStaleContextAndAbandonedStoreRecovers(t *testing.T) {
+	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
+	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(cliapp.RepoRoot(), contractsPath))
+	if err != nil {
+		t.Fatalf("canonicalize project: %v", err)
+	}
+	base := func(configPath, backend, swarmDir string) cliapp.ServeOptions {
+		return cliapp.ServeOptions{
+			ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
+			StoreMode: backend, StoreModeSet: true, SwarmDir: swarmDir, SwarmDirSet: true,
+			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: runtimepkg.DefaultShutdownGrace,
+			Dev: true, SelfCheck: true, NoRequireBundleMatch: true, NoFeed: true, Verbose: true,
+		}
+	}
+	run := func(t *testing.T, opts cliapp.ServeOptions, storePath string) {
+		t.Helper()
+		writeStaleServeContextDescriptor(t, opts.SwarmDir, canonicalProject, storePath)
+		serve := startServeRuntimeTestProcess(t, opts)
+		serve.waitForReadyLine()
+		if !strings.Contains(serve.outputString(), "✓ Recovered previous session") {
+			t.Fatalf("serve omitted abandoned-session recovery:\n%s", serve.outputString())
+		}
+		if code := serve.stop(); code != 0 {
+			t.Fatalf("serve code=%d output:\n%s", code, serve.outputString())
+		}
+	}
+
+	t.Run("sqlite", func(t *testing.T) {
+		stubServeRuntimeWorkspaceLifecycle(t)
+		unsetStoreSelectorEnv(t)
+		path := filepath.Join(t.TempDir(), "runtime.db")
+		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+		if err != nil {
+			t.Fatalf("load platform spec: %v", err)
+		}
+		plans, err := store.GeneratePlatformTableDDLs(spec)
+		if err != nil {
+			t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+		}
+		selected, err := store.NewSQLiteRuntimeStore(path)
+		if err != nil {
+			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
+		}
+		bootstrapSQLiteSchemaForTest(t, context.Background(), selected, plans)
+		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), true)
+		if err := selected.Close(); err != nil {
+			t.Fatalf("close seeded SQLite store: %v", err)
+		}
+		run(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), path), storebackend.BackendSQLite.String(), t.TempDir()), path)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		_, _, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		storetest.BootstrapPostgresRuntimeStore(t, selected)
+		seedServeRuntimeAbandonedAuthority(t, storetest.DatabaseForTest(selected), false)
+		run(t, base(writeStoreBackendRuntimeConfig(t, storebackend.BackendPostgres.String(), ""), storebackend.BackendPostgres.String(), t.TempDir()), "")
+	})
+}
+
+func writeStaleServeContextDescriptor(t *testing.T, swarmDir, projectRoot, storePath string) {
+	t.Helper()
+	dir := filepath.Join(swarmDir, "contexts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("create stale context registry: %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	descriptor := map[string]any{
+		"version": 1, "name": "stale", "runtime_instance_id": "stale-runtime", "transport": "tcp",
+		"api_server": "http://127.0.0.1:1", "auth": map[string]any{"mode": "builtin_loopback"},
+		"project_root": projectRoot, "contracts_path": projectRoot, "store_path": storePath,
+		"created_at": now, "updated_at": now,
+	}
+	raw, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatalf("encode stale context: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "stale.json"), raw, 0o600); err != nil {
+		t.Fatalf("write stale context: %v", err)
+	}
+}
+
+func seedServeRuntimeAbandonedAuthority(t *testing.T, db *sql.DB, sqlite bool) {
+	t.Helper()
+	backend := "postgres_retained_session"
+	if sqlite {
+		backend = "sqlite_retained_owner"
+	}
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "abandoned-process", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	}, backend)
+	if err != nil {
+		t.Fatalf("construct abandoned authority: %v", err)
+	}
+	snapshot, err := canonicaljson.Bytes(authority)
+	if err != nil {
+		t.Fatalf("encode abandoned authority: %v", err)
+	}
+	query := `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,?)`
+	args := []any{uuid.NewString(), authority.AuthorityID, authority.AuthorityGeneration, authority.TransitionOrdinal, authority.StateVersion, authority.State, authority.OwnerID, authority.BootID, authority.RuntimeInstanceID, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind, string(snapshot), authority.RecordedAt.UTC()}
+	if !sqlite {
+		query = `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9::uuid,$10,$11::uuid,$12,$13,NULL,NULL,$14::jsonb,$15)`
+	}
+	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+		t.Fatalf("seed abandoned authority: %v", err)
+	}
+}
+
 func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	t.Helper()
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -7836,19 +8255,11 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	ctx := context.Background()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
-	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
-	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, serveRuntimeUnavailableRunIDForTest, identity.FlowInstancePath)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
-			topology_authority_kind, topology_admission, execution_lifetime
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb,$9,$10::jsonb,$11)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
+		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a"),
+		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Memory: runtimeagentmemory.Authored(true),
+	})
 	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(cliapp.RepoRoot(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
 	if err != nil {
 		t.Fatalf("contracts root: %v", err)
@@ -7879,6 +8290,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 	for _, target := range orphanTargets {
 		seedServeRuntimeUnavailableBundleRunState(t, ctx, runtimePG, target.runID, target.source)
 	}
+	releaseServeTestAgentFixtureCapability(t, runtimePG)
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
@@ -7952,8 +8364,11 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	activeSessionID := uuid.NewString()
 	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
-	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
-	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, runID, identity.FlowInstancePath)
+	requireServeTestAgentFixture(t, sqliteStore, runtimeactors.AgentConfig{
+		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
+		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Memory: runtimeagentmemory.Authored(true),
+	})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
@@ -7964,18 +8379,6 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	if err != nil {
 		_ = sqliteStore.Close()
 		t.Fatalf("claim sqlite active delivery: %v", err)
-	}
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
-			topology_authority_kind, topology_admission, execution_lifetime
-		)
-		VALUES (?,?,?,?,?,?,?,'operator','default','anthropic',TRUE,'authored',?,?,?,?)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("seed sqlite delivery agent: %v", err)
 	}
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -7992,6 +8395,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("bind sqlite active delivery session: %v", err)
 	}
+	releaseServeTestAgentFixtureCapability(t, sqliteStore)
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close seeded sqlite store: %v", err)
 	}
@@ -9324,11 +9728,14 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
-	agentDescriptor := serveTestAgentRuntimeDescriptor("agent-a", "default", nil)
-	topologyKind, topologyAdmission, executionLifetime := serveTestFlowReadinessTopologyValues(t, runID, identity.FlowInstancePath)
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
+		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
+		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
+		Memory: runtimeagentmemory.Authored(true),
+	})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
@@ -9338,17 +9745,6 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, llm_backend, memory_enabled, memory_source, runtime_descriptor,
-			topology_authority_kind, topology_admission, execution_lifetime
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'operator','default','anthropic',TRUE,'authored',$8::jsonb,$9,$10::jsonb,$11)
-	`, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, agentDescriptor, topologyKind, topologyAdmission, executionLifetime); err != nil {
-		t.Fatalf("seed active delivery agent: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -9363,6 +9759,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
 		t.Fatalf("bind active delivery session: %v", err)
 	}
+	releaseServeTestAgentFixtureCapability(t, runtimePG)
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),

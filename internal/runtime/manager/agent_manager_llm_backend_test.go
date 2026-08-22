@@ -396,6 +396,7 @@ func (s *liveMockAlternativePersistence) CommitAgentLifecycleTransition(_ contex
 		rec.LifecyclePhase = req.TargetPhase
 		rec.LifecycleRunMode = req.RunMode
 		rec.Topology = req.Topology
+		rec.ProcessBinding = lifecycleProbeProcessBinding()
 		s.records = append(s.records, rec)
 	}
 	return AgentLifecycleTransitionResult{
@@ -405,6 +406,7 @@ func (s *liveMockAlternativePersistence) CommitAgentLifecycleTransition(_ contex
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: lifecycleProbeProcessBinding(),
 	}, nil
 }
 

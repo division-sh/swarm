@@ -19,7 +19,9 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
 )
@@ -198,10 +200,20 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	ctx := context.Background()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	fact := testBundleSourceFact(t, runtimeTestBundleHash)
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	}, "runtime_test")
+	if err != nil {
+		t.Fatalf("new cold authority: %v", err)
+	}
+	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 	cfg := &config.Config{}
 	cfg.Runtime.ExecutionPosture = "live"
 	rt, err := NewRuntime(testAuthorActivityContext(ctx), RuntimeDeps{
 		Config: cfg,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleCensus: selected,
+		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
@@ -217,7 +229,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 			t.Errorf("Shutdown: %v", shutdownErr)
 		}
 	})
-	capability, grant, err := newRuntimeTestProcessCapability(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID)
+	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected)
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ import (
 
 var _ runtimemanager.AgentLifecycleStateReader = (*AgentPostgresOwner)(nil)
 var _ runtimemanager.AgentLifecycleStateReader = (*AgentSQLiteOwner)(nil)
+var _ runtimemanager.AgentLifecycleCellCensus = (*AgentPostgresOwner)(nil)
+var _ runtimemanager.AgentLifecycleCellCensus = (*AgentSQLiteOwner)(nil)
 var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*AgentPostgresOwner)(nil)
 var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*AgentSQLiteOwner)(nil)
 
@@ -38,8 +41,13 @@ func (s *AgentPostgresOwner) LoadAgentLifecycleState(
 	var generation int64
 	var topologyRaw []byte
 	err = s.backend.QueryRowContext(ctx, `
-		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
-		       lifecycle_config_revision, lifecycle_run_mode, topology_admission
+			SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+			       lifecycle_config_revision, lifecycle_run_mode,
+			       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
+			       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
+			       lifecycle_bundle_hash, lifecycle_bundle_source,
+			       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
+			       topology_admission
 		FROM agents
 		WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
 		  AND agent_route_presence = $4 AND flow_scope_key = $5
@@ -52,6 +60,14 @@ func (s *AgentPostgresOwner) LoadAgentLifecycleState(
 		&state.Phase,
 		&state.ConfigRevision,
 		&state.RunMode,
+		&state.ProcessBinding.ProcessAuthorityID,
+		&state.ProcessBinding.ProcessOwnerID,
+		&state.ProcessBinding.ProcessBootID,
+		&state.ProcessBinding.GenerationGrantID,
+		&state.ProcessBinding.BundleHash,
+		&state.ProcessBinding.BundleSource,
+		&state.ProcessBinding.RuntimeInstanceID,
+		&state.ProcessBinding.RuntimeGeneration,
 		&topologyRaw,
 	)
 	if err == sql.ErrNoRows {
@@ -66,6 +82,9 @@ func (s *AgentPostgresOwner) LoadAgentLifecycleState(
 		return runtimemanager.AgentLifecycleState{}, false, fmt.Errorf("decode agent topology admission: %w", err)
 	}
 	if err := state.Topology.Validate(); err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	if err := state.ProcessBinding.Validate(); err != nil {
 		return runtimemanager.AgentLifecycleState{}, false, err
 	}
 	return state, true, nil
@@ -83,8 +102,13 @@ func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
 	var generation int64
 	var topologyRaw []byte
 	err = s.backend.QueryRowContext(ctx, `
-		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
-		       lifecycle_config_revision, lifecycle_run_mode, topology_admission
+			SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+			       lifecycle_config_revision, lifecycle_run_mode,
+			       lifecycle_process_authority_id, lifecycle_process_owner_id,
+			       lifecycle_process_boot_id, lifecycle_generation_grant_id,
+			       lifecycle_bundle_hash, lifecycle_bundle_source,
+			       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+			       topology_admission
 		FROM agents
 		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
 		  AND agent_route_presence = ? AND flow_scope_key = ?
@@ -97,6 +121,14 @@ func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
 		&state.Phase,
 		&state.ConfigRevision,
 		&state.RunMode,
+		&state.ProcessBinding.ProcessAuthorityID,
+		&state.ProcessBinding.ProcessOwnerID,
+		&state.ProcessBinding.ProcessBootID,
+		&state.ProcessBinding.GenerationGrantID,
+		&state.ProcessBinding.BundleHash,
+		&state.ProcessBinding.BundleSource,
+		&state.ProcessBinding.RuntimeInstanceID,
+		&state.ProcessBinding.RuntimeGeneration,
 		&topologyRaw,
 	)
 	if err == sql.ErrNoRows {
@@ -113,7 +145,130 @@ func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
 	if err := state.Topology.Validate(); err != nil {
 		return runtimemanager.AgentLifecycleState{}, false, err
 	}
+	if err := state.ProcessBinding.Validate(); err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
 	return state, true, nil
+}
+
+func (s *AgentPostgresOwner) ListDurableAgentLifecycleStates(ctx context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode,
+		       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
+		       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
+		       lifecycle_bundle_hash, lifecycle_bundle_source,
+		       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
+		       topology_authority_kind, topology_admission, execution_lifetime
+		FROM agents
+		ORDER BY agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		         flow_scope_key, flow_instance_id, flow_instance
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query durable PostgreSQL lifecycle cell census: %w", err)
+	}
+	defer rows.Close()
+	return scanDurableAgentLifecycleStates(rows)
+}
+
+func (s *AgentSQLiteOwner) ListDurableAgentLifecycleStates(ctx context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode,
+		       lifecycle_process_authority_id, lifecycle_process_owner_id,
+		       lifecycle_process_boot_id, lifecycle_generation_grant_id,
+		       lifecycle_bundle_hash, lifecycle_bundle_source,
+		       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+		       topology_authority_kind, topology_admission, execution_lifetime
+		FROM agents
+		ORDER BY agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		         flow_scope_key, flow_instance_id, flow_instance
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query durable SQLite lifecycle cell census: %w", err)
+	}
+	defer rows.Close()
+	return scanDurableAgentLifecycleStates(rows)
+}
+
+func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLifecycleState, error) {
+	states := make([]runtimemanager.AgentLifecycleState, 0)
+	for rows.Next() {
+		var state runtimemanager.AgentLifecycleState
+		var nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
+		var topologyAuthorityKind, executionLifetime string
+		var generation int64
+		var topologyRaw []byte
+		if err := rows.Scan(
+			&state.AgentID, &nameOwner, &nameSource, &routePresence,
+			&flowScopeKey, &flowInstanceID, &flowInstance,
+			&state.RuntimeEpoch, &generation, &state.Phase,
+			&state.ConfigRevision, &state.RunMode,
+			&state.ProcessBinding.ProcessAuthorityID,
+			&state.ProcessBinding.ProcessOwnerID,
+			&state.ProcessBinding.ProcessBootID,
+			&state.ProcessBinding.GenerationGrantID,
+			&state.ProcessBinding.BundleHash,
+			&state.ProcessBinding.BundleSource,
+			&state.ProcessBinding.RuntimeInstanceID,
+			&state.ProcessBinding.RuntimeGeneration,
+			&topologyAuthorityKind, &topologyRaw, &executionLifetime,
+		); err != nil {
+			return nil, fmt.Errorf("scan durable lifecycle cell census: %w", err)
+		}
+		if generation < 0 {
+			return nil, errors.New("durable lifecycle cell generation is negative")
+		}
+		identity, err := IdentityFromColumns(
+			state.AgentID, nameOwner, nameSource, routePresence,
+			flowScopeKey, flowInstanceID, flowInstance,
+		)
+		if err != nil {
+			return nil, err
+		}
+		state.Identity = identity
+		state.Generation = uint64(generation)
+		if err := json.Unmarshal(topologyRaw, &state.Topology); err != nil {
+			return nil, fmt.Errorf("decode durable lifecycle topology admission: %w", err)
+		}
+		if err := state.Topology.Validate(); err != nil {
+			return nil, err
+		}
+		persistedLifetime := runtimeagenttopology.ExecutionLifetime(strings.TrimSpace(executionLifetime))
+		if persistedLifetime != state.Topology.Lifetime {
+			return nil, errors.New("durable lifecycle execution lifetime differs from topology admission")
+		}
+		persistedAuthorityKind := runtimeagenttopology.AuthorityKind(strings.TrimSpace(topologyAuthorityKind))
+		if persistedAuthorityKind != state.Topology.Authority.Kind {
+			return nil, errors.New("durable lifecycle authority kind differs from topology admission")
+		}
+		if persistedLifetime != runtimeagenttopology.LifetimeDurableManaged {
+			return nil, errors.New("durable lifecycle census returned a non-durable cell")
+		}
+		switch state.Topology.Authority.Kind {
+		case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan:
+		default:
+			return nil, fmt.Errorf("durable lifecycle census returned unsupported authority %q", state.Topology.Authority.Kind)
+		}
+		if err := state.ProcessBinding.Validate(); err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read durable lifecycle cell census: %w", err)
+	}
+	return states, nil
 }
 
 func (s *AgentPostgresOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
@@ -447,6 +602,7 @@ type lifecycleCell struct {
 	Epoch      int64
 	Generation uint64
 	Phase      runtimemanager.AgentLifecyclePhase
+	Binding    runtimemanager.ProcessExecutionBinding
 }
 
 func normalizeLifecycleTransition(req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransition, error) {
@@ -499,6 +655,9 @@ func validateLifecycleTransition(req runtimemanager.AgentLifecycleTransition) er
 	if req.TargetEpoch <= 0 || req.TargetGeneration == 0 || req.TargetPhase == "" || req.RunMode == "" {
 		return fmt.Errorf("complete target lifecycle state is required")
 	}
+	if err := req.ProcessBinding.Validate(); err != nil {
+		return fmt.Errorf("lifecycle process binding: %w", err)
+	}
 	if req.Now.IsZero() {
 		return fmt.Errorf("lifecycle transition time is required")
 	}
@@ -514,6 +673,22 @@ func validateLifecycleExpectation(req runtimemanager.AgentLifecycleTransition, p
 	}
 	if previous.Epoch != req.ExpectedEpoch || previous.Generation != req.ExpectedGeneration || previous.Phase != req.ExpectedPhase {
 		return lifecycleConflict(req, previous, true)
+	}
+	switch req.OperationKind {
+	case "process_takeover":
+		if previous.Binding.Equal(req.ProcessBinding) {
+			return lifecycleConflict(req, previous, true)
+		}
+	case "source_set_rebind", "source_set_retire":
+		if previous.Binding.ProcessAuthorityID != req.ProcessBinding.ProcessAuthorityID ||
+			previous.Binding.ProcessOwnerID != req.ProcessBinding.ProcessOwnerID ||
+			previous.Binding.ProcessBootID != req.ProcessBinding.ProcessBootID {
+			return lifecycleConflict(req, previous, true)
+		}
+	default:
+		if !previous.Binding.Equal(req.ProcessBinding) {
+			return lifecycleConflict(req, previous, true)
+		}
 	}
 	return nil
 }
@@ -536,7 +711,7 @@ func lifecycleResult(req runtimemanager.AgentLifecycleTransition, previous lifec
 		PreviousEpoch: previous.Epoch, RuntimeEpoch: req.TargetEpoch,
 		PreviousGeneration: previous.Generation, Generation: req.TargetGeneration,
 		PreviousPhase: previousPhase, Phase: req.TargetPhase, ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
-		Topology:    req.Topology,
+		Topology: req.Topology, ProcessBinding: req.ProcessBinding,
 		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
 	}
 }
@@ -847,7 +1022,11 @@ func loadPostgresLifecycleCell(
 	var cell lifecycleCell
 	var generation int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+			SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+			       lifecycle_process_authority_id::text, lifecycle_process_owner_id,
+			       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text
+			       , lifecycle_bundle_hash, lifecycle_bundle_source,
+			       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation
 		FROM agents
 		WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
 		  AND agent_route_presence = $4 AND flow_scope_key = $5
@@ -858,6 +1037,14 @@ func loadPostgresLifecycleCell(
 		&cell.Epoch,
 		&generation,
 		&cell.Phase,
+		&cell.Binding.ProcessAuthorityID,
+		&cell.Binding.ProcessOwnerID,
+		&cell.Binding.ProcessBootID,
+		&cell.Binding.GenerationGrantID,
+		&cell.Binding.BundleHash,
+		&cell.Binding.BundleSource,
+		&cell.Binding.RuntimeInstanceID,
+		&cell.Binding.RuntimeGeneration,
 	)
 	if err == sql.ErrNoRows {
 		return lifecycleCell{}, false, nil
@@ -881,7 +1068,11 @@ func loadSQLiteLifecycleCell(
 	var cell lifecycleCell
 	var generation int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+			SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+			       lifecycle_process_authority_id, lifecycle_process_owner_id,
+			       lifecycle_process_boot_id, lifecycle_generation_grant_id
+			       , lifecycle_bundle_hash, lifecycle_bundle_source,
+			       lifecycle_runtime_instance_id, lifecycle_runtime_generation
 		FROM agents
 		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
 		  AND agent_route_presence = ? AND flow_scope_key = ?
@@ -891,6 +1082,14 @@ func loadSQLiteLifecycleCell(
 		&cell.Epoch,
 		&generation,
 		&cell.Phase,
+		&cell.Binding.ProcessAuthorityID,
+		&cell.Binding.ProcessOwnerID,
+		&cell.Binding.ProcessBootID,
+		&cell.Binding.GenerationGrantID,
+		&cell.Binding.BundleHash,
+		&cell.Binding.BundleSource,
+		&cell.Binding.RuntimeInstanceID,
+		&cell.Binding.RuntimeGeneration,
 	)
 	if err == sql.ErrNoRows {
 		return lifecycleCell{}, false, nil
@@ -967,11 +1166,14 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
 				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
-				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id,
-				topology_authority_kind, topology_admission, execution_lifetime)
+					lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id,
+					lifecycle_process_authority_id, lifecycle_process_owner_id, lifecycle_process_boot_id, lifecycle_generation_grant_id,
+					lifecycle_bundle_hash, lifecycle_bundle_source, lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+					topology_authority_kind, topology_admission, execution_lifetime)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13,''), NULLIF($14,'')::uuid,
 				$15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb, $21, 0, $22, $23,
-				$24, $25, $26, $27, $28, $29::uuid, $30, $31::jsonb, $32)
+					$24, $25, $26, $27, $28, $29::uuid, $30::uuid, $31, $32::uuid, $33::uuid,
+					$34, $35, $36::uuid, $37, $38, $39::jsonb, $40)
 			ON CONFLICT (
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance
@@ -981,8 +1183,16 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 				tools=EXCLUDED.tools, permissions=EXCLUDED.permissions, runtime_descriptor=EXCLUDED.runtime_descriptor, status=EXCLUDED.status,
 				last_active_at=EXCLUDED.last_active_at, lifecycle_phase=EXCLUDED.lifecycle_phase,
 				lifecycle_generation=EXCLUDED.lifecycle_generation, lifecycle_runtime_epoch=EXCLUDED.lifecycle_runtime_epoch,
-				lifecycle_config_revision=EXCLUDED.lifecycle_config_revision, lifecycle_run_mode=EXCLUDED.lifecycle_run_mode,
-				lifecycle_last_transition_id=EXCLUDED.lifecycle_last_transition_id,
+					lifecycle_config_revision=EXCLUDED.lifecycle_config_revision, lifecycle_run_mode=EXCLUDED.lifecycle_run_mode,
+					lifecycle_last_transition_id=EXCLUDED.lifecycle_last_transition_id,
+					lifecycle_process_authority_id=EXCLUDED.lifecycle_process_authority_id,
+					lifecycle_process_owner_id=EXCLUDED.lifecycle_process_owner_id,
+					lifecycle_process_boot_id=EXCLUDED.lifecycle_process_boot_id,
+					lifecycle_generation_grant_id=EXCLUDED.lifecycle_generation_grant_id,
+					lifecycle_bundle_hash=EXCLUDED.lifecycle_bundle_hash,
+					lifecycle_bundle_source=EXCLUDED.lifecycle_bundle_source,
+					lifecycle_runtime_instance_id=EXCLUDED.lifecycle_runtime_instance_id,
+					lifecycle_runtime_generation=EXCLUDED.lifecycle_runtime_generation,
 				topology_authority_kind=EXCLUDED.topology_authority_kind, topology_admission=EXCLUDED.topology_admission,
 				execution_lifetime=EXCLUDED.execution_lifetime
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
@@ -991,15 +1201,23 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 			projection.ParentAgentID, projection.EntityID, string(projection.ConfigJSON), string(projection.SubscriptionsJSON), string(projection.EmitEventsJSON),
 			string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req), req.Now.UTC(), startedAt.UTC(),
 			string(result.Phase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+			req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+			req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+			req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+			req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
 			string(req.Topology.Authority.Kind), string(topologyRaw), string(req.Topology.Lifetime))
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE agents
 		SET status=$8, lifecycle_phase=$9, lifecycle_generation=$10,
-		    lifecycle_runtime_epoch=$11, lifecycle_config_revision=$12,
-		    lifecycle_run_mode=$13, lifecycle_last_transition_id=$14::uuid,
-		    last_active_at=$15, topology_authority_kind=$16, topology_admission=$17::jsonb, execution_lifetime=$18
+			    lifecycle_runtime_epoch=$11, lifecycle_config_revision=$12,
+			    lifecycle_run_mode=$13, lifecycle_last_transition_id=$14::uuid,
+			    lifecycle_process_authority_id=$15::uuid, lifecycle_process_owner_id=$16,
+			    lifecycle_process_boot_id=$17::uuid, lifecycle_generation_grant_id=$18::uuid,
+			    lifecycle_bundle_hash=$19, lifecycle_bundle_source=$20,
+			    lifecycle_runtime_instance_id=$21::uuid, lifecycle_runtime_generation=$22,
+			    last_active_at=$23, topology_authority_kind=$24, topology_admission=$25::jsonb, execution_lifetime=$26
 		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
 		  AND agent_route_presence=$4 AND flow_scope_key=$5
 		  AND flow_instance_id=$6 AND flow_instance=$7
@@ -1007,6 +1225,10 @@ func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemana
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		lifecycleAgentStatus(req), string(result.Phase), req.TargetGeneration,
 		req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+		req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+		req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+		req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+		req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
 		req.Now.UTC(), string(req.Topology.Authority.Kind), mustTopologyJSON(req.Topology), string(req.Topology.Lifetime))
 	return err
 }
@@ -1035,9 +1257,11 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
 				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
-				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id,
-				topology_authority_kind, topology_admission, execution_lifetime)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id,
+					lifecycle_process_authority_id, lifecycle_process_owner_id, lifecycle_process_boot_id, lifecycle_generation_grant_id,
+					lifecycle_bundle_hash, lifecycle_bundle_source, lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+					topology_authority_kind, topology_admission, execution_lifetime)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(
 				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance
@@ -1047,8 +1271,16 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 				tools=excluded.tools, permissions=excluded.permissions, runtime_descriptor=excluded.runtime_descriptor, status=excluded.status,
 				last_active_at=excluded.last_active_at, lifecycle_phase=excluded.lifecycle_phase,
 				lifecycle_generation=excluded.lifecycle_generation, lifecycle_runtime_epoch=excluded.lifecycle_runtime_epoch,
-				lifecycle_config_revision=excluded.lifecycle_config_revision, lifecycle_run_mode=excluded.lifecycle_run_mode,
-				lifecycle_last_transition_id=excluded.lifecycle_last_transition_id,
+					lifecycle_config_revision=excluded.lifecycle_config_revision, lifecycle_run_mode=excluded.lifecycle_run_mode,
+					lifecycle_last_transition_id=excluded.lifecycle_last_transition_id,
+					lifecycle_process_authority_id=excluded.lifecycle_process_authority_id,
+					lifecycle_process_owner_id=excluded.lifecycle_process_owner_id,
+					lifecycle_process_boot_id=excluded.lifecycle_process_boot_id,
+					lifecycle_generation_grant_id=excluded.lifecycle_generation_grant_id,
+					lifecycle_bundle_hash=excluded.lifecycle_bundle_hash,
+					lifecycle_bundle_source=excluded.lifecycle_bundle_source,
+					lifecycle_runtime_instance_id=excluded.lifecycle_runtime_instance_id,
+					lifecycle_runtime_generation=excluded.lifecycle_runtime_generation,
 				topology_authority_kind=excluded.topology_authority_kind, topology_admission=excluded.topology_admission,
 				execution_lifetime=excluded.execution_lifetime
 		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
@@ -1057,21 +1289,33 @@ func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemana
 			nullString(projection.ParentAgentID), nullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
 			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req),
 			req.Now.UTC(), startedAt.UTC(), string(result.Phase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+			req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+			req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+			req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+			req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
 			string(req.Topology.Authority.Kind), string(topologyRaw), string(req.Topology.Lifetime))
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE agents
 		SET status=?, lifecycle_phase=?, lifecycle_generation=?,
-		    lifecycle_runtime_epoch=?, lifecycle_config_revision=?,
-		    lifecycle_run_mode=?, lifecycle_last_transition_id=?, last_active_at=?,
-		    topology_authority_kind=?, topology_admission=?, execution_lifetime=?
+			    lifecycle_runtime_epoch=?, lifecycle_config_revision=?,
+			    lifecycle_run_mode=?, lifecycle_last_transition_id=?, last_active_at=?,
+			    lifecycle_process_authority_id=?, lifecycle_process_owner_id=?,
+			    lifecycle_process_boot_id=?, lifecycle_generation_grant_id=?,
+			    lifecycle_bundle_hash=?, lifecycle_bundle_source=?,
+			    lifecycle_runtime_instance_id=?, lifecycle_runtime_generation=?,
+			    topology_authority_kind=?, topology_admission=?, execution_lifetime=?
 		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
 		  AND agent_route_presence=? AND flow_scope_key=?
 		  AND flow_instance_id=? AND flow_instance=?
 	`, lifecycleAgentStatus(req), string(result.Phase), req.TargetGeneration,
 		req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
-		req.Now.UTC(), string(req.Topology.Authority.Kind), mustTopologyJSON(req.Topology), string(req.Topology.Lifetime),
+		req.Now.UTC(), req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+		req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+		req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+		req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
+		string(req.Topology.Authority.Kind), mustTopologyJSON(req.Topology), string(req.Topology.Lifetime),
 		fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID,
 		fields.FlowInstancePath)
@@ -1111,17 +1355,23 @@ func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtim
 			operation_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			operation_kind, request_hash, expected_epoch, expected_generation,
-			target_generation, target_phase, config_revision, run_mode, state,
-			result, created_at, updated_at, completed_at
+			target_generation, target_phase, config_revision, run_mode,
+			process_authority_id, process_owner_id, process_boot_id, generation_grant_id,
+			bundle_hash, bundle_source, runtime_instance_id, runtime_generation,
+			state, result, created_at, updated_at, completed_at
 		) VALUES (
 			$1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-			'succeeded',$17::jsonb,$18,$18,$18
+			$17::uuid,$18,$19::uuid,$20::uuid,$21,$22,$23::uuid,$24,'succeeded',$25::jsonb,$26,$26,$26
 		)
 	`, req.OperationID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID,
 		fields.FlowInstancePath, req.OperationKind, req.RequestHash,
 		req.ExpectedEpoch, req.ExpectedGeneration, req.TargetGeneration,
 		string(req.TargetPhase), req.ConfigRevision, string(req.RunMode),
+		req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+		req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+		req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+		req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
 		string(raw), req.Now.UTC()); err != nil {
 		return err
 	}
@@ -1130,17 +1380,24 @@ func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtim
 			transition_id, operation_id, agent_id, agent_name_owner,
 			agent_name_source, agent_route_presence, flow_scope_key,
 			flow_instance_id, flow_instance, trigger, previous_phase, next_phase,
-			previous_generation, next_generation, runtime_epoch, config_revision,
-			run_mode, created_at
-		) VALUES (
-			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+				previous_generation, next_generation, runtime_epoch, config_revision,
+				run_mode, process_authority_id, process_owner_id, process_boot_id,
+				generation_grant_id, bundle_hash, bundle_source, runtime_instance_id,
+				runtime_generation, created_at
+			) VALUES (
+				$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::uuid,$19,$20::uuid,$21::uuid,$22,$23,$24::uuid,$25,$26
 		)
-	`, result.TransitionID, req.OperationID, fields.AgentID, fields.NameOwner,
+		`, result.TransitionID, req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
 		fields.FlowInstanceID, fields.FlowInstancePath, req.Trigger,
 		string(result.PreviousPhase), string(result.Phase),
 		result.PreviousGeneration, result.Generation, result.RuntimeEpoch,
-		result.ConfigRevision, string(result.RunMode), req.Now.UTC()); err != nil {
+		result.ConfigRevision, string(result.RunMode),
+		req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+		req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+		req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+		req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
+		req.Now.UTC()); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
@@ -1169,14 +1426,20 @@ func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtim
 			operation_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			operation_kind, request_hash, expected_epoch, expected_generation,
-			target_generation, target_phase, config_revision, run_mode, state,
-			result, created_at, updated_at, completed_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'succeeded',?,?,?,?)
+			target_generation, target_phase, config_revision, run_mode,
+			process_authority_id, process_owner_id, process_boot_id, generation_grant_id,
+			bundle_hash, bundle_source, runtime_instance_id, runtime_generation,
+			state, result, created_at, updated_at, completed_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'succeeded',?,?,?,?)
 	`, req.OperationID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID,
 		fields.FlowInstancePath, req.OperationKind, req.RequestHash,
 		req.ExpectedEpoch, req.ExpectedGeneration, req.TargetGeneration,
 		string(req.TargetPhase), req.ConfigRevision, string(req.RunMode),
+		req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+		req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+		req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+		req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
 		string(raw), req.Now.UTC(), req.Now.UTC(), req.Now.UTC()); err != nil {
 		return err
 	}
@@ -1186,14 +1449,21 @@ func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtim
 			agent_name_source, agent_route_presence, flow_scope_key,
 			flow_instance_id, flow_instance, trigger, previous_phase, next_phase,
 			previous_generation, next_generation, runtime_epoch, config_revision,
-			run_mode, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			run_mode, process_authority_id, process_owner_id, process_boot_id,
+			generation_grant_id, bundle_hash, bundle_source, runtime_instance_id,
+			runtime_generation, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	`, result.TransitionID, req.OperationID, fields.AgentID, fields.NameOwner,
 		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
 		fields.FlowInstanceID, fields.FlowInstancePath, req.Trigger,
 		string(result.PreviousPhase), string(result.Phase),
 		result.PreviousGeneration, result.Generation, result.RuntimeEpoch,
-		result.ConfigRevision, string(result.RunMode), req.Now.UTC()); err != nil {
+		result.ConfigRevision, string(result.RunMode),
+		req.ProcessBinding.ProcessAuthorityID, req.ProcessBinding.ProcessOwnerID,
+		req.ProcessBinding.ProcessBootID, req.ProcessBinding.GenerationGrantID,
+		req.ProcessBinding.BundleHash, req.ProcessBinding.BundleSource,
+		req.ProcessBinding.RuntimeInstanceID, req.ProcessBinding.RuntimeGeneration,
+		req.Now.UTC()); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `

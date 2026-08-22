@@ -76,6 +76,47 @@ external.observed:
 	return root
 }
 
+// CopyRootIngressServedConversationFork declares the source agent through the
+// same startup topology used by the live conversation-fork proof.
+func CopyRootIngressServedConversationFork(t testing.TB) string {
+	t.Helper()
+	root := CopyRootIngressServedExternalEvent(t)
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "flows: []\n", `flows:
+  - id: fork-source
+    flow: fork-source
+    mode: static
+`)
+	writeClosedVariantFile(t, root, "flows/fork-source/schema.yaml", `name: fork-source
+mode: static
+pins:
+  inputs:
+    events:
+      - name: fork_source_message
+        event: fork.source_message
+        source: external
+  outputs:
+    events: []
+`)
+	writeClosedVariantFile(t, root, "flows/fork-source/events.yaml", `fork.source_message:
+  note: text
+`)
+	writeClosedVariantFile(t, root, "flows/fork-source/nodes.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/fork-source/entities.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/fork-source/policy.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/fork-source/tools.yaml", "{}\n")
+	writeClosedVariantFile(t, root, "flows/fork-source/agents.yaml", `fork-source-agent:
+  id: fork-source-agent
+  role: researcher
+  intent: prompts/fork-source-agent.md
+  model: regular
+  memory: true
+  subscriptions:
+    - fork.source_message
+`)
+	writeClosedVariantFile(t, root, "flows/fork-source/prompts/fork-source-agent.md", "Preserve the source conversation used by the operator fork proof.\n")
+	return root
+}
+
 // CopyRootIngressServedActiveLoad derives the fixed agent-subscription load
 // proof from the canonical root-ingress route.
 func CopyRootIngressServedActiveLoad(t testing.TB) string {

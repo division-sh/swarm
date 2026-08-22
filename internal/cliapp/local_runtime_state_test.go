@@ -81,7 +81,7 @@ func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
 	}
 }
 
-func TestPrepareLocalRunProjectClaimRejectsLiveProjectContext(t *testing.T) {
+func TestRunStartLocalLiveProjectRefusal(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	projectRoot, contractsPath := writeLocalRuntimeStateProject(t)
 	canonicalProjectRoot, status := canonicalizeDoctorTargetPath(projectRoot)

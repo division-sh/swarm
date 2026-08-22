@@ -18,8 +18,12 @@ func (s *AgentSQLiteOwner) LoadAgents(ctx context.Context) ([]runtimemanager.Per
 		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, COALESCE(runtime_descriptor, '{}'),
 		       COALESCE(subscriptions, '[]'), COALESCE(emit_events, '[]'), COALESCE(tools, '[]'), COALESCE(permissions, '[]'),
 		       COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP),
-		       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
-		       topology_admission
+			       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
+			       lifecycle_process_authority_id, lifecycle_process_owner_id,
+			       lifecycle_process_boot_id, lifecycle_generation_grant_id,
+			       lifecycle_bundle_hash, lifecycle_bundle_source,
+			       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+			       topology_admission
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
@@ -40,6 +44,10 @@ func (s *AgentSQLiteOwner) LoadAgents(ctx context.Context) ([]runtimemanager.Per
 			&row.Role, &row.Model, &row.LLMBackend, &row.MemoryEnabled, &row.MemorySource,
 			&row.ParentAgentID, &row.EntityID, &row.ConfigJSON, &row.RuntimeDescriptor, &row.SubscriptionsJSON, &row.EmitEventsJSON,
 			&row.ToolsJSON, &row.PermissionsJSON, &rec.Status, &startedAt, &rec.LifecycleEpoch, &lifecycleGeneration, &rec.LifecyclePhase, &rec.LifecycleRunMode,
+			&rec.ProcessBinding.ProcessAuthorityID, &rec.ProcessBinding.ProcessOwnerID,
+			&rec.ProcessBinding.ProcessBootID, &rec.ProcessBinding.GenerationGrantID,
+			&rec.ProcessBinding.BundleHash, &rec.ProcessBinding.BundleSource,
+			&rec.ProcessBinding.RuntimeInstanceID, &rec.ProcessBinding.RuntimeGeneration,
 			&topologyRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent: %w", err)
 		}
@@ -60,6 +68,9 @@ func (s *AgentSQLiteOwner) LoadAgents(ctx context.Context) ([]runtimemanager.Per
 			return nil, fmt.Errorf("decode sqlite agent topology admission: %w", err)
 		}
 		if err := rec.Topology.Validate(); err != nil {
+			return nil, err
+		}
+		if err := rec.ProcessBinding.Validate(); err != nil {
 			return nil, err
 		}
 		rec.Config = cfg

@@ -119,6 +119,7 @@ type startupRecoveryOrderStore interface {
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimemanager.ManagerPersistence
+	runtimemanager.AgentLifecycleCellCensus
 	storetest.AgentFixtureStore
 }
 
@@ -259,6 +260,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			if err := runtime.Manager.Shutdown(); err != nil {
 				t.Fatalf("retire constructed manager before startup-order replacement: %v", err)
 			}
+			managerRoles := externalRuntimeTestManagerBusRoles(runtime.Bus)
+			managerRoles.LifecycleCensus = selected
 			runtime.Manager = runtimemanager.NewAgentManagerWithOptions(runtime.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				hydrated.Store(true)
 				subscriptions := make([]events.EventType, 0, len(cfg.Subscriptions))
@@ -268,8 +271,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				return startupRecoveryOrderAgent{id: cfg.ID, subscriptions: subscriptions}, nil
 			}, runtimemanager.AgentManagerOptions{
 				ExecutionPosture: executionposture.Live,
-				BaseContext:      ctx, LifecycleStore: storetest.AgentLifecycleFixture(selected), DeliveryStore: selected, SemanticSource: source,
-				PersistenceRoles:  externalRuntimeTestManagerBusRoles(runtime.Bus),
+				BaseContext:      ctx, LifecycleStore: grant, DeliveryStore: selected, SemanticSource: source,
+				PersistenceRoles:  managerRoles,
 				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
 			installExternalManagerTestGeneration(t, ctx, runtime.Manager, grant)

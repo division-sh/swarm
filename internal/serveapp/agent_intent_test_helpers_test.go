@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"encoding/json"
 	"strings"
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
@@ -31,21 +30,4 @@ func serveTestAgentConfig(cfg runtimeactors.AgentConfig) runtimeactors.AgentConf
 	}
 	cfg.Prompt = prompt
 	return cfg
-}
-
-func serveTestAgentRuntimeDescriptor(agentID, agentType string, fields map[string]any) string {
-	cfg := serveTestAgentConfig(runtimeactors.AgentConfig{ID: agentID})
-	descriptor := map[string]any{
-		"type":           strings.TrimSpace(agentType),
-		"execution_mode": "live",
-		"intent":         cfg.Intent,
-	}
-	for key, value := range fields {
-		descriptor[key] = value
-	}
-	raw, err := json.Marshal(descriptor)
-	if err != nil {
-		panic(err)
-	}
-	return string(raw)
 }

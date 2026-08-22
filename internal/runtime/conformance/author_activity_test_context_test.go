@@ -102,6 +102,7 @@ func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.Event
 		RouteRestorer: eventBus, RouteRetirer: eventBus, RouteRemover: eventBus,
 		FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
 	}
+	roles.LifecycleCensus, _ = selected.(runtimemanager.AgentLifecycleCellCensus)
 	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
 	roles.LifecycleEffects, _ = selected.(runtimeeffects.Store)
 	roles.LifecycleDiagnostics, _ = selected.(runtimemanager.AgentLifecycleDiagnosticPersistence)
@@ -142,6 +143,17 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 }
 
 func installConformanceRuntimeStartupGrant(t testing.TB, ctx context.Context, selected any, rt *runtimepkg.Runtime) runtimestartupownership.ProcessCapability {
+	t.Helper()
+	capability, _ := installConformanceRuntimeStartupGeneration(t, ctx, selected, rt)
+	return capability
+}
+
+func installConformanceRuntimeStartupGeneration(
+	t testing.TB,
+	ctx context.Context,
+	selected any,
+	rt *runtimepkg.Runtime,
+) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant) {
 	t.Helper()
 	store, ok := selected.(runtimestartupownership.Store)
 	if !ok {
@@ -222,7 +234,7 @@ func installConformanceRuntimeStartupGrant(t testing.TB, ctx context.Context, se
 		}
 	})
 	release = false
-	return capability
+	return capability, grant
 }
 
 type testAuthorActivityCatalogRegistrar interface {

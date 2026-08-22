@@ -329,6 +329,54 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	}
 }
 
+func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-remote", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-remote")
+				run["status"] = "completed"
+				run["ended_at"] = "2026-05-13T10:01:00Z"
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+	})
+	defer server.Close()
+	opts := testRunCommandOptions(server)
+	opts.runServe = func(context.Context, string, ServeOptions) int {
+		t.Fatal("remote run mode attempted to acquire local serve ownership")
+		return 1
+	}
+
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "connected start", args: []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}},
+		{name: "reattach", args: []string{"run", "start", "--connect", server.URL, "--reattach", "run-remote"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), test.args, &stdout, &stderr, opts); code != 0 {
+				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+		})
+	}
+	methods := runCommandMethodNames(*calls)
+	if !reflect.DeepEqual(methods, []string{"health.check", "run.start", "run.get"}) {
+		t.Fatalf("methods = %v, want remote API-only execution", methods)
+	}
+}
+
 func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})

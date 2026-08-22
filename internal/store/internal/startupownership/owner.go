@@ -28,30 +28,33 @@ const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"
 type StartupPostgresOwner struct {
 	backend          *postgresbackend.Backend
 	schemaGuard      func() error
+	catalogEmpty     func(context.Context) (bool, error)
 	agents           *storeagent.AgentPostgresOwner
 	bundleDelete     *storeadmin.BundleDeletePostgresOwner
 	destructiveReset *storeadmin.DestructiveResetPostgresOwner
 }
 
 type StartupSQLiteOwner struct {
-	backend     *sqlitebackend.Backend
-	schemaGuard func() error
-	agents      *storeagent.AgentSQLiteOwner
-	ownerMu     sync.Mutex
+	backend      *sqlitebackend.Backend
+	path         string
+	schemaGuard  func() error
+	catalogEmpty func(context.Context) (bool, error)
+	agents       *storeagent.AgentSQLiteOwner
+	ownerMu      sync.Mutex
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, agents *storeagent.AgentPostgresOwner, bundleDelete *storeadmin.BundleDeletePostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || agents == nil || bundleDelete == nil || destructiveReset == nil {
+func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, bundleDelete *storeadmin.BundleDeletePostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || bundleDelete == nil || destructiveReset == nil {
 		return nil, errors.New("startup/topology PostgreSQL owner requires backend, schema guard, and agent lifecycle owner")
 	}
-	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, agents: agents, bundleDelete: bundleDelete, destructiveReset: destructiveReset}, nil
+	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, bundleDelete: bundleDelete, destructiveReset: destructiveReset}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || agents == nil {
+func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil {
 		return nil, errors.New("startup/topology SQLite owner requires backend, schema guard, and agent lifecycle owner")
 	}
-	return &StartupSQLiteOwner{backend: backend, schemaGuard: schemaGuard, agents: agents}, nil
+	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents}, nil
 }
 
 func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
@@ -61,29 +64,32 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 	if err := s.schemaGuard(); err != nil {
 		return nil, err
 	}
+	releaseCapacity := s.backend.RetainConnectionCapacity()
 	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(ctx, s.backend, runtimeSharedStoreOwnershipLock)
 	if err != nil {
+		releaseCapacity()
 		return nil, fmt.Errorf("acquire retained runtime store session: %w", err)
 	}
 	if !acquired {
-		return nil, &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionTakeoverRequired, Detail: "selected store is held by another process"}
+		releaseCapacity()
+		return nil, s.liveOwnerAcquisitionError(ctx)
 	}
-	authority, err := runtimestartupownership.NewColdAuthority(req, "postgres_retained_session")
-	if err != nil {
-		return nil, errors.Join(err, lease.Release(ctx))
-	}
-	session := &postgresSession{owner: s, lease: lease, authority: authority}
+	var authority runtimestartupownership.Authority
 	if err := lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireAcquirableAuthorityHead(txctx, tx, false); err != nil {
-			return err
-		}
-		return recordAuthorityTransitionTx(txctx, tx, nil, authority, false)
+		var acquireErr error
+		authority, acquireErr = acquireAuthorityTx(txctx, tx, req, "postgres_retained_session", false)
+		return acquireErr
 	}); err != nil {
-		return nil, errors.Join(err, lease.Release(ctx))
+		releaseErr := lease.Release(ctx)
+		releaseCapacity()
+		return nil, errors.Join(err, releaseErr)
 	}
+	session := &postgresSession{owner: s, lease: lease, authority: authority, releaseCapacity: releaseCapacity}
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {
-		return nil, errors.Join(err, lease.Release(ctx))
+		releaseErr := lease.Release(ctx)
+		releaseCapacity()
+		return nil, errors.Join(err, releaseErr)
 	}
 	return capability, nil
 }
@@ -95,39 +101,66 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 	if err := s.schemaGuard(); err != nil {
 		return nil, err
 	}
-	if !s.ownerMu.TryLock() {
-		return nil, &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionTakeoverRequired, Detail: "selected store is held by another process capability"}
-	}
-	authority, err := runtimestartupownership.NewColdAuthority(req, "sqlite_retained_owner")
+	possession, err := s.acquirePossession()
 	if err != nil {
-		s.ownerMu.Unlock()
+		var acquisitionErr *runtimestartupownership.AcquisitionError
+		if errors.As(err, &acquisitionErr) && acquisitionErr.Failure == runtimestartupownership.AcquisitionTakeoverRequired {
+			return nil, s.liveOwnerAcquisitionError(ctx)
+		}
 		return nil, err
 	}
-	session := &sqliteSession{owner: s, authority: authority}
+	var authority runtimestartupownership.Authority
+	session := &sqliteSession{owner: s, authority: authority, possession: possession}
 	err = s.backend.RunTransaction(ctx, "acquire runtime process capability", func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireAcquirableAuthorityHead(txctx, tx, true); err != nil {
-			return err
-		}
-		return recordAuthorityTransitionTx(txctx, tx, nil, authority, true)
+		var acquireErr error
+		authority, acquireErr = acquireAuthorityTx(txctx, tx, req, "sqlite_retained_owner", true)
+		return acquireErr
 	})
 	if err != nil {
-		s.ownerMu.Unlock()
-		return nil, err
+		return nil, errors.Join(err, possession.Release())
 	}
+	session.authority = authority
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {
-		s.ownerMu.Unlock()
-		return nil, err
+		return nil, errors.Join(err, possession.Release())
 	}
 	return capability, nil
 }
 
+func (s *StartupPostgresOwner) liveOwnerAcquisitionError(ctx context.Context) error {
+	result := &runtimestartupownership.AcquisitionError{
+		Failure: runtimestartupownership.AcquisitionTakeoverRequired,
+		Detail:  "selected store is held by another process",
+	}
+	inspection, err := s.InspectAuthority(ctx)
+	if err == nil && inspection.Status == runtimestartupownership.AuthorityInspectionValid &&
+		inspection.State == runtimestartupownership.StateActive {
+		result.RecordedAt = inspection.RecordedAt
+	}
+	return result
+}
+
+func (s *StartupSQLiteOwner) liveOwnerAcquisitionError(ctx context.Context) error {
+	result := &runtimestartupownership.AcquisitionError{
+		Failure: runtimestartupownership.AcquisitionTakeoverRequired,
+		Detail:  "selected store is held by another process",
+	}
+	inspection, err := s.InspectAuthority(ctx)
+	if err == nil && inspection.Status == runtimestartupownership.AuthorityInspectionValid &&
+		inspection.State == runtimestartupownership.StateActive {
+		result.RecordedAt = inspection.RecordedAt
+	}
+	return result
+}
+
 type postgresSession struct {
-	mu        sync.Mutex
-	owner     *StartupPostgresOwner
-	lease     *postgresbackend.AdvisoryLockLease
-	authority runtimestartupownership.Authority
-	released  bool
+	mu               sync.Mutex
+	owner            *StartupPostgresOwner
+	lease            *postgresbackend.AdvisoryLockLease
+	authority        runtimestartupownership.Authority
+	releaseCapacity  func()
+	terminalDeadline time.Duration
+	released         bool
 }
 
 func (s *postgresSession) Authority() (runtimestartupownership.Authority, error) {
@@ -141,11 +174,46 @@ func (s *postgresSession) Authority() (runtimestartupownership.Authority, error)
 
 func (s *postgresSession) ProveCurrent(ctx context.Context) error { return s.lease.ProveCurrent(ctx) }
 
-func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
-	if owner == nil || !s.lease.InstallTerminalOwner(nil, owner.SelectedStoreSessionTerminal, nil) {
+func (s *postgresSession) MonitorProveCurrent(ctx context.Context, deadline time.Duration) error {
+	return s.lease.MonitorProveCurrent(ctx, deadline)
+}
+
+func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner, deadline time.Duration) error {
+	if owner == nil || deadline <= 0 {
+		return errors.New("install PostgreSQL process capability terminal callback")
+	}
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return errors.New("install PostgreSQL process capability terminal callback")
+	}
+	s.terminalDeadline = deadline
+	s.mu.Unlock()
+	if !s.lease.InstallTerminalOwner(s.releaseCapacity, func() { s.terminal(owner) }, nil) {
+		if s.releaseCapacity != nil {
+			s.releaseCapacity()
+		}
 		return errors.New("install PostgreSQL process capability terminal callback")
 	}
 	return nil
+}
+
+func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminalOwner) {
+	if s == nil || owner == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return
+	}
+	authority := s.authority
+	deadline := s.terminalDeadline
+	s.released = true
+	s.mu.Unlock()
+	owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
+		return s.owner.terminalResult(ctx, authority, false)
+	}))
 }
 
 func (s *postgresSession) RecordGenerationGrantTransition(ctx context.Context, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) error {
@@ -414,11 +482,13 @@ func (s *postgresSession) Release(ctx context.Context) error {
 }
 
 type sqliteSession struct {
-	mu            sync.Mutex
-	owner         *StartupSQLiteOwner
-	authority     runtimestartupownership.Authority
-	terminalOwner runtimestartupownership.SessionTerminalOwner
-	released      bool
+	mu               sync.Mutex
+	owner            *StartupSQLiteOwner
+	authority        runtimestartupownership.Authority
+	terminalOwner    runtimestartupownership.SessionTerminalOwner
+	terminalDeadline time.Duration
+	possession       sqlitePossession
+	released         bool
 }
 
 func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {
@@ -431,30 +501,72 @@ func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {
 }
 
 func (s *sqliteSession) ProveCurrent(ctx context.Context) error {
-	if _, err := s.Authority(); err != nil {
+	return s.proveCurrent(ctx, true)
+}
+
+func (s *sqliteSession) proveCurrent(ctx context.Context, terminalOnFailure bool) error {
+	authority, err := s.Authority()
+	if err != nil {
+		return err
+	}
+	if err := s.possession.ProveCurrent(ctx); err != nil {
+		if callerErr := contextError(ctx); callerErr != nil {
+			return callerErr
+		}
+		if terminalOnFailure {
+			s.terminal()
+		}
 		return err
 	}
 	var snapshot []byte
-	err := s.owner.backend.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, s.authority.AuthorityID).Scan(&snapshot)
+	err = s.owner.backend.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts WHERE authority_id = ? ORDER BY transition_ordinal DESC LIMIT 1`, authority.AuthorityID).Scan(&snapshot)
 	if err != nil {
-		s.terminal()
+		if callerErr := contextError(ctx); callerErr != nil {
+			return callerErr
+		}
+		if terminalOnFailure {
+			s.terminal()
+		}
 		return err
 	}
 	var persisted runtimestartupownership.Authority
-	if err := json.Unmarshal(snapshot, &persisted); err != nil || persisted != s.authority {
-		s.terminal()
+	if err := json.Unmarshal(snapshot, &persisted); err != nil || persisted != authority {
+		if terminalOnFailure {
+			s.terminal()
+		}
 		return errors.New("SQLite process capability durable head changed")
 	}
 	return nil
 }
 
-func (s *sqliteSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
+func contextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
+func (s *sqliteSession) MonitorProveCurrent(ctx context.Context, deadline time.Duration) error {
+	if deadline <= 0 {
+		return errors.New("SQLite possession monitor deadline must be positive")
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	err := s.proveCurrent(probeCtx, false)
+	if err != nil && ctx.Err() == nil {
+		s.terminal()
+	}
+	return err
+}
+
+func (s *sqliteSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner, deadline time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.terminalOwner != nil || owner == nil {
+	if s.terminalOwner != nil || owner == nil || deadline <= 0 {
 		return errors.New("install SQLite process capability terminal callback")
 	}
 	s.terminalOwner = owner
+	s.terminalDeadline = deadline
 	return nil
 }
 
@@ -530,44 +642,141 @@ func (s *sqliteSession) Release(ctx context.Context) error {
 	s.authority = next
 	s.released = true
 	s.mu.Unlock()
-	s.owner.ownerMu.Unlock()
-	return nil
+	return s.possession.Release()
 }
 
 func (s *sqliteSession) terminal() {
 	s.mu.Lock()
 	owner := s.terminalOwner
+	authority := s.authority
+	deadline := s.terminalDeadline
 	if !s.released {
 		s.released = true
-		s.owner.ownerMu.Unlock()
+		_ = s.possession.Release()
 	}
 	s.mu.Unlock()
 	if owner != nil {
-		owner.SelectedStoreSessionTerminal()
+		owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
+			return s.owner.terminalResult(ctx, authority, true)
+		}))
 	}
 }
 
-func requireAcquirableAuthorityHead(ctx context.Context, tx *sql.Tx, sqlite bool) error {
-	query := `SELECT snapshot FROM runtime_startup_authority_facts ORDER BY created_at DESC, transition_ordinal DESC LIMIT 1`
-	if !sqlite {
-		query += ` FOR UPDATE`
+func boundedTerminalResult(deadline time.Duration, load func(context.Context) runtimestartupownership.TerminalResult) runtimestartupownership.TerminalResult {
+	if deadline <= 0 || load == nil {
+		return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
 	}
-	var raw []byte
-	err := tx.QueryRowContext(ctx, query).Scan(&raw)
-	if err == sql.ErrNoRows {
-		return nil
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	result := load(ctx)
+	if ctx.Err() != nil {
+		return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
 	}
+	return result
+}
+
+func (s *StartupPostgresOwner) terminalResult(ctx context.Context, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {
+	return loadTerminalAuthorityResult(ctx, s.backend, authority, sqlite)
+}
+
+func (s *StartupSQLiteOwner) terminalResult(ctx context.Context, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {
+	return loadTerminalAuthorityResult(ctx, s.backend, authority, sqlite)
+}
+
+type authoritySnapshotReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func loadTerminalAuthorityResult(ctx context.Context, reader authoritySnapshotReader, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {
+	result := runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
+	if reader == nil || strings.TrimSpace(authority.AuthorityID) == "" {
+		return result
+	}
+	record, exists, err := loadAuthorityRecord(ctx, reader, authority.AuthorityID, nil, sqlite)
+	if err != nil || !exists {
+		return result
+	}
+	persisted, err := validateAuthorityLineage(ctx, reader, record, authority.Backend, sqlite, make(map[string]struct{}))
+	if err != nil ||
+		persisted.AuthorityID != authority.AuthorityID || persisted.State != runtimestartupownership.StateSuperseded ||
+		strings.TrimSpace(persisted.SuccessorAuthorityID) == "" {
+		return result
+	}
+	successorRecord, exists, err := loadAuthorityRecord(ctx, reader, persisted.SuccessorAuthorityID, nil, sqlite)
+	if err != nil || !exists {
+		return result
+	}
+	successor, err := validateAuthorityLineage(ctx, reader, successorRecord, authority.Backend, sqlite, make(map[string]struct{}))
+	if err != nil || successor.PredecessorAuthorityID != persisted.AuthorityID || successor.AcquisitionKind != runtimestartupownership.AcquisitionCrashTakeover {
+		return result
+	}
+	return runtimestartupownership.TerminalResult{
+		Cause:                runtimestartupownership.TerminalOwnershipSuperseded,
+		SuccessorAuthorityID: persisted.SuccessorAuthorityID,
+	}
+}
+
+func loadAuthorityHeadTx(ctx context.Context, tx *sql.Tx, backend string, sqlite bool) (runtimestartupownership.Authority, bool, error) {
+	record, exists, err := loadAuthorityHeadRecord(ctx, tx, sqlite, true)
 	if err != nil {
-		return err
+		return runtimestartupownership.Authority{}, false, err
 	}
-	var prior runtimestartupownership.Authority
-	if err := json.Unmarshal(raw, &prior); err != nil || prior.Validate() != nil {
-		return &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "durable process authority head is invalid"}
+	if !exists {
+		return runtimestartupownership.Authority{}, false, nil
 	}
-	if prior.State != runtimestartupownership.StateReleased {
-		return &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionTakeoverRequired, Detail: "prior process authority is nonterminal"}
+	prior, err := validateAuthorityLineage(ctx, tx, record, backend, sqlite, make(map[string]struct{}))
+	if err != nil {
+		return runtimestartupownership.Authority{}, false, &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "durable process authority head is invalid: " + err.Error()}
 	}
-	return nil
+	return prior, true, nil
+}
+
+func acquireAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupownership.AcquireRequest, backend string, sqlite bool) (runtimestartupownership.Authority, error) {
+	prior, exists, err := loadAuthorityHeadTx(ctx, tx, backend, sqlite)
+	if err != nil {
+		return runtimestartupownership.Authority{}, err
+	}
+	if exists && prior.AcquisitionID == strings.TrimSpace(req.BootID) {
+		if prior.AcquisitionRequestHash != runtimestartupownership.AcquireRequestHash(req, backend) || prior.State != runtimestartupownership.StateActive {
+			return runtimestartupownership.Authority{}, &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "process authority acquisition replay conflicts with durable evidence"}
+		}
+		return prior, nil
+	}
+	generation := uint64(1)
+	kind := runtimestartupownership.AcquisitionCold
+	predecessorID := ""
+	if exists {
+		generation = prior.AuthorityGeneration + 1
+		predecessorID = prior.AuthorityID
+		switch prior.State {
+		case runtimestartupownership.StateReleased:
+			kind = runtimestartupownership.AcquisitionCleanHandoff
+		case runtimestartupownership.StateActive:
+			kind = runtimestartupownership.AcquisitionCrashTakeover
+		default:
+			return runtimestartupownership.Authority{}, &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "durable process authority head is terminal without a current successor"}
+		}
+	}
+	next, err := runtimestartupownership.NewAuthority(req, backend, generation, predecessorID, kind)
+	if err != nil {
+		return runtimestartupownership.Authority{}, err
+	}
+	if exists && prior.State == runtimestartupownership.StateActive {
+		superseded, supersedeErr := runtimestartupownership.SupersededAuthority(prior, next.AuthorityID)
+		if supersedeErr != nil {
+			return runtimestartupownership.Authority{}, supersedeErr
+		}
+		if err := recordAuthorityTransitionTx(ctx, tx, &prior, superseded, sqlite); err != nil {
+			return runtimestartupownership.Authority{}, err
+		}
+		if err := retireAuthorityGenerationGrantsTx(ctx, tx, prior.AuthorityID, sqlite); err != nil {
+			return runtimestartupownership.Authority{}, err
+		}
+	}
+	if err := recordAuthorityTransitionTx(ctx, tx, nil, next, sqlite); err != nil {
+		return runtimestartupownership.Authority{}, err
+	}
+	return next, nil
 }
 
 func recordAuthorityTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimestartupownership.Authority, next runtimestartupownership.Authority, sqlite bool) error {
@@ -594,11 +803,76 @@ func recordAuthorityTransitionTx(ctx context.Context, tx *sql.Tx, previous *runt
 		return err
 	}
 	if sqlite {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), next.AuthorityID, next.TransitionOrdinal, next.StateVersion, string(next.State), next.OwnerID, next.BootID, next.RuntimeInstanceID, next.Backend, string(raw), next.RecordedAt.UTC())
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), next.AuthorityID, next.AuthorityGeneration, next.TransitionOrdinal, next.StateVersion, string(next.State), next.OwnerID, next.BootID, next.RuntimeInstanceID, next.Backend, next.AcquisitionID, next.AcquisitionRequestHash, string(next.AcquisitionKind), nullableString(next.PredecessorAuthorityID), nullableString(next.SuccessorAuthorityID), string(raw), next.RecordedAt.UTC())
 	} else {
-		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7::uuid,$8::uuid,$9,$10::jsonb,$11)`, uuid.NewString(), next.AuthorityID, next.TransitionOrdinal, next.StateVersion, string(next.State), next.OwnerID, next.BootID, next.RuntimeInstanceID, next.Backend, string(raw), next.RecordedAt.UTC())
+		_, err = tx.ExecContext(ctx, `INSERT INTO runtime_startup_authority_facts (fact_id,authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9::uuid,$10,$11::uuid,$12,$13,$14::uuid,$15::uuid,$16::jsonb,$17)`, uuid.NewString(), next.AuthorityID, next.AuthorityGeneration, next.TransitionOrdinal, next.StateVersion, string(next.State), next.OwnerID, next.BootID, next.RuntimeInstanceID, next.Backend, next.AcquisitionID, next.AcquisitionRequestHash, string(next.AcquisitionKind), nullableString(next.PredecessorAuthorityID), nullableString(next.SuccessorAuthorityID), string(raw), next.RecordedAt.UTC())
 	}
 	return err
+}
+
+func retireAuthorityGenerationGrantsTx(ctx context.Context, tx *sql.Tx, authorityID string, sqlite bool) error {
+	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE g.process_authority_id = ? AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
+	if !sqlite {
+		query = `SELECT g.snapshot FROM runtime_generation_grants g WHERE g.process_authority_id = $1::uuid AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, query, authorityID)
+	if err != nil {
+		return err
+	}
+	return retireGenerationGrantRowsTx(ctx, tx, rows, sqlite)
+}
+
+func retireAllGenerationGrantsTx(ctx context.Context, tx *sql.Tx, sqlite bool) error {
+	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
+	if !sqlite {
+		query += ` FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	return retireGenerationGrantRowsTx(ctx, tx, rows, sqlite)
+}
+
+func retireGenerationGrantRowsTx(ctx context.Context, tx *sql.Tx, rows *sql.Rows, sqlite bool) error {
+	var grants []runtimestartupownership.GrantEvidence
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		var grant runtimestartupownership.GrantEvidence
+		if err := json.Unmarshal(raw, &grant); err != nil || grant.Validate() != nil {
+			_ = rows.Close()
+			return &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "predecessor generation grant is invalid"}
+		}
+		grants = append(grants, grant)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, previous := range grants {
+		next := previous
+		next.State = runtimestartupownership.GrantRetired
+		next.StateVersion++
+		if err := recordGrantTransitionTx(ctx, tx, &previous, next, sqlite); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func nullableString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func recordGrantTransitionTx(ctx context.Context, tx *sql.Tx, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence, sqlite bool) error {
