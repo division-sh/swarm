@@ -14291,6 +14291,24 @@ platform_tables:
         new-work grants, and appends its successor after backend-exclusive possession has already
         been proved. Runtime generations consume revocable grants and cannot acquire, release,
         copy, infer, or replace this authority.
+      possession_loss_contract:
+        operation_error_recheck: >-
+          A selected-store operation error is not itself ownership loss. Before returning from the serialized process
+          operation boundary, the process capability performs one independent possession proof bounded by its configured
+          monitor deadline. Timeout, backend unreachability, or failed proof terminalizes the capability as
+          ownership_unprovable and retires its local generation grants; no unbounded background-context recheck is allowed.
+        terminal_readback: >-
+          After a retained PostgreSQL session is discarded or a SQLite file-possession lock is released unexpectedly,
+          successor classification is bounded by that same configured monitor deadline. Only exact validated successor
+          lineage may classify ownership_superseded. Timeout, unavailable storage, malformed evidence, or any incomplete
+          readback promptly classifies ownership_unprovable so released physical possession cannot coexist with locally
+          live process capability or generation-grant authority.
+      diagnostic_inspection_contract: >-
+        `swarm store status` is read-only. It never creates a SQLite parent or database file, bootstraps or origin-stamps
+        either selected store, or creates PostgreSQL schema objects. An absent SQLite target or an empty PostgreSQL/SQLite
+        catalog reports the canonical empty authority inspection. Existing SQLite inspection opens the selected file in
+        read-only mode. A non-empty catalog missing the authority table fails closed instead of being reported as empty.
+        Serve startup and explicit repair remain the only consumers here that may invoke schema bootstrap or mutation.
       ddl: |
         CREATE TABLE runtime_startup_authority_facts (
             fact_id             UUID PRIMARY KEY,

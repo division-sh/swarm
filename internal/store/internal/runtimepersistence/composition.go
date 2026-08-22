@@ -253,7 +253,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.preservationPostgresOwner = preservationOwner
-	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, agentOwner, bundleDeleteOwner, destructiveResetOwner)
+	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, schemaOwner.CatalogEmpty, agentOwner, bundleDeleteOwner, destructiveResetOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +407,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.lLMSQLiteOwner = llmOwner
-	startupOwner, err := storestartupownership.NewSQLite(backend, schema.Path(), store.requireCurrentSchema, agentOwner)
+	startupOwner, err := storestartupownership.NewSQLite(backend, schema.Path(), store.requireCurrentSchema, schema.CatalogEmpty, agentOwner)
 	if err != nil {
 		return nil, err
 	}

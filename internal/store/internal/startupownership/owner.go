@@ -28,31 +28,33 @@ const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"
 type StartupPostgresOwner struct {
 	backend          *postgresbackend.Backend
 	schemaGuard      func() error
+	catalogEmpty     func(context.Context) (bool, error)
 	agents           *storeagent.AgentPostgresOwner
 	bundleDelete     *storeadmin.BundleDeletePostgresOwner
 	destructiveReset *storeadmin.DestructiveResetPostgresOwner
 }
 
 type StartupSQLiteOwner struct {
-	backend     *sqlitebackend.Backend
-	path        string
-	schemaGuard func() error
-	agents      *storeagent.AgentSQLiteOwner
-	ownerMu     sync.Mutex
+	backend      *sqlitebackend.Backend
+	path         string
+	schemaGuard  func() error
+	catalogEmpty func(context.Context) (bool, error)
+	agents       *storeagent.AgentSQLiteOwner
+	ownerMu      sync.Mutex
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, agents *storeagent.AgentPostgresOwner, bundleDelete *storeadmin.BundleDeletePostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || agents == nil || bundleDelete == nil || destructiveReset == nil {
+func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, bundleDelete *storeadmin.BundleDeletePostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil || bundleDelete == nil || destructiveReset == nil {
 		return nil, errors.New("startup/topology PostgreSQL owner requires backend, schema guard, and agent lifecycle owner")
 	}
-	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, agents: agents, bundleDelete: bundleDelete, destructiveReset: destructiveReset}, nil
+	return &StartupPostgresOwner{backend: backend, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents, bundleDelete: bundleDelete, destructiveReset: destructiveReset}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || schemaGuard == nil || agents == nil {
+func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil {
 		return nil, errors.New("startup/topology SQLite owner requires backend, schema guard, and agent lifecycle owner")
 	}
-	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), schemaGuard: schemaGuard, agents: agents}, nil
+	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents}, nil
 }
 
 func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
@@ -152,12 +154,13 @@ func (s *StartupSQLiteOwner) liveOwnerAcquisitionError(ctx context.Context) erro
 }
 
 type postgresSession struct {
-	mu              sync.Mutex
-	owner           *StartupPostgresOwner
-	lease           *postgresbackend.AdvisoryLockLease
-	authority       runtimestartupownership.Authority
-	releaseCapacity func()
-	released        bool
+	mu               sync.Mutex
+	owner            *StartupPostgresOwner
+	lease            *postgresbackend.AdvisoryLockLease
+	authority        runtimestartupownership.Authority
+	releaseCapacity  func()
+	terminalDeadline time.Duration
+	released         bool
 }
 
 func (s *postgresSession) Authority() (runtimestartupownership.Authority, error) {
@@ -175,8 +178,8 @@ func (s *postgresSession) MonitorProveCurrent(ctx context.Context, deadline time
 	return s.lease.MonitorProveCurrent(ctx, deadline)
 }
 
-func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
-	if owner == nil {
+func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner, deadline time.Duration) error {
+	if owner == nil || deadline <= 0 {
 		return errors.New("install PostgreSQL process capability terminal callback")
 	}
 	s.mu.Lock()
@@ -184,6 +187,7 @@ func (s *postgresSession) InstallTerminalOwner(owner runtimestartupownership.Ses
 		s.mu.Unlock()
 		return errors.New("install PostgreSQL process capability terminal callback")
 	}
+	s.terminalDeadline = deadline
 	s.mu.Unlock()
 	if !s.lease.InstallTerminalOwner(s.releaseCapacity, func() { s.terminal(owner) }, nil) {
 		if s.releaseCapacity != nil {
@@ -204,9 +208,12 @@ func (s *postgresSession) terminal(owner runtimestartupownership.SessionTerminal
 		return
 	}
 	authority := s.authority
+	deadline := s.terminalDeadline
 	s.released = true
 	s.mu.Unlock()
-	owner.SelectedStoreSessionTerminal(s.owner.terminalResult(context.Background(), authority, false))
+	owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
+		return s.owner.terminalResult(ctx, authority, false)
+	}))
 }
 
 func (s *postgresSession) RecordGenerationGrantTransition(ctx context.Context, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) error {
@@ -475,12 +482,13 @@ func (s *postgresSession) Release(ctx context.Context) error {
 }
 
 type sqliteSession struct {
-	mu            sync.Mutex
-	owner         *StartupSQLiteOwner
-	authority     runtimestartupownership.Authority
-	terminalOwner runtimestartupownership.SessionTerminalOwner
-	possession    sqlitePossession
-	released      bool
+	mu               sync.Mutex
+	owner            *StartupSQLiteOwner
+	authority        runtimestartupownership.Authority
+	terminalOwner    runtimestartupownership.SessionTerminalOwner
+	terminalDeadline time.Duration
+	possession       sqlitePossession
+	released         bool
 }
 
 func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {
@@ -551,13 +559,14 @@ func (s *sqliteSession) MonitorProveCurrent(ctx context.Context, deadline time.D
 	return err
 }
 
-func (s *sqliteSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
+func (s *sqliteSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner, deadline time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.terminalOwner != nil || owner == nil {
+	if s.terminalOwner != nil || owner == nil || deadline <= 0 {
 		return errors.New("install SQLite process capability terminal callback")
 	}
 	s.terminalOwner = owner
+	s.terminalDeadline = deadline
 	return nil
 }
 
@@ -640,14 +649,30 @@ func (s *sqliteSession) terminal() {
 	s.mu.Lock()
 	owner := s.terminalOwner
 	authority := s.authority
+	deadline := s.terminalDeadline
 	if !s.released {
 		s.released = true
 		_ = s.possession.Release()
 	}
 	s.mu.Unlock()
 	if owner != nil {
-		owner.SelectedStoreSessionTerminal(s.owner.terminalResult(context.Background(), authority, true))
+		owner.SelectedStoreSessionTerminal(boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
+			return s.owner.terminalResult(ctx, authority, true)
+		}))
 	}
+}
+
+func boundedTerminalResult(deadline time.Duration, load func(context.Context) runtimestartupownership.TerminalResult) runtimestartupownership.TerminalResult {
+	if deadline <= 0 || load == nil {
+		return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	result := load(ctx)
+	if ctx.Err() != nil {
+		return runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable}
+	}
+	return result
 }
 
 func (s *StartupPostgresOwner) terminalResult(ctx context.Context, authority runtimestartupownership.Authority, sqlite bool) runtimestartupownership.TerminalResult {

@@ -62,9 +62,10 @@ func TestSQLiteUnsupportedFilesystemInspectionOnly(t *testing.T) {
 		t.Fatalf("seed corrupt authority: %v", err)
 	}
 	owner := &StartupSQLiteOwner{
-		backend:     backend,
-		path:        unsupportedSQLiteFilesystemPath(),
-		schemaGuard: func() error { return nil },
+		backend:      backend,
+		path:         unsupportedSQLiteFilesystemPath(),
+		schemaGuard:  func() error { return nil },
+		catalogEmpty: func(context.Context) (bool, error) { return false, nil },
 	}
 	inspection, err := owner.InspectAuthority(context.Background())
 	if err != nil {

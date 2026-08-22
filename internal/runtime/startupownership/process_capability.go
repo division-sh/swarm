@@ -169,7 +169,7 @@ func newProcessCapability(session RetainedSession, cadence, deadline time.Durati
 		session: session, grants: map[string]*generationGrant{}, done: make(chan struct{}),
 		monitorCadence: cadence, monitorDeadline: deadline,
 	}
-	if err := session.InstallTerminalOwner(p); err != nil {
+	if err := session.InstallTerminalOwner(p, deadline); err != nil {
 		return nil, err
 	}
 	p.startPossessionMonitor()
@@ -451,7 +451,7 @@ func (p *processCapability) retireOnPossessionFailure(err error) {
 	}
 	// Closed selected-store operations own semantic failures without implying
 	// session loss. A failed proof or terminal callback performs retirement.
-	if proveErr := p.session.ProveCurrent(context.Background()); proveErr != nil {
+	if proveErr := p.session.MonitorProveCurrent(context.Background(), p.monitorDeadline); proveErr != nil {
 		p.terminalize(possessionTerminalResult(proveErr))
 	}
 }
