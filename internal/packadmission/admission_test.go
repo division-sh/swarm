@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,6 +51,7 @@ func TestAdmitRejectsMalformedBodiesForEveryPackKind(t *testing.T) {
 				Path: tc.packID, EnvelopeBody: envelopeBody, ManifestBody: []byte("unknown_field: true\n"),
 				Origin: packartifact.ImportOrigin{
 					Source: packartifact.ProvenanceEmbedded, ID: entry.ID(), Version: entry.Version(), ManifestHash: entry.ManifestHash(),
+					EnvelopeHash: manifesthash.FromBytes(envelopeBody).String(),
 				},
 			}})
 			if err != nil {

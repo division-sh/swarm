@@ -282,7 +282,10 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 	manifestFile := packmodel.ManifestFileNameForType(entry.Type())
 	declared := ProjectPackManifestImport{
 		ID: id, Type: entry.Type(), Path: id,
-		Origin: ImportOrigin{Source: ProvenanceEmbedded, ID: entry.ID(), Version: entry.Version(), ManifestHash: entry.ManifestHash()},
+		Origin: ImportOrigin{
+			Source: ProvenanceEmbedded, ID: entry.ID(), Version: entry.Version(), ManifestHash: entry.ManifestHash(),
+			EnvelopeHash: importedEnvelopeHash(envelopeBody),
+		},
 	}
 	expectedManifest := ProjectPackManifest{Version: ProjectPackManifestVersion, Imports: []ProjectPackManifestImport{declared}}
 	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)

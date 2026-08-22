@@ -161,6 +161,7 @@ func TestEffectivePackInventoryProjectShadowUsesCurrentBodyIdentity(t *testing.T
 		ManifestBody: projectBody,
 		Origin: ImportOrigin{
 			Source: ProvenanceEmbedded, ID: baseEntry.ID(), Version: baseEntry.Version(), ManifestHash: baseEntry.ManifestHash(),
+			EnvelopeHash: importedEnvelopeHash(projectEnvelopeBody),
 		},
 	}
 
@@ -189,7 +190,7 @@ func TestEffectivePackInventoryProjectShadowUsesCurrentBodyIdentity(t *testing.T
 	}
 }
 
-func TestProjectPackModifiedIncludesVersionOnlyEdits(t *testing.T) {
+func TestProjectPackModifiedTracksEnvelopeAndBodyEdits(t *testing.T) {
 	base, err := LoadPlatformPackInventoryFS(
 		testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", ProvenancePlatform, []byte("provider: demo\n")),
 		InventoryManifestFileName,
@@ -200,24 +201,49 @@ func TestProjectPackModifiedIncludesVersionOnlyEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseEntry, _ := base.Lookup("provider.demo")
-	projectEnvelope := baseEntry.Envelope()
-	projectEnvelope.Version = "0.1.1"
-	projectEnvelope.Provenance.Source = ProvenanceProject
-	projectEnvelope.ManifestHash = ManifestHashDerived
-	envelopeBody, err := yaml.Marshal(projectEnvelope)
+	baselineEnvelope := baseEntry.Envelope()
+	baselineEnvelope.Provenance.Source = ProvenanceProject
+	baselineEnvelope.ManifestHash = ManifestHashDerived
+	baselineEnvelopeBody, err := yaml.Marshal(baselineEnvelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, err := NewEffectivePackInventory(base, []ProjectPackSource{{
-		Path: "provider.demo", EnvelopeBody: envelopeBody, ManifestBody: baseEntry.ManifestBody(),
-		Origin: ImportOrigin{Source: ProvenanceEmbedded, ID: baseEntry.ID(), Version: baseEntry.Version(), ManifestHash: baseEntry.ManifestHash()},
-	}})
-	if err != nil {
-		t.Fatal(err)
+	origin := ImportOrigin{
+		Source: ProvenanceEmbedded, ID: baseEntry.ID(), Version: baseEntry.Version(), ManifestHash: baseEntry.ManifestHash(),
+		EnvelopeHash: importedEnvelopeHash(baselineEnvelopeBody),
 	}
-	entry, ok := effective.Lookup("provider.demo")
-	if !ok || !entry.Modified() {
-		t.Fatalf("version-only project edit = %#v present=%t, want modified", entry, ok)
+	tests := []struct {
+		name     string
+		mutate   func(*Envelope, *[]byte)
+		modified bool
+	}{
+		{name: "unchanged", mutate: func(*Envelope, *[]byte) {}, modified: false},
+		{name: "version", mutate: func(envelope *Envelope, _ *[]byte) { envelope.Version = "0.1.1" }, modified: true},
+		{name: "tests", mutate: func(envelope *Envelope, _ *[]byte) {
+			envelope.Tests = append(append([]string(nil), envelope.Tests...), "providertriggers/edited")
+		}, modified: true},
+		{name: "body", mutate: func(_ *Envelope, body *[]byte) { *body = []byte("provider: demo\nrevision: edited\n") }, modified: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			envelope := baselineEnvelope
+			body := baseEntry.ManifestBody()
+			tc.mutate(&envelope, &body)
+			envelopeBody, err := yaml.Marshal(envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			effective, err := NewEffectivePackInventory(base, []ProjectPackSource{{
+				Path: "provider.demo", EnvelopeBody: envelopeBody, ManifestBody: body, Origin: origin,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, ok := effective.Lookup("provider.demo")
+			if !ok || entry.Modified() != tc.modified {
+				t.Fatalf("project edit = %#v present=%t modified=%t, want %t", entry, ok, entry.Modified(), tc.modified)
+			}
+		})
 	}
 }
 

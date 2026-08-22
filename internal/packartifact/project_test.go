@@ -48,6 +48,9 @@ func TestImportEmbeddedPackIsIdempotentAndPreservesEditedConflict(t *testing.T) 
 	if !strings.Contains(string(set.Sources[0].EnvelopeBody), "source: project") || !strings.Contains(string(set.Sources[0].EnvelopeBody), "manifest_hash: derived") {
 		t.Fatalf("project envelope = %s", set.Sources[0].EnvelopeBody)
 	}
+	if !set.Sources[0].Origin.Valid() || set.Sources[0].Origin.EnvelopeHash != importedEnvelopeHash(set.Sources[0].EnvelopeBody) {
+		t.Fatalf("project origin does not bind exact imported envelope: %#v", set.Sources[0].Origin)
+	}
 	changed, err = ImportEmbeddedPack(project, "provider.demo", base)
 	if err != nil || changed {
 		t.Fatalf("identical import changed=%v error=%v", changed, err)
@@ -468,6 +471,12 @@ func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {
 			t.Helper()
 			mutateProjectPackManifest(t, project, func(manifest *ProjectPackManifest) {
 				manifest.Imports[0].Origin.Source = ProvenanceExternal
+			})
+		}},
+		{name: "missing origin envelope hash", mutate: func(t *testing.T, project string) {
+			t.Helper()
+			mutateProjectPackManifest(t, project, func(manifest *ProjectPackManifest) {
+				manifest.Imports[0].Origin.EnvelopeHash = ""
 			})
 		}},
 		{name: "manifest traversal", mutate: func(t *testing.T, project string) {

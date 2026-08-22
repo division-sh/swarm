@@ -50,7 +50,10 @@ func TestDevelopmentOverrideAndProjectPrecedenceAreFailClosed(t *testing.T) {
 	}
 	effective, err := NewEffectivePackInventory(development, []ProjectPackSource{{
 		Path: "provider.demo", EnvelopeBody: projectEnvelopeBody, ManifestBody: projectBody,
-		Origin: ImportOrigin{Source: ProvenanceEmbedded, ID: embeddedEntry.ID(), Version: embeddedEntry.Version(), ManifestHash: embeddedEntry.ManifestHash()},
+		Origin: ImportOrigin{
+			Source: ProvenanceEmbedded, ID: embeddedEntry.ID(), Version: embeddedEntry.Version(), ManifestHash: embeddedEntry.ManifestHash(),
+			EnvelopeHash: importedEnvelopeHash(projectEnvelopeBody),
+		},
 	}})
 	if err != nil {
 		t.Fatalf("project over development inventory: %v", err)
