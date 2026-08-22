@@ -185,7 +185,7 @@ func classifyAuthorityHead(record authorityHeadRecord, exists bool, backend stri
 		FindingsDigest: digest, Detail: "The recorded project session is inconsistent and must be repaired before serving.",
 	}
 	var authority runtimestartupownership.Authority
-	if record.createdAtValid && json.Unmarshal(record.Snapshot, &authority) == nil && authority.Validate() == nil && authorityMatchesRecord(authority, record) {
+	if record.createdAtValid && json.Unmarshal(record.Snapshot, &authority) == nil && authority.Validate() == nil && authority.Backend == backend && authorityMatchesRecord(authority, record) {
 		result.Status = runtimestartupownership.AuthorityInspectionValid
 		result.State = authority.State
 		result.OwnerID = authority.OwnerID
