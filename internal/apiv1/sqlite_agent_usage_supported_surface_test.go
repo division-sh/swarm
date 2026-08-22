@@ -152,7 +152,7 @@ func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepk
 
 func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *storepkg.SQLiteRuntimeStore, agentID string) {
 	t.Helper()
-	if err := storetest.UpsertAgentFixture(ctx, sqliteStore, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity:           sqliteAgentUsageIdentity(t, agentID),
 			ID:                 agentID,

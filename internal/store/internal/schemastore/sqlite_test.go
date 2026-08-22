@@ -20,8 +20,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 70 {
-		t.Fatalf("platform table plan count = %d, want 70", len(platformPlans))
+	if len(platformPlans) != 71 {
+		t.Fatalf("platform table plan count = %d, want 71", len(platformPlans))
 	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",
@@ -100,6 +100,27 @@ func TestSQLiteStatementsForPlanTranslatesDeliveryAuthorityBundleHashExactly(t *
 	}
 	if len(statements) != 1 || !strings.Contains(statements[0], "length(authority_bundle_hash) = 81") || strings.Contains(statements[0], "authority_(") {
 		t.Fatalf("rendered statements = %#v, want exact authority bundle hash predicate", statements)
+	}
+}
+
+func TestSQLiteStatementsForPlanTranslatesLifecycleBundleHashExactly(t *testing.T) {
+	t.Parallel()
+
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName:  "agents",
+		SchemaKind: "platform_spec",
+		Statements: []string{
+			"CREATE TABLE IF NOT EXISTS agents (\n    lifecycle_bundle_hash TEXT NOT NULL CHECK (lifecycle_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$')\n)",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SQLiteStatementsForPlan: %v", err)
+	}
+	if len(statements) != 1 {
+		t.Fatalf("statement count = %d, want 1", len(statements))
+	}
+	if strings.Contains(statements[0], "lifecycle_(") || !strings.Contains(statements[0], "length(lifecycle_bundle_hash) = 81") {
+		t.Fatalf("translated lifecycle bundle hash predicate = %q", statements[0])
 	}
 }
 

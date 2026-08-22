@@ -321,11 +321,20 @@ type startupRecoveryManagerStore struct {
 
 func startupRecoveryLifecycleResult(req runtimemanager.AgentLifecycleTransition) runtimemanager.AgentLifecycleTransitionResult {
 	return runtimemanager.AgentLifecycleTransitionResult{
-		OperationID: req.OperationID, TransitionID: req.OperationID, AgentID: req.AgentID,
+		OperationID: req.OperationID, TransitionID: req.OperationID, Identity: req.Identity, AgentID: req.AgentID,
 		PreviousEpoch: req.ExpectedEpoch, RuntimeEpoch: req.TargetEpoch,
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+		Topology: req.Topology, ProcessBinding: req.ProcessBinding,
+	}
+}
+
+func (s *startupRecoveryManagerStore) seedRuntimeTestProcessBinding(binding runtimemanager.ProcessExecutionBinding) {
+	for i := range s.agents {
+		if s.agents[i].ProcessBinding.IsZero() {
+			s.agents[i].ProcessBinding = binding
+		}
 	}
 }
 
@@ -1279,7 +1288,7 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	err = rt.Start(ctx)
-	if err == nil || !strings.Contains(err.Error(), "reconcile static declaration topology") {
+	if err == nil || !strings.Contains(err.Error(), "load agents for process takeover") {
 		t.Fatalf("Start error = %v, want fail-closed topology readback gate", err)
 	}
 	if err := rt.Shutdown(); err != nil {

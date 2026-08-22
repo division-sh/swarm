@@ -3,8 +3,10 @@ package startupownership
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -21,11 +23,14 @@ type retainedSessionProbe struct {
 	mu             sync.Mutex
 	authority      Authority
 	plan           runtimeagenttopology.SourceSetPlan
-	callback       func()
+	callback       func(TerminalResult)
 	released       bool
 	proveErr       error
 	records        []GrantEvidence
 	lifecycleScope runtimeauthoractivity.Scope
+	monitorProve   func(context.Context, time.Duration) error
+	terminalRecord bool
+	recordErr      error
 }
 
 func (s *retainedSessionProbe) Authority() (Authority, error) {
@@ -46,6 +51,16 @@ func (s *retainedSessionProbe) ProveCurrent(context.Context) error {
 	return s.proveErr
 }
 
+func (s *retainedSessionProbe) MonitorProveCurrent(ctx context.Context, deadline time.Duration) error {
+	s.mu.Lock()
+	monitorProve := s.monitorProve
+	s.mu.Unlock()
+	if monitorProve != nil {
+		return monitorProve(ctx, deadline)
+	}
+	return s.ProveCurrent(ctx)
+}
+
 func (s *retainedSessionProbe) InstallTerminalOwner(owner SessionTerminalOwner) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -58,9 +73,15 @@ func (s *retainedSessionProbe) InstallTerminalOwner(owner SessionTerminalOwner) 
 
 func (s *retainedSessionProbe) RecordGenerationGrantTransition(_ context.Context, _ *GrantEvidence, next GrantEvidence) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.records = append(s.records, next)
-	return nil
+	callback := s.callback
+	terminal := s.terminalRecord
+	err := s.recordErr
+	s.mu.Unlock()
+	if terminal {
+		callback(TerminalResult{Cause: TerminalOwnershipUnprovable})
+	}
+	return err
 }
 
 func (s *retainedSessionProbe) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
@@ -103,15 +124,21 @@ func (s *retainedSessionProbe) Release(context.Context) error {
 		return nil
 	}
 	s.released = true
-	callback := s.callback
 	s.mu.Unlock()
-	if callback != nil {
-		callback()
-	}
 	return nil
 }
 
 func testCapability(t *testing.T) (ProcessCapability, *retainedSessionProbe, runtimeagenttopology.SourceSetPlan) {
+	t.Helper()
+	session, plan := testRetainedSession(t)
+	capability, err := NewProcessCapability(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return capability, session, plan
+}
+
+func testRetainedSession(t *testing.T) (*retainedSessionProbe, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: startupBundleHashA, BundleSource: "ephemeral"}}, nil)
 	if err != nil {
@@ -122,11 +149,7 @@ func testCapability(t *testing.T) (ProcessCapability, *retainedSessionProbe, run
 		t.Fatal(err)
 	}
 	session := &retainedSessionProbe{authority: authority, plan: plan}
-	capability, err := NewProcessCapability(session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return capability, session, plan
+	return session, plan
 }
 
 func TestAcquireRequestRequiresTypedProcessIdentity(t *testing.T) {
@@ -301,5 +324,271 @@ func TestProcessCapabilityReleaseIsTerminal(t *testing.T) {
 	}
 	if _, err := capability.Evidence(); err == nil {
 		t.Fatal("released capability returned authority evidence")
+	}
+}
+
+func TestProcessCapabilityReleaseDoesNotDeadlockWhenGrantPersistenceTerminalizesSession(t *testing.T) {
+	capability, session, plan := testCapability(t)
+	if _, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
+		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	}); err != nil {
+		t.Fatalf("IssueGenerationGrant: %v", err)
+	}
+	session.mu.Lock()
+	session.terminalRecord = true
+	session.recordErr = errors.New("selected-store session lost during grant retirement")
+	session.mu.Unlock()
+
+	released := make(chan error, 1)
+	go func() { released <- capability.Release(context.Background()) }()
+	select {
+	case err := <-released:
+		if err == nil || !strings.Contains(err.Error(), "session lost") {
+			t.Fatalf("Release error = %v, want exact session loss", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Release deadlocked while the retained session terminalized the grant")
+	}
+	result, ok := capability.TerminalResult()
+	if !ok || result.Cause != TerminalOwnershipUnprovable {
+		t.Fatalf("terminal result = %#v ok=%v, want ownership_unprovable", result, ok)
+	}
+}
+
+func TestProcessCapabilityMonitorTerminalizesIdleBackendFailure(t *testing.T) {
+	session, _ := testRetainedSession(t)
+	entered := make(chan struct{})
+	var once sync.Once
+	session.monitorProve = func(context.Context, time.Duration) error {
+		once.Do(func() { close(entered) })
+		return errors.New("retained backend session disappeared")
+	}
+	capability, err := newProcessCapability(session, time.Millisecond, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newProcessCapability: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("possession monitor did not run")
+	}
+	select {
+	case <-capability.Done():
+	case <-time.After(time.Second):
+		t.Fatal("idle possession loss did not terminalize capability")
+	}
+	result, ok := capability.TerminalResult()
+	if !ok || result.Cause != TerminalOwnershipUnprovable || result.SuccessorAuthorityID != "" {
+		t.Fatalf("terminal result=%#v ok=%v, want ownership_unprovable", result, ok)
+	}
+}
+
+func TestProcessCapabilityMonitorReleaseRace(t *testing.T) {
+	t.Run("release before probe", func(t *testing.T) {
+		session, _ := testRetainedSession(t)
+		var calls int
+		session.monitorProve = func(context.Context, time.Duration) error {
+			calls++
+			return nil
+		}
+		capability, err := newProcessCapability(session, time.Hour, time.Second)
+		if err != nil {
+			t.Fatalf("newProcessCapability: %v", err)
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+		if calls != 0 {
+			t.Fatalf("backend probes = %d, want zero after release-before-probe", calls)
+		}
+		result, ok := capability.TerminalResult()
+		if !ok || result.Cause != TerminalReleased {
+			t.Fatalf("release terminal result=%#v ok=%v, want released", result, ok)
+		}
+	})
+
+	t.Run("release during probe", func(t *testing.T) {
+		session, _ := testRetainedSession(t)
+		entered := make(chan struct{})
+		var once sync.Once
+		session.monitorProve = func(ctx context.Context, _ time.Duration) error {
+			once.Do(func() { close(entered) })
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		capability, err := newProcessCapability(session, time.Millisecond, 10*time.Millisecond)
+		if err != nil {
+			t.Fatalf("newProcessCapability: %v", err)
+		}
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("possession monitor did not enter backend proof")
+		}
+		released := make(chan error, 1)
+		go func() { released <- capability.Release(context.Background()) }()
+		select {
+		case err := <-released:
+			if err != nil {
+				t.Fatalf("Release: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Release did not cancel and join backend proof")
+		}
+		result, ok := capability.TerminalResult()
+		if !ok || result.Cause != TerminalReleased {
+			t.Fatalf("release terminal result=%#v ok=%v, want released", result, ok)
+		}
+	})
+}
+
+func TestProcessCapabilityMonitorTakeoverRace(t *testing.T) {
+	session, _ := testRetainedSession(t)
+	entered := make(chan struct{})
+	var once sync.Once
+	session.monitorProve = func(ctx context.Context, _ time.Duration) error {
+		once.Do(func() { close(entered) })
+		<-ctx.Done()
+		return errors.New("monitor probe cancelled by terminal callback")
+	}
+	capability, err := newProcessCapability(session, time.Millisecond, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newProcessCapability: %v", err)
+	}
+	concrete := capability.(*processCapability)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("possession monitor did not enter backend proof")
+	}
+	successorID := uuid.NewString()
+	session.callback(TerminalResult{Cause: TerminalOwnershipSuperseded, SuccessorAuthorityID: successorID})
+	select {
+	case <-concrete.monitorDone:
+	case <-time.After(time.Second):
+		t.Fatal("terminal callback did not cancel the monitor")
+	}
+	result, ok := capability.TerminalResult()
+	if !ok || result.Cause != TerminalOwnershipSuperseded || result.SuccessorAuthorityID != successorID {
+		t.Fatalf("terminal result=%#v ok=%v, want exact successor", result, ok)
+	}
+	capability.(*processCapability).terminalize(TerminalResult{Cause: TerminalOwnershipUnprovable})
+	result, _ = capability.TerminalResult()
+	if result.Cause != TerminalOwnershipSuperseded || result.SuccessorAuthorityID != successorID {
+		t.Fatalf("second terminalization replaced exact successor: %#v", result)
+	}
+}
+
+func TestProcessCapabilityMonitorJoinsEveryTerminalPath(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		terminate func(ProcessCapability, *retainedSessionProbe)
+	}{
+		{name: "release", terminate: func(capability ProcessCapability, _ *retainedSessionProbe) {
+			if err := capability.Release(context.Background()); err != nil {
+				t.Fatalf("Release: %v", err)
+			}
+		}},
+		{name: "backend failure", terminate: func(_ ProcessCapability, _ *retainedSessionProbe) {}},
+		{name: "exact takeover", terminate: func(_ ProcessCapability, session *retainedSessionProbe) {
+			session.callback(TerminalResult{Cause: TerminalOwnershipSuperseded, SuccessorAuthorityID: uuid.NewString()})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session, _ := testRetainedSession(t)
+			entered := make(chan struct{})
+			var once sync.Once
+			session.monitorProve = func(ctx context.Context, _ time.Duration) error {
+				once.Do(func() { close(entered) })
+				if test.name == "backend failure" {
+					return errors.New("retained backend session disappeared")
+				}
+				<-ctx.Done()
+				return ctx.Err()
+			}
+			capability, err := newProcessCapability(session, time.Millisecond, 10*time.Millisecond)
+			if err != nil {
+				t.Fatalf("newProcessCapability: %v", err)
+			}
+			concrete := capability.(*processCapability)
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("possession monitor did not enter backend proof")
+			}
+			test.terminate(capability, session)
+			select {
+			case <-concrete.monitorDone:
+			case <-time.After(time.Second):
+				t.Fatal("terminal path did not join possession monitor")
+			}
+			select {
+			case <-capability.Done():
+			default:
+				t.Fatal("terminal path joined monitor without terminalizing capability")
+			}
+		})
+	}
+}
+
+func TestProcessCapabilityMonitorDoesNotClassifyOperationContentionAsLoss(t *testing.T) {
+	session, _ := testRetainedSession(t)
+	entered := make(chan struct{})
+	session.monitorProve = func(context.Context, time.Duration) error {
+		close(entered)
+		return nil
+	}
+	capability, err := newProcessCapability(session, time.Hour, 2*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newProcessCapability: %v", err)
+	}
+	concrete := capability.(*processCapability)
+	concrete.opMu.Lock()
+	attempted := make(chan struct{})
+	probeDone := make(chan error, 1)
+	go func() {
+		probeDone <- concrete.monitorPossessionOnce(context.Background(), func() { close(attempted) })
+	}()
+	select {
+	case <-attempted:
+	case <-time.After(time.Second):
+		concrete.opMu.Unlock()
+		t.Fatal("monitor did not reach the canonical operation boundary")
+	}
+	select {
+	case <-capability.Done():
+		concrete.opMu.Unlock()
+		t.Fatal("operation contention terminalized process capability")
+	default:
+	}
+	concrete.opMu.Unlock()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("monitor did not resume after operation boundary released")
+	}
+	if err := <-probeDone; err != nil {
+		t.Fatalf("monitor proof after operation boundary: %v", err)
+	}
+	if err := capability.Release(context.Background()); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+}
+
+func TestProcessCapabilityPreservesOnlyExactSuccessorTerminalEvidence(t *testing.T) {
+	capability, session, _ := testCapability(t)
+	successor := uuid.NewString()
+	session.callback(TerminalResult{Cause: TerminalOwnershipSuperseded, SuccessorAuthorityID: successor})
+	result, ok := capability.TerminalResult()
+	if !ok || result.Cause != TerminalOwnershipSuperseded || result.SuccessorAuthorityID != successor {
+		t.Fatalf("exact successor terminal result=%#v ok=%v", result, ok)
+	}
+
+	capability, session, _ = testCapability(t)
+	session.callback(TerminalResult{Cause: TerminalOwnershipSuperseded})
+	result, ok = capability.TerminalResult()
+	if !ok || result.Cause != TerminalOwnershipUnprovable || result.SuccessorAuthorityID != "" {
+		t.Fatalf("unproved successor terminal result=%#v ok=%v", result, ok)
 	}
 }

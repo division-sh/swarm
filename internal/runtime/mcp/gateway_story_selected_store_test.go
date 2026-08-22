@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -30,6 +31,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -43,6 +45,7 @@ const gatewayStoryAuthToken = "gateway-story-token"
 
 type gatewayStoryStore interface {
 	runtimeeffects.Store
+	storetest.AgentFixtureStore
 	ListAuthorActivity(context.Context, runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error)
 }
 
@@ -90,16 +93,31 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			}
 			scope := runtimeauthoractivity.BundleScope(runtimeInstanceID, sourceFact.BundleHash())
 			actor := models.AgentConfig{
-				ExecutionMode: "live",
-				ID:            "story-writer",
-				Identity:      agentidentitytest.Declared(t, "story-writer", "mcp-gateway-story://story/story-writer", "story", "instance-1", "story/instance-1"),
-				Type:          "internal",
-				Role:          "story-writer",
-				FlowID:        "story",
-				FlowPath:      "story/instance-1",
-				Tools:         []string{"send_story"},
+				ExecutionMode:      "live",
+				ID:                 "story-writer",
+				Identity:           agentidentitytest.Declared(t, "story-writer", "mcp-gateway-story://story/story-writer", "story", "instance-1", "story/instance-1"),
+				Type:               "internal",
+				Role:               "story-writer",
+				Model:              "regular",
+				ResolvedLLMBackend: "anthropic",
+				FlowID:             "story",
+				FlowPath:           "story/instance-1",
+				Tools:              []string{"send_story"},
 			}
-			seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact)
+			actor.Intent, err = runtimeagentintent.Resolve(
+				runtimeagentintent.SourceInline,
+				"inline",
+				"agents.yaml#agents.story-writer.intent",
+				"Send the declared story payload.",
+			)
+			if err != nil {
+				t.Fatalf("resolve story-writer intent: %v", err)
+			}
+			actor.Prompt, err = runtimeagentintent.IntentOnlyPrompt(actor.Intent)
+			if err != nil {
+				t.Fatalf("derive story-writer prompt: %v", err)
+			}
+			lifecycleToken := seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact)
 			source := loadGatewayStorySource(t, server.URL)
 			executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 			if !gatewayStoryToolOffered(executor, actor, "send_story") {
@@ -120,9 +138,9 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				ObserveMCPProviderCall:    registry.ObserveMCPProviderCall,
 				MarkEmitKeyUsed:           registry.MarkEmitKeyUsed,
 			})
-			surface, authority, admission := gatewayStoryCapabilitySurface(t, gateway, actor, runID)
+			surface, authority, admission := gatewayStoryCapabilitySurface(t, gateway, actor, runID, lifecycleToken)
 
-			successCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, "gateway-http-success")
+			successCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, scope, sourceFact, authority, admission, lifecycleToken, "gateway-http-success")
 			successToken := registry.RegisterTurnContextWithCapabilitySurface(successCtx, time.Hour, surface)
 			response := callGatewayStoryTool(t, gateway, successToken, "send_story", map[string]any{})
 			if gatewayStoryResponseIsError(response) {
@@ -133,7 +151,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 				t.Fatalf("HTTP dispatches = %d, want 1", got)
 			}
 
-			missingScopeCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, runtimeauthoractivity.Scope{}, sourceFact, authority, admission, "gateway-http-missing-scope")
+			missingScopeCtx := gatewayStoryManagedTurnContext(context.Background(), selected, actor, runID, runtimeauthoractivity.Scope{}, sourceFact, authority, admission, lifecycleToken, "gateway-http-missing-scope")
 			missingScopeToken := registry.RegisterTurnContextWithCapabilitySurface(missingScopeCtx, time.Hour, surface)
 			failed := callGatewayStoryTool(t, gateway, missingScopeToken, "send_story", map[string]any{})
 			if !gatewayStoryResponseIsError(failed) {
@@ -147,7 +165,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 	}
 }
 
-func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.BundleSourceFact, authority runtimeeffects.Authority, admission managedexecution.Admission, identity string) context.Context {
+func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySelectedStore, actor models.AgentConfig, runID string, scope runtimeauthoractivity.Scope, sourceFact runtimecorrelation.BundleSourceFact, authority runtimeeffects.Authority, admission managedexecution.Admission, token runtimeeffects.LifecycleToken, identity string) context.Context {
 	ctx = models.WithActor(ctx, actor)
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
@@ -155,14 +173,14 @@ func gatewayStoryManagedTurnContext(ctx context.Context, selected gatewayStorySe
 		ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	}
 	ctx = runtimebus.WithInboundEvent(ctx, gatewayStoryInboundEvent(runID, actor))
-	ctx = runtimeeffects.WithLifecycleToken(ctx, runtimeeffects.LifecycleToken{Identity: actor.Identity, RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3})
+	ctx = runtimeeffects.WithLifecycleToken(ctx, token)
 	ctx = runtimeeffects.WithAuthority(ctx, authority)
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(selected.backend).WithExecutionPosture(executionposture.Live))
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, identity)
 }
 
-func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, actor models.AgentConfig, runID string) (managedcapabilities.Surface, runtimeeffects.Authority, managedexecution.Admission) {
+func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, actor models.AgentConfig, runID string, token runtimeeffects.LifecycleToken) (managedcapabilities.Surface, runtimeeffects.Authority, managedexecution.Admission) {
 	t.Helper()
 	var definition *runtimemcp.ToolDef
 	for _, candidate := range gateway.MCPToolsForActor(actor) {
@@ -177,7 +195,6 @@ func gatewayStoryCapabilitySurface(t *testing.T, gateway *runtimemcp.Gateway, ac
 	}
 	turnID := uuid.NewString()
 	sessionID := uuid.NewString()
-	token := runtimeeffects.LifecycleToken{Identity: actor.Identity, RuntimeEpoch: 7, AgentID: actor.ID, Generation: 3}
 	authority := runtimeeffects.NormalAgentAuthority(token, "gateway-story-owner", time.Now().UTC().Add(time.Hour))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID, AgentID: actor.ID,
@@ -297,46 +314,28 @@ func writeGatewayStoryFixture(t *testing.T, path, contents string) {
 	}
 }
 
-func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.BundleSourceFact) {
+func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, runID string, actor models.AgentConfig, source runtimecorrelation.BundleSourceFact) runtimeeffects.LifecycleToken {
 	t.Helper()
 	now := time.Now().UTC()
 	bundleHash, bundleSource := source.StorageValues()
-	fields, err := actor.Identity.StorageFields()
-	if err != nil {
-		t.Fatalf("seed selected-store agent identity: %v", err)
-	}
 	if selected.postgres {
 		runlifecyclefixture.RequirePostgres(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
-		if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO agents (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, status,
-				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at,
-				topology_authority_kind, topology_admission, execution_lifetime
-			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'story-writer', 'regular', 'mock', FALSE, 'platform_default', 'active', 7, 3, 'running', $8,
-				'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}'::jsonb, 'durable_managed')
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
-			t.Fatalf("seed selected-store agent: %v", err)
-		}
-		return
+	} else {
+		runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 	}
-	runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
-	if _, err := selected.db.ExecContext(context.Background(), `
-			INSERT INTO agents (
-				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance,
-				role, model, llm_backend, memory_enabled, memory_source, status,
-				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, created_at,
-				topology_authority_kind, topology_admission, execution_lifetime
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'story-writer', 'regular', 'mock', 0, 'platform_default', 'active', 7, 3, 'running', ?,
-				'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}', 'durable_managed')
-		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
+	if err := storetest.UpsertAgentFixture(t, context.Background(), selected.backend, runtimemanager.PersistedAgent{
+		Config: actor, Status: "active", StartedAt: now,
+		LifecycleEpoch: 7, LifecycleGeneration: 3,
+		LifecyclePhase: runtimemanager.AgentLifecycleRunning, LifecycleRunMode: runtimemanager.AgentRunModeStandard,
+	}); err != nil {
 		t.Fatalf("seed selected-store agent: %v", err)
+	}
+	state, found, err := selected.backend.LoadAgentLifecycleState(context.Background(), actor.Identity)
+	if err != nil || !found {
+		t.Fatalf("read selected-store agent lifecycle: found=%v err=%v", found, err)
+	}
+	return runtimeeffects.LifecycleToken{
+		Identity: actor.Identity, RuntimeEpoch: state.RuntimeEpoch, AgentID: actor.ID, Generation: state.Generation,
 	}
 }
 

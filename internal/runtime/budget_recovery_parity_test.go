@@ -110,13 +110,6 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					"per_entity_monthly_cap": 10,
 				},
 			}}, selected, nil, source, executionposture.Live)
-			manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-				BaseContext:    ctx,
-				LifecycleStore: storetest.AgentLifecycleFixture(selected),
-				SemanticSource: source,
-				Budget:         tracker,
-				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus), ReceiverExecution: eventreceiver.NormalExecution(),
-			}, selected)
 			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
@@ -140,6 +133,13 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("issue budget recovery generation grant: %v", err)
 			}
+			manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+				BaseContext:    ctx,
+				LifecycleStore: grant,
+				SemanticSource: source,
+				Budget:         tracker,
+				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus), ReceiverExecution: eventreceiver.NormalExecution(),
+			}, selected)
 			topologyAdmission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
 			if err != nil {
 				t.Fatalf("construct budget recovery topology admission: %v", err)

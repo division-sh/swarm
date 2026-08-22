@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -103,6 +104,106 @@ func newLifecyclePersistenceProbe() *lifecyclePersistenceProbe {
 	return &lifecyclePersistenceProbe{operations: map[string]AgentLifecycleTransitionResult{}}
 }
 
+func lifecycleProbeProcessBinding() ProcessExecutionBinding {
+	return ProcessExecutionBinding{
+		ProcessAuthorityID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		ProcessOwnerID:     "manager-lifecycle-probe",
+		ProcessBootID:      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+		GenerationGrantID:  "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+		BundleHash:         managerTestTopologyBundleHash,
+		BundleSource:       "ephemeral",
+		RuntimeInstanceID:  "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+		RuntimeGeneration:  1,
+	}
+}
+
+func (p *lifecyclePersistenceProbe) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
+	binding := lifecycleProbeProcessBinding()
+	return binding, binding.Validate()
+}
+
+type lifecycleReintroductionBindingProbe struct {
+	*lifecyclePersistenceProbe
+	binding ProcessExecutionBinding
+}
+
+func (p lifecycleReintroductionBindingProbe) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
+	return p.binding, p.binding.Validate()
+}
+
+func TestLifecycleReintroductionClassifiesExactExecutionAuthority(t *testing.T) {
+	previous := lifecycleProbeProcessBinding()
+	sameOwnerGrant := previous
+	sameOwnerGrant.GenerationGrantID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	sameOwnerGrant.RuntimeGeneration++
+	successorProcess := sameOwnerGrant
+	successorProcess.ProcessAuthorityID = "11111111-1111-4111-8111-111111111111"
+	successorProcess.ProcessOwnerID = "manager-lifecycle-successor"
+	successorProcess.ProcessBootID = "22222222-2222-4222-8222-222222222222"
+	successorProcess.GenerationGrantID = "33333333-3333-4333-8333-333333333333"
+	successorProcess.RuntimeInstanceID = "44444444-4444-4444-8444-444444444444"
+
+	for _, tc := range []struct {
+		name   string
+		target ProcessExecutionBinding
+		want   string
+	}{
+		{name: "same grant is ordinary restart", target: previous, want: "restart"},
+		{name: "same process new grant is source-set rebind", target: sameOwnerGrant, want: "source_set_rebind"},
+		{name: "successor process is takeover", target: successorProcess, want: "process_takeover"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := lifecycleReintroductionBindingProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: tc.target}
+			got, target, err := lifecycleReintroductionAuthority(store, previous)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want || !target.Equal(tc.target) {
+				t.Fatalf("classification = %q %#v, want %q %#v", got, target, tc.want, tc.target)
+			}
+		})
+	}
+}
+
+func TestLifecycleReintroductionRejectsPersistenceWithoutExecutionBinding(t *testing.T) {
+	store := struct{ AgentLifecyclePersistence }{AgentLifecyclePersistence: newLifecyclePersistenceProbe()}
+	if _, _, err := lifecycleReintroductionAuthority(store, lifecycleProbeProcessBinding()); err == nil ||
+		!strings.Contains(err.Error(), "requires process execution binding") {
+		t.Fatalf("missing binding error = %v", err)
+	}
+}
+
+func TestLifecycleTerminalMutationClassifiesGrantRetirementAndProcessTakeover(t *testing.T) {
+	previous := lifecycleProbeProcessBinding()
+	sameOwnerGrant := previous
+	sameOwnerGrant.GenerationGrantID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	sameOwnerGrant.RuntimeGeneration++
+	successorProcess := sameOwnerGrant
+	successorProcess.ProcessAuthorityID = "11111111-1111-4111-8111-111111111111"
+	successorProcess.ProcessOwnerID = "manager-lifecycle-successor"
+	successorProcess.ProcessBootID = "22222222-2222-4222-8222-222222222222"
+
+	for _, tc := range []struct {
+		name   string
+		target ProcessExecutionBinding
+		want   string
+	}{
+		{name: "same process retires old grant", target: sameOwnerGrant, want: "source_set_retire"},
+		{name: "successor process takes over terminal transition", target: successorProcess, want: "process_takeover"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := lifecycleReintroductionBindingProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: tc.target}
+			got, _, err := lifecycleMutationExecutionAuthority(store, previous, "teardown", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("terminal classification = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -129,6 +230,7 @@ func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Con
 		PreviousGeneration: p.cell.Generation, Generation: req.TargetGeneration,
 		PreviousPhase: p.cell.Phase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: lifecycleProbeProcessBinding(),
 	}
 	p.cell = lifecycleProbeCell{Epoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase}
 	p.exists = true
@@ -359,6 +461,7 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 	rec.LifecycleGeneration = 0
 	rec.LifecyclePhase = AgentLifecycleRegistered
 	rec.LifecycleRunMode = AgentRunModeStopped
+	rec.ProcessBinding = lifecycleProbeProcessBinding()
 	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register recovered agent: %v", err)
 	}

@@ -9,10 +9,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -71,7 +75,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 		route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(tc.agentID), AgentIdentity: identity}
 		event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
 		if tc.activeSession != "" {
-			seedAgentLifecycleSession(t, ctx, db, runID, identity, tc.activeSession)
+			seedAgentLifecycleSession(t, ctx, pg, db, runID, identity, tc.activeSession)
 		}
 		if tc.state != runtimedelivery.StateQueued {
 			claimed, err := claimDeliveryFixture(ctx, pg, event, route)
@@ -141,7 +145,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	activeEvent := seedAgentLifecycleEvent(t, ctx, pg, activeEventID, runID, activeRoute, time.Now().UTC())
 	deadLetterEvent := seedAgentLifecycleEvent(t, ctx, pg, oldDeadLetterEventID, runID, activeRoute, time.Now().UTC().Add(-time.Hour))
 	activeSessionID := uuid.NewString()
-	seedAgentLifecycleSession(t, ctx, db, runID, identity, activeSessionID)
+	seedAgentLifecycleSession(t, ctx, pg, db, runID, identity, activeSessionID)
 	deadLetterClaim, err := claimDeliveryFixture(ctx, pg, deadLetterEvent, activeRoute)
 	if err != nil {
 		t.Fatalf("claim old delivery: %v", err)
@@ -225,27 +229,20 @@ func seedAgentLifecycleEvent(t *testing.T, ctx context.Context, pg *PostgresStor
 	return event
 }
 
-func seedAgentLifecycleSession(t *testing.T, ctx context.Context, db *sql.DB, runID string, identity agentidentity.Identity, sessionID string) {
+func seedAgentLifecycleSession(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, runID string, identity agentidentity.Identity, sessionID string) {
 	t.Helper()
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
 		t.Fatalf("seed lifecycle identity: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source,
-			topology_authority_kind, topology_admission, execution_lifetime
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'test', TRUE, 'authored',
-		        'static_declaration_plan', $8::jsonb, 'durable_managed')
-		ON CONFLICT (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance
-		) DO NOTHING
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, testAgentTopologyJSON(t)); err != nil {
-		t.Fatalf("seed lifecycle agent %s: %v", fields.AgentID, err)
+	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: fields.AgentID, Identity: identity, Role: "worker", Type: "managed",
+			Model: "test", Memory: agentmemory.Authored(true), FlowPath: fields.FlowInstancePath,
+		}),
+		Status: "active", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("admit lifecycle agent %s: %v", fields.AgentID, err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (

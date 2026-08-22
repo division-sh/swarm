@@ -1409,7 +1409,12 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		SessionResetter:  pg,
 		PersistenceRoles: conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
-	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
+	_, startupGrant := installConformanceRuntimeStartupGeneration(t, ctx, pg, rt)
+	processBinding, err := startupGrant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatalf("load manager replay process execution binding: %v", err)
+	}
+	managerStore.agents[0].ProcessBinding = processBinding
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1864,7 +1869,7 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	if err != nil {
 		t.Fatalf("derive conformance agent prompt: %v", err)
 	}
-	if err := storetest.UpsertAgentFixture(ctx, pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,

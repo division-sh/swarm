@@ -406,6 +406,10 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item tools.Mailbo
 	return s.mailboxPostgresOwner.InsertMailboxItem(ctx, item)
 }
 
+func (s *PostgresStore) InspectAuthority(ctx context.Context) (startupownership.AuthorityInspection, error) {
+	return s.startupPostgresOwner.InspectAuthority(ctx)
+}
+
 func (s *PostgresStore) InspectDeliveryRecovery(ctx context.Context, source correlation.BundleSourceFact) (deliverylifecycle.RecoveryInventory, error) {
 	return s.deliveryPostgresOwner.InspectDeliveryRecovery(ctx, source)
 }
@@ -932,6 +936,10 @@ func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.
 
 func (s *PostgresStore) RenewDirectiveExecutionLease(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) error {
 	return s.agentPostgresOwner.RenewDirectiveExecutionLease(ctx, operationID, ownerID, now, lease)
+}
+
+func (s *PostgresStore) RepairAuthority(ctx context.Context, req startupownership.AuthorityRepairRequest) (startupownership.AuthorityRepairResult, error) {
+	return s.startupPostgresOwner.RepairAuthority(ctx, req)
 }
 
 func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route, routes []bus.FlowInstanceRouteRecord) error {
@@ -1474,6 +1482,10 @@ func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item tools.M
 	return s.mailboxSQLiteOwner.InsertMailboxItem(ctx, item)
 }
 
+func (s *SQLiteRuntimeStore) InspectAuthority(ctx context.Context) (startupownership.AuthorityInspection, error) {
+	return s.startupSQLiteOwner.InspectAuthority(ctx)
+}
+
 func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(ctx context.Context, source correlation.BundleSourceFact) (deliverylifecycle.RecoveryInventory, error) {
 	return s.deliverySQLiteOwner.InspectDeliveryRecovery(ctx, source)
 }
@@ -1916,6 +1928,10 @@ func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifec
 
 func (s *SQLiteRuntimeStore) RenewDirectiveExecutionLease(ctx context.Context, operationID string, ownerID string, now time.Time, lease time.Duration) error {
 	return s.agentSQLiteOwner.RenewDirectiveExecutionLease(ctx, operationID, ownerID, now, lease)
+}
+
+func (s *SQLiteRuntimeStore) RepairAuthority(ctx context.Context, req startupownership.AuthorityRepairRequest) (startupownership.AuthorityRepairResult, error) {
+	return s.startupSQLiteOwner.RepairAuthority(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route, routes []bus.FlowInstanceRouteRecord) error {

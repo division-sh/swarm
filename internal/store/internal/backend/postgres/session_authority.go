@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 type AdvisoryLockLease struct {
@@ -649,9 +650,21 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
 	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
 }
 
-// ProveCurrent performs an operation on the retained session. Local lease
-// state is evidence of ownership, but only successful I/O proves that the
-// server still associates the advisory lock with this exact session.
+const retainedAdvisoryLockProofSQL = `
+	SELECT EXISTS (
+		SELECT 1
+		FROM pg_locks
+		WHERE locktype = 'advisory'
+		  AND pid = pg_backend_pid()
+		  AND granted
+		  AND classid::bigint = CASE WHEN hashtext($1) < 0 THEN 4294967295::bigint ELSE 0::bigint END
+		  AND objid::bigint = (hashtext($1)::bigint & 4294967295::bigint)
+		  AND objsubid = 1
+	)
+`
+
+// ProveCurrent verifies the exact advisory lock on the retained session.
+// Session liveness alone is not possession evidence.
 func (l *AdvisoryLockLease) ProveCurrent(ctx context.Context) error {
 	if l == nil {
 		return errors.New("advisory lock lease has no current PostgreSQL session")
@@ -671,15 +684,62 @@ func (l *AdvisoryLockLease) ProveCurrent(ctx context.Context) error {
 		discard := session.prepareDiscardExcept(nil)
 		return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 	}
-	var one int
-	err = session.queryRowContext(ctx, `SELECT 1`).Scan(&one)
+	var held bool
+	err = session.queryRowContext(ctx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
 	endOperation()
-	if err == nil && one == 1 {
+	if err == nil && held {
 		return nil
 	}
 	discard := session.prepareDiscardExcept(nil)
 	if err == nil {
-		err = fmt.Errorf("retained PostgreSQL session possession probe returned %d", one)
+		err = errors.New("retained PostgreSQL session no longer owns its advisory lock")
+	}
+	return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+}
+
+// MonitorProveCurrent starts its deadline only after the exact retained
+// session-operation boundary is held. Waiting behind canonical local work is
+// therefore neutral and cannot be misclassified as possession loss.
+func (l *AdvisoryLockLease) MonitorProveCurrent(ctx context.Context, deadline time.Duration) error {
+	if l == nil {
+		return errors.New("advisory lock lease has no current PostgreSQL session")
+	}
+	if deadline <= 0 {
+		return errors.New("PostgreSQL possession monitor deadline must be positive")
+	}
+	l.mu.Lock()
+	session := l.session
+	current := !l.released && session != nil
+	l.mu.Unlock()
+	if !current {
+		return errors.New("advisory lock lease has no current PostgreSQL session")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	endOperation, err := session.beginOperation()
+	if err != nil {
+		discard := session.prepareDiscardExcept(nil)
+		return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
+	}
+	if err := ctx.Err(); err != nil {
+		endOperation()
+		return err
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, deadline)
+	var held bool
+	err = session.queryRowContext(probeCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	cancel()
+	endOperation()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && held {
+		return nil
+	}
+	discard := session.prepareDiscardExcept(nil)
+	if err == nil {
+		err = errors.New("retained PostgreSQL session no longer owns its advisory lock")
 	}
 	return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 }

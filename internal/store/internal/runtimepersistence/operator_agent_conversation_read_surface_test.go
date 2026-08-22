@@ -551,7 +551,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -650,14 +650,14 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent agent-1: %v", err)
 	}
-	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-2", "other"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -839,7 +839,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 
 func seedOperatorAgentUsageAgent(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, agentID string, status string) {
 	t.Helper()
-	if err := agentfixture.Upsert(ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig(agentID, "researcher"),
 		Status:    status,
 		StartedAt: time.Now().UTC(),
@@ -854,7 +854,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -890,7 +890,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		{"agent-1", "researcher"},
 		{"agent-2", "reviewer"},
 	} {
-		if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
+		if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
 			Config:    testOperatorAgentConfig(agent.id, agent.role),
 			Status:    "active",
 			StartedAt: time.Now().UTC(),
@@ -1042,14 +1042,14 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.Upsert(ctx, sqliteStore, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
-	if err := agentfixture.Upsert(ctx, sqliteStore, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-2", "reviewer"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),
@@ -1266,7 +1266,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
-	if err := agentfixture.Upsert(ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    testOperatorAgentConfig("agent-1", "researcher"),
 		Status:    "active",
 		StartedAt: time.Now().UTC(),

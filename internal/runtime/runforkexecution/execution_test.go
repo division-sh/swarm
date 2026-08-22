@@ -3293,7 +3293,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
 	agentIdentity := selectedContractTestAgentIdentity(t, "agent-a", "flow-a/1")
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
-	seedSelectedExecutionTestAgent(t, ctx, db, agentIdentity, at)
+	seedSelectedExecutionTestAgent(t, ctx, pg, agentIdentity, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -3412,7 +3412,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	sourceEvent := seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, []events.DeliveryRoute{agentRoute}, loaded.BundleSourceFact)
 	agentIdentity := agentRoute.AgentIdentity
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
-	seedSelectedExecutionTestAgent(t, ctx, db, agentIdentity, at)
+	seedSelectedExecutionTestAgent(t, ctx, pg, agentIdentity, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -3555,7 +3555,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
 	agentIdentity := selectedContractTestAgentIdentity(t, "agent-a", "flow-a/1")
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
-	seedSelectedExecutionTestAgent(t, ctx, db, agentIdentity, at)
+	seedSelectedExecutionTestAgent(t, ctx, pg, agentIdentity, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -4647,23 +4647,26 @@ func selectedExecutionTestAgentFields(t testing.TB, identity agentidentity.Ident
 func seedSelectedExecutionTestAgent(
 	t testing.TB,
 	ctx context.Context,
-	db *sql.DB,
+	selected storetest.AgentFixtureStore,
 	identity agentidentity.Identity,
 	at time.Time,
 ) {
 	t.Helper()
-	fields := selectedExecutionTestAgentFields(t, identity)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (
-			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			role, model, memory_enabled, memory_source, status, created_at,
-			topology_authority_kind, topology_admission, execution_lifetime
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, 'test-agent', 'tier1', TRUE, 'authored', 'active', $8,
-			'static_declaration_plan', '{"authority":{"kind":"static_declaration_plan","static_declaration_plan":{"source_set_revision":"test-source-set-v1","bundle_hash":"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bundle_source":"ephemeral"}},"execution_lifetime":"durable_managed"}'::jsonb, 'durable_managed')
-	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
+	config := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
+		ExecutionMode:      runtimeeffects.ExecutionModeLive,
+		ResolvedLLMBackend: llmselection.BackendAnthropic,
+		ID:                 identity.AgentID(),
+		Identity:           identity,
+		Type:               "test-agent",
+		Role:               "test-agent",
+		Model:              llmselection.ModelAliasRegular,
+		Memory:             agentmemory.Authored(true),
+		FlowPath:           identity.FlowInstance(),
+		Config:             []byte(`{}`),
+	})
+	if err := storetest.UpsertAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+		Config: config, Status: "active", HiredBy: "test", StartedAt: at,
+	}); err != nil {
 		t.Fatalf("seed selected-execution test agent: %v", err)
 	}
 }

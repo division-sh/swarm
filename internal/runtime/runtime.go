@@ -221,9 +221,11 @@ type BootProgressEvent struct {
 type Runtime struct {
 	generationMu               sync.Mutex
 	lifecycleMu                sync.Mutex
+	startupPrepareMu           sync.Mutex
 	startCtx                   context.Context
 	cancelStart                context.CancelFunc
 	startupGrant               runtimestartupownership.GenerationGrant
+	startupLifecyclePrepared   bool
 	replacementQuiesced        bool
 	workOccurrence             *worklifetime.RuntimeOccurrence
 	runLifecycleExecutor       *runtimerunlifecycle.Executor
@@ -367,6 +369,50 @@ func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.GenerationG
 		return err
 	}
 	rt.startupGrant = grant
+	rt.startupLifecyclePrepared = false
+	return nil
+}
+
+// PrepareStartupLifecycle rebinds durable lifecycle execution and reconciles
+// topology without hydrating any process-local agent execution.
+func (rt *Runtime) PrepareStartupLifecycle(ctx context.Context) error {
+	if rt == nil {
+		return errors.New("runtime is required")
+	}
+	if rt.Manager == nil {
+		return nil
+	}
+	rt.startupPrepareMu.Lock()
+	defer rt.startupPrepareMu.Unlock()
+	rt.lifecycleMu.Lock()
+	if rt.cancelStart != nil {
+		rt.lifecycleMu.Unlock()
+		return errors.New("runtime already started")
+	}
+	if rt.startupLifecyclePrepared {
+		rt.lifecycleMu.Unlock()
+		return nil
+	}
+	grant := rt.startupGrant
+	rt.lifecycleMu.Unlock()
+	if grant == nil {
+		return errors.New("runtime generation grant is required before startup preparation")
+	}
+	if _, err := grant.Evidence(); err != nil {
+		return err
+	}
+	if err := rt.Manager.RebindLifecycleExecutionForStartup(ctx); err != nil {
+		return fmt.Errorf("rebind lifecycle process execution: %w", err)
+	}
+	if err := rt.Manager.PrepareStaticTopologyForStartup(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+		return fmt.Errorf("prepare static declaration topology: %w", err)
+	}
+	rt.lifecycleMu.Lock()
+	defer rt.lifecycleMu.Unlock()
+	if rt.cancelStart != nil || rt.startupGrant != grant {
+		return errors.New("runtime generation changed during startup preparation")
+	}
+	rt.startupLifecyclePrepared = true
 	return nil
 }
 
@@ -1346,6 +1392,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		return err
 	}
+	if err := rt.PrepareStartupLifecycle(ctx); err != nil {
+		rt.releaseAuthorActivityCatalog()
+		return err
+	}
 	ctx = rt.authorActivityContext(ctx)
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	bootStartedAt := rt.Options.BootStartedAt
@@ -1375,11 +1425,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.releaseAuthorActivityCatalog()
 		return grantErr
 	}
-	if err := rt.Manager.ReconcileStaticTopologyForStartup(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+	if err := rt.Manager.HydrateStaticTopologyForStartup(ctx); err != nil {
 		cancelStart()
 		rt.lifecycleMu.Unlock()
 		rt.releaseAuthorActivityCatalog()
-		return fmt.Errorf("reconcile static declaration topology: %w", err)
+		return fmt.Errorf("hydrate static declaration topology: %w", err)
 	}
 	rt.emitBootProgress(5, "startup_ownership_lease", "ok", "grant="+grantEvidence.GrantID)
 	rt.startCtx = startCtx

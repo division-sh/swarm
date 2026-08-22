@@ -851,9 +851,15 @@ func (s *flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent,
 		if s.terminal[id] {
 			continue
 		}
-		out = append(out, latest[id])
+		rec := latest[id]
+		rec.ProcessBinding = lifecycleProbeProcessBinding()
+		out = append(out, rec)
 	}
 	return out, nil
+}
+func (*flowActivationTestStore) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
+	binding := lifecycleProbeProcessBinding()
+	return binding, binding.Validate()
 }
 func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
 	if req.TargetPhase == AgentLifecycleTerminated {
@@ -873,6 +879,7 @@ func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Conte
 		rec.LifecycleGeneration = req.TargetGeneration
 		rec.LifecyclePhase = req.TargetPhase
 		rec.LifecycleRunMode = req.RunMode
+		rec.ProcessBinding = lifecycleProbeProcessBinding()
 		s.upserts = append(s.upserts, rec)
 		if s.terminal != nil {
 			delete(s.terminal, strings.TrimSpace(req.AgentID))
@@ -884,7 +891,8 @@ func (s *flowActivationTestStore) CommitAgentLifecycleTransition(_ context.Conte
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
-		Subordinate: sessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
+		ProcessBinding: lifecycleProbeProcessBinding(),
+		Subordinate:    sessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
 	}, nil
 }
 func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error { return nil }

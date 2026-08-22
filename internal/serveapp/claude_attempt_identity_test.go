@@ -457,7 +457,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			}, runtimemanager.AgentManagerOptions{
 				ExecutionPosture: executionposture.Live,
 				BaseContext:      claudeAttemptProofContext(),
-				LifecycleStore:   storetest.AgentLifecycleFixture(backend.store),
+				LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.store),
 				DeliveryStore:    backend.store,
 				Sessions:         backend.sessions,
 				SessionResetter:  backend.store,
@@ -556,7 +556,7 @@ func newClaudeAttemptProofManagerForGeneration(
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		BaseContext:      claudeAttemptProofContext(),
-		LifecycleStore:   storetest.AgentLifecycleFixture(backend.store),
+		LifecycleStore:   storetest.AgentLifecycleFixture(t, backend.store),
 		DeliveryStore:    backend.store,
 		SemanticSource:   claudeAttemptProofSemanticSource(),
 		Sessions:         backend.sessions,

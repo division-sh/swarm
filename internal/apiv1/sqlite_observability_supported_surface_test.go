@@ -288,6 +288,7 @@ type observabilityFixtureStore interface {
 	ObservabilityReadStore
 	runtimedelivery.Store
 	runtimepkg.RuntimeLogPersistence
+	storetest.AgentFixtureStore
 }
 
 func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore, db *sql.DB, sqlite bool) observabilitySurfaceFixture {
@@ -318,7 +319,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, db, sqlite, runID, identity)
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, store, db, sqlite, runID, identity)
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("BindAgentSession: %v", err)
 	}
