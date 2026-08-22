@@ -553,7 +553,7 @@ func acquireDeliveryTargetByDeclaredKey(
 		if err != nil {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 		}
-		if !workflowInstanceOwnedByFlow(source, candidate, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceTerminal(source, flowID, candidate) || !selectEntityCandidateMatches(candidate, expected) {
+		if !workflowInstanceOwnedByFlow(source, candidate, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, candidate) || !selectEntityCandidateMatches(candidate, expected) {
 			continue
 		}
 		matches = append(matches, candidate)
@@ -603,7 +603,7 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 		}
 	}
 	if ok {
-		if !workflowInstanceOwnedByFlow(source, existing, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceTerminal(source, flowID, existing) || !selectEntityCandidateMatches(existing, expected) {
+		if !workflowInstanceOwnedByFlow(source, existing, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, existing) || !selectEntityCandidateMatches(existing, expected) {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_conflict: node %s flow %s deterministic entity %s exists but does not match declared active key", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), route.EntityID)
 		}
 		existingRoute, err := deliveryTargetRouteForWorkflowInstance(source, flowID, existing)
@@ -682,8 +682,9 @@ func deliveryTargetRouteForWorkflowInstance(source semanticview.Source, flowID s
 	return route, nil
 }
 
-func deliveryTargetWorkflowInstanceTerminal(source semanticview.Source, flowID string, instance WorkflowInstance) bool {
-	if strings.TrimSpace(instance.Status) == "terminated" || !instance.TerminatedAt.IsZero() {
+func deliveryTargetWorkflowInstanceUnavailable(source semanticview.Source, flowID string, instance WorkflowInstance) bool {
+	status := strings.TrimSpace(instance.Status)
+	if !strings.EqualFold(status, "active") || !instance.TerminatedAt.IsZero() {
 		return true
 	}
 	for _, terminal := range source.FlowTerminalStages(flowID) {

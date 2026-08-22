@@ -107,7 +107,7 @@ func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Con
 			WHERE run.run_id = es.run_id AND run.status IN ($4, $5)
 		  )
 		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3 OR ($6::boolean AND es.flow_instance = $1::text))
-		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+		  AND (fi.instance_id IS NULL OR (LOWER(BTRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC
 	`, runID, scopeKey, scopeKey+"/%", string(activeStates[0]), string(activeStates[1]), owner.Owns(runID))
 	if err != nil {
@@ -163,7 +163,7 @@ func (s *PipelinePostgresOwner) SelectActiveWorkflowInstances(ctx context.Contex
 			WHERE run.run_id = es.run_id AND run.status IN ($4, $5)
 		  )
 		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
-		  AND fi.status NOT IN ('terminated', 'inactive')
+		  AND LOWER(BTRIM(fi.status)) = 'active'
 		  AND fi.terminated_at IS NULL
 	`)
 	terminalStates := runtimepipeline.NormalizeWorkflowInstanceExcludedStates(excludedStates)
@@ -537,7 +537,7 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Conte
 			WHERE run.run_id = es.run_id AND run.status IN (?, ?)
 		  )
 		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
-		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+		  AND (fi.instance_id IS NULL OR (LOWER(TRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC
 	`, runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey+"/%", owner.Owns(runID), runID)
 	if err != nil {
@@ -599,7 +599,7 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowInstances(ctx context.Context,
 		if storageRef != scopeKey && !strings.HasPrefix(storageRef, scopeKey+"/") {
 			continue
 		}
-		if item.Status == "terminated" || item.Status == "inactive" || !item.TerminatedAt.IsZero() {
+		if !strings.EqualFold(strings.TrimSpace(item.Status), "active") || !item.TerminatedAt.IsZero() {
 			continue
 		}
 		if _, terminal := terminalStates[strings.ToLower(strings.TrimSpace(item.CurrentState))]; terminal {

@@ -178,7 +178,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx
 		WHERE es.run_id = ?
 		  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN (?, ?))
 		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
-		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+		  AND (fi.instance_id IS NULL OR (LOWER(TRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC`
 	args := []any{runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey + "/%", owner.Owns(runID), runID}
 	if r.dialect == workflowStoreDialectPostgres {
@@ -188,7 +188,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx
 			WHERE es.run_id = $1::uuid
 			  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN ($2, $3))
 				  AND (es.flow_instance = $4 OR es.flow_instance LIKE $5 OR ($6::boolean AND es.flow_instance = $1::text))
-			  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
+				  AND (fi.instance_id IS NULL OR (LOWER(BTRIM(fi.status)) = 'active' AND fi.terminated_at IS NULL))
 			ORDER BY es.created_at ASC, es.entity_id ASC`
 	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -299,7 +299,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowInstances(ctx co
 		if path != scopeKey && !strings.HasPrefix(path, scopeKey+"/") {
 			continue
 		}
-		if item.Status == "terminated" || item.Status == "inactive" || !item.TerminatedAt.IsZero() {
+		if !strings.EqualFold(strings.TrimSpace(item.Status), "active") || !item.TerminatedAt.IsZero() {
 			continue
 		}
 		if _, found := excluded[strings.ToLower(strings.TrimSpace(item.CurrentState))]; found {

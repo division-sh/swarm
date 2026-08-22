@@ -758,6 +758,34 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 	}
 }
 
+func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
+	source := handlerEntityRequirementExecutionSource()
+	tests := []struct {
+		name        string
+		status      string
+		state       string
+		terminated  time.Time
+		unavailable bool
+	}{
+		{name: "active", status: "active", state: "active"},
+		{name: "draining", status: "draining", state: "active", unavailable: true},
+		{name: "terminated", status: "terminated", state: "active", unavailable: true},
+		{name: "retired inactive spelling", status: "inactive", state: "active", unavailable: true},
+		{name: "unknown fails closed", status: "failed", state: "active", unavailable: true},
+		{name: "missing fails closed", state: "active", unavailable: true},
+		{name: "termination timestamp", status: "active", state: "active", terminated: time.Now().UTC(), unavailable: true},
+		{name: "terminal entity stage", status: "active", state: "killed", unavailable: true},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			instance := WorkflowInstance{Status: testCase.status, CurrentState: testCase.state, TerminatedAt: testCase.terminated}
+			if got := deliveryTargetWorkflowInstanceUnavailable(source, "review", instance); got != testCase.unavailable {
+				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
+			}
+		})
+	}
+}
+
 func deliveryTargetOwnershipSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeTemplate},

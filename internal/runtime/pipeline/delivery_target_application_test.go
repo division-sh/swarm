@@ -395,6 +395,27 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					}
 				},
 			},
+			{
+				name: "draining-status", wantError: "descriptor or status conflicts",
+				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, db *sql.DB) {
+					t.Helper()
+					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+						InstanceID: "draining-status", StorageRef: instancePath, EntityID: entityID,
+						WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+						Fields: map[string]any{"marker": "unchanged"},
+					})
+					if err := store.upsert(ctx, instance); err != nil {
+						t.Fatalf("seed draining target: %v", err)
+					}
+					query := `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = ?`
+					if backend == "postgres" {
+						query = `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = $1`
+					}
+					if _, err := db.ExecContext(ctx, query, instancePath); err != nil {
+						t.Fatalf("drain target lifecycle: %v", err)
+					}
+				},
+			},
 		} {
 			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
 				db, store := openHandlerEntityRequirementStore(t, backend)
@@ -438,6 +459,102 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
 				if err != nil || !found || persisted.Revision != 1 || persisted.Fields["marker"] != "unchanged" {
 					t.Fatalf("invalid lifecycle rejection mutated target: found=%t err=%v instance=%#v", found, err, persisted)
+				}
+			})
+		}
+	}
+}
+
+func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutationOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, engine := range []string{"bridge", "declarative"} {
+			t.Run(backend+"/"+engine, func(t *testing.T) {
+				db, store := openHandlerEntityRequirementStore(t, backend)
+				source := handlerEntityRequirementExecutionSource()
+				newCoordinator := func(bus *recordingPipelineBus) *PipelineCoordinator {
+					return newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
+						Module:              staticSemanticWorkflowModule{source: source},
+						Persistence:         workflowPersistenceForTest(store),
+						PipelineObligations: unavailablePipelineTestObligationOwner{},
+					})
+				}
+				firstBus := &recordingPipelineBus{}
+				first := newCoordinator(firstBus)
+				configurePipelineTestDeliveryOwner(t, first)
+				var ctx context.Context
+				if backend == "sqlite" {
+					ctx = sqliteExactOnceRunContext(t, db)
+				} else {
+					ctx = testPipelineRunContext(t, db)
+				}
+
+				instancePath := testPipelineRunID
+				entityID := eventtest.UUID("non-active-delivery-target-" + backend + "-" + engine)
+				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+					InstanceID: instancePath, StorageRef: instancePath, EntityID: entityID,
+					WorkflowName: "review", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
+					Fields: map[string]any{"marker": "unchanged"},
+				})); err != nil {
+					t.Fatalf("seed delayed target: %v", err)
+				}
+				query := `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = ?`
+				if backend == "postgres" {
+					query = `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE instance_id = $1`
+				}
+				if _, err := db.ExecContext(ctx, query, instancePath); err != nil {
+					t.Fatalf("drain delayed target: %v", err)
+				}
+
+				evt := handlerTestRootIngress(
+					uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0,
+					testPipelineRunID, "", handlerTestWorkflowEnvelope("review", instancePath, entityID), time.Now().UTC(),
+				)
+				node := pipelineNode(t, "review", "node-a")
+				route := seedExactOnceEventDelivery(t, first, ctx, evt, node)
+				handler := runtimecontracts.SystemNodeEventHandler{
+					Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
+					Emit:       runtimecontracts.EmitSpec{Event: "work.emitted"},
+				}
+				execute := func(label string, coordinator *PipelineCoordinator, bus *recordingPipelineBus) {
+					t.Helper()
+					deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
+					var err error
+					if engine == "bridge" {
+						_, err = coordinator.executeNodeContractHandler(deliveryCtx, node, handler, workflowTriggerContext{Event: evt}, false)
+					} else {
+						_, err = newCoordinatorHandlerExecutionEngine(coordinator, node).ExecuteHandlerSteps(deliveryCtx, handler, evt, "work.ready")
+					}
+					if err == nil || !strings.Contains(err.Error(), "descriptor or status conflicts") {
+						t.Fatalf("%s non-active target error = %v, want fail-closed status conflict", label, err)
+					}
+					if bus.outboxCount() != 0 || bus.publishedCount() != 0 {
+						t.Fatalf("%s non-active target effects = outbox:%d published:%d, want none", label, bus.outboxCount(), bus.publishedCount())
+					}
+				}
+
+				execute("delayed", first, firstBus)
+				replayBus := &recordingPipelineBus{}
+				execute("replayed after coordinator reconstruction", newCoordinator(replayBus), replayBus)
+
+				persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+				if err != nil || !found || persisted.Revision != 1 || persisted.Fields["marker"] != "unchanged" || persisted.Status != "draining" {
+					t.Fatalf("non-active replay changed target: found=%t err=%v instance=%#v", found, err, persisted)
+				}
+				mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE caused_by_event = ?`
+				if backend == "postgres" {
+					mutationQuery = `SELECT COUNT(*) FROM entity_mutations WHERE caused_by_event = $1::uuid`
+				}
+				var mutationCount int
+				if err := db.QueryRowContext(ctx, mutationQuery, evt.ID()).Scan(&mutationCount); err != nil || mutationCount != 0 {
+					t.Fatalf("non-active replay mutation rows = %d, err=%v, want zero", mutationCount, err)
+				}
+				deliveryQuery := `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+				if backend == "postgres" {
+					deliveryQuery = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+				}
+				var deliveryStatus string
+				if err := db.QueryRowContext(ctx, deliveryQuery, evt.ID(), route.Recipient.ID()).Scan(&deliveryStatus); err != nil || deliveryStatus != "pending" {
+					t.Fatalf("non-active replay delivery status = %q, err=%v, want unchanged pending", deliveryStatus, err)
 				}
 			})
 		}
