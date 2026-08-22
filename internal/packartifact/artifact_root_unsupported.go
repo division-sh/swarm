@@ -16,6 +16,10 @@ func openAdmittedArtifactRoot(target string) (*admittedArtifactRoot, error) {
 
 func (r *admittedArtifactRoot) close() error { return nil }
 
+func (r *admittedArtifactRoot) openDirectory(relative string) (*os.File, error) {
+	return nil, fmt.Errorf("artifact directory %q cannot be admitted safely on this platform", relative)
+}
+
 func (r *admittedArtifactRoot) readDir(relative string) ([]fs.DirEntry, error) {
 	return nil, fmt.Errorf("artifact directory %q cannot be admitted safely on this platform", relative)
 }

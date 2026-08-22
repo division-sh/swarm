@@ -2,6 +2,8 @@ package packartifact
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -246,8 +248,15 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 }
 
 func importEmbeddedPackLocked(root, id string, entry Entry, transaction *projectPackTransaction) (bool, error) {
-	packsRoot := filepath.Join(root, ProjectPackDirectory)
-	if info, statErr := os.Lstat(packsRoot); statErr == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
+	if transaction == nil || transaction.root == nil || transaction.writerRoot == nil || strings.TrimSpace(transaction.stateRoot) == "" {
+		return false, fmt.Errorf("project pack transaction is required")
+	}
+	if filepath.Clean(root) != transaction.stateRoot {
+		return false, fmt.Errorf("project pack transaction root does not match the selected project")
+	}
+	writer := transaction.writerRoot
+	packsRoot := ProjectPackDirectory
+	if info, statErr := writer.Lstat(packsRoot); statErr == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
 		return false, fmt.Errorf("project pack path %q must be a real directory", ProjectPackDirectory)
 	} else if statErr != nil && !os.IsNotExist(statErr) {
 		return false, fmt.Errorf("inspect project pack directory: %w", statErr)
@@ -263,7 +272,7 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 		Origin: origin,
 	}
 	expectedManifest := ProjectPackManifest{Version: ProjectPackManifestVersion, Imports: []ProjectPackManifestImport{declared}}
-	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)
+	manifestPath := filepath.Join(ProjectPackDirectory, ProjectPackManifestFileName)
 	set, loadErr := loadProjectPackSetLocked(transaction)
 	if loadErr != nil {
 		return false, loadErr
@@ -284,8 +293,8 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 			return false, fmt.Errorf("project pack %q already exists with different membership or edited bytes; import will not overwrite it", id)
 		}
 	}
-	packPath := filepath.Join(packsRoot, id)
-	if _, statErr := os.Lstat(packPath); statErr == nil {
+	packPath := filepath.Join(ProjectPackDirectory, id)
+	if _, statErr := writer.Lstat(packPath); statErr == nil {
 		return false, fmt.Errorf("project pack path %q already exists and import will not overwrite it", path.Join(ProjectPackDirectory, id))
 	} else if !os.IsNotExist(statErr) {
 		return false, fmt.Errorf("inspect project pack path %q: %w", id, statErr)
@@ -296,68 +305,103 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 		return false, fmt.Errorf("marshal project pack manifest: %w", err)
 	}
 	packsRootExisted := true
-	if _, statErr := os.Lstat(packsRoot); os.IsNotExist(statErr) {
+	if _, statErr := writer.Lstat(packsRoot); os.IsNotExist(statErr) {
 		packsRootExisted = false
 	} else if statErr != nil {
 		return false, fmt.Errorf("inspect project packs directory: %w", statErr)
 	}
 	if !packsRootExisted {
-		if err := os.Mkdir(packsRoot, 0o755); err != nil {
+		if err := writer.Mkdir(packsRoot, 0o755); err != nil {
 			return false, fmt.Errorf("create project packs directory: %w", err)
 		}
 	}
 	cleanupEmptyRoot := func() {
 		if !packsRootExisted {
-			_ = os.Remove(packsRoot)
+			_ = writer.Remove(packsRoot)
 		}
 	}
-	if transaction == nil || strings.TrimSpace(transaction.stateRoot) == "" {
-		cleanupEmptyRoot()
-		return false, fmt.Errorf("project pack transaction is required")
-	}
-	tmp, err := os.MkdirTemp(transaction.stateRoot, ".pack-import-*")
+	tmp, err := createProjectPackTempDirectory(writer, ".pack-import-")
 	if err != nil {
 		cleanupEmptyRoot()
 		return false, fmt.Errorf("stage project pack import: %w", err)
 	}
-	defer os.RemoveAll(tmp)
-	if err := os.WriteFile(filepath.Join(tmp, EnvelopeFileName), envelopeBody, 0o644); err != nil {
+	defer writer.RemoveAll(tmp)
+	if err := writer.WriteFile(filepath.Join(tmp, EnvelopeFileName), envelopeBody, 0o644); err != nil {
 		cleanupEmptyRoot()
 		return false, err
 	}
-	if err := os.WriteFile(filepath.Join(tmp, manifestFile), entry.ManifestBody(), 0o644); err != nil {
+	if err := writer.WriteFile(filepath.Join(tmp, manifestFile), entry.ManifestBody(), 0o644); err != nil {
 		cleanupEmptyRoot()
 		return false, err
 	}
-	if err := os.Rename(tmp, packPath); err != nil {
+	if err := writer.Rename(tmp, packPath); err != nil {
 		cleanupEmptyRoot()
 		return false, fmt.Errorf("publish project pack %q: %w", id, err)
 	}
-	manifestTmp, err := os.CreateTemp(transaction.stateRoot, ".pack-manifest-*")
+	manifestTmp, manifestTmpPath, err := createProjectPackTempFile(writer, ".pack-manifest-")
 	if err != nil {
-		_ = os.RemoveAll(packPath)
+		_ = writer.RemoveAll(packPath)
 		cleanupEmptyRoot()
 		return false, err
 	}
-	manifestTmpPath := manifestTmp.Name()
-	defer os.Remove(manifestTmpPath)
+	defer writer.Remove(manifestTmpPath)
 	if _, err := manifestTmp.Write(manifestBody); err != nil {
 		_ = manifestTmp.Close()
-		_ = os.RemoveAll(packPath)
+		_ = writer.RemoveAll(packPath)
 		cleanupEmptyRoot()
 		return false, err
 	}
 	if err := manifestTmp.Close(); err != nil {
-		_ = os.RemoveAll(packPath)
+		_ = writer.RemoveAll(packPath)
 		cleanupEmptyRoot()
 		return false, err
 	}
-	if err := os.Rename(manifestTmpPath, manifestPath); err != nil {
-		_ = os.RemoveAll(packPath)
+	if err := writer.Rename(manifestTmpPath, manifestPath); err != nil {
+		_ = writer.RemoveAll(packPath)
 		cleanupEmptyRoot()
 		return false, fmt.Errorf("publish project pack manifest: %w", err)
 	}
 	return true, nil
+}
+
+func createProjectPackTempDirectory(root *os.Root, prefix string) (string, error) {
+	for range 100 {
+		name, err := projectPackTempName(prefix)
+		if err != nil {
+			return "", err
+		}
+		if err := root.Mkdir(name, 0o700); err == nil {
+			return name, nil
+		} else if !errors.Is(err, fs.ErrExist) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("exhausted temporary project pack directory names")
+}
+
+func createProjectPackTempFile(root *os.Root, prefix string) (*os.File, string, error) {
+	for range 100 {
+		name, err := projectPackTempName(prefix)
+		if err != nil {
+			return nil, "", err
+		}
+		file, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			return file, name, nil
+		}
+		if !errors.Is(err, fs.ErrExist) {
+			return nil, "", err
+		}
+	}
+	return nil, "", fmt.Errorf("exhausted temporary project pack file names")
+}
+
+func projectPackTempName(prefix string) (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	return prefix + hex.EncodeToString(random[:]), nil
 }
 
 func importedProjectArtifact(entry Entry) ([]byte, ImportOrigin, error) {
