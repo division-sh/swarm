@@ -161,6 +161,7 @@ func TestProjectPackManifestUsesCanonicalYAMLAndPackBytesRemainExact(t *testing.
 	equivalent := fmt.Sprintf(`# formatting and map-key order are not identity
 imports:
   - origin:
+      envelope_hash: %q
       manifest_hash: %q
       version: %q
       id: %q
@@ -169,7 +170,7 @@ imports:
     type: %q
     id: %q
 version: 1
-`, declared.Origin.ManifestHash, declared.Origin.Version, declared.Origin.ID, declared.Origin.Source, declared.Path, declared.Type, declared.ID)
+`, declared.Origin.EnvelopeHash, declared.Origin.ManifestHash, declared.Origin.Version, declared.Origin.ID, declared.Origin.Source, declared.Path, declared.Type, declared.ID)
 	if err := os.WriteFile(manifestPath, []byte(equivalent), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -163,40 +163,64 @@ func TestImportEmbeddedPackOwnsProjectBytesAndBundleIdentity(t *testing.T) {
 	}
 }
 
-func TestPackReadbackMarksVersionOnlyProjectEditModified(t *testing.T) {
+func TestPackReadbackMarksEnvelopeOnlyProjectEditsModified(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
-		t.Fatalf("import Telegram changed=%t err=%v", changed, err)
+	tests := []struct {
+		name, old, replacement, wantVersion string
+	}{
+		{name: "version", old: "version: 0.1.0", replacement: "version: 0.1.1", wantVersion: "0.1.1"},
+		{name: "tests", old: "providertriggers/telegram", replacement: "providertriggers/telegram-edited", wantVersion: "0.1.0"},
 	}
-	envelopePath := filepath.Join(project, "packs", "provider.telegram", packartifact.EnvelopeFileName)
-	body, err := os.ReadFile(envelopePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edited := strings.Replace(string(body), "version: 0.1.0", "version: 0.1.1", 1)
-	if edited == string(body) {
-		t.Fatal("Telegram envelope version fixture changed")
-	}
-	if err := os.WriteFile(envelopePath, []byte(edited), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+			if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
+				t.Fatalf("import Telegram changed=%t err=%v", changed, err)
+			}
+			envelopePath := filepath.Join(project, "packs", "provider.telegram", packartifact.EnvelopeFileName)
+			body, err := os.ReadFile(envelopePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			edited := strings.Replace(string(body), tc.old, tc.replacement, 1)
+			if edited == string(body) {
+				t.Fatalf("Telegram envelope %s fixture changed", tc.name)
+			}
+			if err := os.WriteFile(envelopePath, []byte(edited), 0o644); err != nil {
+				t.Fatal(err)
+			}
 
-	code, stdout, stderr := runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", "--contracts", project, "--json")
-	if code != 0 || stderr != "" {
-		t.Fatalf("JSON show code=%d stderr=%q stdout=%s", code, stderr, stdout)
-	}
-	show := decodeOutputJSON[packShowReadback](t, stdout)
-	if show.Pack.Version != "0.1.1" || !show.Pack.Modified || show.Pack.Origin.Version != "0.1.0" {
-		t.Fatalf("version-only JSON readback = %#v", show.Pack)
-	}
-	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", "--contracts", project)
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "version=0.1.1") || !strings.Contains(stdout, "modified=true") || !strings.Contains(stdout, "origin=provider.telegram@0.1.0") {
-		t.Fatalf("version-only human readback code=%d stderr=%q stdout=%s", code, stderr, stdout)
+			code, stdout, stderr := runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", "--contracts", project, "--json")
+			if code != 0 || stderr != "" {
+				t.Fatalf("JSON show code=%d stderr=%q stdout=%s", code, stderr, stdout)
+			}
+			show := decodeOutputJSON[packShowReadback](t, stdout)
+			if show.Pack.Version != tc.wantVersion || !show.Pack.Modified || show.Pack.Origin.Version != "0.1.0" || show.Pack.Origin.EnvelopeHash == "" {
+				t.Fatalf("%s-only JSON show readback = %#v", tc.name, show.Pack)
+			}
+			code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "list", "--contracts", project, "--json")
+			if code != 0 || stderr != "" {
+				t.Fatalf("JSON list code=%d stderr=%q stdout=%s", code, stderr, stdout)
+			}
+			list := decodeOutputJSON[packInventoryReadback](t, stdout)
+			found := false
+			for _, pack := range list.Packs {
+				if pack.ID == "provider.telegram" {
+					found = pack.Modified
+				}
+			}
+			if !found {
+				t.Fatalf("%s-only JSON list did not mark Telegram modified: %#v", tc.name, list.Packs)
+			}
+			code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", "--contracts", project)
+			if code != 0 || stderr != "" || !strings.Contains(stdout, "version="+tc.wantVersion) || !strings.Contains(stdout, "modified=true") || !strings.Contains(stdout, "origin=provider.telegram@0.1.0") {
+				t.Fatalf("%s-only human readback code=%d stderr=%q stdout=%s", tc.name, code, stderr, stdout)
+			}
+		})
 	}
 }
 

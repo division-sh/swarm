@@ -9913,9 +9913,10 @@ tool_model:
           bytes.
         provenance: >
           Required provenance block. Platform base envelopes use `platform`; imported current envelopes use `project` while
-          their immutable receipt separately preserves embedded source/id/version/digest origin. Provenance and effective
-          selection (`embedded`, `development_override`, or `project`) change readback classification but never create a
-          verification shortcut.
+          their immutable receipt separately preserves embedded source/id/version/body-digest origin plus the exact project
+          envelope digest emitted at import. Provenance and effective selection (`embedded`, `development_override`, or
+          `project`) change readback classification but never create a verification shortcut. A receipt missing either
+          digest is invalid; no legacy reconstruction or fallback is permitted.
         capabilities: >
           Required declared capability surface. The loader derives canonical capabilities mechanically from the accepted
           body manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
@@ -9955,8 +9956,10 @@ tool_model:
         Other duplicate universal ids or duplicate normalized provider/tool ownership fail closed and report both sources.
         Development override replaces the complete embedded base before project precedence and never overlays or falls back.
         The exact selected base digest, project bytes, and resulting effective digest are immutable bundle identity facts.
-        Project readback marks an entry modified when either its current version or current body digest differs from the
-        immutable import origin tuple; body equality alone cannot hide a version edit.
+        Project readback marks an entry modified when its current exact envelope digest or current body digest differs from
+        the immutable import baseline tuple. This includes version, platform compatibility, tests, capabilities, requires,
+        implements, provenance, formatting, and any other admitted envelope-byte edit; body equality alone cannot hide an
+        envelope edit.
       capability_surface: >
         Readback consumes `tool_model.provider_capability_surface`. Trigger facts derive from the accepted body manifest,
         while envelope capabilities/requires remain integrity assertions only. Trigger pack subjects render AVAILABLE with
@@ -23582,9 +23585,10 @@ cli_specification:
       owner: provider_trigger_adapters.pack_envelope_source_authority
       behavior: >
         Copies one exact embedded pack into the selected project, records strict membership and immutable embedded origin in
-        `packs/manifest.yaml`, returns idempotently for an identical import, and refuses every conflicting existing path or
-        row without overwriting project edits. The project inventory transaction serializes cross-process imports and
-        validated readers so successful concurrent imports preserve all rows and readers never observe partial publication.
+        `packs/manifest.yaml`, including the exact emitted project-envelope baseline digest, returns idempotently for an
+        identical import, and refuses every conflicting existing path or row without overwriting project edits. The project
+        inventory transaction serializes cross-process imports and validated readers so successful concurrent imports
+        preserve all rows and readers never observe partial publication.
     packs:
       command: swarm packs
       group: author_validate

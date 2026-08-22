@@ -129,6 +129,7 @@ type ImportOrigin struct {
 	ID           string `yaml:"id" json:"id"`
 	Version      string `yaml:"version" json:"version"`
 	ManifestHash string `yaml:"manifest_hash" json:"manifest_hash"`
+	EnvelopeHash string `yaml:"envelope_hash" json:"envelope_hash"`
 }
 
 func (o ImportOrigin) Valid() bool {
@@ -141,7 +142,10 @@ func (o ImportOrigin) Valid() bool {
 	if _, err := packidentity.ParseVersion(strings.TrimSpace(o.Version)); err != nil {
 		return false
 	}
-	_, err := manifesthash.Parse(strings.TrimSpace(o.ManifestHash))
+	if _, err := manifesthash.Parse(strings.TrimSpace(o.ManifestHash)); err != nil {
+		return false
+	}
+	_, err := manifesthash.Parse(strings.TrimSpace(o.EnvelopeHash))
 	return err == nil
 }
 
@@ -172,7 +176,9 @@ func (e Entry) Origin() ImportOrigin { return e.origin }
 func (e Entry) ShadowsBase() bool    { return e.shadowsBase }
 func (e Entry) Modified() bool {
 	return e.selection == ProvenanceProject && e.origin.Valid() &&
-		(e.Version() != strings.TrimSpace(e.origin.Version) || e.ManifestHash() != strings.TrimSpace(e.origin.ManifestHash))
+		(e.Version() != strings.TrimSpace(e.origin.Version) ||
+			e.ManifestHash() != strings.TrimSpace(e.origin.ManifestHash) ||
+			importedEnvelopeHash(e.envelopeBody) != strings.TrimSpace(e.origin.EnvelopeHash))
 }
 func (e Entry) Envelope() Envelope   { return e.envelope }
 func (e Entry) EnvelopeBody() []byte { return append([]byte(nil), e.envelopeBody...) }
@@ -493,7 +499,7 @@ func digestEffectiveInventory(baseDigest string, entries map[string]Entry) strin
 		entry := entries[id]
 		for _, value := range []string{
 			entry.ID(), entry.Version(), entry.Type(), entry.ManifestHash(), entry.Source(),
-			entry.origin.Source, entry.origin.ID, entry.origin.Version, entry.origin.ManifestHash,
+			entry.origin.Source, entry.origin.ID, entry.origin.Version, entry.origin.ManifestHash, entry.origin.EnvelopeHash,
 		} {
 			writeDigestField(hash, []byte(value))
 		}
@@ -501,6 +507,10 @@ func digestEffectiveInventory(baseDigest string, entries map[string]Entry) strin
 		writeDigestField(hash, entry.manifestBody)
 	}
 	return fmt.Sprintf("sha256:%x", hash.Sum(nil))
+}
+
+func importedEnvelopeHash(body []byte) string {
+	return manifesthash.FromBytes(body).String()
 }
 
 type digestWriter interface {
