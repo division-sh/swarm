@@ -112,7 +112,7 @@ func (s *targetRouteMemoryStore) LoadWorkflowEntityState(_ context.Context, rout
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
 }
 
-func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Context, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := append([]runtimepipeline.WorkflowEntityStatePersistenceRecord(nil), s.workflowStates...)
@@ -122,36 +122,7 @@ func (s *targetRouteMemoryStore) SelectActiveWorkflowEntityStates(_ context.Cont
 		}
 		records = append(records, targetRouteWorkflowStateRecord(instance))
 	}
-	excluded := map[string]struct{}{}
-	for _, state := range excludedStates {
-		excluded[strings.ToLower(strings.TrimSpace(state))] = struct{}{}
-	}
-	out := make([]runtimepipeline.WorkflowEntityStatePersistenceRecord, 0, len(records))
-	for _, record := range records {
-		instancePath := strings.Trim(strings.TrimSpace(record.FlowInstance), "/")
-		if instancePath != scopeKey && !strings.HasPrefix(instancePath, strings.Trim(scopeKey, "/")+"/") {
-			continue
-		}
-		if _, skip := excluded[strings.ToLower(strings.TrimSpace(record.CurrentState))]; skip {
-			continue
-		}
-		var fields map[string]any
-		if err := json.Unmarshal(record.Fields, &fields); err != nil {
-			return nil, err
-		}
-		matched := true
-		for _, selector := range selectors {
-			value, ok := runtimepipeline.WorkflowMetadataValue(fields, selector.Field)
-			if !ok || !runtimepipeline.WorkflowJSONValuesEqual(value, selector.Value) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			out = append(out, record)
-		}
-	}
-	return out, nil
+	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
 }
 
 func (s *targetRouteMemoryStore) SelectActiveWorkflowInstances(_ context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowInstance, error) {
@@ -961,8 +932,8 @@ func TestEventBusDeclaredKeyAcquisitionSettlesBeforePersistence(t *testing.T) {
 	}}}
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler("review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{SelectEntity: selector})
-		bundle.FlowTree.ByID["review"].Schema.Mode = runtimecontracts.FlowModeSingleton
-		bundle.FlowSchemas["review"] = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeSingleton, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
 	matching := runtimepipeline.WorkflowInstance{
@@ -1085,8 +1056,8 @@ func TestEventBusSelectOrCreateTargetIsImmutableAfterPrepublicationLinearization
 	}}}
 	newSource := func() semanticview.Source {
 		bundle := materializedTargetBundleWithHandler("review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{SelectOrCreateEntity: selector})
-		bundle.FlowTree.ByID["review"].Schema.Mode = runtimecontracts.FlowModeSingleton
-		bundle.FlowSchemas["review"] = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeSingleton, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"}, TerminalStates: []string{"done"}}
+		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
 		return semanticview.Wrap(bundle)
 	}
 	newBus := func(t *testing.T, store *targetRouteMemoryStore) *EventBus {

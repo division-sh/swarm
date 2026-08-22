@@ -128,7 +128,7 @@ func (unexpectedDurableTestRoles) SelectActiveWorkflowInstances(context.Context,
 func (unexpectedDurableTestRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) SelectActiveWorkflowEntityStates(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (unexpectedDurableTestRoles) SelectActiveWorkflowEntityStates(context.Context, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	return nil, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error) {

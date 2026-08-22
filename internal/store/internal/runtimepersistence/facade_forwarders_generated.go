@@ -1046,8 +1046,8 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, scopeKey, selectors, excludedStates)
+func (s *PostgresStore) SelectActiveWorkflowEntityStates(ctx context.Context, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelinePostgresOwner.SelectActiveWorkflowEntityStates(ctx, owner, selectors, excludedStates)
 }
 
 func (s *PostgresStore) SelectActiveWorkflowInstances(ctx context.Context, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {
@@ -2022,8 +2022,8 @@ func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, auth
 	return s.deliverySQLiteOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
-func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
-	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, scopeKey, selectors, excludedStates)
+func (s *SQLiteRuntimeStore) SelectActiveWorkflowEntityStates(ctx context.Context, owner pipeline.WorkflowEntityStateSelectionOwner, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowEntityStatePersistenceRecord, error) {
+	return s.pipelineSQLiteOwner.SelectActiveWorkflowEntityStates(ctx, owner, selectors, excludedStates)
 }
 
 func (s *SQLiteRuntimeStore) SelectActiveWorkflowInstances(ctx context.Context, scopeKey string, selectors []pipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]pipeline.WorkflowInstance, error) {

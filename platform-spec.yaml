@@ -1342,9 +1342,13 @@ contract_formats:
             appears before execution it is accepted only when its identity and declared key agree, otherwise execution fails.
             Declared-key acquisition is authorized only by explicit target absence. An event carrying an admitted exact target
             consumes that target for select and select_or_create handlers; payload-key matches cannot redirect it to another owner.
-            Declared-key cardinality reads the run-scoped entity_state registry directly. A matching active state row remains
-            selectable before its flow_instances lifecycle companion exists; when a companion exists, terminated or inactive
-            lifecycle excludes that row. Joining through lifecycle as a prerequisite for selected ownership is forbidden.
+            Declared-key cardinality reads the run-scoped entity_state registry through one source-backed exact receiving-flow
+            owner. Static and singleton flows admit only their exact authored scope. Template flows admit exactly one scalar
+            concrete instance segment under their authored scope, excluding every authored descendant flow scope. A nested
+            child row never becomes a parent candidate even when it shares the declared key and has no lifecycle companion.
+            A matching active state row remains selectable before its flow_instances lifecycle companion exists; when a
+            companion exists, terminated or inactive lifecycle excludes that row. Joining through lifecycle as a prerequisite
+            for selected ownership is forbidden.
             Once committed, later matching rows cannot redirect the delivery. Pipeline computes one immutable
             DeliveryTargetApplication from the stamped target and passes it through state preload, both production engines,
             mutation ownership, and producer-source projection. Those consumers validate availability and agreement but do not

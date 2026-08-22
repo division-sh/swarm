@@ -135,12 +135,12 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 	return record, nil
 }
 
-func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx context.Context, owner WorkflowEntityStateSelectionOwner, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	scopeKey := owner.ScopeKey()
 	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
 	if scopeKey == "" || len(selectors) == 0 {
 		return nil, nil
@@ -181,7 +181,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return FilterWorkflowEntityStatePersistenceRecords(records, selectors, excludedStates)
+	return FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
 }
 
 func scanPipelineTestWorkflowEntityState(row interface{ Scan(...any) error }) (WorkflowEntityStatePersistenceRecord, error) {
@@ -399,8 +399,8 @@ func (r *recordingRuntimeMutationRunner) LoadWorkflowTargetPersistence(ctx conte
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowTargetPersistence(ctx, route, entityID)
 }
 
-func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
-	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.SelectActiveWorkflowEntityStates(ctx, scopeKey, selectors, excludedStates)
+func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowEntityStates(ctx context.Context, owner WorkflowEntityStateSelectionOwner, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.SelectActiveWorkflowEntityStates(ctx, owner, selectors, excludedStates)
 }
 
 func (r *recordingRuntimeMutationRunner) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {
