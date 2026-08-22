@@ -57,6 +57,7 @@ type retainedSessionProbe struct {
 	records        []GrantEvidence
 	lifecycleScope runtimeauthoractivity.Scope
 	monitorProve   func(context.Context, time.Duration) error
+	loadSourceErr  error
 	terminalRecord bool
 	recordErr      error
 }
@@ -89,7 +90,7 @@ func (s *retainedSessionProbe) MonitorProveCurrent(ctx context.Context, deadline
 	return s.ProveCurrent(ctx)
 }
 
-func (s *retainedSessionProbe) InstallTerminalOwner(owner SessionTerminalOwner) error {
+func (s *retainedSessionProbe) InstallTerminalOwner(owner SessionTerminalOwner, _ time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if owner == nil || s.callback != nil {
@@ -115,7 +116,7 @@ func (s *retainedSessionProbe) RecordGenerationGrantTransition(_ context.Context
 func (s *retainedSessionProbe) LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.plan, s.plan.Revision != "", nil
+	return s.plan, s.plan.Revision != "", s.loadSourceErr
 }
 
 func (s *retainedSessionProbe) CommitSourceSet(_ context.Context, req runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error) {
@@ -424,6 +425,46 @@ func TestProcessCapabilityReleaseRetirementFailureKeepsPossessionMonitorLive(t *
 	case <-grant.Done():
 	case <-time.After(time.Second):
 		t.Fatal("terminal possession loss did not finish retiring the retained grant")
+	}
+}
+
+func TestProcessCapabilityOperationErrorPossessionRecheckUsesConfiguredDeadline(t *testing.T) {
+	session, _ := testRetainedSession(t)
+	const deadline = 10 * time.Millisecond
+	seenDeadline := make(chan time.Duration, 1)
+	session.mu.Lock()
+	session.loadSourceErr = errors.New("selected-store operation failed")
+	session.monitorProve = func(ctx context.Context, got time.Duration) error {
+		seenDeadline <- got
+		proofCtx, cancel := context.WithTimeout(ctx, got)
+		defer cancel()
+		<-proofCtx.Done()
+		return proofCtx.Err()
+	}
+	session.mu.Unlock()
+	capability, err := newProcessCapability(session, time.Hour, deadline)
+	if err != nil {
+		t.Fatalf("newProcessCapability: %v", err)
+	}
+
+	started := time.Now()
+	if _, _, err := capability.CurrentSourceSet(context.Background()); err == nil || !strings.Contains(err.Error(), "operation failed") {
+		t.Fatalf("CurrentSourceSet error = %v, want selected-store operation failure", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("operation-error possession recheck took %s, want bounded completion", elapsed)
+	}
+	select {
+	case got := <-seenDeadline:
+		if got != deadline {
+			t.Fatalf("operation-error possession deadline = %s, want %s", got, deadline)
+		}
+	default:
+		t.Fatal("operation-error path bypassed bounded possession proof")
+	}
+	result, terminal := capability.TerminalResult()
+	if !terminal || result.Cause != TerminalOwnershipUnprovable {
+		t.Fatalf("terminal result = %#v ok=%v, want ownership_unprovable", result, terminal)
 	}
 }
 

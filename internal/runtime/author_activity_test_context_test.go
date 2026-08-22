@@ -96,7 +96,7 @@ func (s *runtimeTestRetainedSession) MonitorProveCurrent(ctx context.Context, _ 
 	return s.ProveCurrent(ctx)
 }
 
-func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner) error {
+func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupownership.SessionTerminalOwner, _ time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.callback != nil || owner == nil {

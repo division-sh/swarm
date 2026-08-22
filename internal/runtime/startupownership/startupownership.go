@@ -201,6 +201,18 @@ type AuthorityInspection struct {
 	Detail         string                    `json:"detail"`
 }
 
+func EmptyAuthorityInspection(backend string) (AuthorityInspection, error) {
+	backend = strings.TrimSpace(backend)
+	digest := sha256.Sum256([]byte("swarm-empty-authority-inspection-v1\x00" + backend))
+	result := AuthorityInspection{
+		Status:         AuthorityInspectionEmpty,
+		Backend:        backend,
+		FindingsDigest: fmt.Sprintf("sha256:%x", digest),
+		Detail:         "No previous project session is recorded.",
+	}
+	return result, result.Validate()
+}
+
 func (i AuthorityInspection) Validate() error {
 	if i.Status != AuthorityInspectionEmpty && i.Status != AuthorityInspectionValid && i.Status != AuthorityInspectionCorrupt {
 		return errors.New("authority inspection status is invalid")
@@ -387,7 +399,7 @@ type RetainedSession interface {
 	Authority() (Authority, error)
 	ProveCurrent(context.Context) error
 	MonitorProveCurrent(context.Context, time.Duration) error
-	InstallTerminalOwner(SessionTerminalOwner) error
+	InstallTerminalOwner(SessionTerminalOwner, time.Duration) error
 	GrantTransitionRecorder
 	LoadSourceSet(context.Context) (runtimeagenttopology.SourceSetPlan, bool, error)
 	CommitSourceSet(context.Context, runtimeagenttopology.SourceSetCommitRequest) (runtimeagenttopology.SourceSetCommitResult, error)

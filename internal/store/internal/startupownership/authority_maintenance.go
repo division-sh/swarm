@@ -36,10 +36,30 @@ type authorityHeadRecord struct {
 }
 
 func (s *StartupPostgresOwner) InspectAuthority(ctx context.Context) (runtimestartupownership.AuthorityInspection, error) {
+	if s == nil || s.catalogEmpty == nil {
+		return runtimestartupownership.AuthorityInspection{}, errors.New("PostgreSQL authority inspection requires selected-store catalog ownership")
+	}
+	empty, err := s.catalogEmpty(ctx)
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	if empty {
+		return runtimestartupownership.EmptyAuthorityInspection("postgres_retained_session")
+	}
 	return inspectAuthorityHead(ctx, s.backend, "postgres_retained_session", false)
 }
 
 func (s *StartupSQLiteOwner) InspectAuthority(ctx context.Context) (runtimestartupownership.AuthorityInspection, error) {
+	if s == nil || s.catalogEmpty == nil {
+		return runtimestartupownership.AuthorityInspection{}, errors.New("SQLite authority inspection requires selected-store catalog ownership")
+	}
+	empty, err := s.catalogEmpty(ctx)
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	if empty {
+		return runtimestartupownership.EmptyAuthorityInspection("sqlite_retained_owner")
+	}
 	return inspectAuthorityHead(ctx, s.backend, "sqlite_retained_owner", true)
 }
 
@@ -197,18 +217,7 @@ func authorityRecordTimestamp(value any) (string, bool) {
 
 func classifyAuthorityHead(ctx context.Context, queryer authorityQueryer, record authorityHeadRecord, exists bool, backend string, sqlite bool) (runtimestartupownership.AuthorityInspection, error) {
 	if !exists {
-		digest, err := canonicaljson.Hash(struct {
-			Backend string `json:"backend"`
-			Empty   bool   `json:"empty"`
-		}{Backend: backend, Empty: true})
-		if err != nil {
-			return runtimestartupownership.AuthorityInspection{}, err
-		}
-		result := runtimestartupownership.AuthorityInspection{
-			Status: runtimestartupownership.AuthorityInspectionEmpty, Backend: backend,
-			FindingsDigest: digest, Detail: "No previous project session is recorded.",
-		}
-		return result, result.Validate()
+		return runtimestartupownership.EmptyAuthorityInspection(backend)
 	}
 	digest, err := canonicaljson.Hash(record)
 	if err != nil {

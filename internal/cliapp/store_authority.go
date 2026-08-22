@@ -2,7 +2,9 @@ package cliapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -29,6 +31,11 @@ type authorityMaintenanceStore interface {
 	Close() error
 }
 
+type authorityInspectionStore interface {
+	InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error)
+	Close() error
+}
+
 func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
 	opts := storeAuthorityOptions{storeMode: storebackend.ActiveDefaultBackend().String()}
 	cmd := &cobra.Command{
@@ -44,12 +51,7 @@ func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
 		Short: "Show who the selected store records as project owner.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			selected, closeStore, err := openAuthorityMaintenanceStore(ctx, repo, cmd, opts)
-			if err != nil {
-				return err
-			}
-			defer closeStore()
-			inspection, err := selected.InspectAuthority(ctx)
+			inspection, err := inspectSelectedStoreAuthority(ctx, repo, cmd, opts)
 			if err != nil {
 				return err
 			}
@@ -105,6 +107,38 @@ func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
 	repair.Flags().StringVar(&opts.confirm, "confirm", "", "Confirm the exact findings digest printed by inspection")
 	cmd.AddCommand(status, repair)
 	return cmd
+}
+
+func inspectSelectedStoreAuthority(ctx context.Context, repo string, cmd *cobra.Command, opts storeAuthorityOptions) (runtimestartupownership.AuthorityInspection, error) {
+	configPath, _, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config"))
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	paths, err := ResolveCLIContractPlatformSpecPaths(repo, CLIContractPlatformSpecPathOptions{ConfigPath: configPath})
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	selection, err := resolveAuthorityStoreSelection(repo, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	if selection.Backend == storebackend.BackendSQLite {
+		if _, statErr := os.Stat(selection.SQLitePath); errors.Is(statErr, os.ErrNotExist) {
+			return runtimestartupownership.EmptyAuthorityInspection("sqlite_retained_owner")
+		} else if statErr != nil {
+			return runtimestartupownership.AuthorityInspection{}, fmt.Errorf("inspect selected SQLite store: %w", statErr)
+		}
+	}
+	selected, err := constructAuthorityInspectionStore(ctx, selection, cfgResult.Config)
+	if err != nil {
+		return runtimestartupownership.AuthorityInspection{}, err
+	}
+	defer selected.Close()
+	return selected.InspectAuthority(ctx)
 }
 
 func authorityInspectionLine(inspection runtimestartupownership.AuthorityInspection) string {
@@ -171,7 +205,7 @@ func openAuthorityMaintenanceStore(ctx context.Context, repo string, cmd *cobra.
 	return selected, closeStore, nil
 }
 
-func openAuthorityInspectionStore(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions) (authorityMaintenanceStore, func(), error) {
+func openAuthorityInspectionStore(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions) (authorityInspectionStore, func(), error) {
 	configPath, _, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config"))
 	if err != nil {
 		return nil, func() {}, err
@@ -190,11 +224,19 @@ func openAuthorityInspectionStore(ctx context.Context, repo string, cmd *cobra.C
 	if err != nil {
 		return nil, func() {}, err
 	}
-	selected, err := constructAuthorityMaintenanceStore(ctx, selection, cfgResult.Config)
+	selected, err := constructAuthorityInspectionStore(ctx, selection, cfgResult.Config)
 	if err != nil {
 		return nil, func() {}, err
 	}
 	return selected, func() { _ = selected.Close() }, nil
+}
+
+func constructAuthorityInspectionStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityInspectionStore, error) {
+	if selection.Backend == storebackend.BackendSQLite {
+		selected, err := storeconstruction.OpenSQLiteRuntimeReadOnly(selection.SQLitePath)
+		return selected, err
+	}
+	return constructAuthorityMaintenanceStore(ctx, selection, cfg)
 }
 
 func resolveAuthorityStoreSelection(repo, configPath string, cmd *cobra.Command, cfg *config.Config, paths CLIContractPlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
