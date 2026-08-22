@@ -88,13 +88,34 @@ const (
 	workflowEntityStateSelectionTemplate
 )
 
+type workflowEntityStateSemanticOwner struct {
+	flowID      string
+	scopeKey    string
+	cardinality workflowEntityStateSelectionCardinality
+}
+
+func (o workflowEntityStateSemanticOwner) owns(instancePath string) bool {
+	switch o.cardinality {
+	case workflowEntityStateSelectionExact:
+		return instancePath == o.scopeKey
+	case workflowEntityStateSelectionTemplate:
+		if !strings.HasPrefix(instancePath, o.scopeKey+"/") {
+			return false
+		}
+		instanceID := strings.TrimPrefix(instancePath, o.scopeKey+"/")
+		return instanceID != "" && !strings.Contains(instanceID, "/")
+	default:
+		return false
+	}
+}
+
 // WorkflowEntityStateSelectionOwner is the admitted source-backed owner of
-// state-only rows eligible for declared-key acquisition. Authored descendant
-// scopes are reserved so their rows cannot be interpreted as parent instances.
+// state-only rows eligible for declared-key acquisition. Ownership is accepted
+// only when exactly one authored flow's route grammar claims the row.
 type WorkflowEntityStateSelectionOwner struct {
-	scopeKey         string
-	cardinality      workflowEntityStateSelectionCardinality
-	descendantScopes []string
+	flowID     string
+	scopeKey   string
+	candidates []workflowEntityStateSemanticOwner
 }
 
 func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID string) (WorkflowEntityStateSelectionOwner, error) {
@@ -102,7 +123,7 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID s
 	if source == nil || flowID == "" {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner requires source and flow identity")
 	}
-	scope, ok := source.FlowScopeByID(flowID)
+	_, ok := source.FlowScopeByID(flowID)
 	if !ok {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s is not declared", flowID)
 	}
@@ -110,32 +131,37 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID s
 	if scopeKey == "" {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has no canonical scope", flowID)
 	}
-	owner := WorkflowEntityStateSelectionOwner{scopeKey: scopeKey}
-	switch strings.ToLower(strings.TrimSpace(scope.Mode)) {
-	case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
-		owner.cardinality = workflowEntityStateSelectionExact
-	case runtimecontracts.FlowModeTemplate:
-		owner.cardinality = workflowEntityStateSelectionTemplate
-	default:
-		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has unsupported mode %q", flowID, strings.TrimSpace(scope.Mode))
-	}
+	owner := WorkflowEntityStateSelectionOwner{flowID: flowID, scopeKey: scopeKey}
 	for _, candidate := range source.FlowScopes() {
 		candidateID := strings.TrimSpace(candidate.ID)
-		if candidateID == "" || candidateID == flowID {
+		if candidateID == "" {
 			continue
 		}
 		candidateScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, candidateID)), "/")
-		if strings.HasPrefix(candidateScope, scopeKey+"/") {
-			owner.descendantScopes = append(owner.descendantScopes, candidateScope)
+		if candidateScope == "" {
+			return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has no canonical scope", candidateID)
 		}
+		cardinality := workflowEntityStateSelectionCardinalityUnknown
+		switch strings.ToLower(strings.TrimSpace(candidate.Mode)) {
+		case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+			cardinality = workflowEntityStateSelectionExact
+		case runtimecontracts.FlowModeTemplate:
+			cardinality = workflowEntityStateSelectionTemplate
+		default:
+			return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has unsupported mode %q", candidateID, strings.TrimSpace(candidate.Mode))
+		}
+		owner.candidates = append(owner.candidates, workflowEntityStateSemanticOwner{
+			flowID: candidateID, scopeKey: candidateScope, cardinality: cardinality,
+		})
 	}
-	sort.Strings(owner.descendantScopes)
+	if len(owner.candidates) == 0 {
+		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner source has no admitted flow scopes")
+	}
 	return owner, nil
 }
 
 func (o WorkflowEntityStateSelectionOwner) Valid() bool {
-	return strings.TrimSpace(o.scopeKey) != "" &&
-		(o.cardinality == workflowEntityStateSelectionExact || o.cardinality == workflowEntityStateSelectionTemplate)
+	return strings.TrimSpace(o.flowID) != "" && strings.TrimSpace(o.scopeKey) != "" && len(o.candidates) > 0
 }
 
 func (o WorkflowEntityStateSelectionOwner) ScopeKey() string {
@@ -153,22 +179,17 @@ func (o WorkflowEntityStateSelectionOwner) Owns(instancePath string) bool {
 	if instancePath == "" || instancePath != strings.Trim(instancePath, "/") {
 		return false
 	}
-	if o.cardinality == workflowEntityStateSelectionExact {
-		return instancePath == o.scopeKey
-	}
-	if !strings.HasPrefix(instancePath, o.scopeKey+"/") {
-		return false
-	}
-	instanceID := strings.TrimPrefix(instancePath, o.scopeKey+"/")
-	if instanceID == "" || strings.Contains(instanceID, "/") {
-		return false
-	}
-	for _, descendantScope := range o.descendantScopes {
-		if instancePath == descendantScope || strings.HasPrefix(instancePath, descendantScope+"/") {
+	matchedFlowID := ""
+	for _, candidate := range o.candidates {
+		if !candidate.owns(instancePath) {
+			continue
+		}
+		if matchedFlowID != "" {
 			return false
 		}
+		matchedFlowID = candidate.flowID
 	}
-	return true
+	return matchedFlowID == o.flowID
 }
 
 // WorkflowTargetPersistencePresence is the closed selected-store truth for an

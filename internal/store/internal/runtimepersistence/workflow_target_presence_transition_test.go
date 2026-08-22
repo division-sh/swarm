@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -37,6 +39,20 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
 			})
 
+			t.Run("absent target creates exact state and companion", func(t *testing.T) {
+				flowID := "absent-target-" + uuid.NewString()
+				instancePath := flowID + "/receiver"
+				entityID := uuid.NewString()
+				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "", 0, createdAt)
+				record.Transition = runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
+
+				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err != nil {
+					t.Fatalf("commit absent target transition: %v", err)
+				}
+				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 1, 1)
+			})
+
 			t.Run("stale state rolls back companion", func(t *testing.T) {
 				flowID := "state-only-stale-" + uuid.NewString()
 				instancePath := flowID + "/receiver"
@@ -51,7 +67,7 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
 			})
 
-			t.Run("concurrent companion winner rolls back state", func(t *testing.T) {
+			t.Run("preexisting companion contradiction rolls back state", func(t *testing.T) {
 				flowID := "state-only-race-" + uuid.NewString()
 				instancePath := flowID + "/receiver"
 				entityID := uuid.NewString()
@@ -64,6 +80,88 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 					t.Fatal("concurrent companion winner was accepted")
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "review", "active", 1, 1)
+			})
+
+			t.Run("two simultaneous first mutations commit exactly one companion", func(t *testing.T) {
+				flowID := "state-only-contenders-" + uuid.NewString()
+				instancePath := flowID + "/receiver"
+				entityID := uuid.NewString()
+				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
+				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+
+				start := make(chan struct{})
+				results := make(chan error, 2)
+				var contenders sync.WaitGroup
+				for range 2 {
+					contenders.Add(1)
+					go func() {
+						defer contenders.Done()
+						<-start
+						_, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record})
+						results <- err
+					}()
+				}
+				close(start)
+				contenders.Wait()
+				close(results)
+
+				successes := 0
+				failures := 0
+				for err := range results {
+					if err == nil {
+						successes++
+					} else {
+						failures++
+					}
+				}
+				if successes != 1 || failures != 1 {
+					t.Fatalf("simultaneous first mutations succeeded/failed = %d/%d, want 1/1", successes, failures)
+				}
+				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
+			})
+
+			t.Run("committed first mutation reloads complete and uses paired update", func(t *testing.T) {
+				flowID := "state-only-retry-" + uuid.NewString()
+				instancePath := flowID + "/receiver"
+				entityID := uuid.NewString()
+				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
+				first := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: first}); err != nil {
+					t.Fatalf("commit first state-only mutation: %v", err)
+				}
+
+				reader, ok := selected.(runtimepipeline.WorkflowTargetPersistenceReader)
+				if !ok {
+					t.Fatalf("%s selected store does not expose the workflow target reader", backend)
+				}
+				persisted, err := reader.LoadWorkflowTargetPersistence(ctx, first.Route, runtimeidentity.NormalizeEntityID(entityID))
+				if err != nil {
+					t.Fatalf("reload committed target: %v", err)
+				}
+				if err := persisted.Validate(first.Route, runtimeidentity.NormalizeEntityID(entityID)); err != nil {
+					t.Fatalf("validate reloaded committed target: %v", err)
+				}
+				if persisted.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+					t.Fatalf("reloaded target presence = %d, want complete", persisted.Presence)
+				}
+				transition, err := runtimepipeline.WorkflowEngineStateTransitionForPresence(persisted.Presence)
+				if err != nil || transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion {
+					t.Fatalf("reloaded target transition = %d error = %v, want paired update", transition, err)
+				}
+
+				retry := first
+				retry.CurrentState = "settled"
+				retry.ExpectedState = persisted.State.CurrentState
+				retry.ExpectedRevision = persisted.State.Revision
+				retry.EnteredStageAt = first.EnteredStageAt.Add(time.Minute)
+				retry.UpdatedAt = first.UpdatedAt.Add(time.Minute)
+				retry.Transition = transition
+				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: retry}); err != nil {
+					t.Fatalf("commit mutation after complete reload: %v", err)
+				}
+				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "settled", 3, 1)
 			})
 		})
 	}
