@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -244,9 +245,9 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 			return events.DeliveryTargetOwnership{}, err
 		}
 		blueprint = acquired.Route()
-		req.Candidates = append(req.Candidates, DeliveryTargetOwnerCandidate{
+		req.Candidates = []DeliveryTargetOwnerCandidate{{
 			Route: acquired.Route(), Materializing: acquired.MaterializingEntity(),
-		})
+		}}
 	}
 	blueprint.FlowID = flowID
 	blueprint = selectedRunRootTargetBlueprint(req.Source, req.Event, flowID, blueprint)
@@ -326,7 +327,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 }
 
 func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, flowID string, blueprint events.RouteIdentity) events.RouteIdentity {
-	if source == nil || strings.TrimSpace(flowID) != strings.TrimSpace(source.WorkflowName()) {
+	if source == nil || strings.TrimSpace(flowID) != strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
 		return blueprint
 	}
 	runID := strings.TrimSpace(evt.RunID())
@@ -554,18 +555,21 @@ func acquireDeliveryTargetByDeclaredKey(
 }
 
 func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader WorkflowInstancePersistenceReader, source semanticview.Source, flowID, nodeID string, evt events.Event, expected map[string]any) (events.DeliveryTargetOwnership, error) {
-	instanceID, err := selectOrCreateEntityInstanceID(source, flowID, expected)
+	route, err := selectOrCreateEntityMaterializationTarget(source, flowID, evt, expected)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
-	identity := deriveFlowInstanceIdentity(source, flowID, instanceID)
-	route := events.RouteIdentity{FlowID: strings.TrimSpace(flowID), FlowInstance: identity.InstancePath, EntityID: identity.EntityID}.Normalized()
-	existing, ok, err := reader.LoadWorkflowInstance(ctx, identity.Route())
+	identityRoute, err := workflowInstanceRouteForExecution(source, flowID, route.FlowInstance)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
+	}
+	entityID := runtimeidentity.NormalizeEntityID(route.EntityID)
+	existing, ok, err := reader.LoadWorkflowInstance(ctx, identityRoute)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
 	if !ok {
-		record, stateExists, stateErr := reader.LoadWorkflowEntityState(ctx, identity.Route(), runtimeidentity.NormalizeEntityID(identity.EntityID))
+		record, stateExists, stateErr := reader.LoadWorkflowEntityState(ctx, identityRoute, entityID)
 		if stateErr != nil {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), stateErr)
 		}
@@ -591,6 +595,31 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 		return events.NewExistingEntityTarget(existingRoute)
 	}
 	return events.NewMaterializingEntityTarget(route)
+}
+
+func selectOrCreateEntityMaterializationTarget(source semanticview.Source, flowID string, evt events.Event, expected map[string]any) (events.RouteIdentity, error) {
+	flowID = strings.TrimSpace(flowID)
+	if source != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
+		route, err := workflowInstanceRouteForExecution(source, flowID, evt.RunID())
+		if err != nil {
+			return events.RouteIdentity{}, err
+		}
+		return events.RouteIdentity{
+			FlowID:       flowID,
+			FlowInstance: route.InstancePath,
+			EntityID:     runtimeflowidentity.EntityID(route.InstancePath),
+		}.Normalized(), nil
+	}
+	instanceID, err := selectOrCreateEntityInstanceID(source, flowID, expected)
+	if err != nil {
+		return events.RouteIdentity{}, err
+	}
+	identity := deriveFlowInstanceIdentity(source, flowID, instanceID)
+	return events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: identity.InstancePath,
+		EntityID:     identity.EntityID,
+	}.Normalized(), nil
 }
 
 func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {

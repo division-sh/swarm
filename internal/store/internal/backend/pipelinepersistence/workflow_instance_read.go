@@ -102,10 +102,10 @@ func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Con
 			SELECT 1 FROM runs run
 			WHERE run.run_id = es.run_id AND run.status IN ($4, $5)
 		  )
-		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3)
+		  AND (es.flow_instance = $2 OR es.flow_instance LIKE $3 OR ($6::boolean AND es.flow_instance = $1::text))
 		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC
-	`, runID, scopeKey, scopeKey+"/%", string(activeStates[0]), string(activeStates[1]))
+	`, runID, scopeKey, scopeKey+"/%", string(activeStates[0]), string(activeStates[1]), owner.Owns(runID))
 	if err != nil {
 		return nil, err
 	}
@@ -522,10 +522,10 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Conte
 			SELECT 1 FROM runs run
 			WHERE run.run_id = es.run_id AND run.status IN (?, ?)
 		  )
-		  AND (es.flow_instance = ? OR es.flow_instance LIKE ?)
+		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
 		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC
-	`, runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey+"/%")
+	`, runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey+"/%", owner.Owns(runID), runID)
 	if err != nil {
 		return nil, err
 	}

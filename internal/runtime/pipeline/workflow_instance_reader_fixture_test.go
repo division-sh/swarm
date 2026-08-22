@@ -151,17 +151,17 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx
 		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 		WHERE es.run_id = ?
 		  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN (?, ?))
-		  AND (es.flow_instance = ? OR es.flow_instance LIKE ?)
+		  AND (es.flow_instance = ? OR es.flow_instance LIKE ? OR (? AND es.flow_instance = ?))
 		  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
 		ORDER BY es.created_at ASC, es.entity_id ASC`
-	args := []any{runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey + "/%"}
+	args := []any{runID, string(activeStates[0]), string(activeStates[1]), scopeKey, scopeKey + "/%", owner.Owns(runID), runID}
 	if r.dialect == workflowStoreDialectPostgres {
 		query = `SELECT es.entity_id::text, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
 			FROM entity_state es
 			LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 			WHERE es.run_id = $1::uuid
 			  AND EXISTS (SELECT 1 FROM runs run WHERE run.run_id = es.run_id AND run.status IN ($2, $3))
-			  AND (es.flow_instance = $4 OR es.flow_instance LIKE $5)
+				  AND (es.flow_instance = $4 OR es.flow_instance LIKE $5 OR ($6::boolean AND es.flow_instance = $1::text))
 			  AND (fi.instance_id IS NULL OR (fi.status NOT IN ('terminated', 'inactive') AND fi.terminated_at IS NULL))
 			ORDER BY es.created_at ASC, es.entity_id ASC`
 	}

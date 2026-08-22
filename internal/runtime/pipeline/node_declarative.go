@@ -457,15 +457,14 @@ func canonicalHandlerMaterializationTarget(source semanticview.Source, flowID st
 		if err != nil {
 			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target: %w", err)
 		}
-		instanceID, err := selectOrCreateEntityInstanceID(source, flowID, expected)
+		planned, err := selectOrCreateEntityMaterializationTarget(source, flowID, evt, expected)
 		if err != nil {
 			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target: %w", err)
 		}
-		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
-		if instance.InstancePath != blueprint.FlowInstance {
-			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target flow instance %q disagrees with canonical instance %q", blueprint.FlowInstance, instance.InstancePath)
+		if planned.FlowInstance != blueprint.FlowInstance {
+			return events.RouteIdentity{}, fmt.Errorf("select_or_create_entity target flow instance %q disagrees with canonical instance %q", blueprint.FlowInstance, planned.FlowInstance)
 		}
-		want.EntityID = instance.EntityID
+		want.EntityID = planned.EntityID
 	}
 	if blueprint.EntityID != "" && blueprint.EntityID != want.EntityID {
 		return events.RouteIdentity{}, fmt.Errorf("materializing target entity %q disagrees with canonical future entity %q", blueprint.EntityID, want.EntityID)
@@ -509,7 +508,7 @@ func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string,
 		return workflowInstanceRouteForExecution(source, flowID, target.FlowInstance)
 	}
 	if flowID != "" {
-		if source != nil && flowID == strings.TrimSpace(source.WorkflowName()) {
+		if source != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
 			return workflowInstanceRouteForExecution(source, flowID, evt.RunID())
 		}
 		if statePath != "" {
