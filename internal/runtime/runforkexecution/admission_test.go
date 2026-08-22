@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -474,6 +475,10 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 		t.Fatalf("copy selected-contract fixture: %v", err)
 	}
 	base := packfixture.EmbeddedBase(t)
+	baseGenerations, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
 		t.Fatalf("import Telegram pack changed=%t: %v", changed, err)
 	}
@@ -493,7 +498,9 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 		repoRoot,
 		project,
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base},
+		runtimecontracts.WorkflowContractLoadOptions{
+			PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
+		},
 	)
 	if err != nil {
 		t.Fatalf("load imported project-pack bundle: %v", err)
@@ -501,6 +508,15 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
 		t.Fatalf("build imported project-pack catalog projection: %v", err)
+	}
+	telegram, ok := base.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack is missing")
+	}
+	successorBody := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "successor development telegram update object is required", 1))
+	successor, _ := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": successorBody})
+	if err := baseGenerations.Select(successor); err != nil {
+		t.Fatalf("select successor development generation: %v", err)
 	}
 	sourceRunID := uuid.NewString()
 	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
@@ -514,7 +530,7 @@ func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGeneratio
 	}
 	loader := BundleCatalogSelectedContractSourceLoader{
 		RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		PlatformPackBase: base, Store: catalogStore,
+		PlatformPackBases: baseGenerations, Store: catalogStore,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,

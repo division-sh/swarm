@@ -20,6 +20,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -53,7 +55,17 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
-func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
+func runtimeDepsForServeTest(t testing.TB, stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
+	t.Helper()
+	if options.WorkflowModule != nil {
+		if bundle, ok := semanticview.Bundle(options.WorkflowModule.SemanticSource()); ok && bundle != nil && bundle.PackInventory != nil && bundle.PackAdmission == nil {
+			projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+			if err != nil {
+				t.Fatalf("admit serve test pack projection: %v", err)
+			}
+			bundle.PackAdmission = projection
+		}
+	}
 	if cfg != nil && !cfg.Runtime.ExecutionPosture.Valid() {
 		cfg.Runtime.ExecutionPosture = executionposture.Live
 	}
@@ -64,6 +76,15 @@ func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options run
 	deps.Config = cfg
 	deps.Options = options
 	return deps
+}
+
+func testPlatformPackBaseGenerations(t *testing.T) *packartifact.PlatformPackBaseGenerationOwner {
+	t.Helper()
+	owner, err := packartifact.NewPlatformPackBaseGenerationOwner(packfixture.EmbeddedBase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return owner
 }
 
 type failOnceFinalizeStartupOwnershipStore struct {
@@ -103,13 +124,13 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 		nil, nil, catalog, packfixture.EmbeddedBase(t), "/old", &runtimecontracts.WorkflowContractBundle{},
 		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime,
 	)
-	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != root {
 			t.Fatalf("contracts root = %q, want %q", contractsRoot, root)
 		}
 		return module, bundle, nil
 	}
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
 	})
 	supervisor.validateSource = func(ctx context.Context, source semanticview.Source, catalog *providertriggers.CatalogSnapshot) error {
@@ -186,7 +207,7 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 		captured = deps
 		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
-	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != projectRoot {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
 		}
@@ -195,7 +216,7 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	loads := 0
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		loads++
 		if candidate == nil || candidate.PackInventory == nil {
 			t.Fatal("bundle pack reload compiler received no effective inventory")
@@ -887,7 +908,7 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						newHash = runtimeContextTestHash("b")
 					}
 					newRuntime := func(hash string) *runtimepkg.Runtime {
-						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 							SelfCheck:                        false,
 							WorkflowModule:                   module,
 							LLMRuntime:                       servedNoopLLMRuntime{},
@@ -1232,7 +1253,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			processWorkOwner := newSupervisorTestProcessOwner(t)
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			newRuntime := func() *runtimepkg.Runtime {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 					WorkflowModule: module, LLMRuntime: servedNoopLLMRuntime{},
 					Credentials: credentials, ProviderCredentials: credentials,
 					ProviderTriggerCatalog: testProviderTriggerCatalog(t),
@@ -1417,7 +1438,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 						}
 					})
 					newRuntime := func(hash string, workflowModule runtimepipeline.WorkflowModule) *runtimepkg.Runtime {
-						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 							WorkflowModule: workflowModule, LLMRuntime: servedNoopLLMRuntime{},
 							Credentials: credentials, ProviderCredentials: credentials,
 							ProviderTriggerCatalog: catalog, ProcessWorkOwner: processWorkOwner,
@@ -1578,7 +1599,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			fact := mustServeTestEphemeralBundleSourceFact(hash)
 			newRuntime := func() *runtimepkg.Runtime {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, ProcessWorkOwner: processWorkOwner, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID}))
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, ProcessWorkOwner: processWorkOwner, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID}))
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
@@ -2042,7 +2063,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			}
 			contexts := make([]serveRuntimeBundleContext, 0, len(facts))
 			for _, fact := range facts {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 					SelfCheck:                        false,
 					WorkflowModule:                   stubWorkflowModule{source: source},
 					LLMRuntime:                       servedNoopLLMRuntime{},
@@ -2168,7 +2189,7 @@ func testBuilderSupervisorBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, dir, platformPath, runtimecontracts.WorkflowContractLoadOptions{
-		PlatformPackBase: packfixture.EmbeddedBase(t),
+		PlatformPackBase: packfixture.EmbeddedBase(t), AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
 		t.Fatalf("load supervisor workflow bundle: %v", err)
@@ -2192,11 +2213,11 @@ func newSupervisorForLoadProjectFailureTest(
 	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = worklifetime.NewProcess()
 	supervisor.providerTriggers = catalog
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
 	})
 	supervisor.dev = true
-	supervisor.loadWorkflow = func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	supervisor.loadWorkflow = func(RepoRoot, contractsRoot, platformSpecPath string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", got, projectRoot)
 		}
@@ -2254,6 +2275,89 @@ func TestRuntimeProjectSupervisorCarriesProcessOwnerIntoDynamicRuntime(t *testin
 	}
 	if captured.Options.ProcessWorkOwner != processOwner {
 		t.Fatalf("dynamic runtime process owner = %p, want served owner %p", captured.Options.ProcessWorkOwner, processOwner)
+	}
+}
+
+func TestRuntimeProjectSupervisorReloadSelectsFreshBaseAndRetainsPredecessorGeneration(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	embedded := packfixture.EmbeddedBase(t)
+	telegram, ok := embedded.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack is missing")
+	}
+	firstBody := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "first development telegram update object is required", 1))
+	secondBody := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "second development telegram update object is required", 1))
+	thirdBody := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "rejected development telegram update object is required", 1))
+	firstBase, firstDirs := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": firstBody})
+	secondBase, secondDirs := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": secondBody})
+	thirdBase, thirdDirs := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": thirdBody})
+	if firstBase.Digest() == secondBase.Digest() {
+		t.Fatal("development reload fixtures have the same digest")
+	}
+
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
+	})
+	supervisor.RepoRoot = cliapp.RepoRoot()
+	supervisor.platformSpecPath = runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot())
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+	selectedDirs := firstDirs
+	supervisor.SetRuntimeConfigLoader(func() (cliapp.RuntimeConfigLoadResult, error) {
+		return cliapp.RuntimeConfigLoadResult{Config: &config.Config{Platform: config.PlatformConfig{Packs: config.PlatformPacksConfig{PlatformDirs: append([]string(nil), selectedDirs...)}}}}, nil
+	})
+	var loadedBaseDigests []string
+	supervisor.loadWorkflow = func(repoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+		loadedBaseDigests = append(loadedBaseDigests, base.Digest())
+		return cliapp.NewSwarmWorkflowModuleWithPackBase(repoRoot, contractsRoot, platformSpecPath, base)
+	}
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, cfg cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		if !reflect.DeepEqual(cfg.Config.Platform.Packs.PlatformDirs, selectedDirs) {
+			t.Fatalf("candidate pack loader config dirs = %#v, want %#v", cfg.Config.Platform.Packs.PlatformDirs, selectedDirs)
+		}
+		return cliapp.LoadBundlePackRuntime(ctx, cfg, candidate, nil, nil)
+	})
+
+	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("open first development generation: %v", err)
+	}
+	selectedDirs = secondDirs
+	if _, err := supervisor.ReloadProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("reload second development generation: %v", err)
+	}
+	if !reflect.DeepEqual(loadedBaseDigests, []string{firstBase.Digest(), secondBase.Digest()}) {
+		t.Fatalf("workflow base generations = %#v", loadedBaseDigests)
+	}
+	current, err := supervisor.platformPackBases.CurrentPlatformPackBase()
+	if err != nil || current.Digest() != secondBase.Digest() || supervisor.platformPackBase.Digest() != secondBase.Digest() {
+		t.Fatalf("current base = %v supervisor=%v err=%v, want %s", current, supervisor.platformPackBase, err, secondBase.Digest())
+	}
+	firstEffective, err := packartifact.NewEffectivePackInventory(firstBase, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, err := supervisor.platformPackBases.ResolvePlatformPackBase(firstEffective.SelectionReceipt())
+	if err != nil || retained.Digest() != firstBase.Digest() {
+		t.Fatalf("predecessor generation = %v err=%v", retained, err)
+	}
+	predecessorRuntime := supervisor.CurrentRuntime()
+	selectedDirs = thirdDirs
+	supervisor.createRuntime = func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		return nil, errors.New("reject candidate runtime")
+	}
+	if _, err := supervisor.ReloadProject(context.Background(), projectRoot); err == nil || !strings.Contains(err.Error(), "reject candidate runtime") {
+		t.Fatalf("rejected development reload error = %v", err)
+	}
+	current, err = supervisor.platformPackBases.CurrentPlatformPackBase()
+	if err != nil || current.Digest() != secondBase.Digest() || supervisor.CurrentRuntime() != predecessorRuntime {
+		t.Fatalf("rejected reload disturbed predecessor: base=%v runtime_same=%t err=%v", current, supervisor.CurrentRuntime() == predecessorRuntime, err)
+	}
+	thirdEffective, err := packartifact.NewEffectivePackInventory(thirdBase, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := supervisor.platformPackBases.ResolvePlatformPackBase(thirdEffective.SelectionReceipt()); err == nil || !strings.Contains(err.Error(), "not retained by this process") {
+		t.Fatalf("rejected generation resolution error = %v", err)
 	}
 }
 
@@ -2315,14 +2419,14 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSo
 		deps.Options.WorkflowModule = stubWorkflowModule{source: effectiveSource}
 		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
-	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != projectRoot {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
 		}
 		return module, bundle, nil
 	}
 	supervisor.providerTriggers = bootCatalog
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		loaded, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
 		if err != nil {
 			return cliapp.BundlePackRuntimeLoad{}, err
@@ -2407,7 +2511,7 @@ flows:
 		return stubWorkspaceLifecycle{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
 	var candidateChannelLoad cliapp.ChannelPackLoad
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		loaded, loadErr := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: channelCfg}, candidate, nil, nil)
 		if loadErr == nil {
 			candidateChannelLoad = loaded.Channels
@@ -2562,7 +2666,7 @@ flows:
 	predecessorSource := supervisor.CurrentSource()
 	predecessorRuntime := supervisor.CurrentRuntime()
 	predecessorCatalog := predecessorRuntime.ScenarioProfileCatalog
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		loaded, err := cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: channelCfg}, candidate, nil, nil)
 		if err != nil {
 			return cliapp.BundlePackRuntimeLoad{}, err
@@ -2653,10 +2757,10 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 	supervisor.dev = true
 	catalog := emptyProviderTriggerCatalog(t)
 	supervisor.providerTriggers = catalog
-	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: cfg}, candidate, nil, nil)
 	})
-	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if strings.TrimSpace(contractsRoot) != strings.TrimSpace(projectRoot) {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
 		}

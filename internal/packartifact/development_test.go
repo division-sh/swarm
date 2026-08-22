@@ -103,6 +103,23 @@ func TestDevelopmentOverrideDigestIsIndependentOfDirectoryOrderAndRejectsIncompl
 	}
 }
 
+func TestDevelopmentOverrideRejectsSymlinkedConfiguredRoot(t *testing.T) {
+	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs := materializeDevelopmentInventory(t, embedded, nil)
+	target := dirs[0]
+	symlink := filepath.Join(t.TempDir(), "pack-root")
+	if err := os.Symlink(target, symlink); err != nil {
+		t.Fatal(err)
+	}
+	dirs[0] = symlink
+	if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "must be a real directory") {
+		t.Fatalf("symlinked development root error = %v", err)
+	}
+}
+
 func materializeDevelopmentInventory(t *testing.T, inventory *PlatformPackInventory, replacements map[string][]byte) []string {
 	t.Helper()
 	root := t.TempDir()

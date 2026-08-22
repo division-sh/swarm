@@ -39,6 +39,7 @@ func TestAdmittedEffectiveSourceProjectionBindsBaseProvenanceAndIsStable(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitRuntimeTestBundle(t, bundle)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +77,7 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitRuntimeTestBundle(t, bundle)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +136,7 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitRuntimeTestBundle(t, bundle)
 	bundleHash, _ := runtimecontracts.BundleHash(bundle)
 	fact, _ := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: fact})

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -114,15 +115,12 @@ func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTrigg
 	if !ok || bundle == nil || bundle.PackInventory == nil {
 		return nil, suppliedTriggers, nil
 	}
-	runningVersion := strings.TrimSpace(bundle.Platform.Platform.Version)
-	connectors, err := providerconnectors.NewPackRegistryFromInventory(bundle.PackInventory, runningVersion)
+	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
-		return nil, nil, fmt.Errorf("derive provider connector registry from effective pack inventory: %w", err)
+		return nil, nil, fmt.Errorf("load admitted pack projection for effective source: %w", err)
 	}
-	triggers, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, runningVersion)
-	if err != nil {
-		return nil, nil, fmt.Errorf("derive provider trigger catalog from effective pack inventory: %w", err)
-	}
+	connectors := projection.ProviderConnectors
+	triggers := projection.ProviderTriggers
 	if suppliedTriggers != nil && !suppliedTriggers.Generation().Equal(triggers.Generation()) {
 		return nil, nil, fmt.Errorf("supplied provider trigger catalog generation %s contradicts bundle effective inventory generation %s", suppliedTriggers.Generation().Diagnostic(), triggers.Generation().Diagnostic())
 	}

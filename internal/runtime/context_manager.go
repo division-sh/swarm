@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -700,10 +700,11 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 		if contextDef.PackInventoryDigest == "" || contextDef.PackInventoryDigest != inventoryDigest {
 			return BundleContext{}, fmt.Errorf("runtime context %s pack inventory digest %q does not match bundle inventory %q", bundleHash, contextDef.PackInventoryDigest, inventoryDigest)
 		}
-		catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, strings.TrimSpace(bundle.Platform.Platform.Version))
+		projection, err := packadmission.FromBundle(bundle)
 		if err != nil {
-			return BundleContext{}, fmt.Errorf("runtime context %s derive provider-trigger generation: %w", bundleHash, err)
+			return BundleContext{}, fmt.Errorf("runtime context %s load admitted pack projection: %w", bundleHash, err)
 		}
+		catalog := projection.ProviderTriggers
 		if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
 			return BundleContext{}, fmt.Errorf("runtime context %s provider-trigger generation %q does not match bundle inventory generation %q", bundleHash, contextDef.ProviderTriggerGeneration.Diagnostic(), catalog.Generation().Diagnostic())
 		}

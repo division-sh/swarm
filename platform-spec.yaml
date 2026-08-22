@@ -9871,6 +9871,20 @@ tool_model:
         selected base receipt. Missing, extra, malformed, incompatible, tampered, colliding, traversing, symlinked, or
         digest-mismatched inputs fail before publication. No executable-relative, current-directory, source-checkout,
         machine-global, package-global, nil, per-kind-directory, or independent archive-scan fallback exists.
+      admitted_projection: >
+        `internal/packadmission` is the sole body-admission orchestrator for an exact EffectivePackInventory. It parses and
+        validates every trigger, connector, and channel body and compiles their cross-kind channel satisfaction plans into
+        one bundle-owned admitted projection. Inventory readback, hashing, bundle build and registration, verify, doctor,
+        serve, effective-source compilation, replacement, recovery, and fork must receive that admitted projection before
+        publishing or executing the inventory. Downstream consumers retrieve the stored projection and must not independently
+        reparse an inventory body. Credential binding and deployment activation remain later, different semantic concepts.
+      selected_base_generation_lifecycle: >
+        A serving process retains each immutable embedded or complete-development base it has selected, addressed by the
+        exact base digest in the bundle receipt. Reload prepares fresh effective config, base bytes, project bytes, and the
+        admitted projection as one candidate, then makes that base current only when candidate publication succeeds. A
+        rejected candidate does not change the current base or predecessor runtime. Same-process survivor reconstruction,
+        recovery, and fork resolve their receipt against the retained exact generation. This retention is not an archive,
+        migration, or compatibility promise across binary starts.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -9929,6 +9943,8 @@ tool_model:
         Other duplicate universal ids or duplicate normalized provider/tool ownership fail closed and report both sources.
         Development override replaces the complete embedded base before project precedence and never overlays or falls back.
         The exact selected base digest, project bytes, and resulting effective digest are immutable bundle identity facts.
+        Project readback marks an entry modified when either its current version or current body digest differs from the
+        immutable import origin tuple; body equality alone cannot hide a version edit.
       capability_surface: >
         Readback consumes `tool_model.provider_capability_surface`. Trigger facts derive from the accepted body manifest,
         while envelope capabilities/requires remain integrity assertions only. Trigger pack subjects render AVAILABLE with

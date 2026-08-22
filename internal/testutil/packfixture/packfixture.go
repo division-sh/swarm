@@ -1,6 +1,8 @@
 package packfixture
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -9,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	platformpacks "github.com/division-sh/swarm/packs"
+	"gopkg.in/yaml.v3"
 )
 
 const PlatformVersion = "0.7.0"
@@ -34,6 +37,45 @@ func EmbeddedInventory(t testing.TB) *packartifact.EffectivePackInventory {
 		t.Fatalf("build embedded effective pack inventory: %v", err)
 	}
 	return inventory
+}
+
+func DevelopmentBase(t testing.TB, replacements map[string][]byte) (*packartifact.PlatformPackInventory, []string) {
+	t.Helper()
+	embedded := EmbeddedBase(t)
+	root := t.TempDir()
+	dirs := make([]string, 0, len(embedded.Entries()))
+	for _, entry := range embedded.Entries() {
+		directory := filepath.Join(root, entry.ID())
+		if err := os.Mkdir(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		envelope := entry.Envelope()
+		manifestBody := entry.ManifestBody()
+		if replacement, ok := replacements[entry.ID()]; ok {
+			manifestBody = replacement
+			var err error
+			envelope, _, err = packartifact.StampEnvelope(envelope, manifestBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		envelopeBody, err := yaml.Marshal(envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, packartifact.EnvelopeFileName), envelopeBody, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, packartifact.ManifestFileNameForType(entry.Type())), manifestBody, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		dirs = append(dirs, directory)
+	}
+	development, err := packartifact.LoadDevelopmentPlatformPackInventory(PlatformVersion, dirs, embedded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return development, dirs
 }
 
 func TriggerCatalog(t testing.TB) *providertriggers.CatalogSnapshot {

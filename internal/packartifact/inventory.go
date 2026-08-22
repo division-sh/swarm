@@ -171,7 +171,8 @@ func (e Entry) Source() string       { return e.selection }
 func (e Entry) Origin() ImportOrigin { return e.origin }
 func (e Entry) ShadowsBase() bool    { return e.shadowsBase }
 func (e Entry) Modified() bool {
-	return e.selection == ProvenanceProject && e.origin.Valid() && e.ManifestHash() != strings.TrimSpace(e.origin.ManifestHash)
+	return e.selection == ProvenanceProject && e.origin.Valid() &&
+		(e.Version() != strings.TrimSpace(e.origin.Version) || e.ManifestHash() != strings.TrimSpace(e.origin.ManifestHash))
 }
 func (e Entry) Envelope() Envelope   { return e.envelope }
 func (e Entry) EnvelopeBody() []byte { return append([]byte(nil), e.envelopeBody...) }

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -28,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type blockingCredentialSnapshotStore struct {
@@ -1124,11 +1126,19 @@ func projectTelegramAdmissionContext(t *testing.T, hash, alias, payloadObjectErr
 		Events:        map[string]runtimecontracts.EventCatalogEntry{"inbound.telegram": {}, "inbound.telegram.text_message": {}},
 		PackInventory: inventory,
 	}
-	bundle.Platform.Platform.Version = packfixture.PlatformVersion
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(inventory, packfixture.PlatformVersion)
+	platformBody, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := yaml.Unmarshal(platformBody, &bundle.Platform); err != nil {
+		t.Fatal(err)
+	}
+	admitRuntimeTestBundle(t, bundle)
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := projection.ProviderTriggers
 	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
 		Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram",
 	})

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -41,7 +42,12 @@ func loadFixtureBundle(t testing.TB, fixtureRoot string) *runtimecontracts.Workf
 
 func loadFixtureBundleMaybe(fixtureRoot string) (*runtimecontracts.WorkflowContractBundle, error) {
 	repoRoot := repoRootFromCatalogE2ENonFatal()
-	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	return runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 }
 
 func repoRootFromCatalogE2ENonFatal() string {

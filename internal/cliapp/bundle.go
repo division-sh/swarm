@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
@@ -68,6 +69,7 @@ type bundleBuildCommandOptions struct {
 	outputRoot   string
 	report       string
 	RepoRoot     string
+	root         rootCommandOptions
 }
 
 type bundleDeleteCommandOptions struct {
@@ -177,7 +179,7 @@ func newBundleCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
 		newBundleListCommand(opts),
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
-		newBundleBuildCommand(RepoRoot),
+		newBundleBuildCommand(RepoRoot, opts),
 		newBundleRegisterCommand(RepoRoot, opts),
 		newBundleDeleteCommand(opts),
 	)
@@ -249,8 +251,8 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newBundleBuildCommand(RepoRoot string) *cobra.Command {
-	buildOpts := bundleBuildCommandOptions{RepoRoot: RepoRoot}
+func newBundleBuildCommand(RepoRoot string, root rootCommandOptions) *cobra.Command {
+	buildOpts := bundleBuildCommandOptions{RepoRoot: RepoRoot, root: root}
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Materialize a local contract bundle for explicit consumption.",
@@ -574,11 +576,22 @@ func (opts bundleBuildCommandOptions) request() (runtimecontracts.BundleBuildReq
 	} else {
 		outputRoot = ResolvePath(RepoRoot, outputRoot)
 	}
+	cfgResult, err := loadPackInventoryConfig(RepoRoot, rootConfigPath(opts.root))
+	if err != nil {
+		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("load pack inventory config: %w", err)
+	}
+	packBase, err := LoadConfiguredPlatformPackBase(RepoRoot, cfgResult)
+	if err != nil {
+		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("load platform pack base: %w", err)
+	}
 	return runtimecontracts.BundleBuildRequest{
 		RepoRoot:         RepoRoot,
 		ContractsRoot:    contractsRoot,
 		PlatformSpecPath: resolvedPaths.PlatformSpecPath,
 		OutputRoot:       outputRoot,
+		LoadOptions: runtimecontracts.WorkflowContractLoadOptions{
+			PlatformPackBase: packBase, AdmitPackInventory: packadmission.AdmitInventory,
+		},
 	}, reportJSON, nil
 }
 
@@ -657,7 +670,9 @@ func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string)
 	if err != nil {
 		return nil, fmt.Errorf("load platform pack base: %w", err)
 	}
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUploadWithOptions(RepoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: packBase})
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUploadWithOptions(RepoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBase: packBase, AdmitPackInventory: packadmission.AdmitInventory,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("package contracts directory: %w", err)
 	}

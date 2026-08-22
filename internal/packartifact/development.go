@@ -37,6 +37,13 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 			return nil, fmt.Errorf("resolve development platform pack %q: %w", dir, err)
 		}
 		dir = absoluteDir
+		rootInfo, err := os.Lstat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
+		}
+		if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+			return nil, fmt.Errorf("development platform pack %q must be a real directory", dir)
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return nil, fmt.Errorf("read development platform pack %q: %w", dir, err)

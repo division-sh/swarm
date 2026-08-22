@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -22,15 +23,16 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 		},
 	}
 	cfgResult := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
-	inventory := packfixture.EmbeddedInventory(t)
-	triggers := packfixture.TriggerCatalog(t)
-	connectors := packfixture.ConnectorRegistry(t)
 	spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
 	}
+	projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
+	if err != nil {
+		t.Fatalf("admit embedded packs: %v", err)
+	}
 
-	withoutCredential, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, spec, inventory, triggers, connectors, nil, nil)
+	withoutCredential, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, projection, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks without credential: %v", err)
 	}
@@ -47,7 +49,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	}
 
 	credentials := channelTestCredentialStore{"telegram_bot_token": "secret"}
-	ready, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, spec, inventory, triggers, connectors, credentials, nil)
+	ready, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, projection, credentials, nil)
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks with credential: %v", err)
 	}
@@ -62,7 +64,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
 	}
 
-	connectorDescriptors := connectors.PackDescriptors()
+	connectorDescriptors := projection.ProviderConnectors.PackDescriptors()
 	for index := range connectorDescriptors {
 		if connectorDescriptors[index].Identity.ID() != "provider.telegram.connector" {
 			continue
@@ -80,7 +82,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	if err != nil {
 		t.Fatalf("NewInterfaceRegistry: %v", err)
 	}
-	conflicting, err := packs.CompileChannelInventory(registry, ready.Loaded, triggers.PackDescriptors(), connectorDescriptors)
+	conflicting, err := packs.CompileChannelInventory(registry, ready.Loaded, projection.ProviderTriggers.PackDescriptors(), connectorDescriptors)
 	if err != nil {
 		t.Fatalf("CompileChannelInventory: %v", err)
 	}
@@ -109,7 +111,11 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 		if err != nil {
 			t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
 		}
-		return LoadConfiguredChannelPacks(context.Background(), result, spec, packfixture.EmbeddedInventory(t), packfixture.TriggerCatalog(t), packfixture.ConnectorRegistry(t), channelTestCredentialStore{"telegram_hitl_bot": "secret"}, nil)
+		projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
+		if err != nil {
+			t.Fatalf("admit embedded packs: %v", err)
+		}
+		return LoadConfiguredChannelPacks(context.Background(), result, projection, channelTestCredentialStore{"telegram_hitl_bot": "secret"}, nil)
 	}
 
 	loaded, err := load(t, base)

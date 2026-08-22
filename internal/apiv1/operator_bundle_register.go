@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 
 	"golang.org/x/text/unicode/norm"
@@ -56,8 +57,10 @@ type bundleRegistrationDataEntry struct {
 }
 
 type bundleRegistrationRuntimeContext struct {
-	RepoRoot         string
-	PlatformSpecPath string
+	RepoRoot           string
+	PlatformSpecPath   string
+	PlatformPackBases  packartifact.PlatformPackBaseResolver
+	AdmitPackInventory func(*packartifact.EffectivePackInventory, runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error)
 }
 
 func OperatorBundleRegisterHandlers(opts BundleRegisterHandlerOptions) map[string]MethodHandler {
@@ -232,7 +235,9 @@ func buildBundleRegistrationProjection(params bundleRegistrationParams, runtimeC
 	if err != nil {
 		return runtimecontracts.BundleCatalogProjection{}, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, root, platformSpec, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBases: runtimeCtx.PlatformPackBases, AdmitPackInventory: runtimeCtx.AdmitPackInventory,
+	})
 	if err != nil {
 		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
 			return runtimecontracts.BundleCatalogProjection{}, NewInvalidParamsError(map[string]any{
@@ -463,8 +468,8 @@ func bundleRegistrationRuntimeContextFromOptions(opts BundleRegisterHandlerOptio
 		repoRoot = filepath.Dir(platformSpec)
 	}
 	return bundleRegistrationRuntimeContext{
-		RepoRoot:         repoRoot,
-		PlatformSpecPath: platformSpec,
+		RepoRoot: repoRoot, PlatformSpecPath: platformSpec,
+		PlatformPackBases: opts.PlatformPackBases, AdmitPackInventory: opts.AdmitPackInventory,
 	}
 }
 

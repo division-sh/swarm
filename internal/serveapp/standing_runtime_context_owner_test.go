@@ -263,7 +263,7 @@ func newStandingRuntimeContextRuntime(
 		"telegram_bot_token":       "standing-owner-token",
 		"webhook_signing.telegram": "standing-owner-signing-secret",
 	}
-	deps := runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+	deps := runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 		WorkflowModule: module, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
 		ProcessWorkOwner: process, ProviderTriggerCatalog: catalog,
 		Credentials: credentials, ProviderCredentials: credentials,

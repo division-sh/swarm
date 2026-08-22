@@ -15,16 +15,20 @@ const (
 )
 
 type PackSelectionReceipt struct {
-	Version    int           `yaml:"version" json:"version"`
-	BaseMode   SelectionMode `yaml:"base_mode" json:"base_mode"`
-	BaseDigest string        `yaml:"base_digest" json:"base_digest"`
+	Version         int           `yaml:"version" json:"version"`
+	BaseMode        SelectionMode `yaml:"base_mode" json:"base_mode"`
+	BaseDigest      string        `yaml:"base_digest" json:"base_digest"`
+	EffectiveDigest string        `yaml:"effective_digest" json:"effective_digest"`
 }
 
 func (i *EffectivePackInventory) SelectionReceipt() PackSelectionReceipt {
 	if i == nil {
 		return PackSelectionReceipt{}
 	}
-	return PackSelectionReceipt{Version: PackSelectionVersion, BaseMode: i.BaseSelectionMode(), BaseDigest: i.BaseDigest()}
+	return PackSelectionReceipt{
+		Version: PackSelectionVersion, BaseMode: i.BaseSelectionMode(),
+		BaseDigest: i.BaseDigest(), EffectiveDigest: i.Digest(),
+	}
 }
 
 func (i *EffectivePackInventory) SelectionReceiptBody() ([]byte, error) {
@@ -69,9 +73,16 @@ func (r PackSelectionReceipt) Validate() error {
 	if !strings.HasPrefix(strings.TrimSpace(r.BaseDigest), "sha256:") || len(strings.TrimSpace(r.BaseDigest)) != len("sha256:")+64 {
 		return fmt.Errorf("pack selection receipt base_digest is invalid")
 	}
+	if !strings.HasPrefix(strings.TrimSpace(r.EffectiveDigest), "sha256:") || len(strings.TrimSpace(r.EffectiveDigest)) != len("sha256:")+64 {
+		return fmt.Errorf("pack selection receipt effective_digest is invalid")
+	}
 	return nil
 }
 
-func (r PackSelectionReceipt) Matches(base *PlatformPackInventory) bool {
+func (r PackSelectionReceipt) MatchesBase(base *PlatformPackInventory) bool {
 	return base != nil && r.BaseMode == base.SelectionMode() && strings.TrimSpace(r.BaseDigest) == base.Digest()
+}
+
+func (r PackSelectionReceipt) Matches(base *PlatformPackInventory, effective *EffectivePackInventory) bool {
+	return r.MatchesBase(base) && effective != nil && strings.TrimSpace(r.EffectiveDigest) == effective.Digest()
 }

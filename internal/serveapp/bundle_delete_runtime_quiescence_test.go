@@ -57,7 +57,7 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			processWorkOwner := newSupervisorTestProcessOwner(t)
 			providerCatalog := testProviderTriggerCatalog(t)
 			newRuntime := func() *runtimepkg.Runtime {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
 					LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,

@@ -19,6 +19,7 @@ import (
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -218,16 +219,16 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 			},
 		}
 		runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
-			RepoRoot:         req.RepoRoot,
-			PlatformSpecPath: req.PlatformSpecPath,
-			PlatformPackBase: req.PlatformPackBase,
+			RepoRoot:          req.RepoRoot,
+			PlatformSpecPath:  req.PlatformSpecPath,
+			PlatformPackBases: req.PlatformPackBases,
 		})
 		if req.LoadedBundle.dbLoaded {
 			runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
-				RepoRoot:         req.RepoRoot,
-				PlatformSpecPath: req.RunningPlatformSpecPath,
-				PlatformPackBase: req.PlatformPackBase,
-				Store:            pg,
+				RepoRoot:          req.RepoRoot,
+				PlatformSpecPath:  req.RunningPlatformSpecPath,
+				PlatformPackBases: req.PlatformPackBases,
+				Store:             pg,
 			}
 		}
 		runFork := apiv1.SelectedContractRunForkExecutor{
@@ -762,7 +763,7 @@ func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLIContractPlatformSpe
 	return resolvedPaths.PlatformSpecPath, nil
 }
 
-func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBase *packartifact.PlatformPackInventory) ([]serveRuntimeBundle, error) {
+func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return nil, err
@@ -774,7 +775,7 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 			return nil, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
 		}
 		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash, runningPlatformSpecPath, packBase)
+			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash, runningPlatformSpecPath, packBases)
 			if err != nil {
 				for _, prior := range out {
 					if prior.cleanup != nil {
@@ -787,14 +788,14 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 		}
 		return out, nil
 	}
-	loaded, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts, packBase)
+	loaded, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
 	}
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBase *packartifact.PlatformPackInventory) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -807,9 +808,13 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 		if err != nil {
 			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
 		}
-		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0], runningPlatformSpecPath, packBase)
+		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0], runningPlatformSpecPath, packBases)
 	}
 	contractsRoot, err := cliapp.NormalizeContractsRoot(resolvedPaths.ContractsPath)
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	packBase, err := packBases.CurrentPlatformPackBase()
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
@@ -832,7 +837,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 	}, nil
 }
 
-func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash, runningPlatformSpecPath string, packBase *packartifact.PlatformPackInventory) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	catalog := stores.facade().bundleRuntimeCatalogStore()
 	if catalog == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected bundle catalog store")
@@ -852,7 +857,8 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 		ContentYAML:             record.ContentYAML,
 		DataBlob:                record.DataBlob,
 		RunningPlatformSpecPath: strings.TrimSpace(runningPlatformSpecPath),
-		PlatformPackBase:        packBase,
+		PlatformPackBases:       packBases,
+		AdmitPackInventory:      packadmission.AdmitInventory,
 	})
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -1174,6 +1180,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
+	platformPackBases, err := packartifact.NewPlatformPackBaseGenerationOwner(platformPackBase)
+	if err != nil {
+		presenter.fail(2, "config_load", err)
+		return 1
+	}
 	if !opts.Dev && !opts.LocalRun {
 		if err := validateServeGatewayURLEnvForNonDev(); err != nil {
 			presenter.fail(2, "serve_admission", err)
@@ -1231,7 +1242,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return 1
 		}
 	}
-	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts, platformPackBase)
+	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts, platformPackBases)
 	if err != nil {
 		detail := err.Error()
 		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
@@ -1522,15 +1533,15 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
 	supervisor.SetProcessCapability(processCapability)
-	supervisor.SetBundlePackRuntimeLoader(func(loadCtx context.Context, candidateBundle *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
-		freshConfig, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
+	supervisor.SetRuntimeConfigLoader(func() (cliapp.RuntimeConfigLoadResult, error) {
+		return cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
 			RepoRoot: repo, ExplicitPath: opts.ConfigPath, BackendOverride: opts.Backend,
 		})
-		if err != nil {
-			return cliapp.BundlePackRuntimeLoad{}, err
-		}
-		return cliapp.LoadBundlePackRuntime(loadCtx, freshConfig, candidateBundle, providerCredentialStore, managedCredentialStore)
+	})
+	supervisor.SetBundlePackRuntimeLoader(func(loadCtx context.Context, candidateConfig cliapp.RuntimeConfigLoadResult, candidateBundle *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		return cliapp.LoadBundlePackRuntime(loadCtx, candidateConfig, candidateBundle, providerCredentialStore, managedCredentialStore)
 	})
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
@@ -1591,7 +1602,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		ProviderCredentials:     providerCredentialStore,
 		ExecutionPosture:        rt.ExecutionPosture,
 		ProcessCapability:       processCapability,
-		PlatformPackBase:        platformPackBase,
+		PlatformPackBases:       platformPackBases,
 		RuntimeContextManager:   runtimeContextManager,
 		RuntimeSupervisor:       supervisor,
 	})
@@ -1622,7 +1633,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Catalog: apiStoreCaps.BundleCatalog, Effective: rt.Manager}),
-		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{
+			RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath,
+			PlatformPackBases: platformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
+			Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore,
+		}),
 		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: stores.IdempotencyStore, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPIStore}),
