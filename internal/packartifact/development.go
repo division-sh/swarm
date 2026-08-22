@@ -47,6 +47,20 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 		if len(entries) != 2 {
 			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
 		}
+		hasEnvelope := false
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err != nil {
+				return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
+			}
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("development platform pack %q contains unsupported entry %q", dir, entry.Name())
+			}
+			hasEnvelope = hasEnvelope || entry.Name() == EnvelopeFileName
+		}
+		if !hasEnvelope {
+			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
+		}
 		envelopeBody, err := os.ReadFile(filepath.Join(dir, EnvelopeFileName))
 		if err != nil {
 			return nil, fmt.Errorf("read development platform pack envelope %q: %w", dir, err)
@@ -60,11 +74,7 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 			return nil, fmt.Errorf("development platform pack %q has unsupported type %q", envelope.ID, envelope.Type)
 		}
 		for _, entry := range entries {
-			info, err := entry.Info()
-			if err != nil {
-				return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
-			}
-			if !info.Mode().IsRegular() || (entry.Name() != EnvelopeFileName && entry.Name() != manifestFile) {
+			if entry.Name() != EnvelopeFileName && entry.Name() != manifestFile {
 				return nil, fmt.Errorf("development platform pack %q contains unsupported entry %q", dir, entry.Name())
 			}
 		}

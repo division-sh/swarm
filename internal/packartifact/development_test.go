@@ -180,6 +180,44 @@ func TestDevelopmentOverrideRejectsSymlinkedConfiguredRoot(t *testing.T) {
 	}
 }
 
+func TestDevelopmentOverrideRejectsNonRegularEnvelopeBeforeRead(t *testing.T) {
+	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		replace func(t *testing.T, envelopePath string)
+	}{
+		{name: "symlink", replace: func(t *testing.T, envelopePath string) {
+			target := filepath.Join(t.TempDir(), "target.yaml")
+			if err := os.WriteFile(target, []byte("id: followed\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, envelopePath); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "directory", replace: func(t *testing.T, envelopePath string) {
+			if err := os.Mkdir(envelopePath, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := materializeDevelopmentInventory(t, embedded, nil)
+			envelopePath := filepath.Join(dirs[0], EnvelopeFileName)
+			if err := os.Remove(envelopePath); err != nil {
+				t.Fatal(err)
+			}
+			tc.replace(t, envelopePath)
+			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "contains unsupported entry \"pack.yaml\"") {
+				t.Fatalf("non-regular envelope error = %v, want pre-read unsupported-entry rejection", err)
+			}
+		})
+	}
+}
+
 func materializeDevelopmentInventory(t *testing.T, inventory *PlatformPackInventory, replacements map[string][]byte) []string {
 	t.Helper()
 	root := t.TempDir()

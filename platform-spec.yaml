@@ -9950,6 +9950,9 @@ tool_model:
       - >
         require every configured development pack root and each filesystem ancestor from its volume root to be a real
         directory; a symlink at the root or in any ancestor fails closed before reading inventory bytes
+      - >
+        enumerate the exact two development-pack entries and require both to be regular non-symlink files before opening
+        either `pack.yaml` or its body manifest; unsupported entries fail without blocking on or following them
       - parse envelope with strict known fields
       - validate id/version/platform_version/type/provenance/tests metadata
       - read body manifest bytes selected by pack type, such as trigger.yaml or connector.yaml
