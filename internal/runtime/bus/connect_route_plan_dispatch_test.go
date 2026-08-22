@@ -1451,6 +1451,14 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 
 func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *testing.T) {
 	source := connectRoutePlanSingletonProducerRootReceiverSource(t)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.FlowTree.Root == nil {
+		t.Fatal("connect source requires a root flow")
+	}
+	bundle.FlowTree.Root.Schema.Name = "authored-root"
+	if source.WorkflowName() == semanticview.RootExecutionFlowID(source) {
+		t.Fatalf("test requires authored root identity to differ from display name %q", source.WorkflowName())
+	}
 	store := newTargetRouteMemoryStore()
 	runID := uuid.NewString()
 	rootEntityID := eventtest.UUID("selected-root-owner")
@@ -1483,7 +1491,7 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 	want := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-collector")),
 		Target: events.MustExistingEntityTarget(events.RouteIdentity{
-			FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: rootEntityID,
+			FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: rootEntityID,
 		}),
 	}
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)

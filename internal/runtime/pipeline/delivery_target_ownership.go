@@ -249,8 +249,15 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 			Route: acquired.Route(), Materializing: acquired.MaterializingEntity(),
 		}}
 	}
-	blueprint.FlowID = flowID
-	blueprint = selectedRunRootTargetBlueprint(req.Source, req.Event, flowID, blueprint)
+	if strings.TrimSpace(flowID) == strings.TrimSpace(semanticview.RootExecutionFlowID(req.Source)) {
+		blueprint, err = selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, req.Event.HasTargetRoute())
+		if err != nil {
+			return events.DeliveryTargetOwnership{}, err
+		}
+	} else {
+		blueprint.FlowID = flowID
+		blueprint = blueprint.Normalized()
+	}
 	if blueprint.FlowInstance == "" {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target blueprint requires an exact flow instance")
 	}
@@ -326,16 +333,21 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q", blueprint.FlowInstance)
 }
 
-func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, flowID string, blueprint events.RouteIdentity) events.RouteIdentity {
-	if source == nil || strings.TrimSpace(flowID) != strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
-		return blueprint
+func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity, exactTarget bool) (events.RouteIdentity, error) {
+	coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
+	if err != nil {
+		return events.RouteIdentity{}, err
 	}
-	runID := strings.TrimSpace(evt.RunID())
-	if runID == "" {
-		return blueprint
+	blueprint = blueprint.Normalized()
+	if exactTarget && blueprint.FlowID != "" && blueprint.FlowID != coordinate.FlowID() {
+		return events.RouteIdentity{}, fmt.Errorf("root target flow %q disagrees with authored root flow %q", blueprint.FlowID, coordinate.FlowID())
 	}
-	blueprint.FlowInstance = runID
-	return blueprint.Normalized()
+	if exactTarget && blueprint.FlowInstance != "" && blueprint.FlowInstance != coordinate.RunID() {
+		return events.RouteIdentity{}, fmt.Errorf("root target run %q disagrees with current run %q", blueprint.FlowInstance, coordinate.RunID())
+	}
+	blueprint.FlowID = coordinate.FlowID()
+	blueprint.FlowInstance = coordinate.RunID()
+	return blueprint.Normalized(), nil
 }
 
 func ValidateDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest, owner events.DeliveryTargetOwnership) error {
@@ -363,7 +375,16 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 		return fmt.Errorf("receiver %s requires an admitted target handler", recipient.ID())
 	}
 	flowID := handlerFact.ExecutionFlowID(source)
-	if routeFlowID := owner.Route().FlowID; routeFlowID != "" && routeFlowID != flowID {
+	route := owner.Route()
+	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
+		if err != nil {
+			return err
+		}
+		if !coordinate.Matches(route.FlowID, route.FlowInstance) {
+			return fmt.Errorf("stamped root target (%q, %q) disagrees with current root coordinate (%q, %q)", route.FlowID, route.FlowInstance, coordinate.FlowID(), coordinate.RunID())
+		}
+	} else if routeFlowID := route.FlowID; routeFlowID != "" && routeFlowID != flowID {
 		return fmt.Errorf("stamped delivery target flow %q disagrees with handler flow %q", routeFlowID, flowID)
 	}
 	handlerEventType := evt.Type()
@@ -513,7 +534,7 @@ func acquireDeliveryTargetByDeclaredKey(
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_invalid: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
-	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID)
+	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID, evt.RunID())
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
@@ -528,11 +549,11 @@ func acquireDeliveryTargetByDeclaredKey(
 	}
 	matches := make([]WorkflowInstance, 0, len(stateRecords))
 	for _, record := range stateRecords {
-		candidate, err := decodeDeliveryTargetWorkflowEntityState(source, flowID, record)
+		candidate, err := decodeDeliveryTargetWorkflowEntityState(source, flowID, evt.RunID(), record)
 		if err != nil {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 		}
-		if !workflowInstanceOwnedByFlow(source, candidate, flowID) || deliveryTargetWorkflowInstanceTerminal(source, flowID, candidate) || !selectEntityCandidateMatches(candidate, expected) {
+		if !workflowInstanceOwnedByFlow(source, candidate, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceTerminal(source, flowID, candidate) || !selectEntityCandidateMatches(candidate, expected) {
 			continue
 		}
 		matches = append(matches, candidate)
@@ -574,7 +595,7 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), stateErr)
 		}
 		if stateExists {
-			existing, err = decodeDeliveryTargetWorkflowEntityState(source, flowID, record)
+			existing, err = decodeDeliveryTargetWorkflowEntityState(source, flowID, evt.RunID(), record)
 			if err != nil {
 				return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 			}
@@ -582,7 +603,7 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 		}
 	}
 	if ok {
-		if !workflowInstanceOwnedByFlow(source, existing, flowID) || deliveryTargetWorkflowInstanceTerminal(source, flowID, existing) || !selectEntityCandidateMatches(existing, expected) {
+		if !workflowInstanceOwnedByFlow(source, existing, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceTerminal(source, flowID, existing) || !selectEntityCandidateMatches(existing, expected) {
 			return events.DeliveryTargetOwnership{}, fmt.Errorf("select_or_create_entity_conflict: node %s flow %s deterministic entity %s exists but does not match declared active key", strings.TrimSpace(nodeID), strings.TrimSpace(flowID), route.EntityID)
 		}
 		existingRoute, err := deliveryTargetRouteForWorkflowInstance(source, flowID, existing)
@@ -622,8 +643,8 @@ func selectOrCreateEntityMaterializationTarget(source semanticview.Source, flowI
 	}.Normalized(), nil
 }
 
-func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {
-	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID)
+func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID, runID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {
+	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID, runID)
 	if err != nil {
 		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state owner: %w", err)
 	}

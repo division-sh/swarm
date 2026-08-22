@@ -3179,7 +3179,7 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RouteForInstancePath("root"))
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RouteForInstancePath(fixture.RunID))
 		if err == nil && ok && instance.CurrentState == "done" {
 			break
 		}
@@ -3539,12 +3539,12 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
 	evt := eventtest.RunCreatingRootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "root"), now)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now)
 	if err := seedEvent(ctx, evt); err != nil {
 		t.Fatalf("seed decision-card source event: %v", err)
 	}
 	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{
-		EventID: sourceEventID, EntityID: entityID, FlowInstance: "root", FromAgent: "review-agent",
+		EventID: sourceEventID, EntityID: entityID, FlowInstance: runID, FromAgent: "review-agent",
 		Type: "notice", Priority: "normal", Status: "pending", Summary: "review queued", Context: []byte(`{"title":"review queued"}`),
 	})
 	if err != nil {
@@ -3558,7 +3558,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
 	}
-	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
+	activation, err := gateruntime.New(runID, runID, entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
 	if err != nil {
 		t.Fatalf("new gate activation: %v", err)
 	}
@@ -3567,8 +3567,12 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("store gate activation: %v", err)
 	}
 	materializeCtx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
+	rootFlowID := semanticview.RootExecutionFlowID(workflow.SemanticSource())
+	if rootFlowID == "" {
+		t.Fatal("served decision-card fixture requires canonical root flow identity")
+	}
 	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
-		InstanceID: "root", StorageRef: "root", EntityID: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
@@ -3585,7 +3589,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath(runID), EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -4765,7 +4769,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err != nil {
 		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
 	}
-	activation, err := gateruntime.New(runID, "root", entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
+	activation, err := gateruntime.New(runID, runID, entityID, "", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
 	if err != nil {
 		t.Fatalf("new %s run.stop gate activation: %v", rt.Backend, err)
 	}
@@ -4790,8 +4794,12 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	default:
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
+	rootFlowID := semanticview.RootExecutionFlowID(workflow.SemanticSource())
+	if rootFlowID == "" {
+		t.Fatal("served run-control fixture requires canonical root flow identity")
+	}
 	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
-		InstanceID: "root", StorageRef: "root", EntityID: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
@@ -4805,7 +4813,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath(runID), EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -4872,7 +4880,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}
-	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RouteForInstancePath("root"))
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RouteForInstancePath(runID))
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}

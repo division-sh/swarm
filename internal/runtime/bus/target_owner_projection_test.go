@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
@@ -323,6 +324,14 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 	rootOwner := eventtest.UUID("same-flow-agent-root-owner")
 	nestedOwner := eventtest.UUID("same-flow-agent-nested-owner")
 	source := connectRoutePlanRootProducerSingletonSource()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.FlowTree.Root == nil {
+		t.Fatal("declared-agent source requires a root flow")
+	}
+	bundle.FlowTree.Root.Schema.Name = "authored-root"
+	if source.WorkflowName() == semanticview.RootExecutionFlowID(source) {
+		t.Fatalf("test requires authored root identity to differ from display name %q", source.WorkflowName())
+	}
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,
 		agents: map[agentidentity.Identity]ActiveAgentDescriptor{
@@ -354,7 +363,7 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 		t.Fatalf("resolved routes = %#v, want root and nested agents", routes)
 	}
 	want := map[agentidentity.Identity]events.RouteIdentity{
-		rootIdentity:   {FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: rootOwner},
+		rootIdentity:   {FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: rootOwner},
 		nestedIdentity: {FlowID: "review", FlowInstance: "review/one", EntityID: nestedOwner},
 	}
 	for _, route := range routes {

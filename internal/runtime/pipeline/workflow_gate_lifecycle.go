@@ -62,7 +62,7 @@ func workflowGatePlanForInstance(pc *PipelineCoordinator, instance WorkflowInsta
 	if plan, ok := pc.SemanticSource().WorkflowGateForStage(flowID, stage); ok {
 		return flowID, plan, true
 	}
-	if flowID == strings.TrimSpace(pc.SemanticSource().WorkflowName()) {
+	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(pc.SemanticSource())) {
 		if plan, ok := pc.SemanticSource().WorkflowGateForStage("", stage); ok {
 			return "", plan, true
 		}

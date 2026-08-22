@@ -112,7 +112,7 @@ func TestEntitylessDeclarativeEmissionDoesNotMaterializeWorkflowStateOnSQLiteAnd
 				PipelineObligations: unavailablePipelineTestObligationOwner{},
 			})
 			runID := runtimecorrelation.RunIDFromContext(ctx)
-			instancePath := "review/entityless-" + uuid.NewString()
+			instancePath := runID
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
 				handlerTestWorkflowEnvelope("review", instancePath, ""), time.Now().UTC(),
@@ -189,14 +189,15 @@ func executeExistingOwnerBehavior(
 	stateBuckets map[string]any,
 ) (WorkflowInstance, existingOwnerExecutionResult) {
 	t.Helper()
-	flowInstance := "review/" + name
-	entityID := eventtest.UUID("entity-requirement-" + name)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	flowInstance := runID
+	entityID := eventtest.UUID("entity-requirement-root")
 	seedMetadata := cloneStringAnyMap(metadata)
 	if seedMetadata == nil {
 		seedMetadata = map[string]any{}
 	}
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      name,
+		InstanceID:      runID,
 		StorageRef:      flowInstance,
 		EntityID:        entityID,
 		WorkflowName:    "review",
@@ -209,7 +210,7 @@ func executeExistingOwnerBehavior(
 	}
 
 	sourceEvent := handlerTestRootIngress(
-		uuid.NewString(), "work.ready", "", "", payload, 0, testPipelineRunID, "",
+		uuid.NewString(), "work.ready", "", "", payload, 0, runID, "",
 		handlerTestWorkflowEnvelope("review", flowInstance, entityID), time.Now().UTC(),
 	)
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: flowInstance, EntityID: entityID}
@@ -258,10 +259,10 @@ type existingOwnerExecutionResult struct {
 func handlerEntityRequirementExecutionSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Path:   "review",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: "template"},
+		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeStatic},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}, "work.emitted": {}},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			Name: "review", Mode: "template", InitialState: "active",
+			Name: "review", Mode: runtimecontracts.FlowModeStatic, InitialState: "active",
 			States: []string{"active", "killed"}, TerminalStates: []string{"killed"},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

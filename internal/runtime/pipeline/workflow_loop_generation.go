@@ -101,5 +101,5 @@ func loopFlowIDMatches(source semanticview.Source, declared, actual string) bool
 	if declared == actual {
 		return true
 	}
-	return declared == "" && actual == strings.TrimSpace(source.WorkflowName())
+	return declared == "" && actual == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 }

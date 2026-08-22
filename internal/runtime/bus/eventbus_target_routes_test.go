@@ -1479,7 +1479,6 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 			},
 		},
 	)
-	planner.rootFlowID = "root"
 	return planner
 }
 
@@ -1532,7 +1531,6 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 			},
 		},
 	)
-	planner.rootFlowID = "root"
 	return planner
 }
 
@@ -2893,7 +2891,7 @@ func TestEventBusRootInputAPIExplicitTargetPersistsOnlySelectedSameIDScopedRoute
 }
 
 func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *testing.T) {
-	_, routes := duplicateIDScopedRootInputAuthorityFixture(t)
+	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
 	ordinary := routes.routes["thing.created"][0]
 	rootInput := routes.rootInputRoutes["thing.created"][0]
 	event := eventtest.OperatorInjected(
@@ -2910,11 +2908,11 @@ func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *
 		Persist:  true,
 	}
 
-	ordinaryKey := newRoutedSubscriberAuthorityKey(event, ordinary)
+	ordinaryKey := newRoutedSubscriberAuthorityKey(source, event, ordinary)
 	if !routePlanIntentAuthorizesRoutedSubscriber(intent, ordinaryKey, ordinary) {
 		t.Fatal("planned ordinary-flow intent did not authorize its exact subscriber scope")
 	}
-	rootInputKey := newRoutedSubscriberAuthorityKey(event, rootInput)
+	rootInputKey := newRoutedSubscriberAuthorityKey(source, event, rootInput)
 	if routePlanIntentAuthorizesRoutedSubscriber(intent, rootInputKey, rootInput) {
 		t.Fatal("planned ordinary-flow intent transferred authority to duplicate-ID root-input sibling")
 	}
@@ -3369,14 +3367,24 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 
 func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	source := semanticview.Wrap(loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles()))
+	bundle := loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles())
+	root := runtimecontracts.FlowContractView{
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "authored-root"},
+		Nodes:  bundle.Nodes,
+		Events: bundle.Events,
+	}
+	bundle.FlowTree.Root = &root
+	source := semanticview.Wrap(bundle)
 	runID := uuid.NewString()
-	rootOwner := events.RouteIdentity{FlowID: source.WorkflowName(), FlowInstance: runID, EntityID: eventtest.UUID("root-node-owner")}
-	store.setTargetOwnerRoutes(rootOwner)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	if source.WorkflowName() == semanticview.RootExecutionFlowID(source) {
+		t.Fatalf("test requires authored root identity to differ from display name %q", source.WorkflowName())
+	}
+	rootOwner := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: eventtest.UUID("root-node-owner")}
+	store.setTargetOwnerRoutes(rootOwner)
 	portfolioNode := testRootNode(t, "portfolio-node")
 	ch := subscribeInternalDeliveriesForTest(t, eb, portfolioNode.Key(), events.EventType("opco.spinup_requested"))
 	evt := eventtest.RunCreatingRootIngress(
@@ -3434,6 +3442,48 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 	got = requireBusEvent(t, ch, "root routed node replay delivery")
 	if got.FlowInstance() != runID || got.EntityID() != rootOwner.EntityID {
 		t.Fatalf("replayed target = %q/%q, want exact root owner", got.FlowInstance(), got.EntityID())
+	}
+}
+
+func TestEventBusRejectsWrongRunRootTargetBeforePersistenceAndAfterReconstruction(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	bundle := loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles())
+	root := runtimecontracts.FlowContractView{
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "authored-root"},
+		Nodes:  bundle.Nodes,
+		Events: bundle.Events,
+	}
+	bundle.FlowTree.Root = &root
+	source := semanticview.Wrap(bundle)
+	const (
+		currentRunID = "11111111-1111-1111-1111-111111111111"
+		wrongRunID   = "22222222-2222-2222-2222-222222222222"
+	)
+	eventID := uuid.NewString()
+	evt := eventtest.TargetRouted(eventtest.RunCreatingRootIngress(
+		eventID, events.EventType("opco.spinup_requested"), "", "", []byte(`{}`), 0,
+		currentRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	), events.RouteIdentity{
+		FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: wrongRunID,
+		EntityID: eventtest.UUID("wrong-run-root-target"),
+	})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatalf("attempt %d NewEventBusWithOptions: %v", attempt, err)
+		}
+		if _, err := eb.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+			t.Fatalf("attempt %d preflight error = %v", attempt, err)
+		}
+		if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+			t.Fatalf("attempt %d publish error = %v", attempt, err)
+		}
+		_, persisted := store.events[eventID]
+		_, settled := store.settlements[eventID]
+		if persisted || len(store.routes[eventID]) != 0 || settled || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
+			t.Fatalf("attempt %d wrong-run root target mutated event store: event=%t routes=%#v settled=%t scopes=%#v receipts=%#v flow_routes=%#v", attempt, persisted, store.routes[eventID], settled, store.scopes, store.receipts, store.flowRoutes)
+		}
 	}
 }
 

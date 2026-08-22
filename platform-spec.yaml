@@ -1346,10 +1346,17 @@ contract_formats:
             owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
             when exactly one authored flow grammar claims it and that flow is the receiver. Static and singleton flows admit
             only their exact authored scope. Template flows admit exactly one scalar concrete instance segment under their
-            authored scope. The bundle root is recognized by the canonical authored root execution flow ID, which may differ
-            from the bundle workflow name, and additionally admits its exact current run UUID as the run-root instance grammar. Store
-            candidate bounds include that exact run UUID, never a UUID-shaped wildcard or authored-scope substitute. Zero-match
-            root select_or_create materializes the exact run route and derives its future entity from that route.
+            authored scope. The bundle root is owned by the closed coordinate consisting of the canonical authored root
+            execution flow ID and the exact current run ID. The authored root ID may differ from the bundle workflow display
+            name; display metadata is never root routing or declaration authority. UUID shape validates representation only and
+            never establishes ownership of an unrelated run. Store candidate bounds include only the exact current coordinate,
+            never a UUID-shaped wildcard or authored-scope substitute. Every durable target variant (existing_entity,
+            materializing_entity, and entityless_receiver), stamped-target validation, target application, state-only decode,
+            and engine mutation without a delivery application consumes that exact coordinate before persistence access or
+            mutation. Root EventBus delivery planning, root connect materialization, declared-agent projection, and root gate,
+            loop, and timer declaration matching consume the same authored root owner. Zero-match root select_or_create
+            materializes the exact current run route and derives its future entity from that route. Any flow or run mismatch
+            fails before event, delivery, settlement, entity-state, or lifecycle mutation.
             Reads of the exact receiver persistence aggregate MUST observe entity state and its lifecycle companion from one
             database statement snapshot (or one explicitly consistent transaction snapshot). Consumers MUST NOT assemble a
             presence value from independently timed reads that can fabricate absent, state-only, or lifecycle-only evidence.

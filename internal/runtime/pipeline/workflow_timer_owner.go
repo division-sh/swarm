@@ -1013,7 +1013,7 @@ func workflowTimerDeclarationOwnedByInstance(
 	if declarationFlowID == workflowName {
 		return true
 	}
-	return declarationFlowID == "" && workflowName == strings.TrimSpace(source.WorkflowName())
+	return declarationFlowID == "" && workflowName == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 }
 
 func workflowTimerDeclarationForInstance(

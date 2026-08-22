@@ -95,6 +95,43 @@ func TestDeliveryTargetOwnershipRetiredFallbacksStayAbsent(t *testing.T) {
 	}
 }
 
+func TestRootExecutionIdentityConsumersStayCanonical(t *testing.T) {
+	checks := []struct {
+		file     string
+		required []string
+	}{
+		{file: "workflow_instance_store.go", required: []string{"AdmitRootExecutionCoordinate"}},
+		{file: "delivery_target_ownership.go", required: []string{"AdmitRootExecutionCoordinate"}},
+		{file: "engine_adapter.go", required: []string{"AdmitRootExecutionCoordinate", "RootExecutionFlowID"}},
+		{file: "workflow_gate_lifecycle.go", required: []string{"RootExecutionFlowID"}},
+		{file: "workflow_loop_generation.go", required: []string{"RootExecutionFlowID"}},
+		{file: "workflow_timer_owner.go", required: []string{"RootExecutionFlowID"}},
+		{file: filepath.Join("..", "bus", "delivery_planner.go"), required: []string{"AdmitRootExecutionCoordinate"}},
+		{file: filepath.Join("..", "bus", "eventbus_publish.go"), required: []string{"validateEventRootTargetCoordinates"}},
+		{file: filepath.Join("..", "bus", "connect_"+"route_plan_dispatch.go"), required: []string{"AdmitRootExecutionCoordinate"}},
+		{file: filepath.Join("..", "bus", "target_owner_projection.go"), required: []string{"AdmitRootExecutionCoordinate"}},
+	}
+	for _, check := range checks {
+		t.Run(filepath.Base(check.file), func(t *testing.T) {
+			raw, err := os.ReadFile(check.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(raw)
+			for _, token := range check.required {
+				if !strings.Contains(source, token) {
+					t.Errorf("root identity consumer stopped using canonical owner %q", token)
+				}
+			}
+			for _, retired := range []string{".WorkflowName()", "uuid.Parse"} {
+				if strings.Contains(source, retired) {
+					t.Errorf("root identity consumer reintroduced primitive authority %q", retired)
+				}
+			}
+		})
+	}
+}
+
 func TestDeclaredKeyAcquisitionConsumesEntityStateAuthority(t *testing.T) {
 	acquisition := workflowLifecycleFunctionSource(t, "delivery_target_ownership.go", "acquireDeliveryTargetByDeclaredKey")
 	for _, required := range []string{"SelectActiveWorkflowEntityStates", "decodeDeliveryTargetWorkflowEntityState"} {

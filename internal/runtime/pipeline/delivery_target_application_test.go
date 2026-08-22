@@ -137,7 +137,7 @@ func TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutati
 			node := pipelineNode(t, "review", "node-a")
 			handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
-			target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/missing", EntityID: eventtest.UUID("missing-existing-target")}
+			target := events.RouteIdentity{FlowID: "review", FlowInstance: testPipelineRunID, EntityID: eventtest.UUID("missing-existing-target")}
 			evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
 			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), "is missing at execution") {
 				t.Fatalf("missing exact target error = %v", err)
@@ -150,6 +150,104 @@ func TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutati
 				t.Fatalf("missing exact target materialized state: %#v", instances)
 			}
 		})
+	}
+}
+
+func TestDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBothStores(t *testing.T) {
+	const wrongRunID = "88888888-8888-8888-8888-888888888888"
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, testCase := range []struct {
+			name  string
+			owner func(events.RouteIdentity) events.DeliveryTargetOwnership
+			seed  string
+		}{
+			{name: "complete-existing", owner: events.MustExistingEntityTarget, seed: "complete"},
+			{name: "state-only-existing", owner: events.MustExistingEntityTarget, seed: "state-only"},
+			{name: "materializing", owner: events.MustMaterializingEntityTarget},
+			{name: "entityless", owner: func(route events.RouteIdentity) events.DeliveryTargetOwnership {
+				route.EntityID = ""
+				return events.MustEntitylessReceiverTarget(route)
+			}},
+		} {
+			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
+				db, store := openHandlerEntityRequirementStore(t, backend)
+				source := handlerEntityRequirementExecutionSource()
+				newCoordinator := func() *PipelineCoordinator {
+					return newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+						Module:              staticSemanticWorkflowModule{source: source},
+						Persistence:         workflowPersistenceForTest(store),
+						PipelineObligations: unavailablePipelineTestObligationOwner{},
+					})
+				}
+				var ctx context.Context
+				if backend == "sqlite" {
+					ctx = sqliteExactOnceRunContext(t, db)
+				} else {
+					ctx = testPipelineRunContext(t, db)
+				}
+				entityID := eventtest.UUID("wrong-run-root-" + backend + "-" + testCase.name)
+				now := time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
+				switch testCase.seed {
+				case "complete":
+					if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+						InstanceID: wrongRunID, StorageRef: wrongRunID, EntityID: entityID,
+						WorkflowName: "review", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
+						CurrentState: "active", Fields: map[string]any{"marker": "unchanged"},
+					})); err != nil {
+						t.Fatalf("seed complete wrong-run root: %v", err)
+					}
+				case "state-only":
+					query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', 'active', '{}', '{"marker":"unchanged"}', '{}', '{}', 1, ?, ?, ?)`
+					args := []any{testPipelineRunID, entityID, wrongRunID, now, now, now}
+					if backend == "postgres" {
+						query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', 'active', '{}'::jsonb, '{"marker":"unchanged"}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $4, $4)`
+						args = []any{testPipelineRunID, entityID, wrongRunID, now}
+					}
+					if _, err := db.ExecContext(ctx, query, args...); err != nil {
+						t.Fatalf("seed state-only wrong-run root: %v", err)
+					}
+				}
+
+				countRows := func(table string) int {
+					t.Helper()
+					var count int
+					if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+						t.Fatalf("count %s: %v", table, err)
+					}
+					return count
+				}
+				stateBefore, lifecycleBefore := countRows("entity_state"), countRows("flow_instances")
+				node := pipelineNode(t, "review", "node-a")
+				handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
+				handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+				evt := handlerTestRootIngress(
+					uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
+					handlerTestWorkflowEnvelope("review", wrongRunID, entityID), now,
+				)
+				route := events.RouteIdentity{FlowID: "review", FlowInstance: wrongRunID, EntityID: entityID}
+				owner := testCase.owner(route)
+
+				for attempt, coordinator := range []*PipelineCoordinator{newCoordinator(), newCoordinator()} {
+					if _, err := coordinator.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, owner); err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+						t.Fatalf("attempt %d wrong-run root error = %v", attempt+1, err)
+					}
+				}
+				if stateAfter, lifecycleAfter := countRows("entity_state"), countRows("flow_instances"); stateAfter != stateBefore || lifecycleAfter != lifecycleBefore {
+					t.Fatalf("wrong-run rejection mutated persistence: state %d->%d lifecycle %d->%d", stateBefore, stateAfter, lifecycleBefore, lifecycleAfter)
+				}
+				if testCase.seed != "" {
+					var marker string
+					query := `SELECT fields FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+					args := []any{testPipelineRunID, entityID, wrongRunID}
+					if backend == "postgres" {
+						query = `SELECT fields::text FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
+					}
+					if err := db.QueryRowContext(ctx, query, args...).Scan(&marker); err != nil || !strings.Contains(marker, "unchanged") {
+						t.Fatalf("wrong-run rejection changed seeded state: fields=%q err=%v", marker, err)
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -312,7 +410,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				} else {
 					ctx = testPipelineRunContext(t, db)
 				}
-				instancePath := "review/" + testCase.name
+				instancePath := testPipelineRunID
 				entityID := eventtest.UUID("invalid-persistence-" + backend + "-" + testCase.name)
 				testCase.seed(t, ctx, instancePath, entityID, store, db)
 
@@ -365,7 +463,7 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 				ctx = testPipelineRunContext(t, db)
 			}
 
-			instancePath := "review/scenario-seeded"
+			instancePath := testPipelineRunID
 			entityID := eventtest.UUID("scenario-seeded-existing-target")
 			occurredAt := time.Date(2026, time.January, 4, 12, 0, 0, 0, time.UTC)
 			query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', 'active', '{"approved":true}', '{"marker":"preserved"}', '{}', '{}', 1, ?, ?, ?)`
@@ -428,7 +526,7 @@ func TestDeliveryTargetApplicationProjectsScopedGatesWithoutMutatingPersistenceO
 				ctx = testPipelineRunContext(t, db)
 			}
 
-			instancePath := "review/scoped-gates"
+			instancePath := testPipelineRunID
 			entityID := eventtest.UUID("scoped-gates-existing-target")
 			persisted := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
@@ -485,7 +583,7 @@ func TestDeliveryTargetApplicationProjectsExactOwnerIntoEmptyPreviewAndRejectsCo
 	handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 	entityID := eventtest.UUID("preview-exact-target")
-	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/preview", EntityID: entityID}
+	target := events.RouteIdentity{FlowID: "review", FlowInstance: testPipelineRunID, EntityID: entityID}
 	evt := handlerTestRootIngress(
 		uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
 		handlerTestWorkflowEnvelope("review", target.FlowInstance, entityID), time.Now().UTC(),

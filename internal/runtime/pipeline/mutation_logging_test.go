@@ -229,7 +229,7 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("mutation-flow"), "workflow.ready", "g_ready", false); err != nil {
+	if err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID), "workflow.ready", "g_ready", false); err != nil {
 		t.Fatalf("applyWorkflowGateForTest: %v", err)
 	}
 
@@ -248,7 +248,7 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute("mutation-flow"), entityID, "mutation-flow", "research", map[string]any{"summary": "done"}); err != nil {
+	if err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, "mutation-flow", "research", map[string]any{"summary": "done"}); err != nil {
 		t.Fatalf("recordWorkflowEvidence: %v", err)
 	}
 
@@ -291,8 +291,8 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		dropEntityMutationsTable(t, db)
 
 		ctx := testPipelineCoordinatorRunContext(t, pc)
-		transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, testWorkflowInstanceRoute("mutation-flow"), entityID, "flow.transitioned")
-		err := pc.persistWorkflowStateForTest(transitionCtx, testWorkflowInstanceRoute("mutation-flow"), entityID, "done", "flow.transitioned")
+		transitionCtx := testPersistedWorkflowStateTransitionContext(t, pc.workflowStore, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID, "flow.transitioned")
+		err := pc.persistWorkflowStateForTest(transitionCtx, testWorkflowInstanceRoute(testPipelineRunID), entityID, "done", "flow.transitioned")
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("persistWorkflowStateForTest err = %v, want entity_mutations failure", err)
 		}
@@ -306,7 +306,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("mutation-flow"), "workflow.ready", "g_ready", false)
+		err := pc.applyWorkflowGateForTest(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID), "workflow.ready", "g_ready", false)
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("applyWorkflowGateForTest err = %v, want entity_mutations failure", err)
 		}
@@ -320,7 +320,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute("mutation-flow"), entityID, "mutation-flow", "research", map[string]any{"summary": "done"})
+		err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, "mutation-flow", "research", map[string]any{"summary": "done"})
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("recordWorkflowEvidence err = %v, want entity_mutations failure", err)
 		}
@@ -345,8 +345,8 @@ func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 func seedMutationLoggingInstance(t *testing.T, store *workflowInstanceStore, entityID string) {
 	t.Helper()
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "mutation-flow",
-		StorageRef:      "mutation-flow",
+		InstanceID:      testPipelineRunID,
+		StorageRef:      testPipelineRunID,
 		EntityID:        entityID,
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",

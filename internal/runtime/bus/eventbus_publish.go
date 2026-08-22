@@ -1711,6 +1711,9 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
 	}
+	if err := validateEventRootTargetCoordinates(eb.semanticSource, evt); err != nil {
+		return RoutePlan{}, err
+	}
 	plan, err := eb.deliveryPlanner.planForRecipientMaterialization(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
@@ -1719,7 +1722,7 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(ctx, evt, plan.RoutedRecipients, plan); err != nil {
+	if err := validateRoutedNodeDeliveryAuthority(ctx, eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
 	if err := eb.authorizePublishRecipientPlan(ctx, evt, plan); err != nil {
