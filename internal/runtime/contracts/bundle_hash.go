@@ -212,6 +212,10 @@ func (b *bundleHashEntryBuilder) addPackSelectionInput(filePath string, source [
 	if _, exists := b.labels[label]; exists {
 		return fmt.Errorf("duplicate bundle hash label %q", label)
 	}
+	folded := asciiFoldBundleHashLabel(label)
+	if existing, exists := b.foldedLabels[folded]; exists && existing != label {
+		return fmt.Errorf("case-colliding bundle hash labels %q and %q", existing, label)
+	}
 	if strings.TrimSpace(filePath) != "" {
 		abs, err := canonicalContractsRootInput(b.contractsRoot, filePath, "effective pack base selection", false)
 		if err != nil {
@@ -221,7 +225,7 @@ func (b *bundleHashEntryBuilder) addPackSelectionInput(filePath string, source [
 		b.seenPaths[filePath] = struct{}{}
 	}
 	b.labels[label] = filePath
-	b.foldedLabels[asciiFoldBundleHashLabel(label)] = label
+	b.foldedLabels[folded] = label
 	b.entries = append(b.entries, bundleHashEntry{
 		Label: label, Path: filePath, Policy: bundleHashYAML,
 		SourceExact: append([]byte(nil), source...), ExactOwner: "effective pack base selection",
