@@ -63,7 +63,7 @@ func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
 		}
 		return ProjectPackSet{}, fmt.Errorf("inspect project pack directory: %w", err)
 	}
-	transaction, err := acquireProjectPackTransaction(root)
+	transaction, err := acquireProjectPackTransaction(root, false)
 	if err != nil {
 		return ProjectPackSet{}, err
 	}
@@ -249,7 +249,7 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 	if info, statErr := os.Stat(filepath.Join(root, "package.yaml")); statErr != nil || !info.Mode().IsRegular() {
 		return false, fmt.Errorf("selected project %q has no package.yaml", root)
 	}
-	transaction, err := acquireProjectPackTransaction(root)
+	transaction, err := acquireProjectPackTransaction(root, true)
 	if err != nil {
 		return false, err
 	}
