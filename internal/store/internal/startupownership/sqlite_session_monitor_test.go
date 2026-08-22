@@ -121,6 +121,7 @@ func proveSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease
 	}
 
 	monitorCtx, cancelMonitor := context.WithCancel(context.Background())
+	defer cancelMonitor()
 	monitorDone := make(chan error, 1)
 	if phase == "before proof" {
 		cancelMonitor()
