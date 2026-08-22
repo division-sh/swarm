@@ -2,6 +2,7 @@ package packartifact
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -21,4 +22,13 @@ func artifactPathSegments(relative string) ([]string, error) {
 		}
 	}
 	return segments, nil
+}
+
+func (r *admittedArtifactRoot) info() (os.FileInfo, error) {
+	directory, err := r.openDirectory(".")
+	if err != nil {
+		return nil, err
+	}
+	defer directory.Close()
+	return directory.Stat()
 }

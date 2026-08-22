@@ -242,7 +242,7 @@ Available in this repo too:
 
 ## Development
 
-Requirements: Go 1.23. Docker is the default workspace-isolation backend; an
+Requirements: Go 1.25. Docker is the default workspace-isolation backend; an
 explicit host backend is available for local-dev or trusted remote work (see
 [`swarm.example.yaml`](swarm.example.yaml)). Host backend command execution is
 trusted/unsafe: native `bash` commands run as the host user when both host

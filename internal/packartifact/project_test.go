@@ -278,8 +278,11 @@ func TestProjectPackImportFailureRollsBackCandidateInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer transaction.close()
-	transaction.stateRoot = filepath.Join(project, "missing", "transaction-state")
-	if changed, err := importEmbeddedPackLocked(project, "provider.telegram", entry, transaction); err == nil || changed || !strings.Contains(err.Error(), "stage project pack import") {
+	if err := transaction.writerRoot.Close(); err != nil {
+		t.Fatal(err)
+	}
+	transaction.writerRoot = nil
+	if changed, err := importEmbeddedPackLocked(project, "provider.telegram", entry, transaction); err == nil || changed {
 		t.Fatalf("failed import changed=%t err=%v", changed, err)
 	}
 	if _, err := os.Lstat(filepath.Join(project, ProjectPackDirectory)); !os.IsNotExist(err) {
@@ -641,6 +644,108 @@ func TestProjectPackSnapshotRetainsTransactionRootAcrossPathReplacement(t *testi
 	}
 	if envelope.ID != "provider.demo" {
 		t.Fatalf("rooted project snapshot id = %q, want provider.demo", envelope.ID)
+	}
+}
+
+func TestProjectPackTransactionSerializesManifestReplacement(t *testing.T) {
+	project := t.TempDir()
+	manifest := filepath.Join(project, "package.yaml")
+	if err := os.WriteFile(manifest, []byte("name: original\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := acquireProjectPackTransaction(project, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(manifest, manifest+".old"); err != nil {
+		_ = first.close()
+		t.Skipf("package manifest replacement is unavailable: %v", err)
+	}
+	if err := os.WriteFile(manifest, []byte("name: replacement\nversion: 1.0.0\n"), 0o644); err != nil {
+		_ = first.close()
+		t.Fatal(err)
+	}
+	type result struct {
+		transaction *projectPackTransaction
+		err         error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		transaction, err := acquireProjectPackTransaction(project, true)
+		resultCh <- result{transaction: transaction, err: err}
+	}()
+	select {
+	case got := <-resultCh:
+		if got.transaction != nil {
+			_ = got.transaction.close()
+		}
+		_ = first.close()
+		t.Fatalf("replacement package.yaml bypassed the active project transaction: %v", got.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := first.close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-resultCh:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if err := got.transaction.close(); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("replacement-manifest transaction did not resume after predecessor release")
+	}
+}
+
+func TestProjectPackImportRetainsWriterRootAcrossPathReplacement(t *testing.T) {
+	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := base.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack missing")
+	}
+	parent := t.TempDir()
+	project := filepath.Join(parent, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: original\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := acquireProjectPackTransaction(project, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.close()
+	moved := filepath.Join(parent, "moved")
+	if err := os.Rename(project, moved); err != nil {
+		t.Skipf("project root replacement is unavailable: %v", err)
+	}
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: replacement\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := importEmbeddedPackLocked(project, "provider.telegram", entry, transaction); err != nil || !changed {
+		t.Fatalf("rooted import changed=%t err=%v", changed, err)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ProjectPackDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("import escaped into replacement project root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(moved, ProjectPackDirectory, "provider.telegram", EnvelopeFileName)); err != nil {
+		t.Fatalf("retained project root did not receive imported pack: %v", err)
+	}
+	set, err := loadProjectPackSetLocked(transaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := projectPackSourceIDs(set.Sources), []string{"provider.telegram"}; !equalStrings(got, want) {
+		t.Fatalf("retained writer-root ids = %v, want %v", got, want)
 	}
 }
 

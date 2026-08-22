@@ -9899,15 +9899,19 @@ tool_model:
         recovery, and fork resolve their receipt against the retained exact generation. This retention is not an archive,
         migration, or compatibility promise across binary starts.
       project_inventory_transaction: >
-        Project pack mutation and validated reads share one project-scoped cross-process transaction/snapshot lock anchored
-        without mutation on the existing root `package.yaml`, outside the strict `packs/` namespace. Validated readers open
-        that anchor read-only and take a shared lock, so read-only source and materialized bundles remain supported; imports
-        take the exclusive lock before their first inventory path or manifest read and retain it through directory and
-        manifest publication. Validation holds the shared snapshot through every manifest, envelope, body, and unexpected-
-        entry read. Temporary import and manifest artifacts remain outside reader-visible inventory. Successful concurrent
-        imports preserve every committed membership row and directory, and a reader observes only a complete predecessor or
-        successor snapshot. Ordinary publication failures roll back their candidate. No contracts-tree lock artifact,
-        unlocked reader, process-local mutex, compare/retry fallback, repair, or migration path is authoritative.
+        Project pack mutation and validated reads share one project-scoped cross-process transaction/snapshot owner. A
+        canonical-project-path shared/exclusive lock lives outside the project tree and is acquired before root admission;
+        the exact admitted `package.yaml` inode is then locked as a same-project alias guard. Replacing either the project
+        path or `package.yaml` cannot create an independently writable transaction while a predecessor remains active.
+        Validated readers take shared locks without mutating the source or materialized project tree, while imports take
+        exclusive locks before their first inventory path or manifest read and retain them through directory and manifest
+        publication. Readers and writers retain root capabilities for the exact same admitted directory; every manifest,
+        envelope, body, unexpected-entry read, staging write, cleanup, and atomic publication resolves through that retained
+        root rather than re-traversing the selected project path. Temporary import and manifest artifacts remain outside
+        reader-visible inventory. Successful concurrent imports preserve every committed membership row and directory, and
+        a reader observes only a complete predecessor or successor snapshot. Ordinary publication failures roll back their
+        candidate. No contracts-tree lock artifact, unlocked reader, process-local mutex, pathname writer, compare/retry
+        fallback, repair, compatibility, or migration path is authoritative.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
