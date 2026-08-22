@@ -2,6 +2,7 @@ package packartifact
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -60,7 +61,7 @@ func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
 	if err != nil {
 		return ProjectPackSet{}, err
 	}
-	set, loadErr := loadProjectPackSetLocked(root)
+	set, loadErr := loadProjectPackSetLocked(transaction)
 	closeErr := transaction.close()
 	if loadErr != nil {
 		return ProjectPackSet{}, loadErr
@@ -71,31 +72,25 @@ func LoadProjectPackSet(projectRoot string) (ProjectPackSet, error) {
 	return set, nil
 }
 
-func loadProjectPackSetLocked(root string) (ProjectPackSet, error) {
+func loadProjectPackSetLocked(transaction *projectPackTransaction) (ProjectPackSet, error) {
+	if transaction == nil || transaction.root == nil || strings.TrimSpace(transaction.stateRoot) == "" {
+		return ProjectPackSet{}, fmt.Errorf("project pack transaction is required")
+	}
+	root := transaction.stateRoot
 	packsRoot := filepath.Join(root, ProjectPackDirectory)
 	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)
-	rootInfo, err := os.Lstat(packsRoot)
+	_, err := transaction.root.readDir(ProjectPackDirectory)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return ProjectPackSet{}, nil
 		}
 		return ProjectPackSet{}, fmt.Errorf("inspect project pack directory: %w", err)
 	}
-	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
-		return ProjectPackSet{}, fmt.Errorf("project pack path %q must be a real directory", ProjectPackDirectory)
-	}
-	manifestInfo, err := os.Lstat(manifestPath)
+	manifestBody, err := transaction.root.readRegularFile(ProjectPackManifestLabel)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return ProjectPackSet{}, fmt.Errorf("project pack directory exists but %s is missing", ProjectPackManifestLabel)
 		}
-		return ProjectPackSet{}, fmt.Errorf("inspect project pack manifest: %w", err)
-	}
-	if manifestInfo.Mode()&os.ModeSymlink != 0 || !manifestInfo.Mode().IsRegular() {
-		return ProjectPackSet{}, fmt.Errorf("project pack manifest %s must be a regular file", ProjectPackManifestLabel)
-	}
-	manifestBody, err := os.ReadFile(manifestPath)
-	if err != nil {
 		return ProjectPackSet{}, fmt.Errorf("read project pack manifest: %w", err)
 	}
 	manifest, err := ParseProjectPackManifest(manifestBody)
@@ -135,17 +130,13 @@ func loadProjectPackSetLocked(root string) (ProjectPackSet, error) {
 		seenPaths[declared.Path] = declared.ID
 
 		directoryRelative := path.Join(ProjectPackDirectory, declared.Path)
-		directoryAbsolute := filepath.Join(packsRoot, filepath.FromSlash(declared.Path))
-		if err := requireRealDirectoryWithin(packsRoot, directoryAbsolute, directoryRelative); err != nil {
-			return ProjectPackSet{}, err
-		}
 		envelopeRelative := path.Join(directoryRelative, EnvelopeFileName)
 		manifestRelative := path.Join(directoryRelative, packmodel.ManifestFileNameForType(declared.Type))
-		envelopeBody, envelopePath, err := readProjectPackRegularFile(root, envelopeRelative)
+		envelopeBody, envelopePath, err := readProjectPackRegularFile(transaction.root, root, envelopeRelative)
 		if err != nil {
 			return ProjectPackSet{}, err
 		}
-		body, bodyPath, err := readProjectPackRegularFile(root, manifestRelative)
+		body, bodyPath, err := readProjectPackRegularFile(transaction.root, root, manifestRelative)
 		if err != nil {
 			return ProjectPackSet{}, err
 		}
@@ -176,7 +167,7 @@ func loadProjectPackSetLocked(root string) (ProjectPackSet, error) {
 			ProjectPackFile{RelativePath: manifestRelative, AbsolutePath: bodyPath, Body: append([]byte(nil), body...)},
 		)
 	}
-	if err := rejectUnexpectedProjectPackEntries(packsRoot, expected); err != nil {
+	if err := rejectUnexpectedProjectPackEntries(transaction.root, expected); err != nil {
 		return ProjectPackSet{}, err
 	}
 	sort.Slice(set.Sources, func(i, j int) bool { return set.Sources[i].Path < set.Sources[j].Path })
@@ -239,12 +230,9 @@ func ImportEmbeddedPack(projectRoot, id string, embedded *PlatformPackInventory)
 	if err != nil || !present {
 		return false, fmt.Errorf("selected project root is required")
 	}
-	if info, statErr := os.Stat(filepath.Join(root, "package.yaml")); statErr != nil || !info.Mode().IsRegular() {
-		return false, fmt.Errorf("selected project %q has no package.yaml", root)
-	}
 	transaction, err := acquireProjectPackTransaction(root, true)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("selected project %q has no admissible package.yaml: %w", root, err)
 	}
 	changed, importErr := importEmbeddedPackLocked(root, id, entry, transaction)
 	closeErr := transaction.close()
@@ -276,7 +264,7 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 	}
 	expectedManifest := ProjectPackManifest{Version: ProjectPackManifestVersion, Imports: []ProjectPackManifestImport{declared}}
 	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)
-	set, loadErr := loadProjectPackSetLocked(root)
+	set, loadErr := loadProjectPackSetLocked(transaction)
 	if loadErr != nil {
 		return false, loadErr
 	}
@@ -401,72 +389,46 @@ func projectPackSourceEqual(sources []ProjectPackSource, id string, envelopeBody
 	return false
 }
 
-func requireRealDirectoryWithin(root, target, display string) error {
-	rel, err := filepath.Rel(root, target)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return fmt.Errorf("project pack path %q escapes the packs root", display)
-	}
-	current := root
-	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
-		current = filepath.Join(current, segment)
-		info, statErr := os.Lstat(current)
-		if statErr != nil {
-			return fmt.Errorf("inspect project pack path %q: %w", display, statErr)
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("project pack path %q must contain only real directories", display)
-		}
-	}
-	return nil
-}
-
-func readProjectPackRegularFile(projectRoot, relative string) ([]byte, string, error) {
+func readProjectPackRegularFile(root *admittedArtifactRoot, projectRoot, relative string) ([]byte, string, error) {
 	absolute := filepath.Join(projectRoot, filepath.FromSlash(relative))
-	info, err := os.Lstat(absolute)
-	if err != nil {
-		return nil, "", fmt.Errorf("read project pack file %q: %w", relative, err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, "", fmt.Errorf("project pack file %q must be a regular file", relative)
-	}
-	body, err := os.ReadFile(absolute)
+	body, err := root.readRegularFile(relative)
 	if err != nil {
 		return nil, "", fmt.Errorf("read project pack file %q: %w", relative, err)
 	}
 	return body, absolute, nil
 }
 
-func rejectUnexpectedProjectPackEntries(packsRoot string, expected map[string]struct{}) error {
+func rejectUnexpectedProjectPackEntries(root *admittedArtifactRoot, expected map[string]struct{}) error {
 	expectedDirectories := map[string]struct{}{ProjectPackDirectory: {}}
 	for name := range expected {
 		for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
 			expectedDirectories[parent] = struct{}{}
 		}
 	}
-	return filepath.WalkDir(packsRoot, func(name string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(filepath.Dir(packsRoot), name)
+	var inspectDirectory func(string) error
+	inspectDirectory = func(directory string) error {
+		entries, err := root.readDir(directory)
 		if err != nil {
-			return err
+			return fmt.Errorf("inspect project pack inventory directory %q: %w", directory, err)
 		}
-		rel = filepath.ToSlash(rel)
-		if entry.Type()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("project pack inventory path %q is a symlink", rel)
-		}
-		if entry.IsDir() {
-			if _, ok := expectedDirectories[rel]; !ok {
-				return fmt.Errorf("project pack inventory contains unlisted directory %q", rel)
+		for _, entry := range entries {
+			relative := path.Join(directory, entry.Name())
+			if _, ok := expected[relative]; ok {
+				continue
 			}
-			return nil
-		}
-		if !entry.Type().IsRegular() {
-			return fmt.Errorf("project pack inventory path %q is not a regular file", rel)
-		}
-		if _, ok := expected[rel]; !ok {
-			return fmt.Errorf("project pack inventory contains unlisted file %q", rel)
+			if _, ok := expectedDirectories[relative]; ok {
+				if err := inspectDirectory(relative); err != nil {
+					return err
+				}
+				continue
+			}
+			kind := "file"
+			if entry.IsDir() {
+				kind = "directory"
+			}
+			return fmt.Errorf("project pack inventory contains unlisted %s %q", kind, relative)
 		}
 		return nil
-	})
+	}
+	return inspectDirectory(ProjectPackDirectory)
 }

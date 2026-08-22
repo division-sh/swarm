@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packmodel"
 	"gopkg.in/yaml.v3"
 )
 
@@ -582,6 +583,64 @@ func TestProjectPackAdmissionRejectsHostileMembership(t *testing.T) {
 				t.Fatal("project pack load and effective admission succeeded for hostile project inventory")
 			}
 		})
+	}
+}
+
+func TestProjectPackSnapshotRetainsTransactionRootAcrossPathReplacement(t *testing.T) {
+	base, err := LoadPlatformPackInventoryFS(
+		testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", ProvenancePlatform, []byte("provider: demo\n")),
+		InventoryManifestFileName,
+		testPlatformVersion,
+		SelectionEmbedded,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	project := filepath.Join(parent, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: original\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ImportEmbeddedPack(project, "provider.demo", base); err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := acquireProjectPackTransaction(project, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.close()
+
+	moved := filepath.Join(parent, "moved")
+	if err := os.Rename(project, moved); err != nil {
+		t.Skipf("project root replacement is unavailable: %v", err)
+	}
+	outside := filepath.Join(parent, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "package.yaml"), []byte("name: outside\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, project); err != nil {
+		t.Skipf("project symlink replacement is unavailable: %v", err)
+	}
+
+	set, err := loadProjectPackSetLocked(transaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Sources) != 1 {
+		t.Fatalf("rooted project snapshot sources = %#v, want original imported pack", set.Sources)
+	}
+	envelope, err := packmodel.ParseEnvelope(set.Sources[0].EnvelopeBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envelope.ID != "provider.demo" {
+		t.Fatalf("rooted project snapshot id = %q, want provider.demo", envelope.ID)
 	}
 }
 

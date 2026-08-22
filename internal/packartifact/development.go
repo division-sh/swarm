@@ -2,6 +2,8 @@ package packartifact
 
 import (
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,54 +39,57 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 			return nil, fmt.Errorf("resolve development platform pack %q: %w", dir, err)
 		}
 		dir = absoluteDir
-		if err := requireRealDevelopmentPackPath(dir); err != nil {
-			return nil, err
-		}
-		entries, err := os.ReadDir(dir)
+		root, err := openAdmittedArtifactRoot(dir)
 		if err != nil {
+			return nil, fmt.Errorf("development platform pack %q must be a real directory with no symlinked ancestors: %w", dir, err)
+		}
+		entries, err := root.readDir(".")
+		if err != nil {
+			_ = root.close()
 			return nil, fmt.Errorf("read development platform pack %q: %w", dir, err)
 		}
 		if len(entries) != 2 {
+			_ = root.close()
 			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
 		}
 		hasEnvelope := false
 		for _, entry := range entries {
-			info, err := entry.Info()
-			if err != nil {
-				return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
-			}
-			if !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("development platform pack %q contains unsupported entry %q", dir, entry.Name())
-			}
 			hasEnvelope = hasEnvelope || entry.Name() == EnvelopeFileName
 		}
 		if !hasEnvelope {
+			_ = root.close()
 			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
 		}
-		envelopeBody, err := readRegularDevelopmentPackFile(dir, EnvelopeFileName)
+		artifactBodies, err := readDevelopmentPackArtifacts(root, entries)
 		if err != nil {
-			return nil, fmt.Errorf("read development platform pack envelope %q: %w", dir, err)
+			_ = root.close()
+			return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
 		}
+		envelopeBody := artifactBodies[EnvelopeFileName]
 		envelope, err := basepacks.ParseEnvelope(envelopeBody)
 		if err != nil {
+			_ = root.close()
 			return nil, fmt.Errorf("parse development platform pack envelope %q: %w", dir, err)
 		}
 		manifestFile := ManifestFileNameForType(envelope.Type)
 		if manifestFile == "" {
+			_ = root.close()
 			return nil, fmt.Errorf("development platform pack %q has unsupported type %q", envelope.ID, envelope.Type)
 		}
 		for _, entry := range entries {
 			if entry.Name() != EnvelopeFileName && entry.Name() != manifestFile {
+				_ = root.close()
 				return nil, fmt.Errorf("development platform pack %q contains unsupported entry %q", dir, entry.Name())
 			}
 		}
 		if previous, duplicate := seenIDs[envelope.ID]; duplicate {
+			_ = root.close()
 			return nil, fmt.Errorf("duplicate development platform pack id %q from %q and %q", envelope.ID, previous, dir)
 		}
 		seenIDs[envelope.ID] = dir
-		body, err := readRegularDevelopmentPackFile(dir, manifestFile)
-		if err != nil {
-			return nil, fmt.Errorf("read development platform pack body %q: %w", dir, err)
+		body := artifactBodies[manifestFile]
+		if err := root.close(); err != nil {
+			return nil, fmt.Errorf("close development platform pack %q: %w", dir, err)
 		}
 		candidates = append(candidates, candidatePack{
 			directory: dir, envelope: envelope, envelopeBody: envelopeBody, manifestBody: body,
@@ -124,27 +129,38 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 	return inventory, nil
 }
 
-func requireRealDevelopmentPackPath(target string) error {
-	root := filepath.VolumeName(target) + string(filepath.Separator)
-	relative, err := filepath.Rel(root, target)
-	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." {
-		return fmt.Errorf("development platform pack %q must be an absolute real directory", target)
+func readDevelopmentPackArtifacts(root *admittedArtifactRoot, entries []fs.DirEntry) (map[string][]byte, error) {
+	opened := make(map[string]*os.File, len(entries))
+	defer func() {
+		for _, file := range opened {
+			_ = file.Close()
+		}
+	}()
+	for _, entry := range entries {
+		file, err := root.openRegularFile(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		opened[entry.Name()] = file
 	}
-	current := root
-	for _, segment := range strings.Split(relative, string(filepath.Separator)) {
-		if segment == "" || segment == "." {
-			continue
+	bodies := make(map[string][]byte, len(opened))
+	for name, file := range opened {
+		body, err := io.ReadAll(file)
+		if err != nil {
+			return nil, fmt.Errorf("read opened development pack artifact %q: %w", name, err)
 		}
-		current = filepath.Join(current, segment)
-		info, statErr := os.Lstat(current)
-		if statErr != nil {
-			return fmt.Errorf("inspect development platform pack %q component %q: %w", target, current, statErr)
-		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-			return fmt.Errorf("development platform pack %q must be a real directory with no symlinked ancestors", target)
-		}
+		bodies[name] = body
 	}
-	return nil
+	return bodies, nil
+}
+
+func readRegularDevelopmentPackFile(dir, name string) ([]byte, error) {
+	root, err := openAdmittedArtifactRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.close()
+	return root.readRegularFile(name)
 }
 
 func cloneImportOrigins(origins map[string]ImportOrigin) map[string]ImportOrigin {

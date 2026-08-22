@@ -1,6 +1,7 @@
 package providerconnectors
 
 import (
+	"embed"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -11,6 +12,9 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+//go:embed catalog/generated-packs.yaml catalog/generator-profiles/*.yaml
+var generatedConnectorIdentityFS embed.FS
 
 type ConnectorManifest struct {
 	Provider   string                                      `yaml:"provider"`
@@ -75,6 +79,12 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 		return nil, fmt.Errorf("effective pack inventory is required")
 	}
 	entries := inventory.EntriesByType(packartifact.TypeConnector)
+	index, err := loadGeneratedPackIndex(generatedConnectorIdentityFS)
+	if err != nil {
+		return nil, err
+	}
+	expectedGenerated := index.BuiltinByID()
+	seenGenerated := make(map[string]struct{}, len(expectedGenerated))
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
 		pack, err := LoadPackFS(entry.FileSystem(), ".", runningPlatformVersion)
@@ -83,7 +93,21 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 		}
 		pack.Directory = entry.Directory()
 		pack.Source = entry.Source() + ":" + entry.ID()
+		expected, indexed := expectedGenerated[strings.TrimSpace(pack.Envelope.ID)]
+		if indexed {
+			if err := validateGeneratedPackIdentity(generatedConnectorIdentityFS, pack, expected); err != nil {
+				return nil, fmt.Errorf("admit effective generated connector pack %q: %w", pack.Envelope.ID, err)
+			}
+			seenGenerated[strings.TrimSpace(pack.Envelope.ID)] = struct{}{}
+		} else if pack.Manifest.Generation != nil {
+			return nil, fmt.Errorf("effective connector pack %q carries generation evidence but is not in the generated pack index", pack.Envelope.ID)
+		}
 		loaded = append(loaded, pack)
+	}
+	for packID := range expectedGenerated {
+		if _, exists := seenGenerated[packID]; !exists {
+			return nil, fmt.Errorf("generated connector pack index references unavailable effective pack id %q", packID)
+		}
 	}
 	return NewPackRegistry(loaded...)
 }

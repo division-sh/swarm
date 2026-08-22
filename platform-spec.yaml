@@ -9191,11 +9191,12 @@ tool_model:
         parameters, missing 2xx declarations, unknown selected-operation fields, or profile/source disagreement fail closed.
       generated_identity_owner: >
         Strict versioned `internal/providerconnectors/catalog/generated-packs.yaml` independently classifies each generated
-        pack by pack id, provider, exact profile path, kind, and output. It is consumed before builtin connector admission.
+        pack by pack id, provider, exact profile path, kind, and output. Its binary-owned index and profile baseline is consumed
+        before effective connector admission for embedded, complete development-replacement, and project-shadowing selections.
         Duplicate ids, duplicate profile bindings, duplicate outputs, unknown builtin ids, provider/profile mismatch,
-        unindexed generator profiles, or builtin bodies carrying generated evidence without index identity fail closed.
+        unindexed generator profiles, or effective bodies carrying generated evidence without index identity fail closed.
         Indexed generated packs MUST carry matching generation evidence; removing that evidence and recomputing the exact
-        pack manifest hash does not downgrade the pack to handwritten status. Builtin admission parses the exact indexed
+        pack manifest hash does not downgrade the pack to handwritten status. Effective admission parses the exact indexed
         profile and requires the body evidence source path, OpenAPI version, and source hash to equal that profile; repairing
         only connector bytes and the envelope hash cannot substitute another source identity.
       evidence_chain: >
@@ -9948,11 +9949,12 @@ tool_model:
         require selected base envelopes to declare `provenance.source: platform`, and reject missing or unexpected base
         membership before reading project imports
       - >
-        require every configured development pack root and each filesystem ancestor from its volume root to be a real
-        directory; a symlink at the root or in any ancestor fails closed before reading inventory bytes
+        open and retain every configured development pack root through no-follow directory handles from its volume root;
+        a symlink at the root or in any ancestor fails closed, and later pathname replacement cannot redirect enumeration
+        or artifact reads outside the retained root
       - >
-        enumerate the exact two development-pack entries and require both to be regular non-symlink files before opening
-        either `pack.yaml` or its body manifest; unsupported entries fail without blocking on or following them
+        enumerate the exact two development-pack entries, open both no-follow/non-blocking, and validate both as regular files
+        before reading either `pack.yaml` or its body manifest; unsupported entries fail without blocking on or following them
       - >
         open each admitted development artifact with no-follow and non-blocking filesystem semantics, then validate regular-
         file type and read bytes from that same handle; pathname preflight alone is not admission authority
@@ -9963,6 +9965,10 @@ tool_model:
       - parse and validate the body manifest through the matching body-specific owner
       - derive body capabilities and requires mechanically from the manifest
       - compare declared capabilities/requires to derived values
+      - >
+        anchor project inventory reads to the retained transaction-root directory handle; traverse listed directories without
+        following links and open every manifest, envelope, and body no-follow/non-blocking, validating and reading each regular
+        file from the same handle; pathname preflight or the cooperative transaction lock alone is not artifact admission
       - read only project paths listed by strict `packs/manifest.yaml`; reject extras, duplicates, traversal, symlinks, and invalid import receipts
       - derive project current identity from exact admitted current bytes and apply exact-id project precedence over the selected base
       - reject competing immutable identities and duplicate universal pack ids within each source tier
