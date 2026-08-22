@@ -66,10 +66,22 @@ func AdmitAgentExecutionRoutingSource(source semanticview.Source, actor models.A
 	}
 	identity := scope.Identity()
 	owner := scope.ContractSource()
+	ownerFlowID := strings.TrimSpace(scope.Declaration().OwnerFlowID)
 	route := events.RouteIdentity{EntityID: strings.TrimSpace(entityID)}
 	if instancePath := strings.TrimSpace(identity.Route.Normalize().InstancePath); instancePath != "" {
-		route.FlowID = strings.TrimSpace(scope.Declaration().OwnerFlowID)
+		route.FlowID = ownerFlowID
 		route.FlowInstance = instancePath
+	}
+	if ownerFlowID != "" {
+		if sourceFlowID := strings.TrimSpace(owner.FlowID); sourceFlowID != "" && sourceFlowID != ownerFlowID {
+			return events.RoutingSource{}, fmt.Errorf("agent %q declaration source flow %q conflicts with canonical owning flow %q", identity.AgentID(), sourceFlowID, ownerFlowID)
+		}
+		owner.FlowID = ownerFlowID
+		flow, ok := scope.OwningFlow()
+		if !ok {
+			return events.RoutingSource{}, fmt.Errorf("agent %q routing source references missing owning flow %q", identity.AgentID(), ownerFlowID)
+		}
+		return admitFlowExecutionRoutingSource(source, "agent", identity.AgentID(), owner, route, flow)
 	}
 	return admitDeclaredExecutionRoutingSource(source, "agent", identity.AgentID(), owner, route)
 }

@@ -1,6 +1,8 @@
 package pinrouting
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -198,6 +200,83 @@ func TestAdmitAgentExecutionRoutingSourceSeparatesImportedDeclarationFromRuntime
 	if _, err := AdmitAgentExecutionRoutingSource(source, hostile, "chat-entity"); err == nil || !strings.Contains(err.Error(), "declared agent identity") {
 		t.Fatalf("runtime-created declaration collision error = %v", err)
 	}
+}
+
+func TestAdmitAgentExecutionRoutingSourceUsesProjectDeclarationOwningFlow(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mode         string
+		instanceID   string
+		instancePath string
+		entityID     string
+		wantKind     events.RoutingSourceKind
+	}{
+		{name: "template", mode: runtimecontracts.FlowModeTemplate, instanceID: "inst-1", instancePath: "support/inst-1", entityID: "entity-one", wantKind: events.RoutingSourceConcreteTemplateInstance},
+		{name: "entityless_template", mode: runtimecontracts.FlowModeTemplate, instanceID: "inst-1", instancePath: "support/inst-1", wantKind: events.RoutingSourceConcreteTemplateInstance},
+		{name: "static", mode: runtimecontracts.FlowModeStatic, instanceID: "support", instancePath: "support", entityID: "entity-one", wantKind: events.RoutingSourceStaticFlow},
+		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, instanceID: "support", instancePath: "support", entityID: "entity-one", wantKind: events.RoutingSourceStaticFlow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := loadProjectAgentOwnedByFlowSource(t, tc.mode)
+			declarations := semanticview.AgentDeclarations(source)
+			if len(declarations) != 1 || declarations[0].Source.Layer != "project" || declarations[0].OwnerFlowID != "support" {
+				t.Fatalf("declarations = %#v, want one project declaration owned by support", declarations)
+			}
+			plan, err := semanticview.ScopedAgentNamePlan(source, declarations[0])
+			if err != nil {
+				t.Fatalf("ScopedAgentNamePlan: %v", err)
+			}
+			actor := models.AgentConfig{
+				ID:       "backend",
+				FlowID:   "support",
+				FlowPath: tc.instancePath,
+				Identity: agentidentitytest.Declared(t, "backend", plan.OwnerURI, "support", tc.instanceID, tc.instancePath),
+			}
+			got, err := AdmitAgentExecutionRoutingSource(source, actor, tc.entityID)
+			if err != nil {
+				t.Fatalf("AdmitAgentExecutionRoutingSource: %v", err)
+			}
+			wantRoute := events.RouteIdentity{FlowID: "support", FlowInstance: tc.instancePath, EntityID: tc.entityID}
+			if got.Kind() != tc.wantKind || got.Route() != wantRoute {
+				t.Fatalf("routing source = %s %#v, want %s %#v", got.Kind().StorageCode(), got.Route(), tc.wantKind.StorageCode(), wantRoute)
+			}
+		})
+	}
+}
+
+func loadProjectAgentOwnedByFlowSource(t *testing.T, mode string) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := t.TempDir()
+	write := func(path, contents string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	write(filepath.Join(root, "package.yaml"), "name: project-flow-agent\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\npackages:\n  - path: extras\nflows:\n  - id: support\n    flow: support\n    mode: "+mode+"\n")
+	write(filepath.Join(root, "schema.yaml"), "name: project-flow-agent\n")
+	write(filepath.Join(root, "policy.yaml"), "{}\n")
+	write(filepath.Join(root, "tools.yaml"), "{}\n")
+	write(filepath.Join(root, "agents.yaml"), "{}\n")
+	write(filepath.Join(root, "events.yaml"), "{}\n")
+	write(filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\ninitial_state: waiting\nstates: [waiting, done]\n")
+	write(filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	write(filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
+	write(filepath.Join(root, "extras", "package.yaml"), "name: extras\nversion: \"1.0.0\"\nflows: []\n")
+	write(filepath.Join(root, "extras", "agents.yaml"), "backend:\n  type: generic\n  role: backend\n  intent: {inline: \"Handle backend work.\"}\n  model: regular\n")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestPinDeclaredOutputRecognizesExactRootOutputOnly(t *testing.T) {

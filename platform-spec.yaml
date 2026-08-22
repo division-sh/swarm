@@ -16679,8 +16679,10 @@ agent_identity_model:
         materialization, EventBus agent routes, flow-data validation, provider/tool/workspace/CLI/serve projections,
         and contract-backed event producers MUST NOT independently pair project and flow maps, rank duplicate views,
         or reconstruct declaration ownership from URI, package path, local ID, public name, runtime route, suffix, or
-        leaf equality. A project package nested under a declared flow retains its exact package identity and the loader-
-        established owning flow; a flow projection of the same physical declaration is not a second declaration.
+        leaf equality. Physical source layer identifies declaration provenance only; it never decides whether execution
+        is root-owned or flow-owned. A project package nested under a declared flow retains its exact package identity
+        and the loader-established owning flow, and activation plus source admission consume that owning-flow fact; a
+        flow projection of the same physical declaration is not a second declaration.
       execution_agreement: >
         Source admission combines one declared record with one concrete live identity. The declared name and owner URI,
         owning flow presence or explicit root absence, flow mode, and concrete route MUST agree exactly. Static and

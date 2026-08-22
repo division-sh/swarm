@@ -367,7 +367,7 @@ func (am *AgentManager) flowInstanceAgentRecords(req runtimepipeline.FlowInstanc
 	localEvents := flowLocalEventSet(schema, scope)
 	declarations := make([]semanticview.AgentDeclaration, 0)
 	for _, declaration := range semanticview.AgentDeclarations(req.ContractBundle) {
-		if strings.TrimSpace(declaration.Source.Layer) != "flow" || strings.TrimSpace(declaration.Source.FlowID) != strings.TrimSpace(scope.ID) {
+		if strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(scope.ID) {
 			continue
 		}
 		declarations = append(declarations, declaration)
