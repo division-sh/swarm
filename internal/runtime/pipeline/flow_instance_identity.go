@@ -24,14 +24,14 @@ func workflowInstanceRouteForExecution(source semanticview.Source, flowID, expli
 	instancePath := strings.Trim(strings.TrimSpace(explicitPath), "/")
 	expectedScope := runtimeflowidentity.ScopeKey(source, flowID)
 	if instancePath == "" && source != nil {
-		if schema, ok := source.FlowSchemaByID(flowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") && flowID != strings.TrimSpace(source.WorkflowName()) {
+		if schema, ok := source.FlowSchemaByID(flowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") && flowID != strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
 			instancePath = expectedScope
 		}
 	}
 	if instancePath == "" {
 		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route is unavailable for flow %q", flowID)
 	}
-	rootRunScope := source != nil && flowID == strings.TrimSpace(source.WorkflowName())
+	rootRunScope := source != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 	if rootRunScope {
 		if _, err := uuid.Parse(instancePath); err == nil {
 			return runtimeflowidentity.StoredRoute(instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil

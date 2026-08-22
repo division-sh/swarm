@@ -128,7 +128,7 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID s
 	if source == nil || flowID == "" {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner requires source and flow identity")
 	}
-	runRoot := flowID == strings.TrimSpace(source.WorkflowName())
+	runRoot := flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 	_, ok := source.FlowScopeByID(flowID)
 	if !ok && !runRoot {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s is not declared", flowID)

@@ -399,7 +399,7 @@ func resolveHandlerEntityIDForFlow(
 		}
 		instanceID := canonicalHandlerInstanceID(flowID, evt)
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
-		if source != nil && strings.TrimSpace(flowID) == strings.TrimSpace(source.WorkflowName()) {
+		if source != nil && strings.TrimSpace(flowID) == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
 			route, err := canonicalHandlerRoute(source, flowID, "", evt)
 			if err != nil {
 				return "", evt, err
