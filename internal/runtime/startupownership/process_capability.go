@@ -131,6 +131,7 @@ type ProcessCapability interface {
 type processCapability struct {
 	opMu            sync.Mutex
 	mu              sync.Mutex
+	monitorMu       sync.Mutex
 	session         RetainedSession
 	grants          map[string]*generationGrant
 	done            chan struct{}
@@ -166,14 +167,12 @@ func newProcessCapability(session RetainedSession, cadence, deadline time.Durati
 	}
 	p := &processCapability{
 		session: session, grants: map[string]*generationGrant{}, done: make(chan struct{}),
-		monitorDone: make(chan struct{}), monitorCadence: cadence, monitorDeadline: deadline,
+		monitorCadence: cadence, monitorDeadline: deadline,
 	}
 	if err := session.InstallTerminalOwner(p); err != nil {
 		return nil, err
 	}
-	monitorCtx, monitorCancel := context.WithCancel(context.Background())
-	p.monitorCancel = monitorCancel
-	go p.monitorPossession(monitorCtx)
+	p.startPossessionMonitor()
 	return p, nil
 }
 
@@ -376,6 +375,9 @@ func (p *processCapability) Release(ctx context.Context) error {
 	for _, grant := range p.snapshotGrants() {
 		if err := grant.retireWithSession(ctx); err != nil {
 			p.retireOnPossessionFailure(err)
+			if p.requireLive() == nil {
+				p.startPossessionMonitor()
+			}
 			return err
 		}
 	}
@@ -411,11 +413,24 @@ func (p *processCapability) proveCurrent(ctx context.Context) error {
 	if err := p.requireLive(); err != nil {
 		return err
 	}
+	if err := callerContextError(ctx); err != nil {
+		return err
+	}
 	if err := p.session.ProveCurrent(ctx); err != nil {
+		if callerErr := callerContextError(ctx); callerErr != nil {
+			return fmt.Errorf("prove current process startup/topology capability: %w", callerErr)
+		}
 		p.terminalize(possessionTerminalResult(err))
 		return fmt.Errorf("prove current process startup/topology capability: %w", err)
 	}
 	return p.requireLive()
+}
+
+func callerContextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
 }
 
 func (p *processCapability) requireLive() error {
@@ -456,9 +471,6 @@ func (p *processCapability) terminalize(result TerminalResult) {
 		return
 	}
 	p.doneOnce.Do(func() {
-		if p.monitorCancel != nil {
-			p.monitorCancel()
-		}
 		p.mu.Lock()
 		p.terminal = result
 		grants := make([]*generationGrant, 0, len(p.grants))
@@ -468,6 +480,7 @@ func (p *processCapability) terminalize(result TerminalResult) {
 		p.grants = map[string]*generationGrant{}
 		p.mu.Unlock()
 		close(p.done)
+		p.cancelPossessionMonitor()
 		for _, grant := range grants {
 			grant.retireLocal()
 		}
@@ -489,8 +502,8 @@ func possessionTerminalResult(err error) TerminalResult {
 	return TerminalResult{Cause: TerminalOwnershipUnprovable}
 }
 
-func (p *processCapability) monitorPossession(ctx context.Context) {
-	defer close(p.monitorDone)
+func (p *processCapability) monitorPossession(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	ticker := time.NewTicker(p.monitorCadence)
 	defer ticker.Stop()
 	for {
@@ -525,12 +538,56 @@ func (p *processCapability) monitorPossessionOnce(ctx context.Context, beforeSer
 	return p.session.MonitorProveCurrent(ctx, p.monitorDeadline)
 }
 
-func (p *processCapability) stopPossessionMonitor() {
-	if p == nil || p.monitorCancel == nil || p.monitorDone == nil {
+func (p *processCapability) startPossessionMonitor() {
+	if p == nil {
 		return
 	}
-	p.monitorCancel()
-	<-p.monitorDone
+	p.monitorMu.Lock()
+	defer p.monitorMu.Unlock()
+	select {
+	case <-p.done:
+		return
+	default:
+	}
+	if p.monitorDone != nil {
+		select {
+		case <-p.monitorDone:
+		default:
+			return
+		}
+	}
+	monitorCtx, monitorCancel := context.WithCancel(context.Background())
+	monitorDone := make(chan struct{})
+	p.monitorCancel = monitorCancel
+	p.monitorDone = monitorDone
+	go p.monitorPossession(monitorCtx, monitorDone)
+}
+
+func (p *processCapability) cancelPossessionMonitor() {
+	if p == nil {
+		return
+	}
+	p.monitorMu.Lock()
+	monitorCancel := p.monitorCancel
+	p.monitorMu.Unlock()
+	if monitorCancel != nil {
+		monitorCancel()
+	}
+}
+
+func (p *processCapability) stopPossessionMonitor() {
+	if p == nil {
+		return
+	}
+	p.monitorMu.Lock()
+	monitorCancel := p.monitorCancel
+	monitorDone := p.monitorDone
+	p.monitorMu.Unlock()
+	if monitorCancel == nil || monitorDone == nil {
+		return
+	}
+	monitorCancel()
+	<-monitorDone
 }
 
 func (g *generationGrant) Evidence() (GrantEvidence, error) {

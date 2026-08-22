@@ -21,6 +21,7 @@ type AdvisoryLockLease struct {
 	unlocked                 bool
 	released                 bool
 	testUnlock               func(context.Context, *SessionAuthority, string) (bool, error)
+	testProve                func(context.Context, *SessionAuthority, string) (bool, error)
 	testBeforeBeginOperation func()
 }
 
@@ -29,11 +30,14 @@ type SessionAuthority struct {
 	mu                      sync.Mutex
 	conn                    *sql.Conn
 	activeTx                *sql.Tx
+	activeTxCancel          context.CancelFunc
 	refs                    int
 	closed                  bool
 	discardPending          bool
 	leases                  map[*AdvisoryLockLease]struct{}
 	pendingLeaseRetirements []*AdvisoryLockLease
+	cancelCurrentOperation  func() error
+	testBeginTx             func(context.Context, *sql.Conn) (*sql.Tx, error)
 	testEndTxError          func() error
 }
 
@@ -222,6 +226,12 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
 	if a == nil {
 		return nil, errors.New("PostgreSQL session authority is missing")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	a.operationMu.Lock()
 	a.mu.Lock()
 	if a.closed || a.conn == nil {
@@ -234,14 +244,67 @@ func (a *SessionAuthority) beginTx(ctx context.Context) (*sql.Tx, error) {
 		a.operationMu.Unlock()
 		return nil, errors.New("PostgreSQL session authority already has an active transaction")
 	}
-	tx, err := a.conn.BeginTx(ctx, nil)
+	conn := a.conn
+	cancelCurrent := a.cancelCurrentOperation
+	begin := a.testBeginTx
+	if begin == nil {
+		begin = func(beginCtx context.Context, conn *sql.Conn) (*sql.Tx, error) {
+			return conn.BeginTx(beginCtx, nil)
+		}
+	}
+	// Startup is caller-cancellable, but a successfully retained transaction is
+	// detached and remains owned by this authority until explicit settlement.
+	beginCtx := ctx
+	var (
+		cancelBegin context.CancelFunc
+		completed   chan struct{}
+		cancelDone  chan error
+	)
+	if cancelCurrent != nil && ctx.Done() != nil {
+		beginCtx, cancelBegin = context.WithCancel(context.Background())
+		completed = make(chan struct{})
+		cancelDone = make(chan error, 1)
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancelBegin()
+				cancelDone <- cancelCurrent()
+			case <-completed:
+				cancelDone <- nil
+			}
+		}()
+	}
+	tx, err := begin(beginCtx, conn)
+	if completed != nil {
+		close(completed)
+		err = errors.Join(err, <-cancelDone)
+	}
+	if callerErr := contextError(ctx); callerErr != nil {
+		err = errors.Join(callerErr, err)
+	}
+	if err == nil && tx == nil {
+		err = errors.New("PostgreSQL session transaction start returned no transaction")
+	}
 	if err != nil {
-		a.operationMu.Unlock()
+		if tx != nil {
+			a.activeTx = tx
+			a.activeTxCancel = cancelBegin
+		} else if cancelBegin != nil {
+			cancelBegin()
+		}
 		a.mu.Unlock()
+		if tx != nil {
+			return nil, errors.Join(err, rollbackSessionTransaction(tx, a))
+		}
+		a.operationMu.Unlock()
+		if callerErr := contextError(ctx); callerErr != nil {
+			return nil, err
+		}
 		discard := a.prepareDiscardExcept(nil)
 		return nil, errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 	}
 	a.activeTx = tx
+	a.activeTxCancel = cancelBegin
 	a.mu.Unlock()
 	return tx, nil
 }
@@ -256,6 +319,8 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
 		return errors.New("PostgreSQL transaction does not match private session authority")
 	}
 	a.activeTx = nil
+	cancelTx := a.activeTxCancel
+	a.activeTxCancel = nil
 	var err error
 	if a.discardPending && !a.closed && a.conn != nil {
 		err = a.forceDiscardConnectionLocked()
@@ -263,6 +328,9 @@ func (a *SessionAuthority) endTx(tx *sql.Tx) error {
 	retirements := a.takePendingLeaseRetirementsLocked()
 	testEndTxError := a.testEndTxError
 	a.mu.Unlock()
+	if cancelTx != nil {
+		cancelTx()
+	}
 	a.operationMu.Unlock()
 	sessionDiscard{leases: retirements}.drain()
 	if testEndTxError != nil {
@@ -295,6 +363,43 @@ func (a *SessionAuthority) queryRowContext(ctx context.Context, query string, ar
 		return tx.QueryRowContext(ctx, query, args...)
 	}
 	return conn.QueryRowContext(ctx, query, args...)
+}
+
+func (a *SessionAuthority) runWithCallerCancellation(ctx context.Context, run func(context.Context) error) error {
+	a.mu.Lock()
+	cancelCurrent := a.cancelCurrentOperation
+	a.mu.Unlock()
+	return runWithIndependentCallerCancellation(ctx, cancelCurrent, run)
+}
+
+func runWithIndependentCallerCancellation(ctx context.Context, cancelCurrent func() error, run func(context.Context) error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cancelCurrent == nil || ctx.Done() == nil {
+		return run(ctx)
+	}
+
+	completed := make(chan struct{})
+	cancelDone := make(chan error, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancelDone <- cancelCurrent()
+		case <-completed:
+			cancelDone <- nil
+		}
+	}()
+	runErr := run(context.WithoutCancel(ctx))
+	close(completed)
+	cancelErr := <-cancelDone
+	if callerErr := ctx.Err(); callerErr != nil {
+		return errors.Join(callerErr, cancelErr)
+	}
+	return errors.Join(runErr, cancelErr)
 }
 
 func (a *SessionAuthority) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -489,9 +594,7 @@ func (l *AdvisoryLockLease) current() bool {
 	return err == nil
 }
 
-func AcquireAdvisoryLockLease(ctx context.Context, db interface {
-	Conn(context.Context) (*sql.Conn, error)
-}, lockKey string) (*AdvisoryLockLease, bool, error) {
+func AcquireAdvisoryLockLease(ctx context.Context, db ConnectionOwner, lockKey string) (*AdvisoryLockLease, bool, error) {
 	return AcquireAdvisoryLockLeaseWith(ctx, db, lockKey, nil)
 }
 
@@ -499,6 +602,7 @@ type AdvisoryLockAcquire func(context.Context, *SessionAuthority, string) (bool,
 
 type ConnectionOwner interface {
 	Conn(context.Context) (*sql.Conn, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func AcquireAdvisoryLockLeaseWith(
@@ -519,7 +623,32 @@ func AcquireAdvisoryLockLeaseWith(
 		return nil, false, fmt.Errorf("acquire advisory lock connection: %w", err)
 	}
 	authority := newSessionAuthority(conn)
+	if err := authority.installCancellation(ctx, db); err != nil {
+		return nil, false, errors.Join(err, authority.release())
+	}
 	return AcquireAdvisoryLockLeaseOnSession(ctx, authority, lockKey, acquire, authority.release)
+}
+
+func (a *SessionAuthority) installCancellation(ctx context.Context, db ConnectionOwner) error {
+	if a == nil || db == nil {
+		return errors.New("PostgreSQL session cancellation authority is required")
+	}
+	var backendPID int
+	if err := a.queryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&backendPID); err != nil {
+		return fmt.Errorf("load retained PostgreSQL backend identity: %w", err)
+	}
+	a.mu.Lock()
+	a.cancelCurrentOperation = func() error {
+		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var cancelled bool
+		if err := db.QueryRowContext(cancelCtx, `SELECT pg_cancel_backend($1)`, backendPID).Scan(&cancelled); err != nil {
+			return fmt.Errorf("cancel retained PostgreSQL operation: %w", err)
+		}
+		return nil
+	}
+	a.mu.Unlock()
+	return nil
 }
 
 func AcquireAdvisoryLockLeaseOnSession(
@@ -604,10 +733,19 @@ func RunAuthorityTransaction(
 	if err != nil {
 		return err
 	}
-	if runErr := fn(ctx, tx); runErr != nil {
-		return errors.Join(runErr, rollbackSessionTransaction(tx, session))
+	if runErr := session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
+		return fn(operationCtx, tx)
+	}); runErr != nil {
+		rollbackErr := rollbackSessionTransaction(tx, session)
+		return errors.Join(runErr, rollbackErr)
+	}
+	if callerErr := contextError(ctx); callerErr != nil {
+		return errors.Join(callerErr, rollbackSessionTransaction(tx, session))
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
+		if callerErr := contextError(ctx); callerErr != nil {
+			return errors.Join(callerErr, rollbackSessionTransaction(tx, session))
+		}
 		endErr := session.endTx(tx)
 		discardErr := session.forceDiscard()
 		return errors.Join(commitErr, endErr, wrapAdvisoryDiscardError(discardErr))
@@ -650,6 +788,13 @@ func rollbackSessionTransaction(tx *sql.Tx, session *SessionAuthority) error {
 	return errors.Join(rollbackErr, endErr, wrapAdvisoryDiscardError(session.forceDiscard()))
 }
 
+func contextError(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
 const retainedAdvisoryLockProofSQL = `
 	SELECT EXISTS (
 		SELECT 1
@@ -685,8 +830,18 @@ func (l *AdvisoryLockLease) ProveCurrent(ctx context.Context) error {
 		return errors.Join(err, wrapAdvisoryDiscardError(discard.drain()))
 	}
 	var held bool
-	err = session.queryRowContext(ctx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	err = session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
+		if l.testProve != nil {
+			var proveErr error
+			held, proveErr = l.testProve(operationCtx, session, l.lockKey)
+			return proveErr
+		}
+		return session.queryRowContext(operationCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	})
 	endOperation()
+	if callerErr := contextError(ctx); callerErr != nil {
+		return callerErr
+	}
 	if err == nil && held {
 		return nil
 	}
@@ -728,7 +883,9 @@ func (l *AdvisoryLockLease) MonitorProveCurrent(ctx context.Context, deadline ti
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, deadline)
 	var held bool
-	err = session.queryRowContext(probeCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	err = session.runWithCallerCancellation(probeCtx, func(operationCtx context.Context) error {
+		return session.queryRowContext(operationCtx, retainedAdvisoryLockProofSQL, l.lockKey).Scan(&held)
+	})
 	cancel()
 	endOperation()
 	if ctx.Err() != nil {
@@ -791,6 +948,15 @@ func (l *AdvisoryLockLease) SetUnlockForTest(hook func(context.Context, *Session
 	}
 	l.mu.Lock()
 	l.testUnlock = hook
+	l.mu.Unlock()
+}
+
+func (l *AdvisoryLockLease) SetProveForTest(hook func(context.Context, *SessionAuthority, string) (bool, error)) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.testProve = hook
 	l.mu.Unlock()
 }
 
