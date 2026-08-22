@@ -829,7 +829,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	if entityID == "" {
 		t.Fatal("activity boring source event requires entity id")
 	}
-	if err := fixture.pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "research/" + entityID,
 		EntityID:        entityID,
@@ -839,8 +839,43 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 		EnteredStageAt:  evt.CreatedAt(),
 		CreatedAt:       evt.CreatedAt(),
 		Fields:          map[string]any{},
-	})); err != nil {
+	})
+	target, err := fixture.pc.workflowStore.LoadTargetPersistence(ctx, testWorkflowInstanceRoute(instance.StorageRef), identity.NormalizeEntityID(entityID))
+	if err != nil {
+		t.Fatalf("load activity boring workflow persistence: %v", err)
+	}
+	if target.Presence == WorkflowTargetPersistenceLifecycleOnly {
+		seedActivityBoringRunScopedState(t, fixture, kind, evt, instance)
+		return
+	}
+	if err := fixture.pc.workflowStore.upsert(ctx, instance); err != nil {
 		t.Fatalf("seed activity boring workflow instance: %v", err)
+	}
+}
+
+func seedActivityBoringRunScopedState(t *testing.T, fixture activityBoringFixture, kind activityBoringStoreKind, evt events.Event, instance WorkflowInstance) {
+	t.Helper()
+	query := `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, bookkeeping, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		) VALUES (?, ?, ?, 'research_item', ?, '{}', '{}', '{}', '{}', 1, ?, ?, ?)
+	`
+	args := []any{evt.RunID(), instance.EntityID, instance.StorageRef, instance.CurrentState, instance.EnteredStageAt, instance.CreatedAt, instance.CreatedAt}
+	if kind == activityBoringStorePostgres {
+		query = `
+			INSERT INTO entity_state (
+				run_id, entity_id, flow_instance, entity_type, current_state,
+				gates, fields, bookkeeping, accumulator, revision,
+				entered_state_at, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, $3, 'research_item', $4,
+				'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $5, $6, $6)
+		`
+		args = []any{evt.RunID(), instance.EntityID, instance.StorageRef, instance.CurrentState, instance.EnteredStageAt, instance.CreatedAt}
+	}
+	if _, err := fixture.db.ExecContext(context.Background(), query, args...); err != nil {
+		t.Fatalf("seed activity boring complete run-scoped state: %v", err)
 	}
 }
 

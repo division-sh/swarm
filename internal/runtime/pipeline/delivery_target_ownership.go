@@ -599,7 +599,11 @@ func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID 
 	if source != nil {
 		workflowVersion = source.WorkflowVersion()
 	}
-	return DecodeWorkflowEntityStatePersistenceRecord(record, route, strings.TrimSpace(flowID), workflowVersion)
+	mode := workflowPersistedFlowMode(source, flowID)
+	if mode == "" {
+		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state: flow %s has unsupported persistence mode", strings.TrimSpace(flowID))
+	}
+	return DecodeWorkflowEntityStatePersistenceRecord(record, route, strings.TrimSpace(flowID), workflowVersion, mode)
 }
 
 func deliveryTargetRouteForWorkflowInstance(source semanticview.Source, flowID string, instance WorkflowInstance) (events.RouteIdentity, error) {

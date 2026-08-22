@@ -437,7 +437,7 @@ func (pc *PipelineCoordinator) prepareDecisionCardGateCommit(
 		return nil, err
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
-	record, err := workflowEngineStateRecord(card.RunID, anchor.Route, instance, instance.CurrentState, instance.Revision, false, now.UTC())
+	record, err := workflowEngineStateRecord(card.RunID, anchor.Route, instance, instance.CurrentState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, now.UTC())
 	if err != nil {
 		return nil, err
 	}

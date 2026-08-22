@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -149,6 +150,111 @@ func TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutati
 	}
 }
 
+func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleWithoutMutation(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, testCase := range []struct {
+			name      string
+			wantError string
+			seed      func(*testing.T, context.Context, string, string, *workflowInstanceStore, *sql.DB)
+		}{
+			{
+				name: "lifecycle-only", wantError: "lifecycle companion without state",
+				seed: func(t *testing.T, ctx context.Context, instancePath, _ string, _ *workflowInstanceStore, db *sql.DB) {
+					t.Helper()
+					query := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES (?, 'review', 'template', '{}', 'active', ?)`
+					args := []any{instancePath, time.Now().UTC()}
+					if backend == "postgres" {
+						query = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', $2)`
+					}
+					if _, err := db.ExecContext(ctx, query, args...); err != nil {
+						t.Fatalf("seed lifecycle-only target: %v", err)
+					}
+				},
+			},
+			{
+				name: "wrong-descriptor", wantError: "descriptor or status conflicts",
+				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, _ *sql.DB) {
+					t.Helper()
+					if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+						InstanceID: "wrong-descriptor", StorageRef: instancePath, EntityID: entityID,
+						WorkflowName: "other-flow", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+						Fields: map[string]any{"marker": "unchanged"},
+					})); err != nil {
+						t.Fatalf("seed wrong-descriptor target: %v", err)
+					}
+				},
+			},
+			{
+				name: "terminated-status", wantError: "descriptor or status conflicts",
+				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, db *sql.DB) {
+					t.Helper()
+					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+						InstanceID: "terminated-status", StorageRef: instancePath, EntityID: entityID,
+						WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
+						Fields: map[string]any{"marker": "unchanged"},
+					})
+					if err := store.upsert(ctx, instance); err != nil {
+						t.Fatalf("seed terminated target: %v", err)
+					}
+					query := `UPDATE flow_instances SET status = 'terminated', terminated_at = ? WHERE instance_id = ?`
+					args := []any{time.Now().UTC(), instancePath}
+					if backend == "postgres" {
+						query = `UPDATE flow_instances SET status = 'terminated', terminated_at = $1 WHERE instance_id = $2`
+					}
+					if _, err := db.ExecContext(ctx, query, args...); err != nil {
+						t.Fatalf("terminate target lifecycle: %v", err)
+					}
+				},
+			},
+		} {
+			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
+				db, store := openHandlerEntityRequirementStore(t, backend)
+				source := handlerEntityRequirementExecutionSource()
+				pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+					Module:              staticSemanticWorkflowModule{source: source},
+					Persistence:         workflowPersistenceForTest(store),
+					PipelineObligations: unavailablePipelineTestObligationOwner{},
+				})
+				var ctx context.Context
+				if backend == "sqlite" {
+					ctx = sqliteExactOnceRunContext(t, db)
+				} else {
+					ctx = testPipelineRunContext(t, db)
+				}
+				instancePath := "review/" + testCase.name
+				entityID := eventtest.UUID("invalid-persistence-" + backend + "-" + testCase.name)
+				testCase.seed(t, ctx, instancePath, entityID, store, db)
+
+				node := pipelineNode(t, "review", "node-a")
+				handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
+				handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
+				target := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
+				evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", handlerTestWorkflowEnvelope("review", instancePath, entityID), time.Now().UTC())
+				if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), testCase.wantError) {
+					t.Fatalf("invalid %s persistence error = %v, want %q", testCase.name, err, testCase.wantError)
+				}
+
+				if testCase.name == "lifecycle-only" {
+					var stateCount int
+					query := `SELECT COUNT(*) FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+					args := []any{testPipelineRunID, entityID, instancePath}
+					if backend == "postgres" {
+						query = `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
+					}
+					if err := db.QueryRowContext(ctx, query, args...).Scan(&stateCount); err != nil || stateCount != 0 {
+						t.Fatalf("lifecycle-only rejection state rows = %d, err=%v", stateCount, err)
+					}
+					return
+				}
+				persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))
+				if err != nil || !found || persisted.Revision != 1 || persisted.Fields["marker"] != "unchanged" {
+					t.Fatalf("invalid lifecycle rejection mutated target: found=%t err=%v instance=%#v", found, err, persisted)
+				}
+			})
+		}
+	}
+}
+
 func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -235,7 +341,7 @@ func TestDeliveryTargetApplicationProjectsScopedGatesWithoutMutatingPersistenceO
 			entityID := eventtest.UUID("scoped-gates-existing-target")
 			persisted := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
-				WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active",
+				WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
 				Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"review/approved": true},
 			})
 			if err := store.upsert(ctx, persisted); err != nil {
@@ -269,8 +375,8 @@ func TestDeliveryTargetApplicationProjectsScopedGatesWithoutMutatingPersistenceO
 			if err != nil || !exists || !fresh.StateCarrier.Gates["approved"] || fresh.StateCarrier.Fields["marker"] != "durable" {
 				t.Fatalf("fresh immutable snapshot = %#v exists=%t err=%v", fresh, exists, err)
 			}
-			raw, ok := application.persistedInstance()
-			if !ok || raw.Gates["approved"] || !raw.Gates["review/approved"] {
+			raw, presence := application.persistedInstance()
+			if !presence.HasState() || raw.Gates["approved"] || !raw.Gates["review/approved"] {
 				t.Fatalf("raw persisted application state = %#v", raw.Gates)
 			}
 			stored, exists, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath))

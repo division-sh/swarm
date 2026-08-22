@@ -18,16 +18,16 @@ import (
 // admitted durable target. Engines consume this value; they do not reinterpret
 // the stamped target or perform broad entity selection.
 type DeliveryTargetApplication struct {
-	owner     events.DeliveryTargetOwnership
-	policy    DeliveryTargetCompatibilityPolicy
-	flowID    string
-	route     runtimeflowidentity.Route
-	entityID  string
-	event     events.Event
-	state     WorkflowState
-	instance  WorkflowInstance
-	snapshot  runtimeengine.StateSnapshot
-	persisted bool
+	owner    events.DeliveryTargetOwnership
+	policy   DeliveryTargetCompatibilityPolicy
+	flowID   string
+	route    runtimeflowidentity.Route
+	entityID string
+	event    events.Event
+	state    WorkflowState
+	instance WorkflowInstance
+	snapshot runtimeengine.StateSnapshot
+	presence WorkflowTargetPersistencePresence
 }
 
 func (a DeliveryTargetApplication) Owner() events.DeliveryTargetOwnership { return a.owner }
@@ -61,10 +61,13 @@ func (a DeliveryTargetApplication) Validate() error {
 		}
 		return nil
 	}
+	if !a.presence.Valid() || a.presence == WorkflowTargetPersistenceLifecycleOnly {
+		return fmt.Errorf("delivery target application carries invalid persistence presence")
+	}
 	if strings.TrimSpace(a.entityID) == "" || a.entityID != a.owner.Route().EntityID || strings.TrimSpace(a.state.EntityID) != a.entityID {
 		return fmt.Errorf("delivery target application entity disagrees with admitted owner")
 	}
-	if a.persisted {
+	if a.presence.HasState() {
 		if _, err := requireWorkflowInstanceIdentity(a.route, identity.NormalizeEntityID(a.entityID), a.instance); err != nil {
 			return fmt.Errorf("delivery target application persisted state disagrees with admitted owner: %w", err)
 		}
@@ -72,15 +75,19 @@ func (a DeliveryTargetApplication) Validate() error {
 	return nil
 }
 
-func (a DeliveryTargetApplication) persistedInstance() (WorkflowInstance, bool) {
-	if !a.persisted {
-		return WorkflowInstance{}, false
+func (a DeliveryTargetApplication) persistedInstance() (WorkflowInstance, WorkflowTargetPersistencePresence) {
+	if !a.presence.HasState() {
+		return WorkflowInstance{}, a.presence
 	}
-	return cloneWorkflowInstanceForEngineMutation(a.instance), true
+	return cloneWorkflowInstanceForEngineMutation(a.instance), a.presence
+}
+
+func (a DeliveryTargetApplication) persistencePresence() WorkflowTargetPersistencePresence {
+	return a.presence
 }
 
 func (a DeliveryTargetApplication) persistedSnapshot() (runtimeengine.StateSnapshot, bool, error) {
-	if !a.persisted {
+	if !a.presence.HasState() {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
 	carrier, err := runtimeengine.StateCarrierFromPersisted(
@@ -155,7 +162,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	}
 	application := DeliveryTargetApplication{
 		owner: owner, policy: policy, flowID: flowID, route: route, event: executionEvent,
-		state: WorkflowState{Metadata: map[string]any{}},
+		state: WorkflowState{Metadata: map[string]any{}}, presence: WorkflowTargetPersistenceAbsent,
 	}
 	if owner.EntitylessReceiver() {
 		if err := application.Validate(); err != nil {
@@ -183,40 +190,54 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	if pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return DeliveryTargetApplication{}, fmt.Errorf("delivery target application requires workflow persistence")
 	}
-	instance, exists, err := pc.workflowStore.Load(ctx, route)
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, route, identity.NormalizeEntityID(application.entityID))
 	if err != nil {
-		return DeliveryTargetApplication{}, fmt.Errorf("load exact admitted delivery target: %w", err)
+		return DeliveryTargetApplication{}, fmt.Errorf("load exact admitted delivery target persistence: %w", err)
 	}
-	if exists {
+	if err := target.Validate(route, identity.NormalizeEntityID(application.entityID)); err != nil {
+		return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target persistence: %w", err)
+	}
+	switch target.Presence {
+	case WorkflowTargetPersistenceComplete:
+		instance, err := target.DecodeComplete(route, identity.NormalizeEntityID(application.entityID))
+		if err != nil {
+			return DeliveryTargetApplication{}, fmt.Errorf("decode exact admitted delivery target: %w", err)
+		}
 		if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target: %w", err)
+		}
+		owned := workflowInstanceOwnedByFlow(source, instance, flowID)
+		terminal := deliveryTargetWorkflowInstanceTerminal(source, flowID, instance)
+		if !owned || terminal {
+			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target lifecycle descriptor or status conflicts with compiled receiver: flow=%q workflow=%q route=%q state=%q status=%q owned=%t terminal=%t", flowID, instance.WorkflowName, instance.StorageRef, instance.CurrentState, instance.Status, owned, terminal)
 		}
 		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
-		if err := application.applyPersistedInstance(source, flowID, instance); err != nil {
+		if err := application.applyPersistedInstance(source, flowID, instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
-	} else {
-		record, stateExists, stateErr := pc.workflowStore.LoadEntityState(ctx, route, identity.NormalizeEntityID(application.entityID))
-		if stateErr != nil {
-			return DeliveryTargetApplication{}, fmt.Errorf("load exact admitted delivery target state: %w", stateErr)
+	case WorkflowTargetPersistenceStateOnly:
+		instance, err := decodeDeliveryTargetWorkflowEntityState(source, flowID, target.State)
+		if err != nil {
+			return DeliveryTargetApplication{}, fmt.Errorf("decode exact admitted delivery target state: %w", err)
 		}
-		if stateExists {
-			instance, err = decodeDeliveryTargetWorkflowEntityState(source, flowID, record)
-			if err != nil {
-				return DeliveryTargetApplication{}, fmt.Errorf("decode exact admitted delivery target state: %w", err)
-			}
-			if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
-				return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target state: %w", err)
-			}
-			if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
-				return DeliveryTargetApplication{}, err
-			}
-			if err := application.applyPersistedInstance(source, flowID, instance); err != nil {
-				return DeliveryTargetApplication{}, err
-			}
-		} else if owner.ExistingEntity() {
+		if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
+			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target state: %w", err)
+		}
+		if !workflowInstanceOwnedByFlow(source, instance, flowID) || deliveryTargetWorkflowInstanceTerminal(source, flowID, instance) {
+			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target state conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q", flowID, instance.WorkflowName, instance.StorageRef, instance.Status)
+		}
+		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
+			return DeliveryTargetApplication{}, err
+		}
+		if err := application.applyPersistedInstance(source, flowID, instance, target.Presence); err != nil {
+			return DeliveryTargetApplication{}, err
+		}
+	case WorkflowTargetPersistenceLifecycleOnly:
+		return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target has lifecycle companion without state")
+	case WorkflowTargetPersistenceAbsent:
+		if owner.ExistingEntity() {
 			return DeliveryTargetApplication{}, fmt.Errorf("existing_entity target %q is missing at execution", owner.Route().FlowInstance)
 		} else {
 			application.state, err = materializingDeliveryTargetState(source, flowID, handler, executionEvent, owner, policy)
@@ -224,6 +245,8 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 				return DeliveryTargetApplication{}, err
 			}
 		}
+	default:
+		return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target has unknown persistence presence")
 	}
 	if err := application.Validate(); err != nil {
 		return DeliveryTargetApplication{}, err
@@ -231,9 +254,12 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	return application, nil
 }
 
-func (a *DeliveryTargetApplication) applyPersistedInstance(source semanticview.Source, flowID string, instance WorkflowInstance) error {
+func (a *DeliveryTargetApplication) applyPersistedInstance(source semanticview.Source, flowID string, instance WorkflowInstance, presence WorkflowTargetPersistencePresence) error {
 	if a == nil {
 		return fmt.Errorf("delivery target application is required")
+	}
+	if !presence.HasState() {
+		return fmt.Errorf("delivery target application persisted state requires state presence")
 	}
 	carrier, err := workflowInstanceStateCarrier(instance)
 	if err != nil {
@@ -247,7 +273,7 @@ func (a *DeliveryTargetApplication) applyPersistedInstance(source semanticview.S
 		StateCarrier: carrier, EnteredStateAt: instance.EnteredStageAt,
 	}
 	a.state = workflowStateForDeliveryTargetInstance(instance)
-	a.persisted = true
+	a.presence = presence
 	return nil
 }
 

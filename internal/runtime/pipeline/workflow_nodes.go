@@ -736,6 +736,19 @@ func workflowFlowMode(source semanticview.Source, flowID string) string {
 	return ""
 }
 
+func workflowPersistedFlowMode(source semanticview.Source, flowID string) string {
+	switch workflowFlowMode(source, flowID) {
+	case runtimecontracts.FlowModeTemplate:
+		return runtimecontracts.FlowModeTemplate
+	case "", runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+		return runtimecontracts.FlowModeStatic
+	default:
+		// Contract admission owns the authored mode vocabulary. Persistence stays fail-closed
+		// to its static/template representation if an invalid source reaches this projection.
+		return ""
+	}
+}
+
 func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {
 	switch strings.TrimSpace(entry.RuntimeHandling) {
 	case "consuming":

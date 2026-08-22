@@ -124,7 +124,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 		return WorkflowInstance{}, fmt.Errorf("workflow termination time cannot precede creation time")
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, updatedAt)
+	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
 	if err != nil {
 		return WorkflowInstance{}, err
 	}

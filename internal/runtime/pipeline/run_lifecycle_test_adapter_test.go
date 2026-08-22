@@ -493,6 +493,8 @@ func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore 
 	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectPostgres, runner)
 	store.runLifecycle = runner
 	store.instanceReader = runner
+	store.entityStateReader = runner
+	store.targetReader = runner
 	store.engineMutations = runner
 	store.initialCommits = runner
 	return store

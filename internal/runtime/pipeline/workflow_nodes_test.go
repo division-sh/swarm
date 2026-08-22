@@ -706,6 +706,10 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, receiver}}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"producer": producer.Schema,
+			"receiver": receiver.Schema,
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
 				"producer": {{Name: "deploy_done", Event: "deploy.done"}},
@@ -728,6 +732,28 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 			},
 		},
 	})
+}
+
+func TestWorkflowPersistedFlowModeUsesClosedStoreRepresentation(t *testing.T) {
+	tests := []struct {
+		name     string
+		authored string
+		want     string
+	}{
+		{name: "static", authored: runtimecontracts.FlowModeStatic, want: runtimecontracts.FlowModeStatic},
+		{name: "singleton", authored: runtimecontracts.FlowModeSingleton, want: runtimecontracts.FlowModeStatic},
+		{name: "template", authored: runtimecontracts.FlowModeTemplate, want: runtimecontracts.FlowModeTemplate},
+		{name: "omitted", want: runtimecontracts.FlowModeStatic},
+		{name: "unsupported", authored: "hostile-mode", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := testWorkflowNodeConnectedInputSource(tt.authored)
+			if got := workflowPersistedFlowMode(source, "producer"); got != tt.want {
+				t.Fatalf("workflowPersistedFlowMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {

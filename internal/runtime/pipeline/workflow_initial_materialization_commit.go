@@ -26,7 +26,7 @@ func (r WorkflowInitialMaterializationRecord) Validate() error {
 	if err := r.State.Validate(); err != nil {
 		return fmt.Errorf("workflow initial materialization state: %w", err)
 	}
-	if !r.State.Create {
+	if !r.State.Transition.CreatesState() {
 		return fmt.Errorf("workflow initial materialization requires a creating state record")
 	}
 	if r.ProjectionVersion != workflowInitialMaterializationProjectionVersion || len(r.Projection) == 0 || !json.Valid(r.Projection) {

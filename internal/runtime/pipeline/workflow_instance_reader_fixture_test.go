@@ -68,6 +68,73 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.
 	return record, true, nil
 }
 
+func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
+	state, stateExists, err := r.LoadWorkflowEntityState(ctx, route, entityID)
+	if err != nil {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	var companion WorkflowLifecycleCompanionPersistenceRecord
+	var workflowVersion sql.NullString
+	if r.dialect == workflowStoreDialectPostgres {
+		var terminatedAt sql.NullTime
+		err = r.db.QueryRowContext(ctx, `
+			SELECT instance_id, flow_template, COALESCE(config->>'workflow_version', ''), mode, status, config, terminated_at, created_at
+			FROM flow_instances WHERE instance_id = $1
+		`, route.InstancePath).Scan(
+			&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
+			&companion.Status, &companion.Config, &terminatedAt, &companion.CreatedAt,
+		)
+		if terminatedAt.Valid {
+			companion.TerminatedAt = terminatedAt.Time.UTC()
+		}
+	} else {
+		var config, terminatedAt, createdAt any
+		err = r.db.QueryRowContext(ctx, `
+			SELECT instance_id, flow_template, json_extract(config, '$.workflow_version'), mode, status, config, terminated_at, created_at
+			FROM flow_instances WHERE instance_id = ?
+		`, route.InstancePath).Scan(
+			&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
+			&companion.Status, &config, &terminatedAt, &createdAt,
+		)
+		if err == nil {
+			companion.Config = pipelineTestJSONBytes(config)
+			created, present, parseErr := sqliteWorkflowTimeValue(createdAt)
+			if parseErr != nil || !present {
+				if parseErr == nil {
+					parseErr = fmt.Errorf("pipeline test workflow lifecycle creation time is required")
+				}
+				return WorkflowTargetPersistenceRecord{}, parseErr
+			}
+			companion.CreatedAt = created
+			if terminated, present, parseErr := sqliteWorkflowTimeValue(terminatedAt); parseErr != nil {
+				return WorkflowTargetPersistenceRecord{}, parseErr
+			} else if present {
+				companion.TerminatedAt = terminated
+			}
+		}
+	}
+	companionExists := err == nil
+	if err != nil && err != sql.ErrNoRows {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	companion.WorkflowVersion = workflowVersion.String
+	record := WorkflowTargetPersistenceRecord{State: state, Lifecycle: companion}
+	switch {
+	case stateExists && companionExists:
+		record.Presence = WorkflowTargetPersistenceComplete
+	case stateExists:
+		record.Presence = WorkflowTargetPersistenceStateOnly
+	case companionExists:
+		record.Presence = WorkflowTargetPersistenceLifecycleOnly
+	default:
+		record.Presence = WorkflowTargetPersistenceAbsent
+	}
+	if err := record.Validate(route, entityID); err != nil {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	return record, nil
+}
+
 func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
@@ -228,7 +295,7 @@ func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowInstances(ctx co
 }
 
 const pipelineTestWorkflowInstanceSelectPostgres = `
-	SELECT es.entity_id::text, fi.flow_template, fi.config->>'workflow_version', fi.status,
+	SELECT es.entity_id::text, fi.flow_template, fi.config->>'workflow_version', fi.mode, fi.status,
 	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
 	       es.gates, es.fields, es.bookkeeping, es.accumulator, fi.config, es.flow_instance,
 	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
@@ -236,7 +303,7 @@ const pipelineTestWorkflowInstanceSelectPostgres = `
 `
 
 const pipelineTestWorkflowInstanceSelectSQLite = `
-	SELECT es.entity_id, fi.flow_template, json_extract(fi.config, '$.workflow_version'), fi.status,
+	SELECT es.entity_id, fi.flow_template, json_extract(fi.config, '$.workflow_version'), fi.mode, fi.status,
 	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
 	       es.gates, es.fields, es.bookkeeping, es.accumulator, fi.config, es.flow_instance,
 	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
@@ -252,14 +319,14 @@ func scanPipelineTestWorkflowInstances(rows *sql.Rows, dialect workflowStoreDial
 		var terminatedAtRaw, enteredAtRaw, createdAtRaw, updatedAtRaw any
 		var gates, fields, bookkeeping, accumulator, config any
 		destinations := []any{
-			&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Status,
+			&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Mode, &record.Status,
 			&terminatedAt, &record.CurrentState, &record.Revision, &record.EnteredStageAt,
 			&record.Gates, &record.Fields, &record.Bookkeeping, &record.Accumulator, &record.Config,
 			&record.FlowInstance, &record.EntityType, &slug, &name, &record.CreatedAt, &record.UpdatedAt,
 		}
 		if dialect != workflowStoreDialectPostgres {
 			destinations = []any{
-				&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Status,
+				&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Mode, &record.Status,
 				&terminatedAtRaw, &record.CurrentState, &record.Revision, &enteredAtRaw,
 				&gates, &fields, &bookkeeping, &accumulator, &config,
 				&record.FlowInstance, &record.EntityType, &slug, &name, &createdAtRaw, &updatedAtRaw,
@@ -318,6 +385,7 @@ func pipelineTestJSONBytes(value any) json.RawMessage {
 
 var _ WorkflowInstancePersistenceReader = pipelineTestWorkflowInstanceReader{}
 var _ WorkflowEntityStatePersistenceReader = pipelineTestWorkflowInstanceReader{}
+var _ WorkflowTargetPersistenceReader = pipelineTestWorkflowInstanceReader{}
 
 func (r *recordingRuntimeMutationRunner) LoadWorkflowInstance(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowInstance(ctx, route)
@@ -325,6 +393,10 @@ func (r *recordingRuntimeMutationRunner) LoadWorkflowInstance(ctx context.Contex
 
 func (r *recordingRuntimeMutationRunner) LoadWorkflowEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowEntityState(ctx, route, entityID)
+}
+
+func (r *recordingRuntimeMutationRunner) LoadWorkflowTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
+	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowTargetPersistence(ctx, route, entityID)
 }
 
 func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
@@ -341,6 +413,7 @@ func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowInstances(ctx conte
 
 var _ WorkflowInstancePersistenceReader = (*recordingRuntimeMutationRunner)(nil)
 var _ WorkflowEntityStatePersistenceReader = (*recordingRuntimeMutationRunner)(nil)
+var _ WorkflowTargetPersistenceReader = (*recordingRuntimeMutationRunner)(nil)
 
 func (s *workflowInstanceStore) mutate(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance)) error {
 	if fn == nil {
@@ -380,7 +453,7 @@ func (s *workflowInstanceStore) mutateE(ctx context.Context, route runtimeflowid
 	if err := fn(&instance); err != nil {
 		return err
 	}
-	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, time.Now().UTC())
+	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, time.Now().UTC())
 	if err != nil {
 		return err
 	}

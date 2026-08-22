@@ -413,12 +413,12 @@ type preparedWorkflowEngineState struct {
 	instance         WorkflowInstance
 	expectedState    string
 	expectedRevision int64
-	create           bool
+	transition       WorkflowEngineStateTransition
 	updatedAt        time.Time
 }
 
 func (p preparedWorkflowEngineState) record() (WorkflowEngineStateRecord, error) {
-	return workflowEngineStateRecord(p.runID, p.route, p.instance, p.expectedState, p.expectedRevision, p.create, p.updatedAt)
+	return workflowEngineStateRecord(p.runID, p.route, p.instance, p.expectedState, p.expectedRevision, p.transition, p.updatedAt)
 }
 
 func (r pipelineEngineStateRepo) prepareMutation(
@@ -441,31 +441,54 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	if err != nil {
 		return preparedWorkflowEngineState{}, err
 	}
-	current, found, err := r.coordinator.workflowStore.Load(ctx, address.Route)
-	if err != nil {
-		return preparedWorkflowEngineState{}, err
-	}
-	if !found && len(targetApplications) > 0 {
-		if len(targetApplications) != 1 {
-			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation accepts at most one delivery target application")
-		}
-		application := targetApplications[0]
-		if persisted, ok := application.persistedInstance(); ok {
-			if address.Route != application.Route() || entityID.String() != application.EntityID() {
-				return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation state disagrees with admitted delivery target application")
-			}
-			current = persisted
-			found = true
-		}
-	}
-	create := !found
-	expectedState := ""
-	expectedRevision := int64(0)
 	flowID := strings.TrimSpace(address.FlowID.String())
 	if flowID == "" {
 		flowID = semanticview.RootExecutionFlowID(r.coordinator.SemanticSource())
 	}
-	if create {
+	if len(targetApplications) > 1 {
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation accepts at most one delivery target application")
+	}
+	var (
+		current  WorkflowInstance
+		presence WorkflowTargetPersistencePresence
+	)
+	if len(targetApplications) == 1 {
+		application := targetApplications[0]
+		if err := application.Validate(); err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		if address.Route != application.Route() || entityID.String() != application.EntityID() {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation state disagrees with admitted delivery target application")
+		}
+		current, presence = application.persistedInstance()
+	} else {
+		target, err := r.coordinator.workflowStore.LoadTargetPersistence(ctx, address.Route, entityID)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		presence = target.Presence
+		switch presence {
+		case WorkflowTargetPersistenceComplete:
+			current, err = target.DecodeComplete(address.Route, entityID)
+		case WorkflowTargetPersistenceStateOnly:
+			current, err = decodeDeliveryTargetWorkflowEntityState(r.coordinator.SemanticSource(), flowID, target.State)
+		case WorkflowTargetPersistenceAbsent:
+		case WorkflowTargetPersistenceLifecycleOnly:
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation rejects lifecycle companion without state")
+		default:
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires closed target persistence presence")
+		}
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+	}
+	transition, err := WorkflowEngineStateTransitionForPresence(presence)
+	if err != nil {
+		return preparedWorkflowEngineState{}, err
+	}
+	expectedState := ""
+	expectedRevision := int64(0)
+	if transition.CreatesState() {
 		if mutation.TriggeredAt.IsZero() {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
 		}
@@ -477,9 +500,13 @@ func (r pipelineEngineStateRepo) prepareMutation(
 			workflowVersion = source.WorkflowVersion()
 		}
 		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		mode := workflowPersistedFlowMode(source, flowID)
+		if mode == "" {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization rejects unsupported persistence mode for flow %s", flowID)
+		}
 		current = WorkflowInstance{
 			InstanceID: address.Route.InstanceID, StorageRef: address.Route.InstancePath, EntityID: entityID.String(),
-			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Status: "active", CurrentState: initialState,
+			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Mode: mode, Status: "active", CurrentState: initialState,
 			EntityType:   firstNonEmptyString(mutation.StateCarrier.Control.EntityType, workflowEntityType(source, flowID)),
 			InstanceKind: mutation.StateCarrier.Control.InstanceKind, TemplateVersion: mutation.StateCarrier.Control.TemplateVersion,
 			ParentFlowID: mutation.StateCarrier.Control.ParentFlowID, ParentFlowInstance: mutation.StateCarrier.Control.ParentFlowInstance,
@@ -518,7 +545,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted creation time")
 	}
 	updatedAt := mutation.TriggeredAt.UTC()
-	if !create {
+	if transition.UpdatesState() {
 		// The trigger is a causal fact and may legitimately predate materialization
 		// during replay. The row revision time records this commit instead.
 		updatedAt = time.Now().UTC()
@@ -529,7 +556,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	return preparedWorkflowEngineState{
 		runID: runID, route: address.Route, instance: current,
 		expectedState: expectedState, expectedRevision: expectedRevision,
-		create: create, updatedAt: updatedAt,
+		transition: transition, updatedAt: updatedAt,
 	}, nil
 }
 
@@ -1311,7 +1338,7 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	if flowID == "" {
 		return true
 	}
-	if source != nil && flowID == strings.TrimSpace(source.WorkflowName()) && strings.TrimSpace(instance.WorkflowName) == flowID {
+	if strings.TrimSpace(instance.WorkflowName) == flowID {
 		if _, err := uuid.Parse(strings.TrimSpace(instance.StorageRef)); err == nil {
 			return true
 		}

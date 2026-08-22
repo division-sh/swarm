@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
@@ -384,6 +385,13 @@ func selectedContractProjectedWorkflowStateRoute(forkRunID string, state runfork
 }
 
 func materializeSelectedContractWorkflowState(ctx context.Context, tx *sql.Tx, state selectedContractWorkflowState, now time.Time) error {
+	transition, err := runtimepipeline.WorkflowEngineStateTransitionForPresence(runtimepipeline.WorkflowTargetPersistenceStateOnly)
+	if err != nil {
+		return fmt.Errorf("selected-contract workflow state requires the canonical state-only companion transition: %w", err)
+	}
+	if transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
+		return fmt.Errorf("selected-contract workflow state received incompatible persistence transition")
+	}
 	config, err := json.Marshal(map[string]any{
 		"flow_path":        state.Route,
 		"instance_id":      runtimeflowidentity.LogicalInstanceID(state.Route),

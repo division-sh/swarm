@@ -194,6 +194,22 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, repaired.RunID, serviceID, 3)
 			requireStandingRepairMutationProjection(t, ctx, db, backend, repaired.RunID, candidate.EntityID)
+			standingRecord := stateOnlyWorkflowEngineMutationRecord(
+				t, repaired.RunID, "standing", "standing/root", candidate.EntityID,
+				"serving", 4, time.Date(2026, 7, 29, 18, 0, 0, 0, time.UTC),
+			)
+			standingRecord.CurrentState = "serving"
+			standingRecord.Fields = json.RawMessage(`{"name":"standing"}`)
+			standingRecord.Bookkeeping = json.RawMessage(`{"generation":2}`)
+			standingRecord.Gates = json.RawMessage(`{"ready":true}`)
+			standingRecord.Accumulator = json.RawMessage(`{"metrics":{"requests":3}}`)
+			if _, err := selected.CommitWorkflowEngineMutation(
+				testAuthorActivityContextForBundle(secondHash),
+				runtimepipeline.WorkflowEngineMutationCommand{State: standingRecord},
+			); err != nil {
+				t.Fatalf("execute copied standing-generation state: %v", err)
+			}
+			assertWorkflowTargetTransitionRows(t, backend, db, repaired.RunID, candidate.EntityID, "standing/root", "standing", "serving", 5, 1)
 			commitStandingOriginIngress(t, selected, secondHash, repaired.RunID, "repair")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, repaired.RunID, serviceID, 3)
 

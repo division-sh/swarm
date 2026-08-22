@@ -310,19 +310,12 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if !ok {
 		t.Fatal("parent-listener handler missing for root-local work.completed")
 	}
-	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), parentListener, handler, workflowTriggerContext{
-		Event: completion,
-		State: mustCurrentWorkflowState(t, pc, withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), testWorkflowInstanceRoute(testPipelineRunID), entityID),
-	}, false)
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
-	}
-	if result.Outcome == nil || len(result.Outcome.Emits) != 0 {
-		t.Fatalf("handler emits = %#v, want no retired dead output", result.Outcome)
+	if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
+		t.Fatalf("parent-listener carries retired dead output: emit=%#v on_success=%#v", handler.Emit, handler.OnSuccess)
 	}
 
-	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), parentListener, completion); !handled {
-		t.Fatal("parent-listener should clear inherited child flow scope and handle root-local work.completed")
+	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), parentListener, completion); err != nil || !handled {
+		t.Fatalf("parent-listener should clear inherited child flow scope and handle root-local work.completed: handled=%t err=%v", handled, err)
 	}
 	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
 	if err != nil {

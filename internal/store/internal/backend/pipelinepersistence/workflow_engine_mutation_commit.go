@@ -34,6 +34,9 @@ func commitWorkflowEngineState(
 	if err := record.Validate(); err != nil {
 		return err
 	}
+	if rebindExistingRoute && !record.Transition.CreatesState() {
+		return fmt.Errorf("workflow engine route rebinding requires paired state and companion creation")
+	}
 	if postgres {
 		if err := requirePostgresRunActive(ctx, tx, record.RunID); err != nil {
 			return err
@@ -50,7 +53,7 @@ func commitWorkflowEngineState(
 }
 
 func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord, rebindExistingRoute bool) error {
-	if record.Create {
+	if record.Transition.CreatesState() {
 		query := `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 			VALUES ($1, $2, $3, $4::jsonb, $5, $6)
@@ -130,6 +133,16 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 	if rows != 1 {
 		return fmt.Errorf("workflow engine state changed before commit: route=%s revision=%d state=%s", record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
 	}
+	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at)
+			VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+		`, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status,
+			nullableWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt); err != nil {
+			return fmt.Errorf("create workflow engine lifecycle companion for existing state: %w", err)
+		}
+		return nil
+	}
 	result, err = tx.ExecContext(ctx, `
 		UPDATE flow_instances
 		SET flow_template = $1,
@@ -152,7 +165,7 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 }
 
 func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord, rebindExistingRoute bool) error {
-	if record.Create {
+	if record.Transition.CreatesState() {
 		query := `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)
@@ -227,6 +240,16 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 	}
 	if rows != 1 {
 		return fmt.Errorf("workflow engine state changed before commit: route=%s revision=%d state=%s", record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
+	}
+	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status,
+			nullableWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt); err != nil {
+			return fmt.Errorf("create workflow engine lifecycle companion for existing state: %w", err)
+		}
+		return nil
 	}
 	result, err = tx.ExecContext(ctx, `
 		UPDATE flow_instances
@@ -323,7 +346,7 @@ func loadWorkflowEngineStateProjection(
 	postgres bool,
 	record runtimepipeline.WorkflowEngineStateRecord,
 ) (runtimemutationlog.EntityStateProjection, error) {
-	if record.Create {
+	if record.Transition.CreatesState() {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
 	query := `SELECT current_state, fields, bookkeeping, gates, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
@@ -377,7 +400,11 @@ func commitWorkflowEngineMutationLog(
 	if err != nil {
 		return err
 	}
-	writer := runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: map[bool]string{true: "create", false: "mutate"}[record.Create]}
+	handlerStep := "mutate"
+	if record.Transition.CreatesState() {
+		handlerStep = "create"
+	}
+	writer := runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: handlerStep}
 	if postgres {
 		selected, ok := store.(*PipelinePostgresOwner)
 		if !ok {
@@ -410,7 +437,7 @@ func commitWorkflowEngineInitialValues(
 	if err := json.Unmarshal(record.InitialFields, &initial); err != nil {
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine initial fields: %w", err)
 	}
-	if !record.Create || len(initial) == 0 {
+	if !record.Transition.CreatesState() || len(initial) == 0 {
 		return before, nil
 	}
 	adjusted := runtimemutationlog.EntityStateProjection{

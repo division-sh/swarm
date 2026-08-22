@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -143,24 +144,29 @@ func (s *workflowInstanceStore) persistFixtureWorkflowInstance(ctx context.Conte
 	}
 	expectedState := ""
 	expectedRevision := int64(0)
-	create := true
-	current, found, err := s.Load(ctx, identity.Instance.Route())
+	target, err := s.LoadTargetPersistence(ctx, identity.Instance.Route(), runtimeidentity.NormalizeEntityID(identity.RowID()))
 	if err != nil {
 		return err
 	}
-	if found {
+	if target.Presence != WorkflowTargetPersistenceAbsent {
 		if createOnly {
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": identity.StorageRef})
 		}
-		create = false
-		expectedState = current.CurrentState
-		expectedRevision = current.Revision
+		if !target.Presence.HasState() {
+			return errors.New("pipeline fixture rejects lifecycle companion without state")
+		}
+		expectedState = target.State.CurrentState
+		expectedRevision = target.State.Revision
+	}
+	transition, err := WorkflowEngineStateTransitionForPresence(target.Presence)
+	if err != nil {
+		return err
 	}
 	updatedAt := time.Now().UTC()
 	if updatedAt.Before(instance.CreatedAt) {
 		updatedAt = instance.CreatedAt
 	}
-	state, err := workflowEngineStateRecord(runID, identity.Instance.Route(), instance, expectedState, expectedRevision, create, updatedAt)
+	state, err := workflowEngineStateRecord(runID, identity.Instance.Route(), instance, expectedState, expectedRevision, transition, updatedAt)
 	if err != nil {
 		return err
 	}

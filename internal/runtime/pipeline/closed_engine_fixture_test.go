@@ -645,7 +645,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 	if err != nil {
 		return err
 	}
-	if record.Create {
+	if record.Transition.CreatesState() {
 		flowQuery := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES (?, ?, ?, ?, ?, ?)`
 		entityQuery := `
 			INSERT INTO entity_state (
@@ -747,6 +747,17 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 		}
 		return fmt.Errorf("pipeline test workflow state changed before commit")
 	}
+	if record.Transition == WorkflowEngineStateTransitionUpdateStateCreateCompanion {
+		insert := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		args := []any{record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt}
+		if store.testDialect() == workflowStoreDialectPostgres {
+			insert = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)`
+		}
+		if _, err := tx.ExecContext(ctx, insert, args...); err != nil {
+			return fmt.Errorf("create pipeline test workflow lifecycle companion for existing state: %w", err)
+		}
+		return commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before)
+	}
 	flowArgs := []any{record.WorkflowName, record.Mode, string(record.Config), record.Status}
 	if store.testDialect() == workflowStoreDialectSQLite {
 		flowArgs = append(flowArgs, record.Status)
@@ -759,17 +770,6 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 	rows, err = result.RowsAffected()
 	if err != nil {
 		return err
-	}
-	if rows == 0 {
-		insert := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-		args := []any{record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.CreatedAt}
-		if store.testDialect() == workflowStoreDialectPostgres {
-			insert = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)`
-		}
-		if _, err := tx.ExecContext(ctx, insert, args...); err != nil {
-			return fmt.Errorf("materialize pipeline test workflow flow instance companion: %w", err)
-		}
-		rows = 1
 	}
 	if rows != 1 {
 		return fmt.Errorf("pipeline test workflow flow instance is missing")
@@ -823,7 +823,7 @@ func commitPipelineTestWorkflowMutationLog(
 	if err := json.Unmarshal(record.InitialFields, &initial); err != nil {
 		return fmt.Errorf("decode pipeline test workflow initial fields: %w", err)
 	}
-	if record.Create && len(initial) > 0 {
+	if record.Transition.CreatesState() && len(initial) > 0 {
 		if store.testDialect() == workflowStoreDialectPostgres {
 			before, err = insertWorkflowCreateEntityInitialValueMutations(ctx, tx, store.runLifecycle, record.EntityID, before, after, initial)
 		} else {
@@ -833,10 +833,14 @@ func commitPipelineTestWorkflowMutationLog(
 			return err
 		}
 	}
+	handlerStep := "mutate"
+	if record.Transition.CreatesState() {
+		handlerStep = "create"
+	}
 	writer := runtimemutationlog.Writer{
 		Type:        "platform",
 		ID:          "workflow_engine",
-		HandlerStep: map[bool]string{true: "create", false: "mutate"}[record.Create],
+		HandlerStep: handlerStep,
 	}
 	if store.testDialect() == workflowStoreDialectPostgres {
 		return mutationlogfixture.InsertEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)

@@ -52,6 +52,7 @@ type WorkflowInstance struct {
 	ParentEntityID     string
 	WorkflowName       string
 	WorkflowVersion    string
+	Mode               string
 	RuntimeReadiness   *DynamicFlowRuntimeReadinessPlan
 	Status             string
 	TerminatedAt       time.Time
@@ -76,6 +77,121 @@ type WorkflowInstance struct {
 type WorkflowEntityStatePersistenceReader interface {
 	LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
 	SelectActiveWorkflowEntityStates(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
+}
+
+// WorkflowTargetPersistencePresence is the closed selected-store truth for an
+// exact receiver. State may legitimately precede its lifecycle companion; the
+// reverse ordering is an invariant violation rather than a recoverable form.
+type WorkflowTargetPersistencePresence uint8
+
+const (
+	WorkflowTargetPersistencePresenceUnknown WorkflowTargetPersistencePresence = iota
+	WorkflowTargetPersistenceAbsent
+	WorkflowTargetPersistenceStateOnly
+	WorkflowTargetPersistenceComplete
+	WorkflowTargetPersistenceLifecycleOnly
+)
+
+func (p WorkflowTargetPersistencePresence) Valid() bool {
+	switch p {
+	case WorkflowTargetPersistenceAbsent,
+		WorkflowTargetPersistenceStateOnly,
+		WorkflowTargetPersistenceComplete,
+		WorkflowTargetPersistenceLifecycleOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p WorkflowTargetPersistencePresence) HasState() bool {
+	return p == WorkflowTargetPersistenceStateOnly || p == WorkflowTargetPersistenceComplete
+}
+
+func (p WorkflowTargetPersistencePresence) HasLifecycleCompanion() bool {
+	return p == WorkflowTargetPersistenceComplete || p == WorkflowTargetPersistenceLifecycleOnly
+}
+
+// WorkflowLifecycleCompanionPersistenceRecord is the exact relational
+// descriptor paired with entity_state. It is data only; runtime owns semantic
+// validation and private store adapters own its representation.
+type WorkflowLifecycleCompanionPersistenceRecord struct {
+	FlowInstance    string
+	WorkflowName    string
+	WorkflowVersion string
+	Mode            string
+	Status          string
+	Config          json.RawMessage
+	TerminatedAt    time.Time
+	CreatedAt       time.Time
+}
+
+// WorkflowTargetPersistenceRecord carries the two independently persisted
+// halves of one exact receiver together with their closed presence state.
+type WorkflowTargetPersistenceRecord struct {
+	Presence  WorkflowTargetPersistencePresence
+	State     WorkflowEntityStatePersistenceRecord
+	Lifecycle WorkflowLifecycleCompanionPersistenceRecord
+}
+
+func (r WorkflowTargetPersistenceRecord) Validate(route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) error {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() || !r.Presence.Valid() {
+		return fmt.Errorf("workflow target persistence requires exact identity and closed presence")
+	}
+	if r.Presence.HasState() {
+		if strings.TrimSpace(r.State.FlowInstance) != route.InstancePath || runtimeidentity.NormalizeEntityID(r.State.EntityID) != entityID {
+			return fmt.Errorf("workflow target state disagrees with exact receiver identity")
+		}
+		if strings.TrimSpace(r.State.CurrentState) == "" || r.State.Revision <= 0 || r.State.CreatedAt.IsZero() || r.State.UpdatedAt.IsZero() {
+			return fmt.Errorf("workflow target state requires persisted state, revision, and times")
+		}
+	}
+	if r.Presence.HasLifecycleCompanion() {
+		companion := r.Lifecycle
+		if strings.TrimSpace(companion.FlowInstance) != route.InstancePath || strings.TrimSpace(companion.WorkflowName) == "" ||
+			strings.TrimSpace(companion.Mode) == "" || strings.TrimSpace(companion.Status) == "" ||
+			len(companion.Config) == 0 || !json.Valid(companion.Config) || companion.CreatedAt.IsZero() {
+			return fmt.Errorf("workflow target lifecycle companion is incomplete or disagrees with exact receiver route")
+		}
+		if strings.TrimSpace(companion.Status) == "terminated" {
+			if companion.TerminatedAt.IsZero() {
+				return fmt.Errorf("terminated workflow target lifecycle companion requires termination time")
+			}
+		} else if !companion.TerminatedAt.IsZero() {
+			return fmt.Errorf("non-terminal workflow target lifecycle companion cannot carry termination time")
+		}
+	}
+	return nil
+}
+
+func (r WorkflowTargetPersistenceRecord) DecodeComplete(route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowInstance, error) {
+	if err := r.Validate(route, entityID); err != nil {
+		return WorkflowInstance{}, err
+	}
+	if r.Presence != WorkflowTargetPersistenceComplete {
+		return WorkflowInstance{}, fmt.Errorf("complete workflow target persistence is required")
+	}
+	item, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
+		EntityID: r.State.EntityID, WorkflowName: r.Lifecycle.WorkflowName, WorkflowVersion: r.Lifecycle.WorkflowVersion,
+		Mode: r.Lifecycle.Mode, Status: r.Lifecycle.Status, TerminatedAt: r.Lifecycle.TerminatedAt,
+		CurrentState: r.State.CurrentState, Revision: r.State.Revision, EnteredStageAt: r.State.EnteredStageAt,
+		Gates: r.State.Gates, Fields: r.State.Fields, Bookkeeping: r.State.Bookkeeping, Accumulator: r.State.Accumulator,
+		Config: r.Lifecycle.Config, FlowInstance: r.State.FlowInstance, EntityType: r.State.EntityType,
+		Slug: r.State.Slug, Name: r.State.Name, CreatedAt: r.State.CreatedAt, UpdatedAt: r.State.UpdatedAt,
+	})
+	if err != nil {
+		return WorkflowInstance{}, err
+	}
+	if workflowInstanceMode(item) != strings.TrimSpace(r.Lifecycle.Mode) {
+		return WorkflowInstance{}, fmt.Errorf("workflow target lifecycle mode disagrees with persisted descriptor")
+	}
+	return item, nil
+}
+
+type WorkflowTargetPersistenceReader interface {
+	LoadWorkflowTargetPersistence(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error)
 }
 
 // WorkflowInstancePersistenceReader owns exact selected-store workflow reads.
@@ -140,7 +256,7 @@ func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePe
 	return out, nil
 }
 
-func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersistenceRecord, route runtimeflowidentity.Route, workflowName, workflowVersion string) (WorkflowInstance, error) {
+func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersistenceRecord, route runtimeflowidentity.Route, workflowName, workflowVersion, mode string) (WorkflowInstance, error) {
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	if !route.Valid() || strings.TrimSpace(record.FlowInstance) != route.InstancePath {
 		return WorkflowInstance{}, fmt.Errorf("workflow entity state row disagrees with admitted route")
@@ -156,6 +272,7 @@ func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersis
 	}
 	return DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
 		EntityID: record.EntityID, WorkflowName: strings.TrimSpace(workflowName), WorkflowVersion: strings.TrimSpace(workflowVersion),
+		Mode:   strings.TrimSpace(mode),
 		Status: "active", CurrentState: record.CurrentState, Revision: record.Revision, EnteredStageAt: record.EnteredStageAt,
 		Gates: record.Gates, Fields: record.Fields, Bookkeeping: record.Bookkeeping, Accumulator: record.Accumulator,
 		Config: config, FlowInstance: record.FlowInstance, EntityType: record.EntityType,
@@ -170,6 +287,7 @@ type WorkflowInstancePersistenceRecord struct {
 	EntityID        string
 	WorkflowName    string
 	WorkflowVersion string
+	Mode            string
 	Status          string
 	TerminatedAt    time.Time
 	CurrentState    string
@@ -239,6 +357,7 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		ParentEntityID:     strings.TrimSpace(projection.Control.ParentEntityID),
 		WorkflowName:       strings.TrimSpace(record.WorkflowName),
 		WorkflowVersion:    strings.TrimSpace(record.WorkflowVersion),
+		Mode:               strings.TrimSpace(record.Mode),
 		Status:             strings.TrimSpace(record.Status),
 		TerminatedAt:       record.TerminatedAt.UTC(),
 		CurrentState:       strings.TrimSpace(record.CurrentState),
@@ -342,6 +461,7 @@ type workflowInstanceStore struct {
 	decisionRoutes    WorkflowDecisionRouteOwner
 	instanceReader    WorkflowInstancePersistenceReader
 	entityStateReader WorkflowEntityStatePersistenceReader
+	targetReader      WorkflowTargetPersistenceReader
 	initialCommits    WorkflowInitialMaterializationCommitOwner
 	deliverySignalMu  sync.RWMutex
 	deliverySignals   map[runtimedelivery.ExecutionAuthority]func()
@@ -407,6 +527,7 @@ type WorkflowPersistenceOwner interface {
 	WorkflowDecisionRouteOwner
 	WorkflowInstancePersistenceReader
 	WorkflowEntityStatePersistenceReader
+	WorkflowTargetPersistenceReader
 	WorkflowInitialMaterializationCommitOwner
 }
 
@@ -420,7 +541,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		engineMutations: owner, cardMutations: owner, timerOccurrences: owner,
 		timerActivations: owner, readiness: owner, standingServices: owner,
 		decisionRoutes: owner, instanceReader: owner, initialCommits: owner,
-		entityStateReader: owner,
+		entityStateReader: owner, targetReader: owner,
 	}}
 }
 
@@ -443,7 +564,7 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.timerObligations != nil && p.store.engineMutations != nil && p.store.cardMutations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.entityStateReader != nil && p.store.initialCommits != nil
+		p.store.entityStateReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
 }
 
 func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
@@ -451,6 +572,20 @@ func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, route runti
 		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")
 	}
 	return s.entityStateReader.LoadWorkflowEntityState(ctx, route, entityID)
+}
+
+func (s *workflowInstanceStore) LoadTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
+	if s == nil || s.targetReader == nil {
+		return WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence reader is required")
+	}
+	record, err := s.targetReader.LoadWorkflowTargetPersistence(ctx, route, entityID)
+	if err != nil {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	if err := record.Validate(route, entityID); err != nil {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	return record, nil
 }
 
 // RegisterDeliveryContinuationSignal installs the exact runtime-generation
@@ -552,7 +687,7 @@ func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
-	state, err := workflowEngineStateRecord(runID, identity.Instance.Route(), normalized, "", 0, true, occurredAt)
+	state, err := workflowEngineStateRecord(runID, identity.Instance.Route(), normalized, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, occurredAt)
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
@@ -764,7 +899,7 @@ func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtim
 	expectedRevision := instance.Revision
 	instance.Status = "terminated"
 	instance.TerminatedAt = terminatedAt.UTC()
-	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, terminatedAt.UTC())
+	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, WorkflowEngineStateTransitionUpdateStateAndCompanion, terminatedAt.UTC())
 	if err != nil {
 		return err
 	}
@@ -1102,6 +1237,9 @@ func workflowInstanceTransitionHistoryFromConfig(config map[string]any) ([]Workf
 }
 
 func workflowInstanceMode(instance WorkflowInstance) string {
+	if mode := strings.TrimSpace(instance.Mode); mode != "" {
+		return mode
+	}
 	if instance.RuntimeReadiness != nil {
 		return "template"
 	}
