@@ -218,6 +218,20 @@ func TestDevelopmentOverrideRejectsNonRegularEnvelopeBeforeRead(t *testing.T) {
 	}
 }
 
+func TestDevelopmentPackFileReaderRejectsSymlinkReplacement(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target.yaml")
+	if err := os.WriteFile(target, []byte("outside: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, EnvelopeFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRegularDevelopmentPackFile(dir, EnvelopeFileName); err == nil {
+		t.Fatal("same-handle development artifact reader followed a symlink replacement")
+	}
+}
+
 func materializeDevelopmentInventory(t *testing.T, inventory *PlatformPackInventory, replacements map[string][]byte) []string {
 	t.Helper()
 	root := t.TempDir()

@@ -61,7 +61,7 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 		if !hasEnvelope {
 			return nil, fmt.Errorf("development platform pack %q must contain exactly pack.yaml and one body manifest", dir)
 		}
-		envelopeBody, err := os.ReadFile(filepath.Join(dir, EnvelopeFileName))
+		envelopeBody, err := readRegularDevelopmentPackFile(dir, EnvelopeFileName)
 		if err != nil {
 			return nil, fmt.Errorf("read development platform pack envelope %q: %w", dir, err)
 		}
@@ -82,7 +82,7 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 			return nil, fmt.Errorf("duplicate development platform pack id %q from %q and %q", envelope.ID, previous, dir)
 		}
 		seenIDs[envelope.ID] = dir
-		body, err := os.ReadFile(filepath.Join(dir, manifestFile))
+		body, err := readRegularDevelopmentPackFile(dir, manifestFile)
 		if err != nil {
 			return nil, fmt.Errorf("read development platform pack body %q: %w", dir, err)
 		}

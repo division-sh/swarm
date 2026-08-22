@@ -28,19 +28,19 @@ func TestDevelopmentOverrideRejectsFIFOEnvelopeWithoutBlocking(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		_, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded)
+		_, err := readRegularDevelopmentPackFile(dirs[0], EnvelopeFileName)
 		result <- err
 	}()
 	select {
 	case err := <-result:
-		if err == nil || !strings.Contains(err.Error(), "contains unsupported entry \"pack.yaml\"") {
-			t.Fatalf("FIFO envelope error = %v, want pre-read unsupported-entry rejection", err)
+		if err == nil || !strings.Contains(err.Error(), "must be a regular non-symlink file") {
+			t.Fatalf("FIFO envelope error = %v, want same-handle regular-file rejection", err)
 		}
 	case <-time.After(2 * time.Second):
 		writer, _ := os.OpenFile(envelopePath, os.O_WRONLY|unix.O_NONBLOCK, 0)
 		if writer != nil {
 			_ = writer.Close()
 		}
-		t.Fatal("development pack admission blocked while reading a FIFO envelope")
+		t.Fatal("same-handle development artifact reader blocked on a FIFO replacement")
 	}
 }
