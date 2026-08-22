@@ -113,8 +113,20 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 	if err := requireCompleteReplacement(embedded, inventory); err != nil {
 		return nil, err
 	}
+	inventory.embeddedImportOrigins = cloneImportOrigins(embedded.embeddedImportOrigins)
 	inventory.sourceDirectories = append([]string(nil), resolvedDirs...)
 	return inventory, nil
+}
+
+func cloneImportOrigins(origins map[string]ImportOrigin) map[string]ImportOrigin {
+	if origins == nil {
+		return nil
+	}
+	cloned := make(map[string]ImportOrigin, len(origins))
+	for id, origin := range origins {
+		cloned[id] = origin
+	}
+	return cloned
 }
 
 func requireCompleteReplacement(embedded, candidate *PlatformPackInventory) error {

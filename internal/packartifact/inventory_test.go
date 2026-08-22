@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"gopkg.in/yaml.v3"
 )
 
@@ -330,6 +331,58 @@ func TestProjectPackModifiedTracksEnvelopeAndBodyEdits(t *testing.T) {
 			entry, ok := effective.Lookup("provider.demo")
 			if !ok || entry.Modified() != tc.modified {
 				t.Fatalf("project edit = %#v present=%t modified=%t, want %t", entry, ok, entry.Modified(), tc.modified)
+			}
+		})
+	}
+}
+
+func TestEffectivePackInventoryRejectsForgedEmbeddedImportOrigin(t *testing.T) {
+	base, err := LoadPlatformPackInventoryFS(
+		testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", ProvenancePlatform, []byte("provider: demo\nrevision: embedded\n")),
+		InventoryManifestFileName,
+		testPlatformVersion,
+		SelectionEmbedded,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseEntry, _ := base.Lookup("provider.demo")
+	projectBody := []byte("provider: demo\nrevision: edited\n")
+	projectEnvelope := baseEntry.Envelope()
+	projectEnvelope.Provenance.Source = ProvenanceProject
+	projectEnvelope.ManifestHash = ManifestHashDerived
+	projectEnvelope.Version = "0.1.1"
+	projectEnvelopeBody, err := yaml.Marshal(projectEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, baseline, err := importedProjectArtifact(baseEntry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ImportOrigin)
+	}{
+		{name: "source", mutate: func(origin *ImportOrigin) { origin.Source = " embedded " }},
+		{name: "version", mutate: func(origin *ImportOrigin) { origin.Version = projectEnvelope.Version }},
+		{name: "manifest hash", mutate: func(origin *ImportOrigin) { origin.ManifestHash = manifesthash.FromBytes(projectBody).String() }},
+		{name: "envelope hash", mutate: func(origin *ImportOrigin) { origin.EnvelopeHash = importedEnvelopeHash(projectEnvelopeBody) }},
+		{name: "coordinated forged tuple", mutate: func(origin *ImportOrigin) {
+			origin.Version = projectEnvelope.Version
+			origin.ManifestHash = manifesthash.FromBytes(projectBody).String()
+			origin.EnvelopeHash = importedEnvelopeHash(projectEnvelopeBody)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forged := baseline
+			tc.mutate(&forged)
+			_, err := NewEffectivePackInventory(base, []ProjectPackSource{{
+				Path: "provider.demo", EnvelopeBody: projectEnvelopeBody, ManifestBody: projectBody, Origin: forged,
+			}})
+			if err == nil || !strings.Contains(err.Error(), "contradicts the embedded import baseline") {
+				t.Fatalf("forged origin error = %v, want embedded import baseline rejection", err)
 			}
 		})
 	}
