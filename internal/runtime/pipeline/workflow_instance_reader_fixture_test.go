@@ -69,17 +69,40 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.
 }
 
 func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx context.Context, route runtimeflowidentity.Route, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
-	state, stateExists, err := r.LoadWorkflowEntityState(ctx, route, entityID)
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
+	if !route.Valid() || entityID.IsZero() {
+		return WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence lookup requires exact route and entity identity")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return WorkflowTargetPersistenceRecord{}, err
+	}
+	txOptions := &sql.TxOptions{ReadOnly: true}
+	if r.dialect == workflowStoreDialectPostgres {
+		txOptions.Isolation = sql.LevelRepeatableRead
+	}
+	tx, err := r.db.BeginTx(ctx, txOptions)
+	if err != nil {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	defer tx.Rollback()
+	stateQuery := `SELECT entity_id, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+	if r.dialect == workflowStoreDialectPostgres {
+		stateQuery = `SELECT entity_id::text, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
+	}
+	state, stateErr := scanPipelineTestWorkflowEntityState(tx.QueryRowContext(ctx, stateQuery, runID, entityID.String(), route.InstancePath))
+	stateExists := stateErr == nil
+	if stateErr != nil && stateErr != sql.ErrNoRows {
+		return WorkflowTargetPersistenceRecord{}, stateErr
 	}
 	var companion WorkflowLifecycleCompanionPersistenceRecord
 	var workflowVersion sql.NullString
 	if r.dialect == workflowStoreDialectPostgres {
 		var terminatedAt sql.NullTime
-		err = r.db.QueryRowContext(ctx, `
-			SELECT instance_id, flow_template, COALESCE(config->>'workflow_version', ''), mode, status, config, terminated_at, created_at
-			FROM flow_instances WHERE instance_id = $1
+		err = tx.QueryRowContext(ctx, `
+				SELECT instance_id, flow_template, COALESCE(config->>'workflow_version', ''), mode, status, config, terminated_at, created_at
+				FROM flow_instances WHERE instance_id = $1
 		`, route.InstancePath).Scan(
 			&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
 			&companion.Status, &companion.Config, &terminatedAt, &companion.CreatedAt,
@@ -89,7 +112,7 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 		}
 	} else {
 		var config, terminatedAt, createdAt any
-		err = r.db.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 			SELECT instance_id, flow_template, json_extract(config, '$.workflow_version'), mode, status, config, terminated_at, created_at
 			FROM flow_instances WHERE instance_id = ?
 		`, route.InstancePath).Scan(
@@ -115,6 +138,9 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 	}
 	companionExists := err == nil
 	if err != nil && err != sql.ErrNoRows {
+		return WorkflowTargetPersistenceRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return WorkflowTargetPersistenceRecord{}, err
 	}
 	companion.WorkflowVersion = workflowVersion.String
