@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-func lockProjectPackFile(_ *os.File) error {
+func lockProjectPackFile(_ *os.File, _ bool) error {
 	return fmt.Errorf("project pack transactions are unsupported on this platform")
 }
 

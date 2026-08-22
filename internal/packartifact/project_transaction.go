@@ -6,45 +6,25 @@ import (
 	"path/filepath"
 )
 
-const projectPackLockRelativePath = ".swarm/project-packs.lock"
-
 type projectPackTransaction struct {
 	lock      *os.File
 	stateRoot string
 }
 
-func acquireProjectPackTransaction(projectRoot string) (*projectPackTransaction, error) {
-	stateRoot := filepath.Join(projectRoot, ".swarm")
-	info, err := os.Lstat(stateRoot)
+func acquireProjectPackTransaction(projectRoot string, exclusive bool) (*projectPackTransaction, error) {
+	lockPath := filepath.Join(projectRoot, "package.yaml")
+	lockInfo, err := os.Lstat(lockPath)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("inspect project pack transaction directory: %w", err)
-		}
-		if err := os.Mkdir(stateRoot, 0o700); err != nil && !os.IsExist(err) {
-			return nil, fmt.Errorf("create project pack transaction directory: %w", err)
-		}
-		info, err = os.Lstat(stateRoot)
-		if err != nil {
-			return nil, fmt.Errorf("inspect project pack transaction directory: %w", err)
-		}
+		return nil, fmt.Errorf("inspect project pack transaction anchor: %w", err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return nil, fmt.Errorf("project pack transaction path %q must be a real directory", ".swarm")
+	if lockInfo.Mode()&os.ModeSymlink != 0 || !lockInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("project pack transaction anchor package.yaml must be a regular file")
 	}
-
-	lockPath := filepath.Join(projectRoot, filepath.FromSlash(projectPackLockRelativePath))
-	if lockInfo, statErr := os.Lstat(lockPath); statErr == nil {
-		if lockInfo.Mode()&os.ModeSymlink != 0 || !lockInfo.Mode().IsRegular() {
-			return nil, fmt.Errorf("project pack transaction lock %q must be a regular file", projectPackLockRelativePath)
-		}
-	} else if !os.IsNotExist(statErr) {
-		return nil, fmt.Errorf("inspect project pack transaction lock: %w", statErr)
-	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.Open(lockPath)
 	if err != nil {
-		return nil, fmt.Errorf("open project pack transaction lock: %w", err)
+		return nil, fmt.Errorf("open project pack transaction anchor: %w", err)
 	}
-	if err := lockProjectPackFile(lock); err != nil {
+	if err := lockProjectPackFile(lock, exclusive); err != nil {
 		_ = lock.Close()
 		return nil, fmt.Errorf("lock project pack transaction: %w", err)
 	}
@@ -53,9 +33,9 @@ func acquireProjectPackTransaction(projectRoot string) (*projectPackTransaction,
 	if pathErr != nil || fileErr != nil || pathInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(pathInfo, fileInfo) {
 		_ = unlockProjectPackFile(lock)
 		_ = lock.Close()
-		return nil, fmt.Errorf("project pack transaction lock changed during acquisition")
+		return nil, fmt.Errorf("project pack transaction anchor changed during acquisition")
 	}
-	return &projectPackTransaction{lock: lock, stateRoot: stateRoot}, nil
+	return &projectPackTransaction{lock: lock, stateRoot: projectRoot}, nil
 }
 
 func (t *projectPackTransaction) close() error {

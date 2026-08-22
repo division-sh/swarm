@@ -139,7 +139,7 @@ func TestProjectPackSnapshotReaderSeesOnlyPredecessorOrSuccessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transaction, err := acquireProjectPackTransaction(root)
+	transaction, err := acquireProjectPackTransaction(root, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestProjectPackImportFailureRollsBackCandidateInventory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: rollback\nversion: 1.0.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	transaction, err := acquireProjectPackTransaction(project)
+	transaction, err := acquireProjectPackTransaction(project, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +216,58 @@ func TestProjectPackImportFailureRollsBackCandidateInventory(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(project, ProjectPackDirectory)); !os.IsNotExist(err) {
 		t.Fatalf("failed import left reader-visible inventory: %v", err)
+	}
+}
+
+func TestLoadProjectPackSetDoesNotMutateReadOnlyBundle(t *testing.T) {
+	base, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: read-only\nversion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
+		t.Fatalf("import changed=%t err=%v", changed, err)
+	}
+	var paths []string
+	if err := filepath.Walk(project, func(name string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		paths = append(paths, name)
+		if info.IsDir() {
+			return os.Chmod(name, 0o555)
+		}
+		return os.Chmod(name, 0o444)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for i := len(paths) - 1; i >= 0; i-- {
+			_ = os.Chmod(paths[i], 0o755)
+		}
+	}()
+
+	set, err := LoadProjectPackSet(project)
+	if err != nil {
+		t.Fatalf("load read-only project pack set: %v", err)
+	}
+	if got := projectPackSourceIDs(set.Sources); !equalStrings(got, []string{"provider.telegram"}) {
+		t.Fatalf("read-only project ids = %v", got)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".swarm", "project-packs.lock")); !os.IsNotExist(err) {
+		t.Fatalf("read-only load created transaction state: %v", err)
+	}
+	for _, pattern := range []string{".pack-import-*", ".pack-manifest-*"} {
+		matches, err := filepath.Glob(filepath.Join(project, pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("read-only load created staging artifacts: %v", matches)
+		}
 	}
 }
 

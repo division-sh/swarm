@@ -8,8 +8,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func lockProjectPackFile(file *os.File) error {
-	return windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &windows.Overlapped{})
+func lockProjectPackFile(file *os.File, exclusive bool) error {
+	flags := uint32(0)
+	if exclusive {
+		flags = windows.LOCKFILE_EXCLUSIVE_LOCK
+	}
+	return windows.LockFileEx(windows.Handle(file.Fd()), flags, 0, 1, 0, &windows.Overlapped{})
 }
 
 func unlockProjectPackFile(file *os.File) error {
