@@ -281,7 +281,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	}
 }
 
-func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.T) {
+func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		store humanTaskToolStore
@@ -290,6 +290,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 		{name: "sqlite", store: newSQLiteRuntimeToolStoreForTest(t)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			const flowPath = "gateway/provider"
 			cfg := &config.Config{Extensions: map[string]any{
 				"budget": map[string]any{"human_tasks": map[string]any{
 					"max_tasks_per_week": 3, "budget_reset": "monday", "auto_expire_hours": 48,
@@ -298,10 +299,12 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			requester := models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "requester",
-				Role:          "worker", FlowID: "provider", FlowPath: "provider", EntityID: uuid.NewString(),
+				Role:          "worker", FlowID: "provider", FlowPath: flowPath, EntityID: uuid.NewString(),
 				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
 			}
 			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "types: {}\n", "provider_record:\n  status: text\n")
+			bundle.FlowTree.ByID["provider"].Path = flowPath
+			bundle.FlowTree.ByID["provider"].Paths.PackageKey = "provider-package"
 			source := semanticview.Wrap(bundle)
 			declarations := semanticview.AgentDeclarations(source)
 			if len(declarations) != 1 {
@@ -311,7 +314,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			if err != nil {
 				t.Fatalf("requester declaration name: %v", err)
 			}
-			requester.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, "provider", "provider", "provider")
+			requester.Identity = agentidentitytest.Declared(t, plan.AgentID, plan.OwnerURI, flowPath, "provider", flowPath)
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source,
 			})
@@ -339,7 +342,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			if anchor.RequesterAgentID != requester.ID || anchor.OperationID != "provider-turn/tool-call-1" || anchor.Scope.Kind != decisioncard.ScopeFlow || anchor.Scope.FlowInstance != "provider" {
 				t.Fatalf("human-task anchor = %#v", anchor)
 			}
-			wantSourceRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: requester.EntityID}
+			wantSourceRoute := events.RouteIdentity{FlowID: "provider", FlowInstance: flowPath, EntityID: requester.EntityID}
 			if got := anchor.Source.Route().Normalized(); got != wantSourceRoute {
 				t.Fatalf("human-task routing source = %#v, want %#v", got, wantSourceRoute)
 			}
@@ -350,7 +353,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			if continuation.ReplyContextID != replyContextID || continuation.SourceEventID != sourceEventID || continuation.State != decisioncard.HumanTaskContinuationPending {
 				t.Fatalf("human-task continuation = %#v", continuation)
 			}
-			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: requester.EntityID}) {
+			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowID: "provider", FlowInstance: flowPath, EntityID: requester.EntityID}) {
 				t.Fatalf("human-task requester route = %#v", got)
 			}
 			if got := continuation.DeadlineAt.Sub(card.CreatedAt); got != 48*time.Hour {
